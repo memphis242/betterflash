@@ -2,6 +2,7 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QCache>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -9,8 +10,6 @@
 #include <QImage>
 #include <QImageReader>
 #include <QBuffer>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QPainter>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -116,15 +115,15 @@ QString normalizedLanguage(QString language) {
 }
 }
 
-MarkdownView::MarkdownView(QQuickItem *parent) : QQuickPaintedItem(parent) {
+MarkdownView::MarkdownView(QQuickItem *parent) : QQuickPaintedItem(parent), m_document(this) {
     setAntialiasing(true);
     m_document.setUndoRedoEnabled(false);
     m_document.setDocumentMargin(0);
-    m_document.setResourceProvider([this](const QUrl &url) -> QVariant { return loadImage(url); });
 }
 void MarkdownView::setMarkdown(const QString &markdown) {
     if (m_markdown == markdown) return;
     m_markdown = markdown;
+    m_imageErrors.clear();
     emit markdownChanged();
     scheduleRender();
 }
@@ -163,7 +162,7 @@ void MarkdownView::reportImageError(const QString &message) {
 }
 QVariant MarkdownView::loadImage(const QUrl &url) {
     const QString name = url.toString();
-    if (m_images.contains(name)) return m_images.value(name);
+    if (const QImage *const image = m_images.object(name)) return *image;
     if (m_imageErrors.contains(name)) { reportImageError(m_imageErrors.value(name)); return {}; }
     const auto decode = [](const QByteArray &data) -> QImage {
         QBuffer buffer;
@@ -182,41 +181,25 @@ QVariant MarkdownView::loadImage(const QUrl &url) {
         const QString fileName = name.mid(6);
         static const QRegularExpression valid(QStringLiteral("^[a-f0-9]{64}\\.(png|jpg|jpeg|webp|gif)$"));
         const QString path = QDir(m_mediaRoot).filePath(fileName);
-        if (m_mediaRoot.isEmpty() || !valid.match(fileName).hasMatch() || QFileInfo(path).isSymLink()) {
+        if (m_mediaRoot.isEmpty() || !valid.match(fileName).hasMatch()
+            || QFileInfo(m_mediaRoot).isSymLink() || QFileInfo(path).isSymLink()) {
             reportImageError(QStringLiteral("IMAGE_PATH: Attach an image using the editor's image control.")); return {};
         }
         QFile source(path);
-        if (!source.open(QIODevice::ReadOnly) || source.size() > 20 * 1024 * 1024) {
+        if (!QFileInfo(path).isFile() || !source.open(QIODevice::ReadOnly) || source.size() <= 0 || source.size() > 20 * 1024 * 1024) {
             reportImageError(QStringLiteral("IMAGE_MISSING: Sync or import the collection's images, then reopen the card.")); return {};
         }
-        const QImage image = decode(source.readAll());
+        const QByteArray bytes = source.read(20 * 1024 * 1024 + 1);
+        if (bytes.size() > 20 * 1024 * 1024
+            || QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) != fileName.left(64)) {
+            reportImageError(QStringLiteral("IMAGE_INTEGRITY: The attached image does not match its filename. Restore it from a backup or sync the collection.")); return {};
+        }
+        const QImage image = decode(bytes);
         if (image.isNull()) { reportImageError(QStringLiteral("IMAGE_DECODE: Attach a readable PNG, JPEG, WebP, or GIF.")); return {}; }
-        m_images.insert(name, image);
+        m_images.insert(name, new QImage(image), static_cast<int>(image.sizeInBytes()));
         return image;
     }
-    if (url.scheme() != QStringLiteral("https") || !url.userInfo().isEmpty()) {
-        reportImageError(QStringLiteral("IMAGE_SOURCE: Use an HTTPS image URL or attach a local image.")); return {};
-    }
-    if (!m_pendingImages.contains(name)) {
-        if (m_pendingImages.size() >= 16) { reportImageError(QStringLiteral("IMAGE_LIMIT: Use at most 16 remote images on one side.")); return {}; }
-        m_pendingImages.insert(name);
-        QNetworkRequest request(url);
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-        request.setTransferTimeout(15000);
-        auto *const reply = m_network.get(request);
-        connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
-            if (received > 20 * 1024 * 1024 || total > 20 * 1024 * 1024) reply->abort();
-        });
-        connect(reply, &QNetworkReply::finished, this, [this, reply, name, decode] {
-            m_pendingImages.remove(name);
-            const QByteArray data = reply->readAll();
-            const QImage image = reply->error() == QNetworkReply::NoError && data.size() <= 20 * 1024 * 1024 ? decode(data) : QImage();
-            reply->deleteLater();
-            if (image.isNull()) m_imageErrors[name] = QStringLiteral("IMAGE_DOWNLOAD: The image could not be loaded. Check its URL or attach a local copy.");
-            else { m_images[name] = image; if (m_images.size() > 64) m_images.erase(m_images.begin()); }
-            scheduleRender();
-        });
-    }
+    reportImageError(QStringLiteral("IMAGE_SOURCE: Attach a local copy using the editor's image control. Only collection images are rendered."));
     return {};
 }
 void MarkdownView::geometryChange(const QRectF &current, const QRectF &previous) {
@@ -332,7 +315,7 @@ void MarkdownView::rebuild() {
             cursor.setBlockFormat(format);
             cursor.select(QTextCursor::BlockUnderCursor);
             QTextCharFormat codeFormat;
-            codeFormat.setFontFamilies({QStringLiteral("Cascadia Code NF"), QStringLiteral("monospace")});
+            codeFormat.setFontFamilies({QStringLiteral("DejaVu Sans Mono"), QStringLiteral("monospace")});
             codeFormat.setFontFixedPitch(true);
             codeFormat.setFontPointSize(m_baseFontSize * 0.65);
             cursor.mergeCharFormat(codeFormat);
@@ -368,8 +351,15 @@ void MarkdownView::paint(QPainter *painter) {
     m_document.documentLayout()->draw(painter, context);
 }
 QString MarkdownView::plainText(const QString &markdown) {
-    QTextDocument document;
-    document.setResourceProvider([](const QUrl &) -> QVariant { return {}; });
-    document.setMarkdown(markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
+    class PlainDocument final : public QTextDocument {
+    protected:
+        QVariant loadResource(int, const QUrl &) override { return QImage(); }
+    };
+    PlainDocument document;
+    document.setLayoutEnabled(false);
+    QString text = markdown;
+    static const QRegularExpression images(QStringLiteral("!\\[([^\\]]*)\\]\\([^)]*\\)"));
+    text.replace(images, QStringLiteral("[Image: \\1]"));
+    document.setMarkdown(text, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
     return document.toPlainText();
 }

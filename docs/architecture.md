@@ -10,6 +10,8 @@ flowchart TB
     Voice --> Audio[Audio conversion and recognition worker]
     Voice --> Speech[System speech engine]
     UI --> Summary[Optional provider summary]
+    UI --> Atomicize[Optional saved-card split proposals]
+    Atomicize --> Database
     UI --> Sync[Sync controller]
     Sync --> Database
     Sync --> Server[Authenticated event and media server]
@@ -43,7 +45,7 @@ tombstones, device metadata, and the outgoing event log live in local SQLite.
 Each user mutation and its event are one transaction. Review queues are temporary
 session state. Attached images live beside the database in `media/`, with
 SHA-256 filenames. Collection backups include those image bytes and validate
-their names and hashes before importing records.
+their names, hashes, formats, dimensions, and decoding before importing records.
 
 Provider keys and server tokens are held by native credential objects, separately
 from collection data. Desktop persistence uses Secret Service through bounded,

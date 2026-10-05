@@ -19,6 +19,8 @@ The first build downloads two small, pinned source dependencies for native math
 rendering: MicroTeX and tinyxml2. Neither a browser engine nor Electron is used.
 Build output lives on `/workspace`, separate from the source checkout. Set
 `BETTERFLASH_BUILD_DIR` to choose another build directory.
+PNG, JPEG, and GIF use Qt's built-in readers. Install `qt6-qtimageformats` for
+WebP images, or export them to PNG before attaching.
 
 The first run is empty. Create a deck or explicitly load the example collection.
 For an isolated demonstration:
@@ -31,6 +33,8 @@ For an isolated demonstration:
 
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.
+  Attach local copies of web images; card content does not trigger external image
+  requests or read arbitrary local paths.
 - Basic cards have one review item. Reversible cards and numbered cloze deletions
   have independent review schedules.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
@@ -79,6 +83,12 @@ configured chat-completions provider only when requested. It does not grade
 answers or alter scheduling. Groq is the initial default; the endpoint and model
 can be changed in Settings.
 
+Atomicize proposes two through five focused cards from one saved note, or
+recommends keeping a related list or procedure together. Review and edit the
+proposal before explicitly replacing the original. It uses the same provider
+configuration and retains the original's review history. See
+[Atomicize behavior](docs/atomicize.md).
+
 ## Sync and Android
 
 The local sync server is dependency free Python with SQLite and authenticated
@@ -95,12 +105,11 @@ Work in an isolated git worktree. Each build checks that its CMake cache belongs
 to its own checkout. For focused verification:
 
 ```sh
-./scripts/build-desktop.sh
-ctest --test-dir "$BETTERFLASH_BUILD_DIR" --output-on-failure --parallel 24
-python3 -m unittest discover -s server/tests
+./scripts/verify-desktop.sh
 ```
 
 If `BETTERFLASH_BUILD_DIR` is unset, the build script prints the generated path.
 Native GUI verification uses Qt events, including wheel and pane checks, instead
 of browser testing. All test collections use separate temporary directories.
-
+The Fedora workflow builds the native app and runs the same checks. Live provider
+calls require your key and are excluded from automated verification.

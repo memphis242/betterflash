@@ -33,6 +33,7 @@ float sampleValue(const char *const data, const QAudioFormat::SampleFormat forma
         return std::isfinite(value) ? std::clamp(value, -1.0F, 1.0F) : 0.0F;
     }
     case QAudioFormat::Unknown:
+    default:
         Q_UNREACHABLE();
     }
     Q_UNREACHABLE();
@@ -52,6 +53,7 @@ bool VoicePcmConverter::configure(const QAudioFormat &format) {
         m_format = format;
         return true;
     case QAudioFormat::Unknown:
+    default:
         return false;
     }
     return false;

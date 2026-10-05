@@ -1,9 +1,9 @@
 #pragma once
 
 #include <QColor>
+#include <QCache>
 #include <QQuickPaintedItem>
 #include <QTextDocument>
-#include <QNetworkAccessManager>
 #include <QHash>
 #include <QImage>
 #include <QSet>
@@ -45,13 +45,23 @@ private:
     void rebuild();
     QVariant loadImage(const QUrl &url);
     void reportImageError(const QString &message);
-    QTextDocument m_document;
+    class Document final : public QTextDocument {
+    public:
+        explicit Document(MarkdownView *view) : m_view(view) { Q_ASSERT(m_view); }
+    protected:
+        QVariant loadResource(int type, const QUrl &url) override {
+            if (type != QTextDocument::ImageResource) return QByteArray{};
+            const QVariant image = m_view->loadImage(url);
+            return image.isValid() ? image : QVariant::fromValue(QImage());
+        }
+    private:
+        MarkdownView *const m_view;
+    };
+    Document m_document;
     QString m_markdown;
     QString m_renderError;
     QString m_mediaRoot;
-    QNetworkAccessManager m_network;
-    QHash<QString, QImage> m_images;
-    QSet<QString> m_pendingImages;
+    QCache<QString, QImage> m_images{32 * 1024 * 1024};
     QHash<QString, QString> m_imageErrors;
     QColor m_foreground;
     QColor m_codeBackground;

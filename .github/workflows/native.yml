@@ -1,0 +1,43 @@
+name: Native desktop
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y git cmake ninja-build gcc-c++ python3
+          qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel
+          qt6-qtmultimedia-devel qt6-qtspeech-devel
+          dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and verify
+        env:
+          BETTERFLASH_BUILD_DIR: /workspace/betterflash-build/ci
+          BETTERFLASH_JOBS: 4
+        run: ./scripts/verify-desktop.sh
+      - name: Save verification reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-verification
+          path: |
+            /workspace/betterflash-build/ci/artifacts/gui
+            /workspace/betterflash-build/ci/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14

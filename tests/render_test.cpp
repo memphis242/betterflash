@@ -49,6 +49,54 @@ private slots:
         QTRY_VERIFY(view.implicitHeight() > 0);
         QVERIFY(view.renderError().isEmpty());
     }
+    void formulaGlyphsAreVisible() {
+        QTest::failOnWarning(QRegularExpression(QStringLiteral("render glyph failed.*")));
+        MarkdownView view; style(view);
+        view.setMarkdown(QStringLiteral("$\\frac{a+b}{2}$"));
+        QTRY_VERIFY(view.implicitHeight() > 0);
+        QVERIFY(view.renderError().isEmpty());
+        QImage output(640, qCeil(view.implicitHeight()), QImage::Format_ARGB32_Premultiplied);
+        output.fill(Qt::transparent);
+        QPainter painter(&output); view.paint(&painter); painter.end();
+        int pixels = 0;
+        for (int y = 0; y < output.height(); ++y)
+            for (int x = 0; x < output.width(); ++x) pixels += qAlpha(output.pixel(x, y)) > 0 ? 1 : 0;
+        QVERIFY(pixels > 50);
+    }
+    void rejectsCorruptImagesAndLinkedMediaRoots() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const QString name = QStringLiteral("a").repeated(64) + QStringLiteral(".png");
+        QImage image(40, 20, QImage::Format_RGB32); image.fill(Qt::green);
+        QVERIFY(image.save(directory.filePath(name)));
+        MarkdownView view; style(view); view.setMediaRoot(directory.path());
+        view.setMarkdown(QStringLiteral("![corrupted](media:%1)").arg(name));
+        QTRY_VERIFY(view.renderError().startsWith(QStringLiteral("IMAGE_INTEGRITY")));
+        const QString link = directory.filePath(QStringLiteral("linked"));
+        QVERIFY(QFile::link(directory.path(), link));
+        view.setMediaRoot(link);
+        view.setMarkdown(QStringLiteral("![linked](media:%1)").arg(name));
+        QTRY_VERIFY(view.renderError().startsWith(QStringLiteral("IMAGE_PATH")));
+    }
+    void rejectsExternalAndArbitraryLocalImageResources() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("private.png"));
+        QImage image(40, 20, QImage::Format_RGB32); image.fill(Qt::green);
+        QVERIFY(image.save(path));
+        for (const QString &url : {QUrl::fromLocalFile(path).toString(), QStringLiteral("https://127.0.0.1/private.png"),
+                                 QStringLiteral("data:image/png;base64,AAAA")}) {
+            MarkdownView view; style(view);
+            view.setMarkdown(QStringLiteral("![external](%1)").arg(url));
+            QTRY_VERIFY(view.renderError().startsWith(QStringLiteral("IMAGE_SOURCE")));
+            QImage output(640, qCeil(view.implicitHeight()), QImage::Format_ARGB32_Premultiplied);
+            output.fill(Qt::transparent);
+            QPainter painter(&output); view.paint(&painter); painter.end();
+            bool exposed = false;
+            for (int y = 0; y < output.height() && !exposed; ++y)
+                for (int x = 0; x < output.width(); ++x)
+                    if (QColor::fromRgba(output.pixel(x, y)) == QColor(Qt::green)) { exposed = true; break; }
+            QVERIFY(!exposed);
+        }
+    }
     void rendersStoredImagesAndRejectsTraversal() {
         QTemporaryDir temporary;
         QVERIFY(temporary.isValid());
