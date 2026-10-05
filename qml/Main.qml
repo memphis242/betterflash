@@ -225,7 +225,11 @@ ApplicationWindow {
         property string deckContexts: "{}"
         property string pinnedDecks: "[]"
     }
-    onPageChanged: preferences.page = page
+    onPageChanged: {
+        preferences.page = page
+        if (page !== 0 && review && review.reviewModalVisible)
+            review.dismissReviewModal()
+    }
     onNavCollapsedChanged: preferences.navCollapsed = navCollapsed
     onDeckBrowserParentIdChanged: preferences.deckBrowserParentId = deckBrowserParentId
     onDeckTreeExpandedChanged: preferences.deckTreeExpanded = deckTreeExpanded
@@ -522,10 +526,12 @@ ApplicationWindow {
         case "defer":
         case "postpone":
         case "pause":
-            if (page !== 0 || typing || !app.reviewing)
+            if ((page !== 0 && !review.reviewModalVisible) || typing || !app.reviewing)
                 return false
             if (action === "pause")
-                return true
+                return review.reviewModalVisible || app.paused
+            if (!review.reviewModalVisible)
+                return false
             if (app.paused || !app.currentCard.id)
                 return false
             return action.indexOf("grade") !== 0 || app.answerRevealed
@@ -539,6 +545,7 @@ ApplicationWindow {
             commandPalette.open()
             break
         case "deckSearch":
+            review.dismissReviewModal()
             page = 1
             deckPicker.open()
             break
@@ -550,7 +557,7 @@ ApplicationWindow {
             break
         case "editCard":
             {
-                const id = page === 0 && app.currentCard.id ? (app.currentCard.cardId || app.currentCard.id) : selectedCardId
+                const id = (review.reviewModalVisible || page === 0) && app.currentCard.id ? (app.currentCard.cardId || app.currentCard.id) : selectedCardId
                 if (id)
                     openCardEditor(id)
                 else {
@@ -563,6 +570,11 @@ ApplicationWindow {
             page = 0
             if (!app.reviewing)
                 app.startReview(app.selectedDeckId)
+            else {
+                if (app.paused)
+                    app.resumeReview()
+                review.openReviewModal()
+            }
             break
         case "summary":
             if (app.reviewing)
@@ -572,15 +584,19 @@ ApplicationWindow {
             openAtomicize(selectedCardId)
             break
         case "reviewPage":
+            review.dismissReviewModal()
             page = 0
             break
         case "libraryPage":
+            review.dismissReviewModal()
             page = 1
             break
         case "historyPage":
+            review.dismissReviewModal()
             page = 2
             break
         case "settingsPage":
+            review.dismissReviewModal()
             page = 3
             break
         case "review":
@@ -2139,7 +2155,7 @@ ApplicationWindow {
             required property string modelData
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
-            enabled: window.shortcutAllowed(modelData)
+            enabled: !review.reviewModalVisible && window.shortcutAllowed(modelData)
             onActivated: window.runAction(modelData)
         }
     }

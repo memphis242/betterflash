@@ -54,6 +54,9 @@ For an isolated demonstration:
   numbered cloze group separately.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
   fraction remembered. Response time contributes a bounded adjustment.
+- Review cards in a rounded modal over the deck page. The next five question
+  prompts appear beside Pause in queue order. Closing the modal pauses the
+  session; Resume continues the same card and queue.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.
 - Decks, source notes, review schedules, history, and images can be backed up and
@@ -74,6 +77,7 @@ optimized retention. See [the scheduling design](docs/scheduling.md).
 | Reveal answer | `Space` |
 | Missed / Partial / Hard / Good / Easy | `1` / `2` / `3` / `4` / `5` |
 | Defer / postpone / pause | `D` / `S` / `P` |
+| Close the review modal and pause | `Escape` |
 | Insert or cross front/back separator | `Ctrl+Enter` |
 | Turn selected text into a cloze | `Ctrl+Shift+C` |
 | Attach an image | `Ctrl+Shift+I` |

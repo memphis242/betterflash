@@ -63,6 +63,11 @@ themes, keyboard bindings, page selection, and detail-pane sizing.
 Review's idle view contains a bounded horizontal deck browser, an optional deck
 tree, actual queue counts, and a large start action in the lower portion of the
 page. Deck parents are stored and synchronized independently of their names.
+Active review cards open in a rounded native modal, with a pinned header and
+grading controls around a bounded Markdown view. The queue preview reads the
+next five variant question prompts, excluding the current item and unrevealed
+answers. Dismissing the modal pauses the response timer and retains the queue;
+resuming reopens the same session.
 
 The Android draft uses the same native modules. Its build preflight checks the
 matching Qt kit, host tools, full JDK, SDK, NDK, and OpenSSL libraries. Voice is
