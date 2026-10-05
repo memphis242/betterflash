@@ -14,6 +14,7 @@ Button {
     ToolTip.text: hint
     contentItem: Label {
         id: label
+        textFormat: Text.PlainText
         text: control.text
         font: control.font
         color: control.enabled ? (control.primary ? Theme.onAccent : Theme.ink) : Theme.inkMuted
