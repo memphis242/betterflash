@@ -113,6 +113,11 @@ class CoreTest final : public QObject {
 private slots:
     void schedulerGradesFractionsLatencyAndBounds();
     void reverseVariantsAreIndependent();
+    void deckHierarchyValidationAndSubtreeReview();
+    void deckHierarchyMigratesFromV2();
+    void deckHierarchyBackupDeletionAndInvalidParents();
+    void remoteDeckDependenciesAndCyclesAreAtomic();
+    void subtreeDeleteConvergesAcrossConcurrentChildMove();
     void clozeGroupsRenderAndScheduleIndependently();
     void clozeEscapesPreserveScopesAndMultilineText();
     void malformedClozeIsRejected_data();
@@ -177,7 +182,7 @@ void CoreTest::reverseVariantsAreIndependent()
     QCOMPARE(card(app,id).value("variants").toList().size(),2);
     app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.queueCount(),2);QCOMPARE(app.sessionTotal(),2);
     const QString firstKey=app.currentCard().value("variantKey").toString();
-    QCOMPARE(app.currentCard().value("question").toString(),firstKey=="forward"?QStringLiteral("Question"):QStringLiteral("Answer"));
+    QCOMPARE(app.currentCard().value("question").toString(),firstKey=="forward"?QStringLiteral("Question"):QStringLiteral("Ask the question that this answers based on deck context: \n\nAnswer"));
     app.revealAnswer();app.grade(3);QVERIFY(idle(app));
     QCOMPARE(app.reviewedCount(),1);QCOMPARE(app.queueCount(),1);QCOMPARE(app.pendingCards().size(),1);
     const QString otherKey=firstKey=="forward"?"reverse":"forward";
@@ -189,6 +194,94 @@ void CoreTest::reverseVariantsAreIndependent()
     QCOMPARE(app.reviewedCount(),2);QVERIFY(!app.reviewing());QVERIFY(app.pendingCards().isEmpty());
     QCOMPARE(app.history().size(),2);
     QVERIFY(app.history()[0].toMap().value("variantId")!=app.history()[1].toMap().value("variantId"));
+}
+void CoreTest::deckHierarchyValidationAndSubtreeReview()
+{
+    QTemporaryDir directory;AppController app(directory.path());QVERIFY(idle(app));
+    app.createDeck(QStringLiteral("Root"));QVERIFY(idle(app));
+    const QString root=app.decks().first().toMap().value("id").toString();
+    app.createDeck(QStringLiteral("Child"),{},root);QVERIFY(idle(app));
+    QString child;for (const QVariant &value:app.decks()) if (value.toMap().value("name")==QStringLiteral("Child")) child=value.toMap().value("id").toString();
+    QVERIFY(!child.isEmpty());app.createDeck(QStringLiteral("Leaf"),{},child);QVERIFY(idle(app));
+    QString leaf;for (const QVariant &value:app.decks()) if (value.toMap().value("name")==QStringLiteral("Leaf")) leaf=value.toMap().value("id").toString();
+    QVERIFY(!leaf.isEmpty());QVERIFY(!addCard(app,leaf,"reverse","Question","Answer").isEmpty());
+    QVariantMap rootMap;for (const QVariant &value:app.decks()) if (value.toMap().value("id")==root) rootMap=value.toMap();
+    QCOMPARE(rootMap.value("parentId").toString(),QString());QCOMPARE(rootMap.value("cardCount").toInt(),1);
+    app.createDeck(QStringLiteral("Invalid"),{},model::uuid());QVERIFY(idle(app));QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("INVALID_DECK_PARENT"));
+    app.updateDeck(root,QStringLiteral("Root"),{},leaf);QVERIFY(idle(app));QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("INVALID_DECK_PARENT"));
+    app.startReview(root);QVERIFY(idle(app));QCOMPARE(app.queueCount(),2);app.stopReview();QVERIFY(idle(app));
+    app.deleteDeck(child);QVERIFY(idle(app));QVERIFY(app.cards().isEmpty());
+}
+void CoreTest::deckHierarchyMigratesFromV2()
+{
+    QTemporaryDir directory;QString deckId,cardId,variantId;
+    {
+        AppController app(directory.path());QVERIFY(idle(app));deckId=addDeck(app);cardId=addCard(app,deckId,"reverse","Question","Answer");
+        variantId=variant(card(app,cardId),QStringLiteral("forward")).value("id").toString();
+    }
+    {
+        struct DatabaseAccess db(QDir(directory.path()).filePath("betterflash.sqlite"));
+        QVERIFY(db.run("DROP INDEX decks_parent"));QVERIFY(db.run("ALTER TABLE decks DROP COLUMN parent_id"));QVERIFY(db.run("PRAGMA user_version=2"));
+    }
+    {
+        AppController app(directory.path());QVERIFY(idle(app));QVERIFY(app.lastError().isEmpty());
+        QVERIFY(!app.cards().isEmpty());QVERIFY(app.cards().first().toMap().value("id").toString()==cardId);
+        QVariantMap found;for (const QVariant &value:app.decks()) if (value.toMap().value("id")==deckId) found=value.toMap();
+        QCOMPARE(found.value("parentId").toString(),QString());QVERIFY(variant(found.isEmpty()?QVariantMap{}:card(app,cardId),QStringLiteral("forward")).value("id")==variantId);
+        struct DatabaseAccess db(app.storagePath());QSqlQuery query(db.db);QVERIFY(query.exec("PRAGMA user_version"));QVERIFY(query.next());QCOMPARE(query.value(0).toInt(),3);QVERIFY(db.run("SELECT parent_id FROM decks WHERE id='"+deckId+"'"));
+    }
+}
+void CoreTest::deckHierarchyBackupDeletionAndInvalidParents()
+{
+    QTemporaryDir sourceDirectory,destinationDirectory;AppController source(sourceDirectory.path());QVERIFY(idle(source));
+    const QString root=addDeck(source,"Root");source.createDeck("Child",{},root);QVERIFY(idle(source));QString child;
+    for (const QVariant &value:source.decks()) if (value.toMap().value("name")=="Child") child=value.toMap().value("id").toString();
+    source.createDeck("Leaf",{},child);QVERIFY(idle(source));QString leaf;
+    for (const QVariant &value:source.decks()) if (value.toMap().value("name")=="Leaf") leaf=value.toMap().value("id").toString();
+    const QString rootCard=addCard(source,root,"basic","Root question","Root answer");
+    const QString childCard=addCard(source,child,"basic","Child question","Child answer");
+    const QString leafCard=addCard(source,leaf,"basic","Leaf question","Leaf answer");
+    source.startReview(child);QVERIFY(idle(source));source.revealAnswer();source.grade(3);QVERIFY(idle(source));QCOMPARE(source.history().size(),1);
+    const QString past=QDateTime::currentDateTimeUtc().addDays(-1).toString(Qt::ISODateWithMs),future=QDateTime::currentDateTimeUtc().addDays(2).toString(Qt::ISODateWithMs);
+    {struct DatabaseAccess db(source.storagePath());QVERIFY(db.run("UPDATE review_variants SET due='"+past+"',review_count=0 WHERE card_id='"+rootCard+"'"));QVERIFY(db.run("UPDATE review_variants SET due='"+past+"',review_count=1 WHERE card_id='"+childCard+"'"));QVERIFY(db.run("UPDATE review_variants SET due='"+future+"',review_count=1 WHERE card_id='"+leafCard+"'"));}
+    source.refresh();QVERIFY(idle(source));QVariantMap rootMap;for (const QVariant &value:source.decks()) if (value.toMap().value("id")==root) rootMap=value.toMap();
+    QCOMPARE(rootMap.value("cardCount").toInt(),3);QCOMPARE(rootMap.value("newDueCount").toInt(),1);QCOMPARE(rootMap.value("reviewDueCount").toInt(),1);QCOMPARE(rootMap.value("laterCount").toInt(),1);
+    const QString backup=sourceDirectory.filePath("hierarchy.json");source.exportCollection(backup);QVERIFY(idle(source));
+    AppController destination(destinationDirectory.path());QVERIFY(idle(destination));destination.importCollection(backup);QVERIFY(idle(destination));QVERIFY(destination.lastError().isEmpty());
+    QVariantMap importedChild;for (const QVariant &value:destination.decks()) if (value.toMap().value("id")==child) importedChild=value.toMap();QCOMPARE(importedChild.value("parentId").toString(),root);
+    const QVariantList beforeCards=source.cards();source.deleteDeck(child);QVERIFY(idle(source));QVERIFY(source.cards().isEmpty()||source.cards().size()==1);QCOMPARE(source.history().size(),1);
+    const QString deletedBackup=sourceDirectory.filePath("deleted-hierarchy.json");source.exportCollection(deletedBackup);QVERIFY(idle(source));const QJsonArray deleted=readJson(deletedBackup).value("deleted").toArray();QSet<QString> deletedIds;for (const QJsonValue &value:deleted) deletedIds.insert(value.toObject().value("id").toString());
+    QVERIFY(deletedIds.contains(child));QVERIFY(deletedIds.contains(leaf));QVERIFY(deletedIds.contains(childCard));QVERIFY(deletedIds.contains(leafCard));Q_UNUSED(beforeCards);
+    const QVariantList stable=source.decks();QJsonObject malformed=readJson(backup);QJsonArray decks=malformed.value("decks").toArray();for (int i=0;i<decks.size();++i) {QJsonObject value=decks.at(i).toObject();if (value.value("id").toString()==root) value.insert("parentId",child);if (value.value("id").toString()==child) value.insert("parentId",root);decks[i]=value;}malformed.insert("decks",decks);const QString bad=sourceDirectory.filePath("cycle.json");QVERIFY(writeJson(bad,malformed));destination.importCollection(bad);QVERIFY(idle(destination));QCOMPARE(destination.lastError().value("code").toString(),QStringLiteral("INVALID_IMPORT"));QCOMPARE(destination.decks().size(),3);Q_UNUSED(stable);
+}
+void CoreTest::remoteDeckDependenciesAndCyclesAreAtomic()
+{
+    QTemporaryDir directory;AppController app(directory.path());QVERIFY(idle(app));
+    const QString requestId=model::uuid();QVERIFY(!batch(app,requestId).isEmpty());
+    const struct model::Deck parent{model::uuid(),"Parent",{},model::nowUtc(),{}};const struct model::Deck child{model::uuid(),"Child",{},model::nowUtc(),parent.id};
+    const QVariantList ordered{QVariantMap{{"seq",1},{"event",syncEvent("deck.upsert",{{"deck",model::toMap(child)}})}},QVariantMap{{"seq",2},{"event",syncEvent("deck.upsert",{{"deck",model::toMap(parent)}})}}};
+    QVariantMap orderedResponse=response(ordered,2);orderedResponse.insert("requestId",requestId);QVERIFY(apply(app,orderedResponse));QCOMPARE(app.decks().size(),2);
+    const struct model::Deck deleted{model::uuid(),"Deleted",{},model::nowUtc(),{}};
+    QVERIFY(!batch(app).isEmpty());
+    QVERIFY(apply(app,response({QVariantMap{{"seq",3},{"event",syncEvent("deck.delete",{{"id",deleted.id}})}}},3)));
+    QVERIFY(!batch(app).isEmpty());
+    QVERIFY(apply(app,response({QVariantMap{{"seq",4},{"event",syncEvent("deck.upsert",{{"deck",model::toMap(deleted)}})}}},4)));
+    bool resurrected=false;for (const QVariant &value:app.decks()) resurrected|=value.toMap().value("id")==deleted.id;QVERIFY(!resurrected);
+    QTemporaryDir cycleDirectory;AppController cycle(cycleDirectory.path());QVERIFY(idle(cycle));
+    const struct model::Deck first{model::uuid(),"First",{},model::nowUtc(),{}};const struct model::Deck second{model::uuid(),"Second",{},model::nowUtc(),first.id};
+    struct model::Deck cyclicFirst=first;cyclicFirst.parentId=second.id;
+    const QVariantList cyclic{QVariantMap{{"seq",1},{"event",syncEvent("deck.upsert",{{"deck",model::toMap(cyclicFirst)}})}},QVariantMap{{"seq",2},{"event",syncEvent("deck.upsert",{{"deck",model::toMap(second)}})}}};
+    const QString cycleRequest=model::uuid();QVERIFY(!batch(cycle,cycleRequest).isEmpty());QVariantMap cycleResponse=response(cyclic,2);cycleResponse.insert("requestId",cycleRequest);QVERIFY(!apply(cycle,cycleResponse));QCOMPARE(cycle.decks().size(),0);QCOMPARE(batch(cycle).value("cursor").toLongLong(),0);
+}
+void CoreTest::subtreeDeleteConvergesAcrossConcurrentChildMove()
+{
+    QTemporaryDir firstDirectory,secondDirectory;AppController first(firstDirectory.path()),second(secondDirectory.path());QVERIFY(idle(first));QVERIFY(idle(second));struct FakeServer server;
+    const QString parent=addDeck(first,"Parent");first.createDeck("Child",{},parent);QVERIFY(idle(first));QString child;for (const QVariant &value:first.decks()) if (value.toMap().value("name")=="Child") child=value.toMap().value("id").toString();
+    const QString cardId=addCard(first,child,"basic","Question","Answer");QVERIFY(!cardId.isEmpty());QVERIFY(apply(first,server.exchange(batch(first))));QVERIFY(apply(second,server.exchange(batch(second))));
+    second.updateDeck(child,"Child",{},{});QVERIFY(idle(second));QVERIFY(apply(second,server.exchange(batch(second))));
+    first.deleteDeck(parent);QVERIFY(idle(first));QVERIFY(apply(first,server.exchange(batch(first))));
+    QVERIFY(apply(second,server.exchange(batch(second))));QVERIFY(apply(first,server.exchange(batch(first))));
+    QVERIFY(first.cards().isEmpty());QVERIFY(second.cards().isEmpty());QCOMPARE(first.history().size(),second.history().size());
 }
 void CoreTest::clozeGroupsRenderAndScheduleIndependently()
 {

@@ -57,8 +57,8 @@ public:
     QVariantList pendingCards() const { return m_pendingCards; }
 
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
-    Q_INVOKABLE void createDeck(const QString &name, const QString &description = {});
-    Q_INVOKABLE void updateDeck(const QString &id, const QString &name, const QString &description = {});
+    Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
+    Q_INVOKABLE void updateDeck(const QString &id, const QString &name, const QString &description = {}, const QString &parentId = {});
     Q_INVOKABLE void deleteDeck(const QString &id);
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,

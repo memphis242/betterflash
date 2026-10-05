@@ -50,10 +50,10 @@ void AppController::setBusy(bool value) { if (m_busy!=value) {m_busy=value;emit 
 void AppController::setError(const QVariantMap &error) {m_lastError=error;emit lastErrorChanged();}
 void AppController::setSelectedDeckId(const QString &id)
 { if (m_selectedDeckId!=id) {m_selectedDeckId=id;emit selectedDeckIdChanged();} }
-void AppController::createDeck(const QString &name,const QString &description)
-{ invoke([=](DatabaseWorker *worker){worker->createDeck(name,description);}); }
-void AppController::updateDeck(const QString &id,const QString &name,const QString &description)
-{ invoke([=](DatabaseWorker *worker){worker->updateDeck(id,name,description);}); }
+void AppController::createDeck(const QString &name,const QString &description,const QString &parentId)
+{ invoke([=](DatabaseWorker *worker){worker->createDeck(name,description,parentId);}); }
+void AppController::updateDeck(const QString &id,const QString &name,const QString &description,const QString &parentId)
+{ invoke([=](DatabaseWorker *worker){worker->updateDeck(id,name,description,parentId);}); }
 void AppController::deleteDeck(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteDeck(id);}); }
 bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points)

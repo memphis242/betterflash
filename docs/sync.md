@@ -30,7 +30,7 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 
 | Event | Payload |
 | --- | --- |
-| `deck.upsert` | `deck` with name, description, identifier, and creation time |
+| `deck.upsert` | `deck` with name, description, identifier, creation time, and optional `parentId` (empty or absent means a top-level deck) |
 | `deck.delete` | `id` |
 | `card.upsert` | source `card` and exactly its independently scheduled `variants` |
 | `card.delete` | source `id` |
@@ -53,6 +53,11 @@ when sync downloads a verified replacement.
 
 The client retains every review as immutable history. Concurrent note and
 schedule changes follow server event order; they are not merged by an LLM.
+Child decks received before their parent are retained and retried when the parent
+arrives. A hierarchy cycle is rejected without advancing the cursor. Deleting a
+deck removes descendant cards, retains their review history, and emits explicit
+delete events for every descendant card and deck. Remote clients may observe the
+subtree disappearing across multiple pages until all events are applied.
 Deletion tombstones prevent stale clients from resurrecting removed notes.
 Unsynced local mutations stay protected until their echoes establish server
 order. Dependency events that arrive before their notes are retained and retried.

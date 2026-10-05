@@ -6,6 +6,12 @@ Each distinct numbered cloze group has an item, even when the same group occurs
 several times in a sentence. Editing a note preserves schedules for surviving
 directions or groups; new groups start due immediately.
 
+The editor's inverted-form option uses the reverse direction. Its question is
+the exact prefix "Ask the question that this answers based on deck context: "
+followed by the original answer. Its answer is the original question. The prefix
+is applied during rendering, so editing and saving a note cannot accumulate it.
+Existing forward and reverse schedules keep their identifiers when edited.
+
 Adaptive v1 is a small, inspectable heuristic. It has not been fitted to a
 retention dataset. Its persisted review history allows a future calibrated
 scheduler to replay the same grades and timing information.

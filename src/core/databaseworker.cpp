@@ -24,7 +24,7 @@ namespace {
 QVariantMap object(const QVariantMap &map, const QString &key) { return map.value(key).toMap(); }
 QString json(const QVariantMap &map) { return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(QJsonDocument::Compact)); }
 struct model::Deck readDeck(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString()}; }
+{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString()}; }
 struct model::Card readCard(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt()}; }
 struct model::Variant readVariant(const QSqlQuery &q)
@@ -119,10 +119,10 @@ bool DatabaseWorker::migrate()
     QSqlQuery versionQuery(m_db);
     if (!versionQuery.exec("PRAGMA user_version") || !versionQuery.next()) { m_sqlDetail = versionQuery.lastError().text();return false; }
     const int version = versionQuery.value(0).toInt();
-    if (version > 2) { m_sqlDetail = QStringLiteral("Database version is newer than this application.");return false; }
+    if (version > 3) { m_sqlDetail = QStringLiteral("Database version is newer than this application.");return false; }
     return mutate([&] {
         const QStringList schema{
-            "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '')",
             "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,kind TEXT NOT NULL,front TEXT NOT NULL,back TEXT NOT NULL,tags TEXT NOT NULL,point_count INTEGER NOT NULL CHECK(point_count BETWEEN 1 AND 1000))",
             "CREATE TABLE IF NOT EXISTS review_variants(id TEXT PRIMARY KEY,card_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,variant_key TEXT NOT NULL,due TEXT NOT NULL,review_count INTEGER NOT NULL CHECK(review_count>=0),stability REAL NOT NULL CHECK(stability BETWEEN .25 AND 3650),difficulty REAL NOT NULL CHECK(difficulty BETWEEN 0 AND 1),UNIQUE(card_id,variant_key))",
             "CREATE INDEX IF NOT EXISTS variants_due ON review_variants(due)",
@@ -138,6 +138,13 @@ bool DatabaseWorker::migrate()
             "CREATE TABLE IF NOT EXISTS tombstones(entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(entity_type,entity_id))"
         };
         for (const QString &statement : schema) if (!execute(statement)) return false;
+        if (version < 3) {
+            QSqlQuery columns(m_db);
+            if (!columns.exec("PRAGMA table_info(decks)")) {m_sqlDetail=columns.lastError().text();return false;}
+            bool hasParent=false;while (columns.next()) hasParent|=columns.value(1).toString()==QStringLiteral("parent_id");
+            if (!hasParent&&!execute("ALTER TABLE decks ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")) return false;
+        }
+        if (!execute("CREATE INDEX IF NOT EXISTS decks_parent ON decks(parent_id)")) return false;
         if (!execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('device_id',?)",{model::uuid()})
             || !execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('sync_cursor','0')")) return false;
         QSqlQuery device(m_db);
@@ -161,7 +168,7 @@ bool DatabaseWorker::migrate()
                 migrated.append(note);
             }
             QSqlQuery allDecks(m_db);
-            if (!allDecks.exec("SELECT id,name,description,created_at FROM decks")) {m_sqlDetail=allDecks.lastError().text();return false;}
+            if (!allDecks.exec("SELECT id,name,description,created_at,parent_id FROM decks")) {m_sqlDetail=allDecks.lastError().text();return false;}
             while (allDecks.next()) if (!enqueue("deck.upsert",{{"deck",model::toMap(readDeck(allDecks))}})) return false;
             for (const struct model::Card &note : migrated) if (!enqueue("card.upsert",cardPayload(note))) return false;
             if (m_db.tables().contains(QStringLiteral("history"))) {
@@ -186,12 +193,12 @@ bool DatabaseWorker::migrate()
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
-        return execute("PRAGMA user_version=2");
+        return execute("PRAGMA user_version=3");
     });
 }
 std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id,name,description,created_at FROM decks WHERE id=?");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,name,description,created_at,parent_id FROM decks WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
     return q.next() ? std::optional<struct model::Deck>(readDeck(q)) : std::nullopt;
 }
@@ -216,7 +223,7 @@ QList<struct model::Variant> DatabaseWorker::cardVariants(const QString &id)
     return result;
 }
 bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
-{ return execute("INSERT INTO decks(id,name,description,created_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at",{r.id,r.name,r.description,r.createdAt}); }
+{ return execute("INSERT INTO decks(id,name,description,created_at,parent_id) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id",{r.id,r.name,r.description,r.createdAt,r.parentId}); }
 bool DatabaseWorker::upsertCard(const struct model::Card &r)
 { return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount}); }
 bool DatabaseWorker::upsertVariant(const struct model::Variant &r)
@@ -280,11 +287,32 @@ bool DatabaseWorker::eraseCard(const QString &id, qint64 seq)
 { return tombstone("card",id,seq) && execute("DELETE FROM notes WHERE id=?",{id}); }
 bool DatabaseWorker::eraseDeck(const QString &id, qint64 seq)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id FROM notes WHERE deck_id=?");q.addBindValue(id);
-    if (!q.exec()) {m_sqlDetail=q.lastError().text();return false;}
-    QStringList ids;while (q.next()) ids.append(q.value(0).toString());
-    for (const QString &cardId : ids) if (!eraseCard(cardId,seq)) return false;
-    return tombstone("deck",id,seq) && execute("DELETE FROM decks WHERE id=?",{id});
+    QSqlQuery descendants(m_db);descendants.prepare("WITH RECURSIVE descendants(id) AS (SELECT ? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants");descendants.addBindValue(id);
+    if (!descendants.exec()) {m_sqlDetail=descendants.lastError().text();return false;}
+    QStringList deckIds;while (descendants.next()) deckIds.append(descendants.value(0).toString());
+    for (const QString &deckId : deckIds) {
+        QSqlQuery cards(m_db);cards.prepare("SELECT id FROM notes WHERE deck_id=?");cards.addBindValue(deckId);
+        if (!cards.exec()) {m_sqlDetail=cards.lastError().text();return false;}
+        QStringList cardIds;while (cards.next()) cardIds.append(cards.value(0).toString());
+        for (const QString &cardId : cardIds) if (!eraseCard(cardId,seq)) return false;
+    }
+    for (const QString &deckId : deckIds) if (!tombstone("deck",deckId,seq)||!execute("DELETE FROM decks WHERE id=?",{deckId})) return false;
+    return true;
+}
+bool DatabaseWorker::validDeckParent(const QString &id,const QString &parentId)
+{
+    if (parentId.isEmpty()) return true;
+    if (!model::validUuid(parentId)||parentId==id||!deck(parentId)) return false;
+    QSet<QString> seen{id};QString current=parentId;
+    while (!current.isEmpty()) {
+        if (seen.contains(current)) return false;
+        seen.insert(current);
+        QSqlQuery query(m_db);query.prepare("SELECT parent_id FROM decks WHERE id=?");query.addBindValue(current);
+        if (!query.exec()) {m_sqlDetail=query.lastError().text();return false;}
+        if (!query.next()) return false;
+        current=query.value(0).toString();
+    }
+    return true;
 }
 
 bool DatabaseWorker::publishSnapshot()
@@ -293,12 +321,33 @@ bool DatabaseWorker::publishSnapshot()
     QVariantList decks,cards,history;
     const QString now=model::nowUtc();
     QSqlQuery q(m_db);
-    q.prepare("SELECT d.id,d.name,d.description,d.created_at,COUNT(DISTINCT n.id),COUNT(v.id),SUM(CASE WHEN v.due<=? THEN 1 ELSE 0 END) FROM decks d LEFT JOIN notes n ON n.deck_id=d.id LEFT JOIN review_variants v ON v.card_id=n.id GROUP BY d.id ORDER BY d.name,d.id");q.addBindValue(now);
+    q.prepare("SELECT d.id,d.name,d.description,d.created_at,d.parent_id,COUNT(DISTINCT n.id),COUNT(v.id),SUM(CASE WHEN v.due<=? THEN 1 ELSE 0 END),SUM(CASE WHEN v.due>? THEN 1 ELSE 0 END),SUM(CASE WHEN v.due<=? AND v.review_count=0 THEN 1 ELSE 0 END),SUM(CASE WHEN v.due<=? AND v.review_count>0 THEN 1 ELSE 0 END) FROM decks d LEFT JOIN notes n ON n.deck_id=d.id LEFT JOIN review_variants v ON v.card_id=n.id GROUP BY d.id ORDER BY d.name,d.id");q.addBindValue(now);q.addBindValue(now);q.addBindValue(now);q.addBindValue(now);
     if (!q.exec()) {fail("STORAGE_READ","Could not load decks. Try refreshing.",q.lastError().text());return false;}
+    QHash<QString,int> deckIndexes;QHash<QString,QString> deckParents;
     while (q.next()) {
         QVariantMap map=model::toMap(readDeck(q));
-        map.insert("totalCount",q.value(4).toInt());map.insert("variantCount",q.value(5).toInt());map.insert("dueCount",q.value(6).toInt());decks.append(map);
+        const QString id=map.value("id").toString();deckIndexes.insert(id,decks.size());deckParents.insert(id,map.value("parentId").toString());
+        map.insert("ownCardCount",q.value(5).toInt());map.insert("ownVariantCount",q.value(6).toInt());map.insert("ownDueCount",q.value(7).toInt());map.insert("ownLaterCount",q.value(8).toInt());map.insert("ownNewDueCount",q.value(9).toInt());map.insert("ownReviewDueCount",q.value(10).toInt());map.insert("cardCount",q.value(5).toInt());map.insert("totalCount",q.value(5).toInt());map.insert("variantCount",q.value(6).toInt());map.insert("dueCount",q.value(7).toInt());map.insert("laterCount",q.value(8).toInt());map.insert("newDueCount",q.value(9).toInt());map.insert("reviewDueCount",q.value(10).toInt());decks.append(map);
     }
+    QHash<QString,int> childCounts;QList<QString> ready;
+    for (const QString &id : deckIndexes.keys()) childCounts.insert(id,0);
+    for (const QString &id : deckIndexes.keys()) {
+        const QString parent=deckParents.value(id);
+        if (parent.isEmpty()) continue;
+        if (childCounts.contains(parent)) childCounts[parent]++;
+        else {fail("STORAGE_HIERARCHY","A deck refers to a missing parent. Repair the database and refresh.");return false;}
+    }
+    for (const QString &id : deckIndexes.keys()) if (childCounts.value(id)==0) ready.append(id);
+    int processed=0;
+    while (!ready.isEmpty()) {
+        const QString current=ready.takeLast();++processed;
+        const QString parent=deckParents.value(current);if (parent.isEmpty()) continue;
+        QVariantMap child=decks.at(deckIndexes.value(current)).toMap();QVariantMap aggregate=decks.at(deckIndexes.value(parent)).toMap();
+        for (const QString &key : {QStringLiteral("cardCount"),QStringLiteral("totalCount"),QStringLiteral("variantCount"),QStringLiteral("dueCount"),QStringLiteral("laterCount"),QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount")}) aggregate[key]=aggregate.value(key).toInt()+child.value(key).toInt();
+        decks[deckIndexes.value(parent)]=aggregate;
+        const int remaining=childCounts.value(parent)-1;childCounts[parent]=remaining;if (remaining==0) ready.append(parent);
+    }
+    if (processed!=deckIndexes.size()) {fail("STORAGE_HIERARCHY","The deck hierarchy contains a cycle. Repair the database and refresh.");return false;}
     QHash<QString,QList<struct model::Variant>> variants;
     if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants ORDER BY variant_key")) {fail("STORAGE_READ","Could not load review variants. Try refreshing.",q.lastError().text());return false;}
     while (q.next()) {const struct model::Variant schedule=readVariant(q);variants[schedule.cardId].append(schedule);}
@@ -370,23 +419,25 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
     return true;
 }
 
-void DatabaseWorker::createDeck(const QString &name, const QString &description)
+void DatabaseWorker::createDeck(const QString &name, const QString &description, const QString &parentId)
 {
     if (!ready()) return;
-    const struct model::Deck record{model::uuid(),name.trimmed(),description,model::nowUtc()};
+    const struct model::Deck record{model::uuid(),name.trimmed(),description,model::nowUtc(),parentId};
     const auto valid=model::deckFromMap(model::toMap(record));
     if (!valid) {fail("INVALID_DECK","Enter a deck name of at most 256 characters and a description of at most 65536 characters.",valid.error());return;}
+    if (!validDeckParent(record.id,record.parentId)) {fail("INVALID_DECK_PARENT","Choose an existing parent deck that is not this deck or one of its descendants.");return;}
     if (!mutate([&]{return upsertDeck(record)&&enqueue("deck.upsert",{{"deck",model::toMap(record)}});})) {fail("DECK_SAVE","Could not save the deck. Check storage and try again.",m_sqlDetail);return;}
     if (publishSnapshot()) done("Deck created");
 }
-void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QString &description)
+void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QString &description, const QString &parentId)
 {
     if (!ready()) return;
     const auto existing=deck(id);
     if (!existing) {fail("DECK_NOT_FOUND","This deck no longer exists. Refresh the collection.",m_sqlDetail);return;}
-    const struct model::Deck record{id,name.trimmed(),description,existing->createdAt};
+    const struct model::Deck record{id,name.trimmed(),description,existing->createdAt,parentId};
     const auto valid=model::deckFromMap(model::toMap(record));
     if (!valid) {fail("INVALID_DECK","Enter a valid deck name and description.",valid.error());return;}
+    if (!validDeckParent(record.id,record.parentId)) {fail("INVALID_DECK_PARENT","Choose an existing parent deck that is not this deck or one of its descendants.");return;}
     if (!mutate([&]{return upsertDeck(record)&&enqueue("deck.upsert",{{"deck",model::toMap(record)}});})) {fail("DECK_SAVE","Could not save the deck. Check storage and try again.",m_sqlDetail);return;}
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck updated");
@@ -395,7 +446,25 @@ void DatabaseWorker::deleteDeck(const QString &id)
 {
     if (!ready()) return;
     if (!model::validUuid(id)) {fail("INVALID_DECK_ID","Choose a valid deck to delete.");return;}
-    if (!mutate([&]{return eraseDeck(id)&&enqueue("deck.delete",{{"id",id}});})) {fail("DECK_DELETE","Could not delete the deck. Check storage and try again.",m_sqlDetail);return;}
+    QSqlQuery hierarchy(m_db);hierarchy.prepare("WITH RECURSIVE descendants(id,parent_id) AS (SELECT id,parent_id FROM decks WHERE id=? UNION SELECT d.id,d.parent_id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,parent_id FROM descendants");hierarchy.addBindValue(id);
+    if (!hierarchy.exec()) {fail("DECK_DELETE","Could not inspect the deck subtree. Check storage and try again.",hierarchy.lastError().text());return;}
+    QHash<QString,QString> parents;while (hierarchy.next()) parents.insert(hierarchy.value(0).toString(),hierarchy.value(1).toString());
+    if (parents.isEmpty()) parents.insert(id,QString());
+    QStringList cardIds;
+    for (const QString &deckId : parents.keys()) {
+        QSqlQuery cards(m_db);cards.prepare("SELECT id FROM notes WHERE deck_id=?");cards.addBindValue(deckId);
+        if (!cards.exec()) {fail("DECK_DELETE","Could not inspect the deck cards. Check storage and try again.",cards.lastError().text());return;}
+        while (cards.next()) cardIds.append(cards.value(0).toString());
+    }
+    QStringList deckIds=parents.keys();
+    const auto depth=[&](const QString &deckId) {int result=0;QSet<QString> seen;QString current=deckId;while (!current.isEmpty()&&!seen.contains(current)&&parents.contains(current)) {seen.insert(current);current=parents.value(current);++result;}return result;};
+    std::sort(deckIds.begin(),deckIds.end(),[&](const QString &left,const QString &right){return depth(left)>depth(right);});
+    if (!mutate([&] {
+        if (!eraseDeck(id)) return false;
+        for (const QString &cardId : cardIds) if (!enqueue("card.delete",{{"id",cardId}})) return false;
+        for (const QString &deckId : deckIds) if (!enqueue("deck.delete",{{"id",deckId}})) return false;
+        return true;
+    })) {fail("DECK_DELETE","Could not delete the deck. Check storage and try again.",m_sqlDetail);return;}
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck deleted");
 }
@@ -467,7 +536,7 @@ void DatabaseWorker::beginReview(const QString &deckId)
     if (!ready()) return;
     if (!deckId.isEmpty() && (!model::validUuid(deckId)||!deck(deckId))) {fail("DECK_NOT_FOUND","Choose an existing deck to review.");return;}
     QSqlQuery q(m_db);
-    q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id=?")+" ORDER BY v.due,n.id,v.variant_key");
+    q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants)")+" ORDER BY v.due,n.id,v.variant_key");
     q.addBindValue(model::nowUtc());if (!deckId.isEmpty()) q.addBindValue(deckId);
     if (!q.exec()) {fail("REVIEW_START","Could not start review. Refresh and try again.",q.lastError().text());return;}
     m_queue.clear();m_queueCache.clear();m_queueDirty=true;while (q.next()) m_queue.append(q.value(0).toString());
@@ -560,6 +629,11 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         if (!executeEffects) return recordSequence("deck",record.id,seq);
         if (isDeleted("deck",record.id)||seq<=entitySequence("deck",record.id)) return m_sqlDetail.isEmpty();
         if (pendingEntity("deck",record.id)) {applied=false;return m_sqlDetail.isEmpty();}
+        if (!record.parentId.isEmpty()&&isDeleted("deck",record.parentId)) return tombstone("deck",record.id,seq)&&recordSequence("deck",record.id,seq);
+        if (!validDeckParent(record.id,record.parentId)) {
+            if (!record.parentId.isEmpty()&&deck(record.parentId)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
+            applied=false;return m_sqlDetail.isEmpty();
+        }
         return upsertDeck(record)&&recordSequence("deck",record.id,seq);
     }
     if (type==QStringLiteral("card.upsert")) {
@@ -638,6 +712,19 @@ bool DatabaseWorker::retryRemoteEvents()
     if (!q.exec("SELECT seq,event FROM remote_pending ORDER BY seq")) {m_sqlDetail=q.lastError().text();return false;}
     QList<QPair<qint64,QVariantMap>> events;
     while (q.next()) events.append({q.value(0).toLongLong(),QJsonDocument::fromJson(q.value(1).toString().toUtf8()).object().toVariantMap()});
+    QHash<QString,QString> parents;QSqlQuery decks(m_db);
+    if (!decks.exec("SELECT id,parent_id FROM decks")) {m_sqlDetail=decks.lastError().text();return false;}
+    while (decks.next()) parents.insert(decks.value(0).toString(),decks.value(1).toString());
+    for (const auto &entry : events) if (entry.second.value("type")==QStringLiteral("deck.upsert")) {
+        const QVariantMap record=object(object(entry.second,"payload"),"deck");parents.insert(record.value("id").toString(),record.value("parentId").toString());
+    }
+    QHash<QString,int> colors;
+    std::function<bool(const QString &)> acyclic=[&](const QString &id) {
+        if (id.isEmpty()||!parents.contains(id)) return true;
+        if (colors.value(id)==1) return false;if (colors.value(id)==2) return true;colors[id]=1;
+        if (!acyclic(parents.value(id))) return false;colors[id]=2;return true;
+    };
+    for (const QString &id : parents.keys()) if (!acyclic(id)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
     bool progressed=false;
     do {
         progressed=false;
@@ -739,7 +826,7 @@ void DatabaseWorker::exportCollection(const QString &path)
     QVariantList decks,cards,variants,history,deleted;
     QList<struct model::Card> notes;
     QSqlQuery q(m_db);
-    if (!q.exec("SELECT id,name,description,created_at FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
+    if (!q.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
     while (q.next()) decks.append(model::toMap(readDeck(q)));
     if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
     while (q.next()) {const struct model::Card note=readCard(q);notes.append(note);cards.append(model::toMap(note));}
@@ -763,8 +850,16 @@ void DatabaseWorker::exportCollection(const QString &path)
 }
 bool DatabaseWorker::importRecords(const struct model::Collection &records)
 {
-    for (const struct model::Deck &record : records.decks) {
-        if (!deck(record.id)&&(!upsertDeck(record)||!enqueue("deck.upsert",{{"deck",model::toMap(record)}}))) return false;
+    QList<struct model::Deck> pendingDecks=records.decks;
+    while (!pendingDecks.isEmpty()) {
+        bool progressed=false;
+        for (auto it=pendingDecks.begin();it!=pendingDecks.end();) {
+            const struct model::Deck &record=*it;
+            if (!record.parentId.isEmpty()&&!deck(record.parentId)) {++it;continue;}
+            if (!deck(record.id)&&(!upsertDeck(record)||!enqueue("deck.upsert",{{"deck",model::toMap(record)}}))) return false;
+            it=pendingDecks.erase(it);progressed=true;
+        }
+        if (!progressed) {m_sqlDetail="Deck hierarchy dependencies could not be resolved.";return false;}
     }
     QSet<QString> addedCards;
     for (const struct model::Card &record : records.cards) {

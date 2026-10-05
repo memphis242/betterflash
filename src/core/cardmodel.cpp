@@ -141,7 +141,9 @@ QString variantId(const QString &cardId, const QString &key)
 QString question(const struct Card &card, const QString &key)
 {
     if (card.kind == QStringLiteral("cloze")) return clozeText(card, key, true);
-    return key == QStringLiteral("reverse") ? card.back : card.front;
+    return key == QStringLiteral("reverse")
+        ? QStringLiteral("Ask the question that this answers based on deck context: \n\n") + card.back
+        : card.front;
 }
 QString answer(const struct Card &card, const QString &key)
 {
@@ -161,7 +163,7 @@ QString gradeLabel(int grade)
     return QStringList{QStringLiteral("Missed"), QStringLiteral("Partial"), QStringLiteral("Hard"), QStringLiteral("Good"), QStringLiteral("Easy")}.at(grade);
 }
 QVariantMap toMap(const struct Deck &r)
-{ return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt}}; }
+{ return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId}}; }
 QVariantMap toMap(const struct Card &r)
 { return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount}}; }
 QVariantMap toMap(const struct Variant &r)
@@ -173,9 +175,14 @@ std::expected<struct Deck, QString> deckFromMap(const QVariantMap &m)
 {
     if (!validUuid(m.value("id").toString()) || !text(m,"name",256,true) || !text(m,"description",65536)
         || !text(m,"createdAt",40,true)) return std::unexpected(QStringLiteral("Deck fields are invalid or exceed their limits."));
+    const QString parentId=m.contains("parentId") ? m.value("parentId").toString() : QString();
+    if (m.contains("parentId") && m.value("parentId").metaType().id()!=QMetaType::QString)
+        return std::unexpected(QStringLiteral("Deck parentId must be a UUID or an empty string."));
+    if (!parentId.isEmpty() && (!validUuid(parentId)||parentId==m.value("id").toString()))
+        return std::unexpected(QStringLiteral("Deck parentId must reference another deck."));
     const auto time = utcInstant(m.value("createdAt").toString());
     if (!time) return std::unexpected(time.error());
-    return Deck{m.value("id").toString(),m.value("name").toString(),m.value("description").toString(),*time};
+    return Deck{m.value("id").toString(),m.value("name").toString(),m.value("description").toString(),*time,parentId};
 }
 std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
 {
@@ -295,6 +302,15 @@ std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &
         if (!record) return std::unexpected(record.error());
         if (deletedDecks.contains(record->id)||deckIds.contains(record->id)) return std::unexpected(QStringLiteral("Duplicate deck identifier."));
         deckIds.insert(record->id);result.decks.append(*record);
+    }
+    QHash<QString,QString> parents;
+    for (const struct Deck &deck : result.decks) parents.insert(deck.id,deck.parentId);
+    for (const struct Deck &deck : result.decks) {
+        QSet<QString> seen;QString current=deck.parentId;
+        while (!current.isEmpty()) {
+            if (!parents.contains(current)||seen.contains(current)) return std::unexpected(QStringLiteral("Deck hierarchy has a missing parent or cycle."));
+            seen.insert(current);current=parents.value(current);
+        }
     }
     for (const QJsonValue &value : object.value("cards").toArray()) {
         if (!value.isObject()) return std::unexpected(QStringLiteral("Card record must be an object."));

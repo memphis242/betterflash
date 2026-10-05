@@ -99,6 +99,23 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(len(self.sync([])[1]["events"]), 0)
         self.assertEqual(self.request("POST", "/v1/sync", b'{"deviceId":"a","deviceId":"b"}', raw=True)[0], 400)
 
+    def test_deck_parent_is_optional_uuid_and_not_self(self):
+        root = self.event()
+        root_id = root["payload"]["deck"]["id"]
+        self.assertEqual(self.sync([root])[0], 200)
+        child = self.event()
+        child["payload"]["deck"]["parentId"] = root_id
+        self.assertEqual(self.sync([child])[0], 200)
+        invalid = self.event()
+        invalid["payload"]["deck"]["parentId"] = None
+        self.assertEqual(self.sync([invalid])[0], 400)
+        invalid = self.event()
+        invalid["payload"]["deck"]["parentId"] = invalid["payload"]["deck"]["id"]
+        self.assertEqual(self.sync([invalid])[0], 400)
+        missing = self.event()
+        missing["payload"]["deck"].pop("parentId", None)
+        self.assertEqual(self.sync([missing])[0], 200)
+
     def test_cloze_payload_accepts_code_scopes_and_multiline_answers(self):
         event = self.event()
         card_id = str(uuid4())

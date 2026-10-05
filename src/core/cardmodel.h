@@ -29,6 +29,7 @@ struct Deck {
     QString name;
     QString description;
     QString createdAt;
+    QString parentId = {};
 };
 struct Card {
     QString id;

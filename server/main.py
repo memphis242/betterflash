@@ -162,6 +162,9 @@ def validate_payload(kind, payload):
             text(deck, "name", 256, True)
             text(deck, "description", 65536)
             instant(text(deck, "createdAt", 40, True))
+            parent_id = deck.get("parentId", "")
+            if not isinstance(parent_id, str) or (parent_id and not valid_uuid(parent_id)) or parent_id == deck["id"]:
+                raise ProtocolError("INVALID_EVENT", "A deck parent identifier is invalid.")
         case "deck.delete" | "card.delete":
             identifiers(payload, "id")
         case "card.upsert":

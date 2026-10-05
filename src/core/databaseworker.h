@@ -19,8 +19,8 @@ public:
     void initialize();
     void shutdown();
     void snapshot();
-    void createDeck(const QString &name, const QString &description);
-    void updateDeck(const QString &id, const QString &name, const QString &description);
+    void createDeck(const QString &name, const QString &description, const QString &parentId);
+    void updateDeck(const QString &id, const QString &name, const QString &description, const QString &parentId);
     void deleteDeck(const QString &id);
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
                   const QString &front, const QString &back, const QString &tags, int points);
@@ -92,6 +92,7 @@ private:
     bool isDeleted(const QString &type, const QString &id);
     bool eraseCard(const QString &id, qint64 seq = 0);
     bool eraseDeck(const QString &id, qint64 seq = 0);
+    bool validDeckParent(const QString &id, const QString &parentId);
     QVariantMap cardPayload(const struct betterflash::model::Card &record);
     QVariantMap reviewCard(const struct betterflash::model::Card &record,
                            const struct betterflash::model::Variant &variant, const QString &deckName);
