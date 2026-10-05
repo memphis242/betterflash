@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=BetterFlash
+Comment=Markdown flashcards with graded recall and voice review
+Exec=betterflash
+Icon=betterflash
+Terminal=false
+Categories=Education;
+Keywords=flashcards;markdown;spaced repetition;study;
+
