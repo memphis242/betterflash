@@ -21,9 +21,9 @@ QtObject {
     readonly property color error: dark ? "#ee9a9a" : "#a13939"
     readonly property color transparent: "transparent"
     readonly property color scrim: dark ? "#99211722" : "#77322832"
-    readonly property string uiFont: "Cantarell"
-    readonly property string contentFont: "Caladea"
-    readonly property string monoFont: "DejaVu Sans Mono"
+    readonly property string uiFont: "IBM Plex Mono"
+    readonly property string contentFont: "IBM Plex Mono"
+    readonly property string monoFont: "IBM Plex Mono"
     property Settings preferences: Settings {
         category: "appearance"
         property bool savedDark: true

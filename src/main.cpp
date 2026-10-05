@@ -9,6 +9,7 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFontDatabase>
 #include <QHash>
 #include <QGuiApplication>
 #include <QIcon>
@@ -33,6 +34,19 @@ int main(int argc, char **argv) {
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
     QGuiApplication application(argc, argv);
+    const QStringList fontResources{
+        QStringLiteral(":/fonts/IBMPlexMono-Regular.ttf"),
+        QStringLiteral(":/fonts/IBMPlexMono-Bold.ttf"),
+        QStringLiteral(":/fonts/IBMPlexMono-Italic.ttf"),
+        QStringLiteral(":/fonts/IBMPlexMono-BoldItalic.ttf")
+    };
+    for (const QString &resource : fontResources) {
+        if (QFontDatabase::addApplicationFont(resource) < 0) {
+            qCritical().noquote() << QStringLiteral("FONT_LOAD: Cannot load %1. Rebuild or reinstall BetterFlash.").arg(resource);
+            return 1;
+        }
+    }
+    application.setFont(QFont(QStringLiteral("IBM Plex Mono")));
     application.setWindowIcon(QIcon(QStringLiteral(":/icons/betterflash.svg")));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);

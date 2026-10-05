@@ -215,7 +215,7 @@ void MarkdownView::rebuild() {
     if (width() <= 0 || !m_foreground.isValid()) return;
     if (!m_renderError.isEmpty()) { m_renderError.clear(); emit renderErrorChanged(); }
     const qreal documentWidth = std::max(1.0, width());
-    QFont font(QStringLiteral("Caladea"));
+    QFont font(QStringLiteral("IBM Plex Mono"));
     font.setPixelSize(qRound(m_baseFontSize));
     m_document.setDefaultFont(font);
     QTextOption textOptions;
@@ -315,7 +315,7 @@ void MarkdownView::rebuild() {
             cursor.setBlockFormat(format);
             cursor.select(QTextCursor::BlockUnderCursor);
             QTextCharFormat codeFormat;
-            codeFormat.setFontFamilies({QStringLiteral("DejaVu Sans Mono"), QStringLiteral("monospace")});
+            codeFormat.setFontFamilies({QStringLiteral("IBM Plex Mono"), QStringLiteral("monospace")});
             codeFormat.setFontFixedPitch(true);
             codeFormat.setFontPointSize(m_baseFontSize * 0.65);
             cursor.mergeCharFormat(codeFormat);

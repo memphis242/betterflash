@@ -34,6 +34,9 @@ target_link_libraries(betterflash_voice PRIVATE betterflash_integrations)
 qt_add_executable(betterflash src/main.cpp)
 qt_add_resources(betterflash application_icon PREFIX /icons BASE packaging
     FILES packaging/betterflash.svg)
+qt_add_resources(betterflash application_fonts PREFIX /fonts BASE packaging/fonts
+    FILES packaging/fonts/IBMPlexMono-Regular.ttf packaging/fonts/IBMPlexMono-Bold.ttf
+    packaging/fonts/IBMPlexMono-Italic.ttf packaging/fonts/IBMPlexMono-BoldItalic.ttf)
 file(GLOB LICENSE_NOTICES CONFIGURE_DEPENDS packaging/licenses/*.txt)
 qt_add_resources(betterflash license_notices PREFIX /licenses BASE packaging/licenses FILES ${LICENSE_NOTICES})
 file(GLOB_RECURSE QML_SOURCES CONFIGURE_DEPENDS qml/*.qml)
