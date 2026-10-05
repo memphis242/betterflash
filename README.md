@@ -12,6 +12,8 @@ dark theme, a separate paper light theme, and collapsible bottom navigation.
 sudo dnf install cmake ninja-build gcc-c++ \
   qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
   qt6-qtmultimedia-devel qt6-qtspeech-devel
+./scripts/build-desktop.sh
+./scripts/install-user-launcher.sh
 ./scripts/run-desktop.sh
 ```
 
@@ -19,6 +21,9 @@ The first build downloads two small, pinned source dependencies for native math
 rendering: MicroTeX and tinyxml2. Neither a browser engine nor Electron is used.
 Build output lives on `/workspace`, separate from the source checkout. Set
 `BETTERFLASH_BUILD_DIR` to choose another build directory.
+The user launcher points at this worktree and its build. It also supplies the
+desktop entry used by native desktop portals; it refuses to overwrite a launcher
+owned by another checkout.
 PNG, JPEG, and GIF use Qt's built-in readers. Install `qt6-qtimageformats` for
 WebP images, or export them to PNG before attaching.
 

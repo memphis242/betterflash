@@ -36,3 +36,7 @@ export ANDROID_OPENSSL_LIB_DIR=/path/to/openssl/arm64-v8a
 The script derives its persistent build directory under `/workspace/betterflash-build` from the complete worktree path and a SHA-256 path prefix, sets native API 28, and requests Qt's `apk` target with parallel compilation. `BETTERFLASH_ANDROID_BUILD_DIR` overrides the build location; an existing CMake cache must point at this worktree. `--release` prepares a release build; device deployment and signing are separate actions. With Fedora's system host Qt, `QT_HOST_ROOT=/usr` is accepted when its version matches the Android kit.
 
 An Android APK has not been built or tested yet because the Android kit, SDK, NDK, full JDK, and arm64 OpenSSL assets are missing from this machine. After installing them, the next checks are package startup, phone and tablet layouts, image import, voice permission denial/retry, Bluetooth audio, provider cancellation during lifecycle changes, and two-device synchronization.
+
+Image import currently accepts local file URLs. Android document-provider
+`content:` URLs still need a read adapter before phone attachment import is
+complete.

@@ -25,15 +25,15 @@
 #endif
 
 int main(int argc, char **argv) {
-    QGuiApplication application(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("BetterFlash"));
+    QCoreApplication::setApplicationName(QStringLiteral("BetterFlash"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("org.betterflash.BetterFlash"));
 #ifdef Q_OS_ANDROID
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
-    QCoreApplication::setOrganizationName(QStringLiteral("BetterFlash"));
-    QCoreApplication::setApplicationName(QStringLiteral("BetterFlash"));
+    QGuiApplication application(argc, argv);
     application.setWindowIcon(QIcon(QStringLiteral(":/icons/betterflash.svg")));
-    QGuiApplication::setDesktopFileName(QStringLiteral("org.betterflash.BetterFlash"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QCommandLineParser parser;
