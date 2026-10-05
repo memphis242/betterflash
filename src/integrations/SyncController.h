@@ -28,8 +28,8 @@ public:
     QString lastSync() const { return m_lastSync; }
     bool busy() const { return m_busy; }
     void setEndpoint(const QString &endpoint);
-    Q_INVOKABLE void setToken(const QString &token) { m_credentials->setKey(token); }
-    Q_INVOKABLE void clearToken() { m_credentials->clear(); }
+    Q_INVOKABLE void setToken(const QString &token) { cancel(); m_credentials->setKey(token); }
+    Q_INVOKABLE void clearToken() { cancel(); m_credentials->clear(); }
     Q_INVOKABLE void synchronize();
     Q_INVOKABLE void cancel();
 signals:
@@ -37,11 +37,15 @@ signals:
     void keyChanged();
     void changed();
 private:
+    enum class Phase { Idle, Preparing, Uploading, Exchanging, Downloading, ValidatingImage, Applying };
+    bool active(const QString &requestId, Phase phase) const;
+    void beginBatch();
+    void resetPending();
     void handleBatch(const QVariantMap &batch);
     void uploadNext();
     void postBatch();
     void downloadNext();
-    void finishApply(bool success, bool hasMore);
+    void finishApply(const QString &requestId, bool success, bool hasMore);
     void fail(const QString &code, const QString &message);
     void configureCredentials();
     QUrl mediaUrl(const QString &name) const;
@@ -56,6 +60,7 @@ private:
     QString m_status = QStringLiteral("Stored on this device.");
     QString m_error;
     QString m_lastSync;
+    QString m_requestId;
     QVariantMap m_batch;
     QVariantMap m_response;
     QStringList m_uploads;
@@ -63,5 +68,6 @@ private:
     bool m_busy = false;
     bool m_batchWasFull = false;
     int m_rounds = 0;
+    qint64 m_downloadedBytes = 0;
+    Phase m_phase = Phase::Idle;
 };
-

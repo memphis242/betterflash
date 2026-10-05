@@ -2,11 +2,18 @@
 
 #include "SecretStore.h"
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QPointer>
 #include <QSettings>
+#include <expected>
 
 class AppController;
 class QNetworkReply;
+
+struct ProviderError {
+    QString code;
+    QString message;
+};
 
 class Summarizer final : public QObject {
     Q_OBJECT
@@ -21,6 +28,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY changed)
 public:
     explicit Summarizer(AppController *app, QObject *parent = nullptr);
+    ~Summarizer() override;
     QString endpoint() const { return m_endpoint; }
     QString model() const { return m_model; }
     bool hasApiKey() const { return m_credentials->hasKey(); }
@@ -32,6 +40,7 @@ public:
     int pendingCount() const { return m_pendingCount; }
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
+    std::expected<QNetworkRequest, struct ProviderError> configuredRequest() const;
     Q_INVOKABLE void setApiKey(const QString &key) { m_credentials->setKey(key); }
     Q_INVOKABLE void clearApiKey() { m_credentials->clear(); }
     Q_INVOKABLE void summarizeRemaining();
@@ -56,4 +65,3 @@ private:
     bool m_busy = false;
     int m_pendingCount = 0;
 };
-

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QUrl>
+#include <expected>
 
 class MediaStore final : public QObject {
     Q_OBJECT
@@ -15,6 +16,7 @@ public:
     QString error() const { return m_error; }
     Q_INVOKABLE void importImage(const QUrl &file, const QString &alt = {});
     static bool validName(const QString &name);
+    static std::expected<void, QString> validateImage(const QString &name, const QByteArray &bytes);
 signals:
     void changed();
     void imageImported(const QString &markdown);
@@ -23,4 +25,3 @@ private:
     bool m_busy = false;
     QString m_error;
 };
-
