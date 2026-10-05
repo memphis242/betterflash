@@ -38,6 +38,7 @@ jobs:
           name: native-verification
           path: |
             /workspace/betterflash-build/ci/artifacts/gui
+            /workspace/betterflash-build/ci/artifacts/gui-utc14
             /workspace/betterflash-build/ci/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14

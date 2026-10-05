@@ -654,7 +654,12 @@ private:
         check(visible("postponeDialog"), "postpone_keyboard_" + theme);
         click("postponeConfirm");
         check(waitUntil([this,postponedCount] { return !m_app.busy() && m_app.queueCount() == postponedCount-1; })
-              && m_app.history().size() == historyCount+1, "postpone_changes_date_without_grade_" + theme);
+              && m_app.history().size() == historyCount+1 && !visible("postponeDialog"),
+              "postpone_accepts_local_tomorrow_" + theme,
+              QStringLiteral("field=%1 dialogVisible=%2 queue=%3 expected=%4")
+                  .arg(require("postponeDate")->property("text").toString())
+                  .arg(visible("postponeDialog"))
+                  .arg(m_app.queueCount()).arg(postponedCount-1));
         key(Qt::Key_K,Qt::ControlModifier);
         require("commandSearch")->setProperty("text",QStringLiteral("summ"));
         key(Qt::Key_Return);

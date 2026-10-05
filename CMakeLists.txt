@@ -86,7 +86,12 @@ if(BUILD_TESTING AND NOT ANDROID)
             "-DBETTERFLASH_EXECUTABLE=$<TARGET_FILE:betterflash>"
             "-DBETTERFLASH_ARTIFACT_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifacts/gui"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GuiSweep.cmake")
-        set_tests_properties(gui PROPERTIES TIMEOUT 200)
+        add_test(NAME gui-utc14 COMMAND "${CMAKE_COMMAND}"
+            "-DBETTERFLASH_EXECUTABLE=$<TARGET_FILE:betterflash>"
+            "-DBETTERFLASH_ARTIFACT_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifacts/gui-utc14"
+            "-DBETTERFLASH_SWEEP_TIMEZONE=Pacific/Kiritimati"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GuiSweep.cmake")
+        set_tests_properties(gui gui-utc14 PROPERTIES TIMEOUT 200)
     endif()
     foreach(test_name core voice)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${test_name}_test.cpp")

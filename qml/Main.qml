@@ -1406,7 +1406,7 @@ ApplicationWindow {
                 primary: true
                 onClicked: {
                     const value = postponeDate.text.trim()
-                    const valid = /^\d{4}-\d{2}-\d{2}$/.test(value) && !isNaN(Date.parse(value)) && new Date(value + "T12:00:00").toISOString().slice(0, 10) === value && value > Qt.formatDate(new Date(), "yyyy-MM-dd")
+                    const valid = /^\d{4}-\d{2}-\d{2}$/.test(value) && !isNaN(Date.parse(value)) && Qt.formatDate(new Date(value + "T12:00:00"), "yyyy-MM-dd") === value && value > Qt.formatDate(new Date(), "yyyy-MM-dd")
                     if (!valid) {
                         postponeDialog.validation = "POSTPONE_DATE: Enter a real date later than today, in YYYY-MM-DD format."
                         return
