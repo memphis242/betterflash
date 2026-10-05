@@ -43,6 +43,11 @@ card identifier and direction or cloze key. Nested payloads are validated before
 events enter the server log.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically.
+Upload referenced assets before sending a card event. A card and a received page
+can reference at most 64 unique images and 64 MiB of attached data. The server
+splits event pages at those bounds, and the client validates a page before fetching
+its assets. Damaged local copies are preserved under a `.damaged-UUID` suffix
+when sync downloads a verified replacement.
 
 ## Conflict behavior and scope
 

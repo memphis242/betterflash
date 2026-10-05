@@ -7,7 +7,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import main
@@ -99,6 +99,24 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(len(self.sync([])[1]["events"]), 0)
         self.assertEqual(self.request("POST", "/v1/sync", b'{"deviceId":"a","deviceId":"b"}', raw=True)[0], 400)
 
+    def test_cloze_payload_accepts_code_scopes_and_multiline_answers(self):
+        event = self.event()
+        card_id = str(uuid4())
+        event["type"] = "card.upsert"
+        event["payload"] = {
+            "card": {"id": card_id, "deckId": str(uuid4()), "kind": "cloze",
+                     "front": "Use {{c1::std\\::expected}} with {{c2::first\nsecond::two lines}}.",
+                     "back": "", "tags": "", "pointCount": 1},
+            "variants": [{"id": str(uuid5(UUID(card_id), key)), "cardId": card_id, "key": key,
+                          "due": "2026-01-01T00:00:00Z", "reviewCount": 0,
+                          "stability": 1.0, "difficulty": 0.5} for key in ("c1", "c2")]}
+        self.assertEqual(self.sync([event])[0], 200)
+        invalid = json.loads(json.dumps(event))
+        invalid["id"] = str(uuid4())
+        invalid["payload"]["card"]["front"] = "{{c1::answer::}}"
+        self.assertEqual(self.sync([invalid])[0], 400)
+        self.assertEqual(len(self.sync([])[1]["events"]), 1)
+
     def test_media_round_trip_and_hash_integrity(self):
         data = b"an opaque test image payload"
         filename = hashlib.sha256(data).hexdigest() + ".png"
@@ -151,6 +169,40 @@ class SyncTests(unittest.TestCase):
                 break
         self.assertEqual(len(set(received)), 125)
         self.assertEqual(cursor, 125)
+
+    def test_media_reference_budget_paginate_and_rejects_oversized_cards(self):
+        names = []
+        for index in range(80):
+            data = f"bounded attachment fixture {index}".encode()
+            name = hashlib.sha256(data).hexdigest() + ".png"
+            (self.store.media / name).write_bytes(data)
+            names.append(name)
+
+        def card_event(references):
+            event = self.event()
+            identifier = str(uuid4())
+            event["type"] = "card.upsert"
+            event["payload"] = {
+                "card": {"id": identifier, "deckId": str(uuid4()), "kind": "basic",
+                         "front": "\n\n".join(f"![image](media:{name})" for name in references),
+                         "back": "Answer", "tags": "", "pointCount": 1},
+                "variants": [{"id": str(uuid5(UUID(identifier), "forward")), "cardId": identifier,
+                              "key": "forward", "due": "2026-01-01T00:00:00Z",
+                              "reviewCount": 0, "stability": 1.0, "difficulty": 0.5}]}
+            return event
+
+        self.assertEqual(self.sync([card_event(names[:65])])[0], 413)
+        self.assertEqual(self.sync([card_event(["b" * 64 + ".png"])])[0], 422)
+        status, first = self.sync([card_event(names[:40]), card_event(names[40:])])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(first["acceptedIds"]), 2)
+        self.assertEqual(len(first["events"]), 1)
+        self.assertEqual(len(first["media"]), 40)
+        self.assertTrue(first["hasMore"])
+        second = self.sync([], first["cursor"])[1]
+        self.assertEqual(len(second["events"]), 1)
+        self.assertFalse(second["hasMore"])
+        self.assertEqual(second["cursor"], 2)
 
 
 if __name__ == "__main__":

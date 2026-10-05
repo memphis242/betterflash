@@ -25,8 +25,11 @@ BODY_LIMIT = 4 * 1024 * 1024
 EVENT_BYTES = 3 * 1024 * 1024
 RESPONSE_BYTES = 6 * 1024 * 1024
 MEDIA_LIMIT = 20 * 1024 * 1024
+PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
+PAGE_MEDIA_COUNT = 64
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif))$")
 EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "variant.upsert"))
+MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
 
 
 class ProtocolError(Exception):
@@ -103,9 +106,24 @@ def card_keys(card):
         if opening < 0:
             break
         closing, nested = front.find("}}", opening + 2), front.find("{{", opening + 2)
-        match = re.fullmatch(r"c([1-9][0-9]{0,2})::([^\r\n]*?)(?:::(.*))?", front[opening + 2:closing]) if closing >= 0 else None
-        if not match or (nested >= 0 and nested < closing) or not match[2].strip() or (match[3] is not None and not match[3].strip()):
+        body = front[opening + 2:closing] if closing >= 0 else ""
+        match = re.match(r"c([1-9][0-9]{0,2})::", body)
+        if not match or (nested >= 0 and nested < closing):
             raise ProtocolError("INVALID_EVENT", "Cloze markers must have a group from 1 through 999 and a nonempty answer.")
+        remaining = body[match.end():]
+        separator, search = -1, 0
+        while (candidate := remaining.find("::", search)) >= 0:
+            slash, position = 0, candidate - 1
+            while position >= 0 and remaining[position] == "\\":
+                slash += 1
+                position -= 1
+            if slash % 2 == 0:
+                separator = candidate
+                break
+            search = candidate + 2
+        answer = remaining if separator < 0 else remaining[:separator]
+        if not answer.strip() or (separator >= 0 and not remaining[separator + 2:].strip()):
+            raise ProtocolError("INVALID_EVENT", "A cloze answer and its optional hint must be nonempty.")
         groups.add(int(match[1]))
         offset = closing + 2
     if not groups:
@@ -190,6 +208,16 @@ def validate_event(event, device):
     return canonical
 
 
+def event_media(event):
+    if event["type"] != "card.upsert":
+        return set()
+    card = event["payload"]["card"]
+    names = set(MEDIA_REFERENCE.findall(card["front"]) + MEDIA_REFERENCE.findall(card["back"]))
+    if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif)", name) for name in names):
+        raise ProtocolError("MEDIA_REFERENCE", "Attach images using valid collection media filenames.")
+    return names
+
+
 class Store:
     def __init__(self, path, media):
         self.path = str(path)
@@ -208,6 +236,20 @@ class Store:
         database.row_factory = sqlite3.Row
         database.execute("PRAGMA synchronous=FULL")
         return database
+
+    def media_sizes(self, event):
+        result = {}
+        for name in event_media(event):
+            try:
+                metadata = (self.media / name).lstat()
+            except OSError:
+                raise ProtocolError("MEDIA_MISSING", "Upload the referenced image before sending its card.", 422) from None
+            if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= MEDIA_LIMIT:
+                raise ProtocolError("MEDIA_STORAGE", "A referenced image is missing or invalid. Restore the server media file.", 422)
+            result[name] = metadata.st_size
+        if len(result) > PAGE_MEDIA_COUNT or sum(result.values()) > PAGE_MEDIA_LIMIT:
+            raise ProtocolError("MEDIA_EVENT_LIMIT", "A card can reference at most 64 images and 64 MiB of attached data.", 413)
+        return result
 
     def sync(self, body):
         if not isinstance(body, dict) or not valid_uuid(body.get("deviceId")):
@@ -230,25 +272,30 @@ class Store:
                     if existing and existing[0] != canonical:
                         raise Conflict()
                     if not existing:
+                        self.media_sizes(event)
                         database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
                                          (event["id"], body["deviceId"], canonical, event["createdAt"]))
                     if event["id"] not in accepted:
                         accepted.append(event["id"])
                 rows = database.execute("SELECT seq,event_json FROM events WHERE seq>? ORDER BY seq LIMIT ?",
                                         (cursor, RESPONSE_LIMIT)).fetchall()
-                outgoing, response_bytes = [], 0
+                outgoing, response_bytes, media_sizes = [], 0, {}
                 for row in rows:
                     size = len(row["event_json"].encode()) + 64
                     if outgoing and response_bytes + size > RESPONSE_BYTES:
                         break
-                    outgoing.append({"seq": row["seq"], "event": json.loads(row["event_json"])})
+                    event = json.loads(row["event_json"])
+                    assets = {**media_sizes, **self.media_sizes(event)}
+                    if outgoing and (len(assets) > PAGE_MEDIA_COUNT or sum(assets.values()) > PAGE_MEDIA_LIMIT):
+                        break
+                    media_sizes = assets
+                    outgoing.append({"seq": row["seq"], "event": event})
                     response_bytes += size
                 next_cursor = outgoing[-1]["seq"] if outgoing else cursor
                 latest = database.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0]
                 response = {"acceptedIds": accepted, "events": outgoing, "cursor": next_cursor,
                             "hasMore": next_cursor < latest,
-                            "media": sorted(set(re.findall(r"media:([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif))",
-                                                          json.dumps(outgoing))))}
+                            "media": sorted(media_sizes)}
                 database.commit()
                 return response
             except BaseException:
