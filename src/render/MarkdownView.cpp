@@ -42,7 +42,7 @@ QString initializeMath() {
     QDirIterator files(QStringLiteral(":/tex"), QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
     while (files.hasNext()) {
         const QString resource = files.next();
-        const QString output = directory + QLatin1Char('/') + resource.mid(7);
+        const QString output = directory + QLatin1Char('/') + resource.mid(QStringLiteral(":/tex/").size());
         if (QFile::exists(output))
             continue;
         if (!QDir().mkpath(QFileInfo(output).absolutePath()))
@@ -230,6 +230,7 @@ void MarkdownView::scheduleRender() {
 }
 void MarkdownView::rebuild() {
     if (width() <= 0 || !m_foreground.isValid()) return;
+    if (!m_renderError.isEmpty()) { m_renderError.clear(); emit renderErrorChanged(); }
     const qreal documentWidth = std::max(1.0, width());
     QFont font(QStringLiteral("Caladea"));
     font.setPixelSize(qRound(m_baseFontSize));
@@ -270,7 +271,7 @@ void MarkdownView::rebuild() {
         else prose += line + QLatin1Char('\n');
     }
     flushProse();
-    m_document.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub | QTextDocument::MarkdownNoHTML);
+    m_document.setMarkdown(markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
     QTextCursor entire(&m_document);
     entire.select(QTextCursor::Document);
     QTextCharFormat normal;
@@ -369,6 +370,6 @@ void MarkdownView::paint(QPainter *painter) {
 QString MarkdownView::plainText(const QString &markdown) {
     QTextDocument document;
     document.setResourceProvider([](const QUrl &) -> QVariant { return {}; });
-    document.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub | QTextDocument::MarkdownNoHTML);
+    document.setMarkdown(markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
     return document.toPlainText();
 }

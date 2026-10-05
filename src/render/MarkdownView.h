@@ -6,8 +6,9 @@
 #include <QNetworkAccessManager>
 #include <QHash>
 #include <QImage>
+#include <QSet>
 
-class MarkdownView final : public QQuickPaintedItem {
+class MarkdownView : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QString markdown READ markdown WRITE setMarkdown NOTIFY markdownChanged)
     Q_PROPERTY(QColor foreground READ foreground WRITE setForeground NOTIFY styleChanged)

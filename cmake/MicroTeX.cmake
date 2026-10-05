@@ -18,12 +18,19 @@ target_include_directories(betterflash_xml SYSTEM PUBLIC "${tinyxml2_SOURCE_DIR}
 set_target_properties(betterflash_xml PROPERTIES POSITION_INDEPENDENT_CODE ON)
 file(GLOB_RECURSE MICROTEX_SOURCES CONFIGURE_DEPENDS "${microtex_SOURCE_DIR}/src/*.cpp")
 list(FILTER MICROTEX_SOURCES EXCLUDE REGEX "/(samples|platform)/")
+# Formula glyphs use vector outlines for consistent rasterization at every scale.
+file(READ "${microtex_SOURCE_DIR}/src/platform/qt/graphic_qt.cpp" microtex_qt)
+string(REPLACE "#include \"graphic_qt.h\"" "#include \"platform/qt/graphic_qt.h\"" microtex_qt "${microtex_qt}")
+string(REPLACE "#include <QPainter>" "#include <QPainter>\n#include <QPainterPath>" microtex_qt "${microtex_qt}")
+string(REPLACE "_painter->drawText(QPointF(x, y), text);"
+    "QPainterPath outline; outline.addText(QPointF(x, y), _font->getQFont(), text); _painter->fillPath(outline, getQBrush());"
+    microtex_qt "${microtex_qt}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/microtex_qt.cpp" "${microtex_qt}")
 add_library(betterflash_tex STATIC ${MICROTEX_SOURCES}
-    "${microtex_SOURCE_DIR}/src/platform/qt/graphic_qt.cpp")
+    "${CMAKE_CURRENT_BINARY_DIR}/microtex_qt.cpp")
 target_include_directories(betterflash_tex SYSTEM PUBLIC "${microtex_SOURCE_DIR}/src")
 target_compile_definitions(betterflash_tex PUBLIC BUILD_QT)
 target_link_libraries(betterflash_tex PRIVATE betterflash_xml Qt6::Gui)
 set_target_properties(betterflash_tex PROPERTIES POSITION_INDEPENDENT_CODE ON)
 file(GLOB_RECURSE MICROTEX_RESOURCES LIST_DIRECTORIES FALSE "${microtex_SOURCE_DIR}/res/*")
 list(APPEND MICROTEX_RESOURCES "${microtex_SOURCE_DIR}/res/.clatexmath-res_root")
-
