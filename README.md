@@ -4,7 +4,8 @@ A native C++23 and Qt Quick flashcard application, starting with Fedora Linux.
 
 The desktop prototype keeps its collection in SQLite on the device. Markdown is
 the source of truth for both sides of a card. The interface uses a warm aubergine
-dark theme, a separate paper light theme, and collapsible bottom navigation.
+dark theme, a separate paper light theme, IBM Plex Mono typography, and a
+collapsible left navigation pane whose icons remain available when collapsed.
 
 ## Run on Fedora
 
@@ -42,6 +43,15 @@ For an isolated demonstration:
   requests or read arbitrary local paths.
 - Basic cards have one review item. Reversible cards and numbered cloze deletions
   have independent review schedules.
+- Select **Create inverted form** in the card editor to add the reverse direction.
+  Its question automatically begins with "Ask the question that this answers
+  based on deck context: " followed by the original answer; its answer is the
+  original question. Editing either side updates both directions.
+- Browse decks horizontally on Review. The root shows top-level decks; enter a
+  deck to browse its subdecks, or expand the selected deck's tree. The deck editor
+  can place a deck under a parent. Reviewing a parent includes its descendants.
+  Queue statistics count review variants, including each inverted direction and
+  numbered cloze group separately.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
   fraction remembered. Response time contributes a bounded adjustment.
 - Defer moves the current item to the queue's tail without changing its schedule.
@@ -71,6 +81,9 @@ optimized retention. See [the scheduling design](docs/scheduling.md).
 
 Bindings are configurable in Settings. Review keys are scoped to review; they
 do not consume characters typed into editors or dialogs.
+The deck browser also accepts Left/Right to choose a deck, Down to browse its
+subdecks, and Up to return to the parent level. Tree rows use Left/Right to
+collapse or expand their branches.
 
 ## Voice and language models
 

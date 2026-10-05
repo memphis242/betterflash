@@ -36,12 +36,18 @@ ApplicationWindow {
     readonly property int gutter: width < 600 ? 12 : 24
     property int page: preferences.page
     property bool navCollapsed: preferences.navCollapsed
+    property string deckBrowserParentId: preferences.deckBrowserParentId
+    property bool deckTreeExpanded: preferences.deckTreeExpanded
+    readonly property bool effectiveNavCollapsed: navCollapsed || width < 700
     property bool detailOpen: preferences.detailOpen
     property string selectedCardId: preferences.selectedCardId
     property real libraryScrollY: preferences.libraryY
     property string cardSearchText: ""
     property string editingDeckId: ""
+    property string editingDeckParentId: ""
     property string editingCardId: ""
+    property bool cardInverted: false
+    property bool initializingDeckParent: false
     property string localCardError: ""
     property string localDeckError: ""
     property string pendingDeckName: ""
@@ -59,6 +65,7 @@ ApplicationWindow {
     property string deleteTarget: ""
     property string deleteId: ""
     property string deleteName: ""
+    property int deleteDescendantCount: 0
     property string summarizedQueue: ""
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
@@ -207,6 +214,8 @@ ApplicationWindow {
         category: "layout"
         property int page: 0
         property bool navCollapsed: false
+        property string deckBrowserParentId: ""
+        property bool deckTreeExpanded: false
         property bool detailOpen: false
         property int detailWidth: 380
         property string selectedDeckId: ""
@@ -218,6 +227,8 @@ ApplicationWindow {
     }
     onPageChanged: preferences.page = page
     onNavCollapsedChanged: preferences.navCollapsed = navCollapsed
+    onDeckBrowserParentIdChanged: preferences.deckBrowserParentId = deckBrowserParentId
+    onDeckTreeExpandedChanged: preferences.deckTreeExpanded = deckTreeExpanded
     onDetailOpenChanged: preferences.detailOpen = detailOpen
     onSelectedCardIdChanged: preferences.selectedCardId = selectedCardId
     onLibraryScrollYChanged: preferences.libraryY = libraryScrollY
@@ -298,9 +309,10 @@ ApplicationWindow {
         })
         return text || showAll ? decks : decks.filter((d, i) => pins.indexOf(d.id) >= 0 || i < 6)
     }
-    function setDeck(id) {
+    function setDeck(id, stayOnPage) {
         if (id === app.selectedDeckId) {
-            page = 1
+            if (!stayOnPage)
+                page = 1
             return
         }
         let contexts = ({})
@@ -327,7 +339,8 @@ ApplicationWindow {
             library.restoreScroll(window.libraryScrollY)
             window.restoringDeck = false
         })
-        page = 1
+        if (!stayOnPage)
+            page = 1
     }
     function pickCard(id) {
         selectedCardId = id
@@ -335,8 +348,24 @@ ApplicationWindow {
         if (width < 800)
             detailDialog.open()
     }
-    function openDeckEditor(id) {
+    function deckIsDescendant(id, ancestorId) {
+        let current = deckById(id)
+        const visited = []
+        while (current && current.id && current.parentId && visited.indexOf(current.id) < 0) {
+            if (current.parentId === ancestorId)
+                return true
+            visited.push(current.id)
+            current = deckById(current.parentId)
+        }
+        return false
+    }
+    function deckParentChoices() {
+        return [{ id: "", name: "Top level" }].concat(app.decks.filter(d => d.id !== editingDeckId && !deckIsDescendant(d.id, editingDeckId)))
+    }
+    function openDeckEditor(id, parentId) {
+        initializingDeckParent = true
         editingDeckId = id || ""
+        editingDeckParentId = parentId || ""
         deckDialog.open()
     }
     function openCardEditor(id) {
@@ -411,7 +440,7 @@ ApplicationWindow {
         editorSource.remove(editorSource.selectionStart, editorSource.selectionEnd)
         editorSource.insert(at, insertion)
         editorSource.cursorPosition = at + insertion.length
-        cardKind.currentIndex = 2
+        cardKind.currentIndex = 1
         localCardError = ""
         editorSource.forceActiveFocus()
     }
@@ -427,7 +456,7 @@ ApplicationWindow {
     function submitCard() {
         const parts = splitSource(editorSource.text)
         const cloze = /\{\{c\d+::/.test(parts.front)
-        const kind = cloze ? "cloze" : cardKind.currentValue
+        const kind = cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic"
         if (!cardDeck.currentValue) {
             localCardError = "CARD_DECK: Choose a deck for this card."
             return
@@ -453,11 +482,11 @@ ApplicationWindow {
             return
         }
         if (editingDeckId)
-            app.updateDeck(editingDeckId, deckName.text.trim(), deckDescription.text)
+            app.updateDeck(editingDeckId, deckName.text.trim(), deckDescription.text, deckParent.currentValue || "")
         else {
             knownDeckIds = app.decks.map(deck => deck.id)
             pendingDeckName = deckName.text.trim()
-            app.createDeck(deckName.text.trim(), deckDescription.text)
+            app.createDeck(deckName.text.trim(), deckDescription.text, deckParent.currentValue || "")
         }
         deckDialog.close()
     }
@@ -465,6 +494,7 @@ ApplicationWindow {
         deleteTarget = target
         deleteId = id
         deleteName = name
+        deleteDescendantCount = target === "deck" ? app.decks.filter(d => d.id !== id && deckIsDescendant(d.id, id)).length : 0
         deleteDialog.open()
     }
     function openCredentials(target) {
@@ -653,12 +683,24 @@ ApplicationWindow {
             anchors.leftMargin: window.gutter
             anchors.rightMargin: window.gutter
             spacing: 10
-            Label {
-                textFormat: Text.PlainText
-                text: "BetterFlash"
-                color: Theme.ink
-                font.family: Theme.contentFont
-                font.pixelSize: 23
+            Item {
+                objectName: "appMark"
+                Layout.preferredWidth: 22
+                Layout.preferredHeight: 22
+                ToolTip.visible: logoHover.containsMouse
+                ToolTip.text: "BetterFlash"
+                Accessible.name: "BetterFlash"
+                Icon {
+                    anchors.fill: parent
+                    kind: "cards"
+                    stroke: Theme.ink
+                }
+                MouseArea {
+                    id: logoHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                }
             }
             Item {
                 Layout.fillWidth: true
@@ -687,130 +729,92 @@ ApplicationWindow {
             }
         }
     }
-    StackLayout {
+    RowLayout {
         id: mainContent
         objectName: "mainContent"
         anchors.fill: parent
-        currentIndex: window.page
-        ReviewPage {
-            id: review
-            ui: window
-            objectName: "reviewPage"
-        }
-        LibraryPage {
-            id: library
-            ui: window
-            objectName: "libraryPage"
-        }
-        HistoryPage {
-            ui: window
-            objectName: "historyPage"
-        }
-        SettingsPage {
-            id: settings
-            ui: window
-            objectName: "settingsPage"
-        }
-    }
-    footer: ToolBar {
-        id: navigation
-        objectName: "bottomNavigation"
-        height: window.navCollapsed ? 28 : 78
-        background: Rectangle {
-            color: Theme.surface
-            Rectangle {
-                width: parent.width
-                height: 1
-                color: Theme.rule
+        spacing: 0
+        ToolBar {
+            id: navigation
+            objectName: "sideNavigation"
+            Layout.fillHeight: true
+            Layout.preferredWidth: window.effectiveNavCollapsed ? 58 : Math.min(220, Math.max(176, window.width * 0.18))
+            background: Rectangle {
+                color: Theme.surface
+                Rectangle { width: 1; height: parent.height; anchors.right: parent.right; color: Theme.rule }
             }
-        }
-        ToolButton {
-            objectName: "navToggle"
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.rightMargin: window.gutter
-            width: 48
-            height: 26
-            ToolTip.visible: hovered
-            ToolTip.text: window.navCollapsed ? "Expand bottom navigation" : "Collapse bottom navigation"
-            Accessible.name: ToolTip.text
-            contentItem: Item {
-                Icon {
-                    anchors.centerIn: parent
-                    kind: window.navCollapsed ? "up" : "down"
+            ToolButton {
+                objectName: "navToggle"
+                anchors.top: parent.top
+                anchors.right: parent.right
+                width: 42
+                height: 42
+                visible: window.width >= 700
+                ToolTip.visible: visible && hovered
+                ToolTip.text: window.effectiveNavCollapsed ? "Expand navigation" : "Collapse navigation"
+                Accessible.name: ToolTip.text
+                contentItem: Icon {
+                    kind: window.effectiveNavCollapsed ? "arrow-right" : "arrow-left"
                     stroke: Theme.inkMuted
                 }
+                onClicked: window.navCollapsed = !window.navCollapsed
+                background: Rectangle { color: parent.hovered ? Theme.accentSoft : Theme.transparent }
             }
-            onClicked: window.navCollapsed = !window.navCollapsed
-            background: Rectangle {
-                color: parent.hovered ? Theme.accentSoft : Theme.transparent
-                radius: 3
-            }
-        }
-        RowLayout {
-            visible: !window.navCollapsed
-            anchors.fill: parent
-            anchors.topMargin: 26
-            anchors.leftMargin: window.gutter
-            anchors.rightMargin: window.gutter
-            anchors.bottomMargin: 6
-            spacing: 6
-            Repeater {
-                model: [
-                    {
-                        name: "Review",
-                        icon: "play",
-                        action: "reviewPage"
-                    },
-                    {
-                        name: "Library",
-                        icon: "book",
-                        action: "libraryPage"
-                    },
-                    {
-                        name: "History",
-                        icon: "clock",
-                        action: "historyPage"
-                    },
-                    {
-                        name: "Settings",
-                        icon: "gear",
-                        action: "settingsPage"
-                    }
-                ]
-                delegate: Button {
-                    required property var modelData
-                    required property int index
-                    objectName: "nav" + modelData.name
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ToolTip.visible: hovered
-                    ToolTip.text: modelData.name + " (" + shortcuts.bindings[modelData.action] + ")"
-                    onClicked: window.page = index
-                    contentItem: Row {
-                        spacing: 8
-                        anchors.centerIn: parent
-                        Icon {
-                            kind: modelData.icon
-                            stroke: window.page === index ? Theme.accent : Theme.inkMuted
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: window.width >= 550
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.topMargin: 52
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                anchors.bottomMargin: 8
+                spacing: 6
+                Repeater {
+                    model: [
+                        { name: "Review", icon: "play", action: "reviewPage" },
+                        { name: "Library", icon: "book", action: "libraryPage" },
+                        { name: "History", icon: "clock", action: "historyPage" },
+                        { name: "Settings", icon: "gear", action: "settingsPage" }
+                    ]
+                    delegate: Button {
+                        required property var modelData
+                        required property int index
+                        objectName: "nav" + modelData.name
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 48
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.name + " (" + shortcuts.bindings[modelData.action] + ")"
+                        Accessible.name: ToolTip.text
+                        onClicked: window.page = index
+                        contentItem: RowLayout {
+                            spacing: 10
+                            Icon { kind: modelData.icon; stroke: window.page === index ? Theme.accent : Theme.inkMuted }
+                            Label {
+                                visible: !window.effectiveNavCollapsed
+                                textFormat: Text.PlainText
+                                text: modelData.name
+                                color: window.page === index ? Theme.accent : Theme.inkMuted
+                                Layout.fillWidth: true
+                            }
                         }
-                        Label {
-                            textFormat: Text.PlainText
-                            text: modelData.name
-                            font.pixelSize: window.width < 420 ? 12 : 14
-                            color: window.page === index ? Theme.accent : Theme.inkMuted
+                        background: Rectangle {
+                            radius: 4
+                            color: parent.hovered ? Theme.accentSoft : Theme.transparent
+                            border.width: window.page === index || parent.activeFocus ? 2 : 0
+                            border.color: Theme.accent
                         }
-                    }
-                    background: Rectangle {
-                        radius: 4
-                        color: parent.hovered ? Theme.accentSoft : Theme.transparent
-                        border.width: window.page === index || parent.activeFocus ? 2 : 0
-                        border.color: Theme.accent
                     }
                 }
+                Item { Layout.fillHeight: true }
             }
+        }
+        StackLayout {
+            id: pageStack
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: window.page
+            ReviewPage { id: review; ui: window; objectName: "reviewPage" }
+            LibraryPage { id: library; ui: window; objectName: "libraryPage" }
+            HistoryPage { ui: window; objectName: "historyPage" }
+            SettingsPage { id: settings; ui: window; objectName: "settingsPage" }
         }
     }
 
@@ -1009,8 +1013,12 @@ ApplicationWindow {
         onOpened: {
             const d = deckById(editingDeckId)
             localDeckError = ""
+            initializingDeckParent = true
+            editingDeckParentId = d.parentId || editingDeckParentId || ""
             deckName.text = d.name || ""
             deckDescription.text = d.description || ""
+            deckParent.currentIndex = Math.max(0, deckParent.indexOfValue(editingDeckParentId))
+            initializingDeckParent = false
             deckName.forceActiveFocus()
         }
         contentItem: ColumnLayout {
@@ -1043,6 +1051,22 @@ ApplicationWindow {
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                 }
+            }
+            Label {
+                textFormat: Text.PlainText
+                text: "Parent deck (optional)"
+                color: Theme.inkMuted
+            }
+            ComboBox {
+                id: deckParent
+                objectName: "deckParent"
+                model: window.deckParentChoices()
+                textRole: "name"
+                valueRole: "id"
+                Layout.fillWidth: true
+                ToolTip.visible: hovered
+                ToolTip.text: "Place this deck under another deck"
+                onCurrentValueChanged: if (!initializingDeckParent) editingDeckParentId = currentValue || ""
             }
             ErrorBlock {
                 message: localDeckError
@@ -1077,7 +1101,8 @@ ApplicationWindow {
             const c = editingCard()
             localCardError = ""
             cardDeck.currentIndex = Math.max(0, cardDeck.indexOfValue(c.deckId || app.selectedDeckId))
-            cardKind.currentIndex = c.kind === "reverse" ? 1 : c.kind === "cloze" ? 2 : 0
+            cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
+            cardInverted = c.kind === "reverse"
             editorSource.text = c.id ? c.front + (c.back ? "\n\n---\n\n" + c.back : "") : "\n\n---\n\n"
             cardTags.text = c.tags || ""
             cardPoints.value = c.pointCount || 1
@@ -1119,10 +1144,6 @@ ApplicationWindow {
                             key: "basic"
                         },
                         {
-                            label: "Both directions",
-                            key: "reverse"
-                        },
-                        {
                             label: "Cloze",
                             key: "cloze"
                         }
@@ -1131,8 +1152,24 @@ ApplicationWindow {
                     valueRole: "key"
                     Layout.preferredWidth: window.width < 600 ? 125 : 175
                     ToolTip.visible: hovered
-                    ToolTip.text: "Both directions schedules each side separately. Cloze schedules each numbered group."
+                    ToolTip.text: "Choose Basic or Cloze card behavior."
+                    onCurrentValueChanged: if (currentValue === "cloze") cardInverted = false
                 }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: cardKind.currentValue !== "cloze"
+                CheckBox {
+                    id: createInverted
+                    objectName: "createInverted"
+                    text: "Create inverted form"
+                    visible: cardKind.currentValue !== "cloze"
+                    checked: cardInverted
+                    onToggled: cardInverted = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Schedule the card in both directions"
+                }
+                Item { Layout.fillWidth: true }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -1218,6 +1255,41 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.preferredHeight: implicitHeight
                             baseFontSize: 18
+                        }
+                        ColumnLayout {
+                            visible: cardInverted && cardKind.currentValue !== "cloze"
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Label {
+                                textFormat: Text.PlainText
+                                text: "Inverted front"
+                                color: Theme.inkMuted
+                                font.family: Theme.monoFont
+                                font.pixelSize: 11
+                            }
+                            MarkdownPane {
+                                objectName: "invertedFrontPreview"
+                                markdown: "Ask the question that this answers based on deck context: \n\n" + splitSource(editorSource.text).back
+                                mediaRoot: media.rootPath
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: implicitHeight
+                                baseFontSize: 18
+                            }
+                            Label {
+                                textFormat: Text.PlainText
+                                text: "Inverted back"
+                                color: Theme.inkMuted
+                                font.family: Theme.monoFont
+                                font.pixelSize: 11
+                            }
+                            MarkdownPane {
+                                objectName: "invertedBackPreview"
+                                markdown: splitSource(editorSource.text).front
+                                mediaRoot: media.rootPath
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: implicitHeight
+                                baseFontSize: 18
+                            }
                         }
                     }
                 }
@@ -1859,7 +1931,7 @@ ApplicationWindow {
             Label {
                 textFormat: Text.PlainText
                 width: parent.width
-                text: "Delete \"" + deleteName + "\"" + (deleteTarget === "deck" ? " and all its cards" : "") + "? Completed review records will remain in history."
+                text: "Delete \"" + deleteName + "\"" + (deleteTarget === "deck" ? " and all its cards" + (deleteDescendantCount ? " and " + deleteDescendantCount + " child decks" : "") : "") + "? Completed review records will remain in history."
                 color: Theme.ink
                 wrapMode: Text.Wrap
             }

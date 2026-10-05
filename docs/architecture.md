@@ -56,9 +56,13 @@ remains session-only until Keystore integration is implemented.
 ## Interface and platform boundaries
 
 QML supplies one shared interface with fixed top bars, bounded content areas,
-modal editors, and collapsible bottom navigation. A narrow window opens card
+modal editors, and a collapsible left navigation pane with a persistent icon
+rail. IBM Plex Mono is embedded for the interface and Markdown text. A narrow window opens card
 details in a modal instead of shrinking the card list. Preferences persist
 themes, keyboard bindings, page selection, and detail-pane sizing.
+Review's idle view contains a bounded horizontal deck browser, an optional deck
+tree, actual queue counts, and a large start action in the lower portion of the
+page. Deck parents are stored and synchronized independently of their names.
 
 The Android draft uses the same native modules. Its build preflight checks the
 matching Qt kit, host tools, full JDK, SDK, NDK, and OpenSSL libraries. Voice is

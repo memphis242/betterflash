@@ -6,6 +6,17 @@ Item {
     id: page
     required property var ui
     readonly property bool hasCard: !!app.currentCard.id
+    readonly property var queueStats: [
+        { key: "due", label: "Due now", count: deckCount("dueCount"), hint: "Review variants due in this deck and its subdecks" },
+        { key: "new", label: "New due", count: deckCount("newDueCount"), hint: "Due variants that have never been reviewed" },
+        { key: "review", label: "Reviewed due", count: deckCount("reviewDueCount"), hint: "Due variants with a previous review" },
+        { key: "later", label: "Due later", count: deckCount("laterCount"), hint: "Variants with a future review date" }
+    ]
+    function deckCount(key) {
+        if (ui.selectedDeck.id)
+            return ui.selectedDeck[key] || 0
+        return app.decks.filter(deck => !deck.parentId).reduce((total, deck) => total + (deck[key] || 0), 0)
+    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: page.ui.gutter
@@ -69,29 +80,146 @@ Item {
                 }
             }
             AppButton {
-                objectName: "reviewPrimary"
-                text: app.reviewing ? (app.paused ? "Resume" : "Pause") : !app.decks.length ? "Create deck" : page.ui.selectedDeck.cardCount === 0 ? "Add card" : "Start review"
-                hint: app.reviewing ? shortcuts.bindings.pause : "Review due cards in the selected deck"
+                objectName: "reviewPause"
+                visible: app.reviewing
+                text: app.paused ? "Resume" : "Pause"
+                hint: shortcuts.bindings.pause
                 primary: true
                 enabled: !app.busy
-                onClicked: {
-                    if (app.reviewing) {
-                        if (app.paused)
-                            app.resumeReview()
-                        else
-                            app.pauseReview()
-                    } else if (!app.decks.length)
-                        page.ui.openDeckEditor("")
-                    else if (page.ui.selectedDeck.cardCount === 0)
-                        page.ui.openCardEditor("")
-                    else
-                        app.startReview(app.selectedDeckId)
+                onClicked: app.paused ? app.resumeReview() : app.pauseReview()
+            }
+        }
+        Item {
+            id: idle
+            objectName: "reviewIdle"
+            visible: !page.hasCard
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 20
+                ScrollView {
+                    id: idleScroll
+                    objectName: "reviewDeckBrowserScroll"
+                    visible: app.decks.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(contentHeight, idle.height * 0.62)
+                    clip: true
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: idleScroll.availableWidth
+                        spacing: 20
+                        DeckBrowser {
+                            ui: page.ui
+                            Layout.fillWidth: true
+                        }
+                        GridLayout {
+                            objectName: "reviewStats"
+                            visible: page.deckCount("variantCount") > 0
+                            Layout.fillWidth: true
+                            columns: width < 600 ? 2 : 4
+                            columnSpacing: 12
+                            rowSpacing: 12
+                            Repeater {
+                                model: page.queueStats
+                                delegate: Rectangle {
+                                    id: stat
+                                    required property var modelData
+                                    objectName: "queueStat" + modelData.key
+                                    readonly property int count: modelData.count
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 90
+                                    Layout.minimumWidth: 0
+                                    color: Theme.surface
+                                    radius: 4
+                                    border.color: Theme.rule
+                                    border.width: 1
+                                    Accessible.name: modelData.label + ": " + count
+                                    ToolTip.visible: statHover.hovered
+                                    ToolTip.text: modelData.hint
+                                    HoverHandler { id: statHover }
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 14
+                                        spacing: 6
+                                        Label {
+                                            textFormat: Text.PlainText
+                                            text: stat.modelData.label
+                                            color: Theme.inkMuted
+                                            font.pixelSize: 11
+                                            Layout.fillWidth: true
+                                            elide: Text.ElideRight
+                                        }
+                                        Label {
+                                            textFormat: Text.PlainText
+                                            text: stat.count
+                                            color: Theme.ink
+                                            font.family: Theme.monoFont
+                                            font.pixelSize: 23
+                                            Layout.fillWidth: true
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Item {
+                    id: actionZone
+                    objectName: "reviewStartArea"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 112
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        width: parent.width
+                        spacing: 14
+                        Label {
+                            textFormat: Text.PlainText
+                            visible: !app.decks.length
+                            text: "Your decks will appear here."
+                            color: Theme.inkMuted
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        AppButton {
+                            objectName: "reviewPrimary"
+                            text: !app.decks.length ? "Create deck" : page.deckCount("cardCount") === 0 ? "Add card" : "Start review"
+                            hint: "Review due cards in the selected deck and its subdecks"
+                            primary: true
+                            Layout.alignment: Qt.AlignHCenter
+                            Layout.preferredWidth: Math.min(340, actionZone.width)
+                            Layout.preferredHeight: page.ui.width < 600 ? 72 : 86
+                            font.pixelSize: page.ui.width < 600 ? 21 : 25
+                            enabled: !app.busy && (!app.decks.length || page.deckCount("cardCount") === 0 || page.deckCount("dueCount") > 0)
+                            onClicked: {
+                                if (!app.decks.length)
+                                    page.ui.openDeckEditor("")
+                                else if (page.deckCount("cardCount") === 0)
+                                    page.ui.openCardEditor("")
+                                else
+                                    app.startReview(app.selectedDeckId)
+                            }
+                        }
+                        Label {
+                            textFormat: Text.PlainText
+                            visible: app.decks.length > 0 && page.deckCount("cardCount") > 0 && page.deckCount("dueCount") === 0
+                            text: "No cards due in this deck."
+                            color: Theme.inkMuted
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                    }
                 }
             }
         }
         ScrollView {
             id: reviewScroll
             objectName: "reviewScroll"
+            visible: page.hasCard
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
@@ -145,28 +273,6 @@ Item {
                         textFormat: Text.PlainText
                         visible: app.spokenAnswer.length > 0
                         text: "Your answer: " + app.spokenAnswer
-                        color: Theme.inkMuted
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                }
-                ColumnLayout {
-                    visible: !page.hasCard
-                    Layout.fillWidth: true
-                    Layout.topMargin: page.ui.width < 600 ? 50 : 90
-                    spacing: 14
-                    Label {
-                        textFormat: Text.PlainText
-                        text: app.decks.length ? "Ready when you are" : "Make room for a new idea"
-                        font.family: Theme.contentFont
-                        font.pixelSize: page.ui.width < 600 ? 27 : 34
-                        color: Theme.ink
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        textFormat: Text.PlainText
-                        text: app.decks.length ? (page.ui.selectedDeck.cardCount === 0 ? "Add the first card to this deck to begin a review." : "Start a review to study cards that are due" + (page.ui.selectedDeck.name ? " in " + page.ui.selectedDeck.name : "") + ".") : "Create a deck, then add a question and an answer in Markdown."
                         color: Theme.inkMuted
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true

@@ -12,7 +12,7 @@ automatic agent co-author attribution, or a remote session label.
   outgoing event in one transaction before reporting success or advancing review.
 - Voice is BYOK by default. Local models are optional test tools. Keep keys out
   of Markdown, backups, SQLite collection tables, sync payloads, and logs.
-- UI defaults to the warm dark theme. Keep bottom navigation collapsible and
+- UI defaults to the warm dark theme. Keep left navigation collapsible and
   pinned, page actions visible, lists bounded, and editing in modal dialogs.
 - Images imported by the user are stored by SHA-256. Never read arbitrary local
   files just because a card contains a Markdown URL.
@@ -25,4 +25,3 @@ automatic agent co-author attribution, or a remote session label.
   microphone permissions and lifecycle. Do not imply background voice is ready.
 - Launch the completed desktop build for the user from this worktree. Give a
   fallback command. Manual user confirmation remains part of GUI handoff.
-

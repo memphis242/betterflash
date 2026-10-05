@@ -75,6 +75,12 @@ Canvas {
             c.bezierCurveTo(13, 2, 11, 3, 9, 4)
             c.lineTo(9, 16)
             break
+        case "cards":
+            c.rect(5, 2, 10, 13)
+            c.moveTo(3, 5)
+            c.lineTo(3, 16)
+            c.lineTo(13, 16)
+            break
         case "clock":
             c.arc(9, 9, 7, 0, Math.PI * 2)
             c.moveTo(9, 5)

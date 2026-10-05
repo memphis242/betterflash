@@ -74,6 +74,15 @@ QObject *flickableFor(QObject *object)
     return nullptr;
 }
 
+QObject *visualObject(QQuickItem *item, const QString &name)
+{
+    if (!item) return nullptr;
+    if (item->objectName() == name) return item;
+    for (QQuickItem *const child : item->childItems())
+        if (QObject *const result = visualObject(child,name)) return result;
+    return nullptr;
+}
+
 struct EnvironmentOverride final {
     explicit EnvironmentOverride(QByteArray variable, const QByteArray &value)
         : name(std::move(variable)), original(qgetenv(name.constData())), present(qEnvironmentVariableIsSet(name.constData()))
@@ -167,12 +176,14 @@ public:
         check(!theme->property("hasChoice").toBool(), "theme_has_no_initial_user_override");
         check(theme->property("dark").toBool() == (QGuiApplication::styleHints()->colorScheme() != Qt::ColorScheme::Light),
               "theme_follows_system_until_choice");
+        check(theme->property("monoFont").toString().contains(QStringLiteral("IBM Plex Mono")), "theme_uses_IBM_Plex_Mono");
         if (!theme->property("dark").toBool()) click("themeToggle");
         seedDecks();
         const QString image = importImage();
         createCardThroughEditor(image);
         seedCards(image);
         check(m_app.cards().size() >= 22, "fixture_cards_created");
+        reviewIdleBrowser();
         const QColor firstColor = m_window->color();
         desktop("dark");
         compactDesktop("dark");
@@ -234,7 +245,9 @@ private:
 
     QObject *object(const QString &name) const
     {
-        return m_window ? m_window->findChild<QObject *>(name) : nullptr;
+        if (!m_window) return nullptr;
+        if (QObject *const owned = m_window->findChild<QObject *>(name)) return owned;
+        return visualObject(m_window->contentItem(),name);
     }
     QObject *require(const QString &name) const
     {
@@ -304,10 +317,11 @@ private:
     void layouts(const QString &suffix)
     {
         const QRectF main = rect("mainContent");
-        const QRectF nav = rect("bottomNavigation");
+        const QRectF nav = rect("sideNavigation");
         const QRectF header = rect("globalHeader");
-        check(std::abs(main.width() - m_window->width()) < 1.1, "main_full_width_" + suffix);
-        check(main.top() >= header.bottom() - 1.1 && main.bottom() <= nav.top() + 1.1,
+        check(main.width() >= m_window->width() - nav.width() - 1.1, "main_full_width_" + suffix,
+              QStringLiteral("main=%1 window=%2 nav=%3").arg(main.width()).arg(m_window->width()).arg(nav.width()));
+        check(main.top() >= header.bottom() - 1.1 && main.bottom() <= m_window->height() + 1.1,
               "pinned_bars_reserve_space_" + suffix);
         const auto names = {QStringLiteral("reviewTopBar"),QStringLiteral("libraryTopBar"),QStringLiteral("settingsTopBar")};
         for (const QString &name : names) {
@@ -375,6 +389,11 @@ private:
             throw std::runtime_error("Could not create fixture decks.");
         m_deckA = deckNamed("Fixture A");
         m_deckB = deckNamed("Fixture B");
+        m_app.createDeck("Fixture A child", "Nested fixture deck.", m_deckA);
+        m_app.createDeck("Fixture B child", "Second nested fixture deck.", m_deckB);
+        if (!check(waitUntil([this] { return !m_app.busy() && m_app.decks().size() == 4; }), "fixture_hierarchy_created"))
+            throw std::runtime_error("Could not create fixture hierarchy.");
+        m_deckChild = deckNamed("Fixture A child");
         call("setDeck",{m_deckA});
     }
     QString importImage()
@@ -457,6 +476,56 @@ private:
         const QVariantMap card = m_app.cards().first().toMap();
         check(card.value("kind").toString() == QStringLiteral("cloze") && card.value("front").toString().contains(image)
               && card.value("back").toString().contains(image), "cloze_inferred_and_images_on_both_sides");
+        const QString editableId = card.value("id").toString();
+        call("openCardEditor",{editableId});
+        check(visible("cardDialog"), "inversion_editor_opens_existing_card");
+        require("cardKind")->setProperty("currentIndex",0);
+        QTest::qWait(100);
+        require("editorSource")->setProperty("text",QStringLiteral("Inversion source question\n\n---\n\nInversion source answer"));
+        click("createInverted");
+        require("editorTabs")->setProperty("currentIndex",1);
+        QTest::qWait(100);
+        const QString invertedPrefix = QStringLiteral("Ask the question that this answers based on deck context: ");
+        const QString invertedPreview = require("invertedFrontPreview")->property("markdown").toString();
+        check(visible("invertedFrontPreview") && invertedPreview.startsWith(invertedPrefix + QStringLiteral("\n\n"))
+              && invertedPreview.endsWith(QStringLiteral("Inversion source answer")), "inversion_preview_uses_exact_prefix",
+              QStringLiteral("kind=%1 inverted=%2 combo=%3 preview=%4 source=%5")
+                  .arg(require("cardKind")->property("currentValue").toString())
+                  .arg(require("createInverted")->property("checked").toBool())
+                  .arg(require("cardKind")->property("currentIndex").toInt())
+                  .arg(invertedPreview,require("editorSource")->property("text").toString()));
+        key(Qt::Key_S,Qt::ControlModifier);
+        check(waitUntil([this,editableId] {
+            if (m_app.busy()) return false;
+            for (const QVariant &value : m_app.cards()) {
+                const QVariantMap candidate = value.toMap();
+                if (candidate.value("id").toString() == editableId)
+                    return candidate.value("kind").toString() == QStringLiteral("reverse");
+            }
+            return false;
+        }), "inversion_editor_saves_reverse_card",
+        QStringLiteral("id=%1 kind=%2 dialog=%3").arg(editableId).arg(card.value("kind").toString()).arg(visible("cardDialog")));
+        call("openCardEditor",{editableId});
+        check(require("createInverted")->property("checked").toBool(), "inversion_editor_restores_checked_state");
+        click("createInverted");
+        key(Qt::Key_S,Qt::ControlModifier);
+        check(waitUntil([this,editableId] {
+            if (m_app.busy()) return false;
+            for (const QVariant &value : m_app.cards())
+                if (value.toMap().value("id").toString() == editableId)
+                    return value.toMap().value("kind").toString() == QStringLiteral("basic");
+            return false;
+        }), "inversion_editor_uncheck_restores_basic_schedule");
+        call("openCardEditor",{editableId});
+        click("createInverted");
+        key(Qt::Key_S,Qt::ControlModifier);
+        check(waitUntil([this,editableId] {
+            if (m_app.busy()) return false;
+            for (const QVariant &value : m_app.cards())
+                if (value.toMap().value("id").toString() == editableId)
+                    return value.toMap().value("kind").toString() == QStringLiteral("reverse");
+            return false;
+        }), "inversion_editor_recheck_preserves_reverse_schedule");
     }
     void seedCards(const QString &image)
     {
@@ -470,13 +539,106 @@ private:
         answer += QStringLiteral("```python\nvalues = tuple(range(4))\n```\n\n$\\frac{1}{2}$\n\n") + image;
         for (int index = 0; index < 20; ++index) m_app.saveCard({},m_deckA,"basic",QStringLiteral("Fixture %1\n\n").arg(index)+question,answer,"verification",3);
         m_app.saveCard({},m_deckB,"basic","Second-deck question","Second-deck answer","verification",1);
-        if (!check(waitUntil([this] { return !m_app.busy() && m_app.cards().size() == 22; },10000), "fixture_notes_persisted"))
+        m_app.saveCard({},m_deckChild,"basic","Nested question","Nested answer","verification",1);
+        if (!check(waitUntil([this] { return !m_app.busy() && m_app.cards().size() == 23; },10000), "fixture_notes_persisted"))
             throw std::runtime_error("Could not persist fixture notes.");
         for (const QVariant &value : m_app.cards()) {
             const QVariantMap card = value.toMap();
             if (card.value("deckId").toString() == m_deckA && card.value("kind").toString() == "basic") { m_longCard = card.value("id").toString();break; }
         }
         assert(!m_longCard.isEmpty());
+    }
+    void reviewIdleBrowser()
+    {
+        m_app.stopReview();
+        for (int index = 0; index < 8; ++index)
+            m_app.createDeck(QStringLiteral("Browser fixture %1").arg(index), QStringLiteral("Horizontal browser fixture."));
+        if (!check(waitUntil([this] { return !m_app.busy() && m_app.decks().size() == 12; }), "review_browser_overflow_fixtures")) return;
+        call("setDeck",{m_deckA,true});
+        key(Qt::Key_1,Qt::AltModifier);
+        if (!check(waitUntil([this] { return !m_app.busy() && visible("reviewIdle"); }), "review_idle_visible")) return;
+        check(visible("reviewDeckBrowser") && visible("reviewDeckList"), "review_deck_browser_visible");
+        QObject *const deckList = require("reviewDeckList");
+        int topLevelCount = 0;
+        for (const QVariant &value : m_app.decks())
+            topLevelCount += value.toMap().value("parentId").toString().isEmpty() ? 1 : 0;
+        check(deckList->property("count").toInt() == topLevelCount, "review_root_lists_only_top_level_decks",
+              QStringLiteral("count=%1").arg(deckList->property("count").toInt()));
+        check(deckList->property("contentWidth").toDouble() > deckList->property("width").toDouble(),
+              "review_deck_browser_has_bounded_horizontal_overflow");
+        deckList->setProperty("contentX",0.0);
+        const QPointF deckPosition = rect("reviewDeckList").center();
+        qreal previousX = 0.0;
+        bool wheelMonotonic = true;
+        for (int iteration = 0; iteration < 8; ++iteration) {
+            QWheelEvent event(deckPosition,m_window->mapToGlobal(deckPosition.toPoint()),QPoint(),QPoint(0,-120),
+                              Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+            QTest::lastMouseTimestamp += 35;
+            event.setTimestamp(static_cast<quint64>(QTest::lastMouseTimestamp));
+            QCoreApplication::sendEvent(m_window,&event);
+            QTest::qWait(30);
+            const qreal currentX = deckList->property("contentX").toDouble();
+            if (currentX + 0.5 < previousX) wheelMonotonic = false;
+            previousX = currentX;
+        }
+        check(wheelMonotonic && previousX > 0 && m_window->property("page").toInt() == 0,
+              "review_deck_browser_horizontal_wheel_is_bounded");
+        QObject *const stats = require("reviewStats");
+        check(stats->property("visible").toBool(), "review_queue_stats_visible");
+        QVariantMap selected;
+        for (const QVariant &value : m_app.decks())
+            if (value.toMap().value("id").toString() == m_deckA) selected = value.toMap();
+        const QStringList statKeys = {QStringLiteral("dueCount"),QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount"),QStringLiteral("laterCount")};
+        const QStringList objectKeys = {QStringLiteral("due"),QStringLiteral("new"),QStringLiteral("review"),QStringLiteral("later")};
+        for (int index = 0; index < statKeys.size(); ++index) {
+            QObject *const stat = require("queueStat" + objectKeys[index]);
+            const QVariant expected = m_app.decks().isEmpty() ? QVariant(0) : QVariant(selected.value(statKeys[index]).toInt());
+            check(stat->property("count").toInt() == expected.toInt(), "review_queue_stat_matches_model_" + objectKeys[index],
+                  QStringLiteral("actual=%1 expected=%2").arg(stat->property("count").toInt()).arg(expected.toInt()));
+        }
+        const QRectF idle = rect("reviewIdle");
+        const QRectF action = rect("reviewStartArea");
+        const QRectF primary = rect("reviewPrimary");
+        check(primary.width() >= 180 && primary.height() >= 48
+              && std::abs(primary.center().x() - action.center().x()) <= 2.0
+              && primary.center().y() >= idle.top() + idle.height() * 0.5,
+              "review_idle_primary_is_large_and_centered");
+        check(action.top() >= idle.top() && action.bottom() <= idle.bottom() + 1.1, "review_idle_action_zone_bounded");
+        call("setDeck",{m_deckA,true});
+        QObject *const subdecks = require("reviewBrowseSubdecks");
+        QStringList childNames;
+        for (const QVariant &value : m_app.decks()) {
+            const QVariantMap deck = value.toMap();
+            if (deck.value("parentId").toString() == m_deckA) childNames.append(deck.value("id").toString());
+        }
+        check(subdecks->property("enabled").toBool(), "review_subdeck_action_enabled",
+              QStringLiteral("appSelected=%1 windowSelected=%2 uiSelected=%3 parent=%4 children=%5")
+                  .arg(m_app.selectedDeckId()).arg(m_window->property("selectedDeckId").toString())
+                  .arg(require("reviewDeckBreadcrumb")->property("text").toString()).arg(m_deckA).arg(childNames.join(',')));
+        click("reviewBrowseSubdecks");
+        check(m_window->property("deckBrowserParentId").toString() == m_deckA, "review_browse_enters_selected_subdecks");
+        check(require("reviewDeckList")->property("count").toInt() == 1, "review_child_level_lists_children");
+        click("reviewDeckBrowserBack");
+        check(m_window->property("deckBrowserParentId").toString().isEmpty(), "review_browse_back_returns_to_root");
+        click("reviewDeckTreeToggle");
+        check(m_window->property("deckTreeExpanded").toBool() && visible("reviewDeckTree"), "review_tree_expands_from_root");
+        const QRectF tree = rect("reviewDeckTree");
+        check(tree.width() <= rect("reviewDeckBrowser").width() + 1.1 && tree.height() > 0, "review_tree_is_bounded");
+        QObject *const treeList = require("reviewDeckTree");
+        click("reviewDeckBranch0");
+        check(treeList->property("count").toInt() == 1 && visible("reviewDeckTree"), "review_tree_branch_collapses_to_root");
+        click("reviewDeckBranch0");
+        check(treeList->property("count").toInt() > 1, "review_tree_branch_reopens_children");
+        click("reviewDeckTreeSelect1");
+        check(m_app.selectedDeckId() == m_deckChild && m_window->property("page").toInt() == 0,
+              "review_tree_child_selection_preserves_review_context");
+        focus("reviewDeckList");
+        key(Qt::Key_Right);
+        key(Qt::Key_Return);
+        check(m_app.selectedDeckId() != m_deckA && !m_app.selectedDeckId().isEmpty(), "review_deck_tiles_keyboard_select");
+        call("setDeck",{m_deckA,true});
+        check(m_window->property("deckTreeExpanded").toBool(), "review_tree_state_persists_across_selection");
+        key(Qt::Key_2,Qt::AltModifier);
     }
     void desktop(const QString &theme)
     {
@@ -510,14 +672,20 @@ private:
               "navigation_preserves_card_and_pane_width_" + theme);
         check(std::abs(require("libraryScroll")->property("contentY").toDouble() - scrollBeforeNavigation) < 1.1,
               "navigation_preserves_library_scroll_" + theme);
-        const qreal height = item("mainContent")->height();
         click("navToggle");
-        check(m_window->property("navCollapsed").toBool() && item("mainContent")->height() > height,
-              "bottom_navigation_collapse_reserves_space_" + theme);
+        check(m_window->property("navCollapsed").toBool() && rect("sideNavigation").width() <= 60
+              && rect("mainContent").width() >= m_window->width() - 1.1,
+              "side_navigation_collapse_preserves_content_" + theme);
+        for (const QString &navName : {QStringLiteral("navReview"),QStringLiteral("navLibrary"),QStringLiteral("navHistory"),QStringLiteral("navSettings")})
+            check(visible(navName) && require(navName)->property("enabled").toBool(), "collapsed_navigation_control_" + navName + "_" + theme);
+        click("navReview");
+        click("navLibrary");
+        check(m_window->property("page").toInt() == 1 && m_window->property("selectedCardId").toString() == m_longCard,
+              "collapsed_navigation_preserves_library_context_" + theme);
         layouts(theme + "_desktop_collapsed");
         click("navToggle");
-        check(!m_window->property("navCollapsed").toBool() && std::abs(item("mainContent")->height()-height) < 1.1,
-              "bottom_navigation_reopens_" + theme);
+        check(!m_window->property("navCollapsed").toBool() && rect("sideNavigation").width() > 60,
+              "side_navigation_reopens_" + theme);
         layouts(theme + "_desktop_expanded");
         screenshot(theme + "-desktop-library");
         keyboardNavigation(theme);
@@ -567,7 +735,7 @@ private:
               "command_palette_switches_deck_" + theme);
         key(Qt::Key_L,Qt::ControlModifier);
         check(visible("deckPicker"), "deck_search_keyboard_" + theme);
-        require("deckSearch")->setProperty("text",QStringLiteral("Fixture A"));
+        require("deckSearch")->setProperty("text",QStringLiteral("Native interaction"));
         key(Qt::Key_Down);
         key(Qt::Key_Up);
         key(Qt::Key_Return);
@@ -584,7 +752,8 @@ private:
     }
     void ensureLongCurrent()
     {
-        for (int index = 0; index < 3 && m_app.currentCard().value("kind").toString() != "basic"; ++index) {
+        for (int index = 0; index < 8 && (m_app.currentCard().value("kind").toString() != "basic"
+                                           || m_app.currentCard().value("pointCount").toInt() < 3); ++index) {
             const QString before = currentVariant();
             m_app.deferCard();
             waitUntil([this,before] { return !m_app.busy() && currentVariant() != before; });
@@ -598,6 +767,8 @@ private:
         m_app.startReview(m_deckA);
         if (!check(waitUntil([this] { return !m_app.busy() && m_app.reviewing() && !m_app.currentCard().isEmpty(); }), "review_started_" + theme))
             throw std::runtime_error("Review did not start.");
+        check(!visible("reviewIdle") && visible("reviewPause") && !visible("reviewPrimary"),
+              "active_review_uses_pinned_pause_control_" + theme);
         ensureLongCurrent();
         check(item("reviewQuestion")->height() > 0 && require("reviewQuestion")->property("renderError").toString().isEmpty(),
               "question_and_image_render_" + theme);
@@ -675,7 +846,7 @@ private:
         resize(390,780);
         key(Qt::Key_2,Qt::AltModifier);
         call("setDeck",{m_deckA});
-        check(!item("cardDetails")->isVisible() && item("libraryList")->width() >= 350,
+        check(!item("cardDetails")->isVisible() && item("libraryList")->width() >= item("mainContent")->width() - rect("sideNavigation").width() - 32,
               "phone_library_uses_full_width_" + theme);
         layouts(theme + "_phone_library");
         wheel("libraryScroll",theme + "_phone_library");
@@ -699,12 +870,12 @@ private:
         wheel("reviewScroll",theme + "_phone_review");
         layouts(theme + "_phone_review");
         const QRectF grades = rect("reviewToolbar");
-        check(grades.left() >= 0 && grades.right() <= m_window->width() && grades.bottom() <= rect("bottomNavigation").top() + 1,
+        check(grades.left() >= rect("sideNavigation").right() - 1.1 && grades.right() <= m_window->width()
+              && grades.bottom() <= m_window->height() + 1,
               "phone_review_controls_do_not_overlap_nav_" + theme);
         screenshot(theme + "-phone-review");
-        click("navToggle");
-        layouts(theme + "_phone_nav_collapsed");
-        click("navToggle");
+        check(!visible("navToggle") && rect("sideNavigation").width() <= 60,
+              "phone_navigation_uses_persistent_icon_rail_" + theme);
         key(Qt::Key_4,Qt::AltModifier);
         require("settingsPage")->setProperty("section",1);
         QTest::qWait(100);
@@ -720,10 +891,12 @@ private:
         call("setDeck",{m_deckA});
         call("pickCard",{m_longCard});
         layouts(theme + "_compact_desktop");
-        check(item("libraryList")->width() >= 300 && item("cardDetails")->width() >= 260,
+        const qreal pageWidth = item("mainContent")->width() - rect("sideNavigation").width();
+        check(item("libraryList")->width() >= 260 && item("cardDetails")->width() >= 240
+              && item("libraryList")->width() + item("cardDetails")->width() <= pageWidth + 2,
               "compact_desktop_panes_clamp_width_" + theme);
         click("detailsToggle");
-        check(item("libraryList")->width() >= 810, "compact_desktop_collapsed_list_full_width_" + theme);
+        check(item("libraryList")->width() >= pageWidth - 2 * m_window->property("gutter").toInt() - 2, "compact_desktop_collapsed_list_full_width_" + theme);
         click("detailsToggle");
         screenshot(theme + "-compact-desktop-library");
     }
@@ -871,6 +1044,7 @@ private:
     QJSValue m_root;
     QString m_deckA;
     QString m_deckB;
+    QString m_deckChild;
     QString m_longCard;
     QStringList m_warnings;
     QJsonArray m_checks;
