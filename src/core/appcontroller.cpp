@@ -193,14 +193,14 @@ void AppController::handleOperation(bool ok,const QString &message,const QVarian
     if (!ok) setError(error);
     else if (!m_lastError.isEmpty()) {m_lastError.clear();emit lastErrorChanged();}
 }
-void AppController::handleQueue(const QVariantList &cards,int total,bool resetCurrent,const QVariantMap &inspectionCard)
+void AppController::handleQueue(const QVariantList &cards,int total,bool resetCurrent,const QVariantMap &selectedCard,
+                                bool inspecting,const QString &cursorVariantId)
 {
-    const bool inspecting=!inspectionCard.isEmpty();
-    const QVariantMap current=inspecting?inspectionCard:cards.isEmpty()?QVariantMap():cards.first().toMap();
+    const QVariantMap current=selectedCard;
     const bool changed=resetCurrent||m_reviewingCompletedCard!=inspecting||m_currentCard.value("variantId")!=current.value("variantId")
         ||m_currentCard.value("front")!=current.value("front")||m_currentCard.value("back")!=current.value("back");
     m_pendingCards=cards;m_queueCount=cards.size();m_sessionTotal=total;m_currentCard=current;
-    m_reviewingCompletedCard=inspecting;
+    m_reviewingCompletedCard=inspecting;m_reviewCursorVariantId=cursorVariantId;
     const bool reviewing=!cards.isEmpty();
     if (reviewing!=m_reviewing) {m_reviewing=reviewing;emit reviewingChanged();}
     if (changed) {

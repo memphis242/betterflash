@@ -41,7 +41,8 @@ public:
 signals:
     void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
-    void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &inspectionCard);
+    void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
+                          bool inspecting, const QString &cursorVariantId);
     void gradeCommitted();
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
     void syncBatchReady(const QVariantMap &batch);
@@ -65,6 +66,7 @@ private:
     QStringList m_queue;
     QHash<QString,QVariantMap> m_queueCache;
     QSet<QString> m_sessionReviewedVariants;
+    QString m_selectedVariant;
     QString m_inspectedVariant;
     bool m_queueDirty = true;
     int m_sessionTotal = 0;
@@ -81,6 +83,7 @@ private:
     void done(const QString &message = {});
     bool publishSnapshot();
     bool publishQueue(bool resetCurrent);
+    void advanceAfterRemoval(qsizetype position);
     std::optional<struct betterflash::model::Deck> deck(const QString &id);
     std::optional<struct betterflash::model::Card> card(const QString &id);
     std::optional<struct betterflash::model::Variant> variant(const QString &id);

@@ -25,6 +25,7 @@ class AppController final : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool reviewing READ reviewing NOTIFY reviewingChanged)
     Q_PROPERTY(bool reviewingCompletedCard READ reviewingCompletedCard NOTIFY reviewStateChanged)
+    Q_PROPERTY(QString reviewCursorVariantId READ reviewCursorVariantId NOTIFY reviewStateChanged)
     Q_PROPERTY(bool answerRevealed READ answerRevealed NOTIFY answerRevealedChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY pausedChanged)
     Q_PROPERTY(int queueCount READ queueCount NOTIFY reviewStateChanged)
@@ -49,6 +50,7 @@ public:
     bool busy() const { return m_busy; }
     bool reviewing() const { return m_reviewing; }
     bool reviewingCompletedCard() const { return m_reviewingCompletedCard; }
+    QString reviewCursorVariantId() const { return m_reviewCursorVariantId; }
     bool answerRevealed() const { return m_answerRevealed; }
     bool paused() const { return m_paused; }
     int queueCount() const { return m_queueCount; }
@@ -102,7 +104,8 @@ private:
     void invoke(const std::function<void(DatabaseWorker *)> &call);
     void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
-    void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &inspectionCard);
+    void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
+                     bool inspecting, const QString &cursorVariantId);
     void setBusy(bool value);
     void setError(const QVariantMap &error);
     void updateElapsed();
@@ -116,6 +119,7 @@ private:
     QString m_selectedDeckId;
     QString m_statusMessage;
     QString m_spokenAnswer;
+    QString m_reviewCursorVariantId;
     QVariantList m_decks,m_cards,m_history,m_pendingCards;
     QVariantMap m_currentCard,m_lastError;
     bool m_busy = true;
