@@ -62,9 +62,10 @@ Launch it with `./scripts/run-desktop.sh --queue-designs`.
   fraction remembered. Response time contributes a bounded adjustment.
 - Review cards in a rounded modal over the deck page. Pause sits directly beside
   the bounded deck title. The queue opens as a centered, horizontally scrollable
-  timeline with fading edges; it has no rail or current label, and the current
-  card may scroll out of view when the queue is long. Upcoming cards disclose
-  more text and become clearer as they enter the view, with fixed card widths
+  ledger lane with fading edges. Wide, low cards show their queue position on
+  the left and recall verdict on the right; a heavier outline marks the active
+  card. The current card may scroll out of view when the queue is long. Upcoming
+  cards disclose more text and become clearer as they enter the view, with fixed card widths
   and gaps. The timeline includes all pending and completed cards in the session.
   Scrolling stops with the first or final card at the center. Click a pending
   preview to highlight and review it in place, keeping the queue order and scroll

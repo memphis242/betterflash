@@ -5,6 +5,10 @@ directions. Each study uses the same 24-card fixture, reviewed and pending
 states, horizontal timeline, keyboard focus, reset action, and light/dark theme
 switch. The gallery is a design study, not the production review queue.
 
+The production review queue uses **04 Review ledger**, with a 3 px active
+outline. Its wide, low cards place the queue position on the left and recall
+verdict on the right, within a ruled lane with faded ends.
+
 | # | Study | Style and proportions | Body font | Card size / gap | Frame |
 |---:|---|---|---|---:|---|
 | 1 | Archive index | Ruled catalog header; compact serif card | Caladea 18 | 194 x 126 / 14 | Inset |

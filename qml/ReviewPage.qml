@@ -433,10 +433,10 @@ Item {
                     readonly property int visibleStartIndex: Math.max(0, Math.min(count, Math.floor((contentX - leadingTrack) / stride) - 1))
                     readonly property int visibleEndIndex: Math.max(visibleStartIndex, Math.min(count, Math.ceil((contentX + width - leadingTrack) / stride) + 1))
                     readonly property int renderedCount: visibleEndIndex - visibleStartIndex
-                    readonly property real slotWidth: Math.max(92, Math.min(158, (width - 32) / 5))
-                    readonly property real spacing: 8
+                    readonly property real slotWidth: Math.min(286, Math.max(0, width - 20))
+                    readonly property real spacing: 10
                     readonly property real stride: slotWidth + spacing
-                    readonly property real fadeWidth: Math.min(32, width * 0.08)
+                    readonly property real fadeWidth: Math.min(24, width * 0.08)
                     readonly property real leadingTrack: Math.max(0, (width - slotWidth) / 2)
                     readonly property int firstCardIndex: Math.max(0, 2 - page.timelineCompleted.length)
                     readonly property real minimumScroll: firstCardIndex < 0 ? 0 : Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
@@ -448,7 +448,7 @@ Item {
                     readonly property real scrollSpan: maximumScroll - minimumScroll
                     visible: count > 0
                     Layout.fillWidth: true
-                    Layout.preferredHeight: page.ui.width < 600 ? 82 : 92
+                    Layout.preferredHeight: 114
                     clip: true
                     interactive: true
                     activeFocusOnTab: true
@@ -552,6 +552,8 @@ Item {
                                 readonly property int reviewedGrade: isPrevious ? Number(modelData.grade) : -1
                                 readonly property bool reviewOutline: isPrevious
                                 readonly property string timelineRole: modelData.kind
+                                readonly property int cardNumber: timelineIndex - reviewQueuePreviewList.firstCardIndex + 1
+                                readonly property string ordinal: (cardNumber < 10 ? "0" : "") + cardNumber
                                 readonly property real renderedOpacity: previewCard.opacity
                                 readonly property real renderedWidth: previewCard.width
                                 readonly property real renderedLeft: reviewQueuePreviewList.leadingTrack + timelineIndex * reviewQueuePreviewList.stride + previewCard.x
@@ -564,13 +566,13 @@ Item {
                                     id: previewCard
                                     anchors.centerIn: parent
                                     width: parent.width
-                                    height: timelineSlot.isCurrent ? 72 : 66
+                                    height: 94
                                     visible: timelineSlot.modelData.kind !== "empty"
-                                    opacity: timelineSlot.isPrevious && !timelineSlot.isCurrent ? 0.52 : timelineSlot.isCurrent ? 1 : 0.25 + 0.75 * timelineSlot.revealAmount
-                                    color: timelineSlot.isCurrent ? Theme.surfaceRaised : Theme.canvas
-                                    border.color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : timelineSlot.isCurrent ? Theme.accent : Theme.rule
-                                    border.width: timelineSlot.isCurrent ? 2 : 1
-                                    radius: timelineSlot.isCurrent ? 7 : 5
+                                    opacity: timelineSlot.isPrevious && !timelineSlot.isCurrent ? 0.78 : timelineSlot.isCurrent ? 1 : 0.42 + 0.58 * timelineSlot.revealAmount
+                                    color: timelineSlot.isCurrent ? Theme.ledgerSurfaceRaised : Theme.ledgerSurface
+                                    border.color: timelineSlot.isCurrent ? Theme.accent : timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.ledgerRule
+                                    border.width: timelineSlot.isCurrent ? 3 : 1
+                                    radius: 2
                                     ToolTip.visible: queueHover.hovered
                                     ToolTip.text: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + ": " + page.reviewSnippet(timelineSlot.card) : page.reviewSnippet(timelineSlot.card)
                                     Accessible.role: Accessible.Button
@@ -584,28 +586,65 @@ Item {
                                         }
                                     }
                                     Label {
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        anchors.rightMargin: timelineSlot.isPrevious ? 18 : 8
+                                        x: 12
+                                        y: 35
+                                        textFormat: Text.PlainText
+                                        text: timelineSlot.ordinal
+                                        color: timelineSlot.isCurrent ? Theme.accent : Theme.inkMuted
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 15
+                                        Accessible.name: "Review card " + timelineSlot.cardNumber + " of " + (reviewQueuePreviewList.count - reviewQueuePreviewList.firstCardIndex)
+                                        ToolTip.visible: ordinalHover.hovered
+                                        ToolTip.text: "Review card " + timelineSlot.cardNumber + " of " + (reviewQueuePreviewList.count - reviewQueuePreviewList.firstCardIndex)
+                                        HoverHandler { id: ordinalHover }
+                                    }
+                                    Label {
+                                        x: 50
+                                        y: 12
+                                        width: parent.width - 64
+                                        textFormat: Text.PlainText
+                                        text: (timelineSlot.card.deckName || page.ui.selectedDeck.name || "Review").toUpperCase()
+                                        color: Theme.inkMuted
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
+                                    Label {
+                                        x: 50
+                                        y: 33
+                                        width: parent.width - 89
+                                        height: parent.height - 45
                                         textFormat: Text.PlainText
                                         text: page.reviewSnippet(timelineSlot.card)
-                                        color: timelineSlot.isCurrent ? Theme.ink : Theme.inkMuted
+                                        color: Theme.ink
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 13
                                         elide: Text.ElideRight
                                         maximumLineCount: timelineSlot.revealAmount > 0.65 ? 3 : 2
                                         wrapMode: Text.Wrap
-                                        verticalAlignment: Text.AlignVCenter
-                                        horizontalAlignment: timelineSlot.isCurrent ? Text.AlignHCenter : Text.AlignLeft
+                                        verticalAlignment: Text.AlignTop
                                     }
-                                    Label {
-                                        anchors.right: parent.right
-                                        anchors.bottom: parent.bottom
-                                        anchors.margins: 7
-                                        visible: timelineSlot.isPrevious
-                                        textFormat: Text.PlainText
-                                        text: page.gradeMark(timelineSlot.reviewedGrade)
-                                        color: page.gradeColor(timelineSlot.reviewedGrade)
-                                        font.family: Theme.monoFont
-                                        font.pixelSize: 11
+                                    Rectangle {
+                                        x: parent.width - 28
+                                        y: 33
+                                        width: 18
+                                        height: 24
+                                        radius: 3
+                                        color: Theme.transparent
+                                        border.width: timelineSlot.isCurrent ? 2 : 1
+                                        border.color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : timelineSlot.isCurrent ? Theme.accent : Theme.ledgerRule
+                                        Accessible.name: timelineSlot.isPrevious ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
+                                        ToolTip.visible: verdictHover.hovered
+                                        ToolTip.text: timelineSlot.isPrevious ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
+                                        HoverHandler { id: verdictHover }
+                                        Label {
+                                            anchors.centerIn: parent
+                                            textFormat: Text.PlainText
+                                            text: timelineSlot.isPrevious ? page.gradeMark(timelineSlot.reviewedGrade) : "·"
+                                            color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.inkMuted
+                                            font.family: Theme.monoFont
+                                            font.pixelSize: 11
+                                        }
                                     }
                                     Rectangle {
                                         anchors.fill: parent
@@ -622,6 +661,28 @@ Item {
                     }
                     Rectangle {
                         parent: reviewQueuePreviewList
+                        z: -1
+                        anchors.fill: parent
+                        color: Theme.surface
+                    }
+                    Rectangle {
+                        parent: reviewQueuePreviewList
+                        z: 1
+                        anchors.top: parent.top
+                        width: parent.width
+                        height: 1
+                        color: Theme.ledgerRule
+                    }
+                    Rectangle {
+                        parent: reviewQueuePreviewList
+                        z: 1
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 1
+                        color: Theme.ledgerRule
+                    }
+                    Rectangle {
+                        parent: reviewQueuePreviewList
                         z: 1
                         anchors.left: parent.left
                         anchors.top: parent.top
@@ -629,7 +690,7 @@ Item {
                         width: reviewQueuePreviewList.fadeWidth
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.0; color: Theme.surface }
+                            GradientStop { position: 0.0; color: Theme.canvas }
                             GradientStop { position: 1.0; color: "transparent" }
                         }
                     }
@@ -643,7 +704,7 @@ Item {
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
                             GradientStop { position: 0.0; color: "transparent" }
-                            GradientStop { position: 1.0; color: Theme.surface }
+                            GradientStop { position: 1.0; color: Theme.canvas }
                         }
                     }
                 }

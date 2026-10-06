@@ -153,7 +153,7 @@ Item {
                                 anchors.fill: parent
                                 color: slot.style === "numbered" || slot.style === "margin" ? preview.tokens.transparent : slot.selected ? preview.tokens.raised : preview.tokens.surface
                                 radius: preview.design.radius
-                                border.width: slot.style === "numbered" || slot.style === "margin" || slot.style === "instrument" ? 0 : slot.selected ? 2 : 1
+                                border.width: slot.style === "numbered" || slot.style === "margin" || slot.style === "instrument" ? 0 : slot.selected ? (slot.style === "ledger" ? 3 : 2) : 1
                                 border.color: slot.selected ? preview.tokens.accent : slot.reviewed ? slot.stateColor : preview.tokens.rule
                             }
                             Rectangle {
