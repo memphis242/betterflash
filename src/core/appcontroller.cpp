@@ -86,6 +86,15 @@ void AppController::startReview(const QString &deckId)
     emit spokenAnswerChanged();emit pausedChanged();emit reviewStateChanged();
     invoke([=](DatabaseWorker *worker){worker->beginReview(deckId);});
 }
+void AppController::selectReviewCard(const QString &variantId)
+{
+    if (m_busy) return;
+    if (!m_reviewing) {
+        setError({{"code","REVIEW_INACTIVE"},{"message","Start a review before choosing a card."},{"detail",QString()}});return;
+    }
+    if (variantId==m_currentCard.value("variantId").toString()) return;
+    invoke([=](DatabaseWorker *worker){worker->selectReviewCard(variantId);});
+}
 void AppController::updateElapsed()
 {
     if (m_elapsed.isValid()) {
@@ -100,13 +109,16 @@ void AppController::freezeElapsed()
 void AppController::resetElapsed()
 {
     m_elapsed.invalidate();m_accumulatedSeconds=0;m_responseSeconds=0;
-    if (m_reviewing&&!m_paused) {m_elapsed.start();m_elapsedTick.start();}
+    if (m_reviewing&&!m_paused&&!m_reviewingCompletedCard) {m_elapsed.start();m_elapsedTick.start();}
     else m_elapsedTick.stop();
     emit responseSecondsChanged();
 }
 bool AppController::reviewActionReady(bool needsAnswer)
 {
     if (m_busy||m_paused) return false;
+    if (m_reviewingCompletedCard) {
+        setError({{"code","REVIEW_INSPECTION"},{"message","Choose an upcoming card to continue reviewing."},{"detail",QString()}});return false;
+    }
     if (!m_reviewing||m_currentCard.isEmpty()||(needsAnswer&&!m_answerRevealed)) {
         setError({{"code","REVIEW_NOT_READY"},{"message",needsAnswer?"Reveal the answer before grading this card.":"Start a review first."},{"detail",QString()}});return false;
     }
@@ -146,7 +158,7 @@ void AppController::resumeReview()
 {
     if (!m_reviewing||!m_paused) return;
     m_paused=false;
-    if (!m_answerRevealed) {m_elapsed.start();m_elapsedTick.start();}
+    if (!m_answerRevealed&&!m_reviewingCompletedCard) {m_elapsed.start();m_elapsedTick.start();}
     emit pausedChanged();
 }
 void AppController::stopReview()
@@ -181,16 +193,18 @@ void AppController::handleOperation(bool ok,const QString &message,const QVarian
     if (!ok) setError(error);
     else if (!m_lastError.isEmpty()) {m_lastError.clear();emit lastErrorChanged();}
 }
-void AppController::handleQueue(const QVariantList &cards,int total,bool resetCurrent)
+void AppController::handleQueue(const QVariantList &cards,int total,bool resetCurrent,const QVariantMap &inspectionCard)
 {
-    const QVariantMap current=cards.isEmpty()?QVariantMap():cards.first().toMap();
-    const bool changed=resetCurrent||m_currentCard.value("variantId")!=current.value("variantId")
+    const bool inspecting=!inspectionCard.isEmpty();
+    const QVariantMap current=inspecting?inspectionCard:cards.isEmpty()?QVariantMap():cards.first().toMap();
+    const bool changed=resetCurrent||m_reviewingCompletedCard!=inspecting||m_currentCard.value("variantId")!=current.value("variantId")
         ||m_currentCard.value("front")!=current.value("front")||m_currentCard.value("back")!=current.value("back");
     m_pendingCards=cards;m_queueCount=cards.size();m_sessionTotal=total;m_currentCard=current;
+    m_reviewingCompletedCard=inspecting;
     const bool reviewing=!cards.isEmpty();
     if (reviewing!=m_reviewing) {m_reviewing=reviewing;emit reviewingChanged();}
     if (changed) {
-        m_answerRevealed=false;m_spokenAnswer.clear();
+        m_answerRevealed=inspecting;m_spokenAnswer.clear();
         if (!m_reviewing&&m_paused) {m_paused=false;emit pausedChanged();}
         resetElapsed();emit answerRevealedChanged();emit spokenAnswerChanged();
     }

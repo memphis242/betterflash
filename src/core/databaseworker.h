@@ -27,6 +27,7 @@ public:
     void deleteCard(const QString &id);
     void replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
     void beginReview(const QString &deckId);
+    void selectReviewCard(const QString &variantId);
     void endReview();
     void defer();
     void postpone(const QString &date);
@@ -40,7 +41,7 @@ public:
 signals:
     void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
-    void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent);
+    void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &inspectionCard);
     void gradeCommitted();
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
     void syncBatchReady(const QVariantMap &batch);
@@ -63,6 +64,8 @@ private:
     QStringList m_requestOrder;
     QStringList m_queue;
     QHash<QString,QVariantMap> m_queueCache;
+    QSet<QString> m_sessionReviewedVariants;
+    QString m_inspectedVariant;
     bool m_queueDirty = true;
     int m_sessionTotal = 0;
     bool m_sessionActive = false;
@@ -96,6 +99,7 @@ private:
     QVariantMap cardPayload(const struct betterflash::model::Card &record);
     QVariantMap reviewCard(const struct betterflash::model::Card &record,
                            const struct betterflash::model::Variant &variant, const QString &deckName);
+    std::optional<QVariantMap> reviewCardByVariant(const QString &variantId);
     bool migrate();
     bool applyRemoteEvent(const QVariantMap &event, qint64 seq, bool &applied);
     bool retryRemoteEvents();

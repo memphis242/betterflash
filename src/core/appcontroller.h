@@ -24,6 +24,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool reviewing READ reviewing NOTIFY reviewingChanged)
+    Q_PROPERTY(bool reviewingCompletedCard READ reviewingCompletedCard NOTIFY reviewStateChanged)
     Q_PROPERTY(bool answerRevealed READ answerRevealed NOTIFY answerRevealedChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY pausedChanged)
     Q_PROPERTY(int queueCount READ queueCount NOTIFY reviewStateChanged)
@@ -47,6 +48,7 @@ public:
     QVariantMap lastError() const { return m_lastError; }
     bool busy() const { return m_busy; }
     bool reviewing() const { return m_reviewing; }
+    bool reviewingCompletedCard() const { return m_reviewingCompletedCard; }
     bool answerRevealed() const { return m_answerRevealed; }
     bool paused() const { return m_paused; }
     int queueCount() const { return m_queueCount; }
@@ -66,6 +68,7 @@ public:
     Q_INVOKABLE void deleteCard(const QString &id);
     Q_INVOKABLE bool replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
     Q_INVOKABLE void startReview(const QString &deckId = {});
+    Q_INVOKABLE void selectReviewCard(const QString &variantId);
     Q_INVOKABLE void revealAnswer();
     Q_INVOKABLE void grade(int grade, double recallFraction = -1.0);
     Q_INVOKABLE void deferCard();
@@ -99,7 +102,7 @@ private:
     void invoke(const std::function<void(DatabaseWorker *)> &call);
     void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
-    void handleQueue(const QVariantList &cards, int total, bool resetCurrent);
+    void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &inspectionCard);
     void setBusy(bool value);
     void setError(const QVariantMap &error);
     void updateElapsed();
@@ -117,6 +120,7 @@ private:
     QVariantMap m_currentCard,m_lastError;
     bool m_busy = true;
     bool m_reviewing = false;
+    bool m_reviewingCompletedCard = false;
     bool m_answerRevealed = false;
     bool m_paused = false;
     int m_queueCount = 0;

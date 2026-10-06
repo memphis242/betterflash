@@ -123,6 +123,8 @@ private slots:
     void malformedClozeIsRejected_data();
     void malformedClozeIsRejected();
     void queueRotationDoesNotChangeSchedules();
+    void queueSelectionPreservesOrderSchedulesAndPause();
+    void completedQueueSelectionIsReadOnlyInspection();
     void postponeSurvivesRestartAndKeepsOtherVariantDue();
     void actualTimingExcludesPauseAndGradingDelay();
     void invalidGradesLeaveReviewUnchanged();
@@ -351,6 +353,61 @@ void CoreTest::queueRotationDoesNotChangeSchedules()
     QCOMPARE(batch(app).value("events").toList(),events);
     app.revealAnswer();app.grade(2);QVERIFY(idle(app));
     QCOMPARE(app.pendingCards().size(),1);QCOMPARE(app.pendingCards().first().toMap().value("variantId"),before.first().toMap().value("variantId"));
+}
+void CoreTest::queueSelectionPreservesOrderSchedulesAndPause()
+{
+    QTemporaryDir directory;AppController app(directory.path());QVERIFY(idle(app));const QString deckId=addDeck(app);
+    for (int index=0;index<4;++index) QVERIFY(!addCard(app,deckId,"basic",QString::number(index),"Answer").isEmpty());
+    const QString otherDeck=addDeck(app,"Other");const QString otherCard=addCard(app,otherDeck,"basic","Other","Answer");
+    const QString outside=variant(card(app,otherCard),"forward").value("id").toString();
+    const QVariantList schedules=app.cards(),events=batch(app).value("events").toList();
+    app.selectReviewCard(outside);QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_INACTIVE"));
+    app.startReview(deckId);app.selectReviewCard(outside);QVERIFY(idle(app));
+    const QVariantList original=app.pendingCards();QCOMPARE(original.size(),4);
+    app.revealAnswer();app.setSpokenAnswer("response");const double unchangedTime=app.responseSeconds();
+    app.selectReviewCard(app.currentCard().value("variantId").toString());QVERIFY(!app.busy());
+    QVERIFY(app.answerRevealed());QCOMPARE(app.spokenAnswer(),QStringLiteral("response"));QCOMPARE(app.responseSeconds(),unchangedTime);
+    for (const QString &stale:{model::uuid(),outside,QString()}) {
+        app.selectReviewCard(stale);QVERIFY(idle(app));
+        QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_STALE"));
+        QCOMPARE(app.pendingCards(),original);QVERIFY(app.answerRevealed());
+    }
+    app.pauseReview();
+    const QString selected=original[2].toMap().value("variantId").toString();app.selectReviewCard(selected);QVERIFY(idle(app));
+    QVariantList expected=original;expected.prepend(expected.takeAt(2));
+    QCOMPARE(app.pendingCards(),expected);QCOMPARE(app.currentCard(),expected.first().toMap());
+    QVERIFY(app.paused());QVERIFY(!app.answerRevealed());QVERIFY(app.spokenAnswer().isEmpty());QCOMPARE(app.responseSeconds(),0.0);
+    QTest::qWait(60);QCOMPARE(app.responseSeconds(),0.0);
+    QCOMPARE(app.sessionTotal(),4);QCOMPARE(app.reviewedCount(),0);QCOMPARE(app.cards(),schedules);QVERIFY(app.history().isEmpty());
+    QCOMPARE(batch(app).value("events").toList(),events);
+    app.resumeReview();app.revealAnswer();app.grade(3);QVERIFY(idle(app));expected.removeFirst();
+    QCOMPARE(app.pendingCards(),expected);QCOMPARE(app.history().first().toMap().value("variantId").toString(),selected);
+}
+void CoreTest::completedQueueSelectionIsReadOnlyInspection()
+{
+    QTemporaryDir directory;AppController app(directory.path());QVERIFY(idle(app));const QString deckId=addDeck(app);
+    for (int index=0;index<3;++index) QVERIFY(!addCard(app,deckId,"basic",QString::number(index),"Answer").isEmpty());
+    app.startReview(deckId);QVERIFY(idle(app));const QString completed=app.currentCard().value("variantId").toString();
+    const QString completedCard=app.currentCard().value("id").toString();app.revealAnswer();app.grade(3);QVERIFY(idle(app));
+    const QVariantList pending=app.pendingCards(),schedules=app.cards(),history=app.history(),events=batch(app).value("events").toList();
+    app.pauseReview();app.selectReviewCard(completed);QVERIFY(idle(app));
+    QVERIFY(app.reviewingCompletedCard());QVERIFY(app.answerRevealed());QVERIFY(app.paused());QCOMPARE(app.responseSeconds(),0.0);
+    QCOMPARE(app.currentCard().value("variantId").toString(),completed);QCOMPARE(app.pendingCards(),pending);
+    app.resumeReview();QTest::qWait(60);QCOMPARE(app.responseSeconds(),0.0);
+    app.grade(4);QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_INSPECTION"));
+    app.deferCard();QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_INSPECTION"));
+    app.postponeDays(2);QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_INSPECTION"));
+    app.refresh();QVERIFY(idle(app));QVERIFY(app.reviewingCompletedCard());QCOMPARE(app.currentCard().value("variantId").toString(),completed);
+    QCOMPARE(app.pendingCards(),pending);QCOMPARE(app.cards(),schedules);QCOMPARE(app.history(),history);
+    QCOMPARE(app.reviewedCount(),1);QCOMPARE(app.sessionTotal(),3);QCOMPARE(batch(app).value("events").toList(),events);
+    app.selectReviewCard(pending.first().toMap().value("variantId").toString());QVERIFY(idle(app));
+    QVERIFY(!app.reviewingCompletedCard());QVERIFY(!app.answerRevealed());QCOMPARE(app.pendingCards(),pending);
+    app.selectReviewCard(completed);QVERIFY(idle(app));QVERIFY(app.reviewingCompletedCard());
+    app.deleteCard(completedCard);QVERIFY(idle(app));QVERIFY(!app.reviewingCompletedCard());QCOMPARE(app.pendingCards(),pending);
+    app.selectReviewCard(completed);QVERIFY(idle(app));QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_STALE"));
+    app.stopReview();QVERIFY(idle(app));QVERIFY(!app.reviewingCompletedCard());
+    app.startReview(deckId);QVERIFY(idle(app));app.selectReviewCard(completed);QVERIFY(idle(app));
+    QCOMPARE(app.lastError().value("code").toString(),QStringLiteral("REVIEW_STALE"));
 }
 void CoreTest::postponeSurvivesRestartAndKeepsOtherVariantDue()
 {

@@ -389,6 +389,16 @@ QVariantMap DatabaseWorker::reviewCard(const struct model::Card &note,const stru
     result.insert("readingBudgetSeconds",model::readingBudget(result.value("question").toString()));result.insert("deckName",deckName);
     return result;
 }
+std::optional<QVariantMap> DatabaseWorker::reviewCardByVariant(const QString &variantId)
+{
+    const auto schedule=variant(variantId);
+    const auto note=schedule?card(schedule->cardId):std::nullopt;
+    const auto sourceDeck=note?deck(note->deckId):std::nullopt;
+    if (!schedule||!note||!sourceDeck) return std::nullopt;
+    const auto keys=model::variantKeys(*note);
+    if (!keys||!keys->contains(schedule->key)) return std::nullopt;
+    return reviewCard(*note,*schedule,sourceDeck->name);
+}
 bool DatabaseWorker::publishQueue(bool resetCurrent)
 {
     QVariantList cards;
@@ -414,8 +424,15 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         if (cached==m_queueCache.cend()) {it=m_queue.erase(it);continue;}
         cards.append(*cached);++it;
     }
-    if (m_queue.isEmpty()) {m_sessionActive=false;m_queueCache.clear();}
-    emit reviewQueueReady(cards,m_sessionTotal,resetCurrent);
+    if (m_queue.isEmpty()) {m_sessionActive=false;m_queueCache.clear();m_inspectedVariant.clear();}
+    QVariantMap inspectionCard;
+    if (!m_inspectedVariant.isEmpty()) {
+        const auto selected=reviewCardByVariant(m_inspectedVariant);
+        if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load the selected card. Refresh and try again.",m_sqlDetail);return false;}
+        if (selected) inspectionCard=*selected;
+        else m_inspectedVariant.clear();
+    }
+    emit reviewQueueReady(cards,m_sessionTotal,resetCurrent,inspectionCard);
     return true;
 }
 
@@ -539,20 +556,43 @@ void DatabaseWorker::beginReview(const QString &deckId)
     q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants)")+" ORDER BY v.due,n.id,v.variant_key");
     q.addBindValue(model::nowUtc());if (!deckId.isEmpty()) q.addBindValue(deckId);
     if (!q.exec()) {fail("REVIEW_START","Could not start review. Refresh and try again.",q.lastError().text());return;}
-    m_queue.clear();m_queueCache.clear();m_queueDirty=true;while (q.next()) m_queue.append(q.value(0).toString());
+    m_queue.clear();m_queueCache.clear();m_sessionReviewedVariants.clear();m_inspectedVariant.clear();m_queueDirty=true;while (q.next()) m_queue.append(q.value(0).toString());
     m_sessionTotal=m_queue.size();m_sessionActive=!m_queue.isEmpty();
     if (publishQueue(true)) done(m_queue.isEmpty()?"No cards are due in this deck":"Review started");
+}
+void DatabaseWorker::selectReviewCard(const QString &variantId)
+{
+    if (!ready()) return;
+    if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before choosing a card.");return;}
+    const qsizetype position=m_queue.indexOf(variantId);
+    if (!model::validUuid(variantId)||(position<0&&!m_sessionReviewedVariants.contains(variantId))) {
+        fail("REVIEW_STALE","This card is no longer in the review session. Choose a card in the current queue.");return;
+    }
+    const auto selected=reviewCardByVariant(variantId);
+    if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load the selected card. Refresh and try again.",m_sqlDetail);return;}
+    if (!selected||(position>=0&&selected->value("due").toString()>model::nowUtc())) {
+        fail("REVIEW_STALE","This card is no longer available for review. Refresh and choose another card.");return;
+    }
+    if (position>=0) {
+        if (position==0&&m_inspectedVariant.isEmpty()) {done();return;}
+        m_inspectedVariant.clear();
+        m_queue.prepend(m_queue.takeAt(position));
+        m_queueCache.insert(variantId,*selected);
+    } else m_inspectedVariant=variantId;
+    assert(m_queue.size()<=m_sessionTotal);
+    if (publishQueue(true)) done(position>=0?"Review card selected":"Completed card opened");
 }
 void DatabaseWorker::endReview()
 {
     if (!ready()) return;
-    m_queue.clear();m_sessionActive=false;
-    emit reviewQueueReady({},m_sessionTotal,true);done("Review ended");
+    m_queue.clear();m_sessionActive=false;m_inspectedVariant.clear();m_sessionReviewedVariants.clear();
+    emit reviewQueueReady({},m_sessionTotal,true,{});done("Review ended");
 }
 void DatabaseWorker::defer()
 {
     if (!ready()) return;
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before deferring a card.");return;}
+    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
     m_queue.append(m_queue.takeFirst());
     if (publishQueue(true)) done("Card moved to the queue end");
 }
@@ -562,6 +602,7 @@ void DatabaseWorker::postpone(const QString &date)
     const QDate day=QDate::fromString(date,Qt::ISODate);
     if (!day.isValid()||date!=day.toString(Qt::ISODate)||day<=QDate::currentDate()) {fail("INVALID_POSTPONE_DATE","Choose a later date in YYYY-MM-DD format.");return;}
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before postponing a card.");return;}
+    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
     const auto existing=variant(m_queue.first());
     if (!existing) {m_queueDirty=true;if (publishQueue(true)) fail("CARD_NOT_FOUND","This review card no longer exists. Continue with the next card.");return;}
     const QDateTime localStart=day.startOfDay(QTimeZone::systemTimeZone());
@@ -576,6 +617,7 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     if (!ready()) return;
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
     if (!m_sessionActive||m_queue.isEmpty()||m_queue.first()!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
+    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
     const auto old=variant(expectedVariant);
     const auto note=old?card(old->cardId):std::nullopt;
     const auto sourceDeck=note?deck(note->deckId):std::nullopt;
@@ -588,7 +630,7 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     const struct model::Variant schedule{old->id,old->cardId,old->key,due,old->reviewCount+1,result.stability,result.difficulty};
     const struct model::Review review{model::uuid(),old->cardId,old->id,sourceDeck->name,grade,recall,seconds,reviewedAt,due};
     if (!mutate([&]{return upsertVariant(schedule)&&insertReview(review)&&enqueue("review.add",{{"review",model::toMap(review)},{"variant",model::toMap(schedule)}});})) {fail("REVIEW_SAVE","Could not save this review. Check storage and retry the grade.",m_sqlDetail);return;}
-    m_queue.removeFirst();emit gradeCommitted();
+    m_sessionReviewedVariants.insert(expectedVariant);m_queue.removeFirst();emit gradeCommitted();
     if (publishSnapshot()&&publishQueue(true)) done("Review saved");
 }
 
