@@ -64,11 +64,12 @@ Review's idle view contains a bounded horizontal deck browser, an optional deck
 tree, actual queue counts, and a large start action in the lower portion of the
 page. Deck parents are stored and synchronized independently of their names.
 Active review cards open in a rounded native modal, with a pinned header and
-grading controls around a bounded Markdown view. Pause sits beside the deck
-title. A full-width timeline keeps the current variant centered, with graded
-completed cards fading to the left and up to five increasingly hazy upcoming
-prompts to the right. Dismissing the modal pauses the response timer and
-retains the queue;
+grading controls around a bounded Markdown view. Pause sits directly beside the
+bounded deck title. The queue opens as a centered, horizontally scrollable
+timeline with fading edges, without a rail or current label; the current
+variant can scroll out of view. A timer sits above the controls, and a large
+rounded Reveal answer cover sits below the prompt. Dismissing the modal pauses
+the response timer and retains the queue;
 resuming reopens the same session.
 
 The Android draft uses the same native modules. Its build preflight checks the

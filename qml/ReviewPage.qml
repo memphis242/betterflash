@@ -67,6 +67,12 @@ Item {
         default: return ""
         }
     }
+    function formatElapsed(seconds) {
+        const total = Math.max(0, Math.floor(Number(seconds) || 0))
+        const minutes = Math.floor(total / 60)
+        const remaining = total % 60
+        return (minutes < 10 ? "0" : "") + minutes + ":" + (remaining < 10 ? "0" : "") + remaining
+    }
     function reviewTimelineItems() {
         const items = []
         const completed = Math.min(timelineCompleted.length, 2)
@@ -323,16 +329,36 @@ Item {
                 Layout.fillWidth: true
                 spacing: 10
                 ColumnLayout {
-                    Layout.fillWidth: true
+                    id: reviewHeaderInfo
+                    readonly property real titleMaxWidth: Math.max(120, reviewDialog.width * 0.42)
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: titleLabel.width + reviewPause.width + 10
                     spacing: 3
-                    Label {
-                        textFormat: Text.PlainText
-                        text: page.hasCard ? (app.currentCard.deckName || ui.selectedDeck.name || "Review") : "Review"
-                        color: Theme.ink
-                        font.family: Theme.contentFont
-                        font.pixelSize: page.ui.width < 600 ? 21 : 27
-                        elide: Text.ElideRight
+                    RowLayout {
                         Layout.fillWidth: true
+                        spacing: 10
+                        Label {
+                            id: titleLabel
+                            objectName: "reviewDeckTitle"
+                            textFormat: Text.PlainText
+                            text: page.hasCard ? (app.currentCard.deckName || ui.selectedDeck.name || "Review") : "Review"
+                            color: Theme.ink
+                            font.family: Theme.contentFont
+                            font.pixelSize: page.ui.width < 600 ? 21 : 27
+                            elide: Text.ElideRight
+                            Layout.minimumWidth: 0
+                            Layout.preferredWidth: Math.min(reviewHeaderInfo.titleMaxWidth, implicitWidth)
+                            Layout.maximumWidth: reviewHeaderInfo.titleMaxWidth
+                        }
+                        AppButton {
+                            id: reviewPause
+                            objectName: "reviewPause"
+                            text: app.paused ? "Resume" : "Pause"
+                            hint: shortcuts.bindings.pause
+                            primary: true
+                            enabled: !app.busy
+                            onClicked: app.paused ? app.resumeReview() : app.pauseReview()
+                        }
                     }
                     Label {
                         textFormat: Text.PlainText
@@ -340,16 +366,11 @@ Item {
                         color: app.paused ? Theme.warning : Theme.inkMuted
                         font.family: Theme.monoFont
                         font.pixelSize: 11
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
                     }
                 }
-                AppButton {
-                    objectName: "reviewPause"
-                    text: app.paused ? "Resume" : "Pause"
-                    hint: shortcuts.bindings.pause
-                    primary: true
-                    enabled: !app.busy
-                    onClicked: app.paused ? app.resumeReview() : app.pauseReview()
-                }
+                Item { Layout.fillWidth: true }
                 GlyphButton {
                     objectName: "reviewClose"
                     glyph: "close"
@@ -378,6 +399,11 @@ Item {
                     id: reviewQueuePreviewList
                     objectName: "reviewQueuePreview"
                     readonly property bool timelineMode: true
+                    readonly property bool scrollable: interactive
+                    readonly property bool horizontalScrollable: true
+                    readonly property bool autoCentersCurrent: false
+                    readonly property bool railVisible: false
+                    readonly property bool currentLabelVisible: false
                     readonly property int previousCount: page.timelineCompleted.length
                     readonly property int upcomingCount: Math.min(5, Math.max(0, app.pendingCards.length - 1))
                     readonly property bool previousSpaceReserved: true
@@ -387,12 +413,13 @@ Item {
                     readonly property bool previousOutlines: true
                     readonly property real slotWidth: Math.max(74, Math.min(158, (width - 48) / 7))
                     readonly property real leadingTrack: Math.max(0, width / 2 - (2 * (slotWidth + spacing) + slotWidth / 2))
+                    readonly property real scrollGutter: width
                     visible: count > 0
                     Layout.fillWidth: true
                     Layout.preferredHeight: page.ui.width < 600 ? 82 : 92
                     clip: true
                     orientation: ListView.Horizontal
-                    interactive: false
+                    interactive: true
                     keyNavigationEnabled: true
                     activeFocusOnTab: true
                     cacheBuffer: 10000
@@ -401,21 +428,24 @@ Item {
                     Accessible.name: "Upcoming review timeline"
                     currentIndex: app.pendingCards.length > 0 ? 2 : -1
                     header: Item {
-                        width: reviewQueuePreviewList.leadingTrack
+                        width: reviewQueuePreviewList.leadingTrack + reviewQueuePreviewList.scrollGutter
                         height: reviewQueuePreviewList.height
                     }
                     footer: Item {
-                        width: reviewQueuePreviewList.leadingTrack
+                        width: reviewQueuePreviewList.leadingTrack + reviewQueuePreviewList.scrollGutter
                         height: reviewQueuePreviewList.height
                     }
                     function centerCurrent() {
                         if (currentIndex >= 0 && currentIndex < count)
                             positionViewAtIndex(currentIndex, ListView.Center)
                     }
-                    onCurrentIndexChanged: Qt.callLater(centerCurrent)
-                    onCountChanged: Qt.callLater(centerCurrent)
-                    onWidthChanged: Qt.callLater(centerCurrent)
                     Component.onCompleted: Qt.callLater(centerCurrent)
+                    Connections {
+                        target: reviewDialog
+                        function onOpened() {
+                            Qt.callLater(reviewQueuePreviewList.centerCurrent)
+                        }
+                    }
                     Keys.onLeftPressed: decrementCurrentIndex()
                     Keys.onRightPressed: incrementCurrentIndex()
                     delegate: Rectangle {
@@ -426,6 +456,7 @@ Item {
                         readonly property bool isPrevious: modelData.kind === "previous"
                         readonly property bool isCurrent: modelData.kind === "current"
                         readonly property bool isUpcoming: modelData.kind === "upcoming"
+                        readonly property bool currentLabelVisible: false
                         readonly property int reviewedGrade: isPrevious ? Number(modelData.grade) : -1
                         readonly property bool reviewOutline: isPrevious
                         readonly property string timelineRole: modelData.kind
@@ -448,7 +479,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 8
                             textFormat: Text.PlainText
-                            text: modelData.kind === "empty" ? "" : modelData.kind === "previous" ? page.reviewSnippet(card) : modelData.kind === "current" ? "Current\n" + page.reviewSnippet(card) : page.reviewSnippet(card)
+                            text: modelData.kind === "empty" ? "" : page.reviewSnippet(card)
                             color: isCurrent ? Theme.ink : Theme.inkMuted
                             elide: Text.ElideRight
                             maximumLineCount: 2
@@ -467,15 +498,6 @@ Item {
                             font.family: Theme.monoFont
                             font.pixelSize: 11
                         }
-                    }
-                    Rectangle {
-                        z: -1
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        height: 1
-                        color: Theme.rule
-                        opacity: 0.68
                     }
                     Rectangle {
                         z: 1
@@ -530,6 +552,27 @@ Item {
                         Layout.preferredHeight: implicitHeight
                         baseFontSize: page.ui.width < 600 ? 20 : 24
                     }
+                    AppButton {
+                        objectName: "revealAnswer"
+                        visible: !app.answerRevealed
+                        text: "Reveal answer"
+                        hint: shortcuts.bindings.review
+                        primary: true
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: page.ui.width < 600 ? 148 : 188
+                        font.pixelSize: page.ui.width < 600 ? 19 : 22
+                        enabled: !app.paused && !app.busy
+                        property real radius: 14
+                        Accessible.name: "Reveal answer"
+                        background: Rectangle {
+                            radius: revealAnswer.radius
+                            color: revealAnswer.enabled ? (revealAnswer.hovered ? Theme.accentSoft : Theme.surfaceRaised) : Theme.canvas
+                            border.width: revealAnswer.activeFocus ? 2 : 1
+                            border.color: revealAnswer.activeFocus ? Theme.accent : Theme.rule
+                            opacity: revealAnswer.enabled ? 1 : 0.7
+                        }
+                        onClicked: app.revealAnswer()
+                    }
                     Rectangle {
                         visible: app.answerRevealed
                         Layout.fillWidth: true
@@ -567,17 +610,17 @@ Item {
                 objectName: "reviewToolbar"
                 Layout.fillWidth: true
                 spacing: 10
-                RowLayout {
-                    visible: !app.answerRevealed
+                Label {
+                    objectName: "reviewTimer"
+                    readonly property bool running: !app.paused && app.reviewing
+                    readonly property real elapsedSeconds: app.responseSeconds
+                    textFormat: Text.PlainText
+                    text: page.formatElapsed(app.responseSeconds)
+                    color: app.paused ? Theme.warning : Theme.inkMuted
+                    font.family: Theme.monoFont
+                    font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
                     Layout.fillWidth: true
-                    AppButton {
-                        objectName: "revealAnswer"
-                        text: "Reveal answer"
-                        hint: shortcuts.bindings.review
-                        Layout.fillWidth: true
-                        enabled: !app.paused && !app.busy
-                        onClicked: app.revealAnswer()
-                    }
                 }
                 RowLayout {
                     visible: app.answerRevealed

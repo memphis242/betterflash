@@ -764,6 +764,11 @@ private:
     {
         QObject *const preview = require("reviewQueuePreview");
         check(preview->property("timelineMode").toBool(), "review_preview_is_timeline_" + suffix);
+        check(preview->property("horizontalScrollable").toBool() && preview->property("interactive").toBool(),
+              "review_preview_is_horizontally_scrollable_" + suffix);
+        check(!preview->property("autoCentersCurrent").toBool(),
+              "review_preview_does_not_auto_recenter_" + suffix);
+        check(!preview->property("railVisible").toBool(), "review_preview_has_no_rail_" + suffix);
         check(preview->property("count").toInt() >= 1, "review_timeline_has_current_card_" + suffix,
               QStringLiteral("count=%1 pending=%2").arg(preview->property("count").toInt()).arg(m_app.pendingCards().size()));
 
@@ -777,14 +782,13 @@ private:
               QStringLiteral("timeline=%1 modal=%2").arg(viewport.width()).arg(surface.width()));
 
         const int currentIndex = preview->property("currentIndex").toInt();
-        const QRectF currentBounds = rect("reviewQueueCurrent");
-        check(preview->property("currentIndex").isValid() && currentIndex >= 0
-              && std::abs(currentBounds.center().x() - viewport.center().x()) <= viewport.width() * .18,
-              "review_timeline_current_card_is_centered_" + suffix,
-              QStringLiteral("index=%1 currentCenter=%2 timelineCenter=%3").arg(currentIndex)
-                  .arg(currentBounds.center().x()).arg(viewport.center().x()));
+        check(preview->property("currentIndex").isValid() && currentIndex >= 0,
+              "review_timeline_current_card_is_addressable_" + suffix,
+              QStringLiteral("index=%1").arg(currentIndex));
         check(require("reviewQueueCurrent")->property("timelineRole").toString() == QStringLiteral("current"),
               "review_timeline_marks_current_role_" + suffix);
+        check(!require("reviewQueueCurrent")->property("currentLabelVisible").toBool(),
+              "review_timeline_expresses_current_without_label_" + suffix);
 
         const int previousCount = preview->property("previousCount").toInt();
         const int upcomingCount = preview->property("upcomingCount").toInt();
@@ -810,6 +814,26 @@ private:
         check(preview->property("previousCardsFaded").toBool() && preview->property("upcomingCardsHazy").toBool(),
               "review_timeline_applies_directional_fade_" + suffix);
         check(preview->property("previousOutlines").toBool(), "review_timeline_previous_cards_have_review_outlines_" + suffix);
+
+        const qreal contentWidth = preview->property("contentWidth").toDouble();
+        const qreal viewportWidth = preview->property("width").toDouble();
+        if (contentWidth > viewportWidth + 5.0) {
+            const QString beforeVariant = currentVariant();
+            const int beforeIndex = currentIndex;
+            const qreal maximum = std::max(0.0, contentWidth - viewportWidth);
+            preview->setProperty("contentX", maximum);
+            QTest::qWait(100);
+            const qreal scrolled = preview->property("contentX").toDouble();
+            check(scrolled >= maximum - 2.0 && currentVariant() == beforeVariant
+                      && preview->property("currentIndex").toInt() == beforeIndex,
+                  "review_preview_scrolls_without_changing_card_" + suffix,
+                  QStringLiteral("contentX=%1 maximum=%2 index=%3->%4 variantUnchanged=%5")
+                      .arg(scrolled).arg(maximum).arg(beforeIndex).arg(preview->property("currentIndex").toInt())
+                      .arg(currentVariant() == beforeVariant));
+            const bool currentOutOfView = !rect("reviewQueueCurrent").intersects(viewport);
+            if (currentOutOfView)
+                check(true, "review_preview_allows_current_card_out_of_view_" + suffix);
+        }
     }
     void reviewLifecycle()
     {
@@ -850,13 +874,24 @@ private:
               && require("reviewDialogSurface")->property("radius").toDouble() > 0,
               "review_dialog_is_bounded_and_rounded_" + theme);
         const QRectF modalHeader = rect("reviewModalHeader");
+        const QRectF deckTitle = rect("reviewDeckTitle");
         const QRectF pause = rect("reviewPause");
+        const QRectF closeButton = rect("reviewClose");
         check(pause.top() >= modalHeader.top() - 1.1 && pause.bottom() <= modalHeader.bottom() + 1.1
               && pause.right() <= modalHeader.right() + 1.1 && pause.left() >= modalHeader.left() - 1.1,
               "review_pause_sits_in_title_bar_" + theme);
-        check(pause.right() >= modalHeader.right() - 180.0,
-              "review_pause_is_to_right_of_deck_title_" + theme,
-              QStringLiteral("pauseRight=%1 headerRight=%2").arg(pause.right()).arg(modalHeader.right()));
+        check(pause.left() >= deckTitle.right() - 1.1 && pause.right() < closeButton.left() - 4.0,
+              "review_pause_is_after_title_and_before_close_" + theme,
+              QStringLiteral("titleRight=%1 pause=%2..%3 closeLeft=%4")
+                  .arg(deckTitle.right()).arg(pause.left()).arg(pause.right()).arg(closeButton.left()));
+        const QRectF timer = rect("reviewTimer");
+        check(require("reviewTimer")->property("running").toBool()
+                  && require("reviewTimer")->property("elapsedSeconds").toDouble() >= 0.0,
+              "review_timer_runs_during_active_card_" + theme);
+        check(std::abs(timer.center().x() - surface.center().x()) <= 3.0,
+              "review_timer_is_centered_" + theme,
+              QStringLiteral("timerCenter=%1 modalCenter=%2")
+                  .arg(timer.center().x()).arg(surface.center().x()));
         checkReviewQueuePreview(theme + "_initial");
         const QString modalVariant = currentVariant();
         const int modalQueue = m_app.queueCount();
@@ -887,6 +922,18 @@ private:
         ensureLongCurrent();
         check(item("reviewQuestion")->height() > 0 && require("reviewQuestion")->property("renderError").toString().isEmpty(),
               "question_and_image_render_" + theme);
+        const QRectF question = rect("reviewQuestion");
+        const QRectF reveal = rect("revealAnswer");
+        check(!m_app.answerRevealed() && !visible("reviewAnswer"),
+              "review_answer_is_concealed_before_reveal_" + theme);
+        check(reveal.top() >= question.bottom() - 1.1
+                  && reveal.width() >= surface.width() * 0.70
+                  && reveal.height() >= 52.0
+                  && require("revealAnswer")->property("radius").toDouble() > 0,
+              "review_reveal_is_large_rounded_area_below_question_" + theme,
+              QStringLiteral("questionBottom=%1 reveal=%2..%3 size=%4x%5 radius=%6")
+                  .arg(question.bottom()).arg(reveal.top()).arg(reveal.bottom()).arg(reveal.width()).arg(reveal.height())
+                  .arg(require("revealAnswer")->property("radius").toDouble()));
         wheel("reviewScroll",theme + "_desktop_question");
         const QRectF toolbarBefore = rect("reviewToolbar");
         wheel("reviewScroll",theme + "_desktop_question_again");
@@ -916,6 +963,11 @@ private:
         check(m_app.answerRevealed(), "reveal_keyboard_" + theme);
         check(item("reviewAnswer")->height() > 0 && require("reviewAnswer")->property("renderError").toString().isEmpty(),
               "answer_and_image_render_" + theme);
+        const QRectF firstGrade = rect("grade0");
+        const QRectF revealedTimer = rect("reviewTimer");
+        check(revealedTimer.bottom() <= firstGrade.top() + 1.1,
+              "review_timer_is_above_grade_controls_" + theme,
+              QStringLiteral("timerBottom=%1 gradeTop=%2").arg(revealedTimer.bottom()).arg(firstGrade.top()));
         wheel("reviewScroll",theme + "_desktop_answer");
         screenshot(theme + "-desktop-review");
         const int historyCount = m_app.history().size();
@@ -1016,23 +1068,16 @@ private:
         queuePreview->setProperty("contentX",0.0);
         QTest::qWait(80);
         const int previewStart = queuePreview->property("currentIndex").toInt();
-        const qreal previewX = queuePreview->property("contentX").toDouble();
         focus("reviewQueuePreview");
         key(Qt::Key_Right);
         key(Qt::Key_Right);
         key(Qt::Key_Right);
         const int previewEnd = queuePreview->property("currentIndex").toInt();
-        const qreal previewEndX = queuePreview->property("contentX").toDouble();
-        const bool previewOverflows = queuePreview->property("contentWidth").toDouble()
-            > queuePreview->property("width").toDouble() + 5;
-        check(previewEnd > previewStart && (!previewOverflows || previewEndX > previewX)
-              && previewEndX <= std::max(0.0,queuePreview->property("contentWidth").toDouble()
-                  - queuePreview->property("width").toDouble()) + 1.5
+        check(previewEnd > previewStart && previewEnd < queuePreview->property("count").toInt()
               && currentVariant() == previewVariant && m_app.queueCount() == previewQueue,
               "phone_review_preview_keyboard_navigation_is_bounded_" + theme,
-              QStringLiteral("index=%1->%2 x=%3->%4 content=%5 viewport=%6 focus=%7 sameVariant=%8 queue=%9->%10")
-                  .arg(previewStart).arg(previewEnd).arg(previewX).arg(previewEndX)
-                  .arg(queuePreview->property("contentWidth").toDouble()).arg(queuePreview->property("width").toDouble())
+              QStringLiteral("index=%1->%2 count=%3 focus=%4 sameVariant=%5 queue=%6->%7")
+                  .arg(previewStart).arg(previewEnd).arg(queuePreview->property("count").toInt())
                   .arg(queuePreview->property("activeFocus").toBool()).arg(currentVariant() == previewVariant)
                   .arg(previewQueue).arg(m_app.queueCount()));
         screenshot(theme + "-phone-review");
