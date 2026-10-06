@@ -63,10 +63,12 @@ For an isolated demonstration:
   more text and become clearer as they enter the view, with fixed card widths
   and gaps. The timeline includes all pending and completed cards in the session.
   Scrolling stops with the first or final card at the center. Click a pending
-  preview to center and review it in place, keeping the queue order, or click a
-  completed preview to inspect its answer without
-  recording another review. A timer sits above the controls, and a large
-  rounded Reveal answer cover appears below the prompt. Closing the modal pauses
+  preview to highlight and review it in place, keeping the queue order and scroll
+  position, or click a completed preview to inspect its answer without recording
+  another review. An always-visible scrollbar shows the timeline extent; a Return
+  to active card button appears above it when the active card is off-screen.
+  A timer sits above the controls, and a large rounded Reveal answer cover appears
+  below the prompt. Closing the modal pauses
   the session; Resume continues the same card and queue.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.

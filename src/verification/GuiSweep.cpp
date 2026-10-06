@@ -819,6 +819,10 @@ private:
         const qreal initial = preview->property("contentX").toDouble();
         const qreal minimum = preview->property("minimumScroll").toDouble();
         const qreal maximum = preview->property("maximumScroll").toDouble();
+        const QRectF activeBeforeScroll = rect("reviewQueueCurrent");
+        QObject *const scrollBar = require("reviewQueueScrollBar");
+        check(visible("reviewQueueScrollBar") && rect("reviewQueueScrollBar").top() >= viewport.bottom() - 1.1,
+              "review_timeline_scrollbar_is_always_visible_below_cards_" + suffix);
         if (upcomingCount >= 3 && object("reviewQueueItem1") && object("reviewQueueItem2")) {
             QObject *const second = require("reviewQueueItem1");
             QObject *const third = require("reviewQueueItem2");
@@ -852,6 +856,22 @@ private:
         check(std::abs(preview->property("contentX").toDouble() - maximum) < 2.0
                   && currentVariant() == beforeVariant,
               "review_preview_stops_at_tail_without_switching_card_" + suffix);
+        check(std::abs(scrollBar->property("position").toDouble() + scrollBar->property("size").toDouble() - 1.0) < 0.01,
+              "review_timeline_scrollbar_maps_right_endpoint_" + suffix);
+        const bool activeOffscreen = !activeBeforeScroll.translated(initial - maximum, 0).intersects(viewport);
+        check(visible("reviewQueueReturn") == activeOffscreen,
+              "review_timeline_return_control_tracks_offscreen_active_card_" + suffix);
+        if (activeOffscreen) {
+            const QVariantList unchangedQueue = m_app.pendingCards();
+            click("reviewQueueReturn");
+            check(!visible("reviewQueueReturn") && currentVariant() == beforeVariant
+                      && m_app.pendingCards() == unchangedQueue
+                      && std::abs(rect("reviewQueueCurrent").center().x() - viewport.center().x()) < 2.0
+                      && rect("reviewQueuePreview") == viewport,
+                  "review_timeline_return_centers_active_without_layout_shift_" + suffix);
+            preview->setProperty("contentX", maximum);
+            QTest::qWait(60);
+        }
         if (upcomingCount > 0) {
             const QRectF tail = rect("reviewQueueItem" + QString::number(upcomingCount - 1));
             check(tail.left() >= viewport.left() - 1.1 && tail.right() <= viewport.right() + 1.1,
@@ -864,6 +884,32 @@ private:
         QTest::qWait(100);
         check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0,
               "review_preview_stops_at_first_card_" + suffix);
+        check(std::abs(scrollBar->property("position").toDouble()) < 0.01,
+              "review_timeline_scrollbar_maps_left_endpoint_" + suffix);
+        focus("reviewQueueScrollBar");
+        key(Qt::Key_End);
+        check(std::abs(preview->property("contentX").toDouble() - maximum) < 2.0 && currentVariant() == beforeVariant,
+              "review_timeline_scrollbar_keyboard_reaches_right_endpoint_" + suffix);
+        key(Qt::Key_Home);
+        check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0 && currentVariant() == beforeVariant,
+              "review_timeline_scrollbar_keyboard_reaches_left_endpoint_" + suffix);
+        if (suffix.endsWith("_initial") && maximum > minimum + 100.0) {
+            QQuickItem *const thumb = qobject_cast<QQuickItem *>(scrollBar->property("contentItem").value<QObject *>());
+            if (!thumb) throw std::runtime_error("Timeline scrollbar has no thumb.");
+            const QPoint start = thumb->mapRectToScene(QRectF(0,0,thumb->width(),thumb->height())).center().toPoint();
+            const QPoint finish = start + QPoint(static_cast<int>(rect("reviewQueueScrollBar").width() * 0.25),0);
+            QTest::mousePress(m_window,Qt::LeftButton,Qt::NoModifier,start);
+            QTest::mouseMove(m_window,finish,50);
+            QTest::mouseRelease(m_window,Qt::LeftButton,Qt::NoModifier,finish);
+            QTest::qWait(80);
+            const qreal dragged = preview->property("contentX").toDouble();
+            check(dragged > minimum + 1.0 && dragged <= maximum + 1.1 && currentVariant() == beforeVariant,
+                  "review_timeline_scrollbar_drag_moves_only_viewport_" + suffix);
+            key(Qt::Key_Home);
+            check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0
+                      && std::abs(scrollBar->property("position").toDouble()) < 0.01,
+                  "review_timeline_scrollbar_tracks_return_after_drag_" + suffix);
+        }
         const QString firstName = previousCount >= 2 ? QStringLiteral("reviewTimelineItem0")
             : previousCount == 1 ? QStringLiteral("reviewTimelineItem1") : QStringLiteral("reviewQueueCurrent");
         check(rect(firstName).center().x() <= viewport.center().x() + 2.0,
@@ -918,8 +964,8 @@ private:
                   && m_app.pendingCards() == expectedRemaining && m_app.history() == historyBeforeSelection,
               "review_timeline_selects_card_beyond_initial_preview");
         QTest::qWait(80);
-        check(std::abs(rect("reviewQueueCurrent").center().x() - rect("reviewQueuePreview").center().x()) < 2.0,
-              "review_timeline_centers_selected_tail_in_original_position");
+        check(std::abs(fullPreview->property("contentX").toDouble() - fullPreview->property("maximumScroll").toDouble()) < 2.0,
+              "review_timeline_selected_tail_keeps_scroll_position");
         fullPreview->setProperty("contentX", fullPreview->property("minimumScroll"));
         QTest::qWait(100);
         check(require("reviewTimelineItem0")->property("variantId").toString() == oldestVariant,
@@ -975,12 +1021,15 @@ private:
             const QVariantList originalHistory = m_app.history();
             const QVariantList originalCards = m_app.cards();
             const QString target = originalQueue.at(1).toMap().value("variantId").toString();
+            const qreal beforeSelectionScroll = require("reviewQueuePreview")->property("contentX").toDouble();
             click("reviewQueueItem0");
             check(waitUntil([this,target] { return !m_app.busy() && currentVariant() == target; })
                       && m_app.pendingCards() == originalQueue
                       && !m_app.answerRevealed() && m_app.history() == originalHistory
                       && m_app.cards() == originalCards,
                   "review_preview_click_selects_without_grading_" + theme);
+            check(std::abs(require("reviewQueuePreview")->property("contentX").toDouble() - beforeSelectionScroll) < 0.1,
+                  "review_preview_selection_keeps_scroll_position_" + theme);
             m_app.selectReviewCard(originalVariant);
             check(waitUntil([this,originalVariant] { return !m_app.busy() && currentVariant() == originalVariant; })
                       && m_app.pendingCards() == originalQueue,

@@ -391,10 +391,27 @@ Item {
                     }
                 }
             }
-            RowLayout {
+            ColumnLayout {
                 objectName: "reviewQueueBar"
                 Layout.fillWidth: true
-                spacing: 0
+                spacing: 4
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 30
+                    Layout.minimumHeight: 30
+                    Layout.maximumHeight: 30
+                    Item { Layout.fillWidth: true }
+                    AppButton {
+                        objectName: "reviewQueueReturn"
+                        visible: !reviewQueuePreviewList.activeCardVisible && reviewQueuePreviewList.logicalActiveIndex >= 0
+                        text: "Return to active card"
+                        hint: "Center the active card in the review timeline"
+                        implicitHeight: 30
+                        font.pixelSize: 11
+                        padding: 6
+                        onClicked: reviewQueuePreviewList.centerCurrent()
+                    }
+                }
                 Flickable {
                     id: reviewQueuePreviewList
                     objectName: "reviewQueuePreview"
@@ -425,7 +442,10 @@ Item {
                     readonly property real minimumScroll: firstCardIndex < 0 ? 0 : Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
                     readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth / 2 - width / 2)
                     property int currentIndex: Math.max(2, page.timelineCompleted.length)
-                    property string selectedVariantToCenter: ""
+                    readonly property int logicalActiveIndex: activeIndex()
+                    readonly property real activeCardLeft: leadingTrack + logicalActiveIndex * stride
+                    readonly property bool activeCardVisible: logicalActiveIndex >= 0 && activeCardLeft + slotWidth > contentX && activeCardLeft < contentX + width
+                    readonly property real scrollSpan: maximumScroll - minimumScroll
                     visible: count > 0
                     Layout.fillWidth: true
                     Layout.preferredHeight: page.ui.width < 600 ? 82 : 92
@@ -455,9 +475,10 @@ Item {
                         return completedIndex < 0 ? -1 : firstCardIndex + completedIndex
                     }
                     function centerCurrent() {
-                        const index = activeIndex()
+                        const index = logicalActiveIndex
                         if (index < 0)
                             return
+                        cancelFlick()
                         currentIndex = index
                         contentX = Math.max(minimumScroll, Math.min(maximumScroll, leadingTrack + index * stride + slotWidth / 2 - width / 2))
                     }
@@ -479,17 +500,18 @@ Item {
                     function selectVariant(variantId) {
                         if (!variantId || app.busy)
                             return
-                        selectedVariantToCenter = variantId
                         app.selectReviewCard(variantId)
-                        if (app.currentCard.variantId === variantId) {
-                            selectedVariantToCenter = ""
-                            Qt.callLater(centerCurrent)
-                        }
+                        if (app.currentCard.variantId === variantId)
+                            currentIndex = logicalActiveIndex
                     }
                     function selectIndex(index) {
                         const item = page.reviewTimelineItem(index)
                         if (item.card)
                             selectVariant(item.card.variantId)
+                    }
+                    onLogicalActiveIndexChanged: {
+                        if (logicalActiveIndex >= 0)
+                            currentIndex = logicalActiveIndex
                     }
                     onContentXChanged: clampScroll()
                     onMinimumScrollChanged: Qt.callLater(clampScroll)
@@ -503,22 +525,6 @@ Item {
                         target: reviewDialog
                         function onOpened() {
                             Qt.callLater(reviewQueuePreviewList.centerCurrent)
-                        }
-                    }
-                    Connections {
-                        target: app
-                        function onCurrentCardChanged() {
-                            if (reviewQueuePreviewList.selectedVariantToCenter === app.currentCard.variantId) {
-                                reviewQueuePreviewList.selectedVariantToCenter = ""
-                                Qt.callLater(reviewQueuePreviewList.centerCurrent)
-                            }
-                        }
-                        function onBusyChanged() {
-                            if (!app.busy)
-                                Qt.callLater(function() {
-                                    if (!app.busy && reviewQueuePreviewList.selectedVariantToCenter !== app.currentCard.variantId)
-                                        reviewQueuePreviewList.selectedVariantToCenter = ""
-                                })
                         }
                     }
                     Keys.onLeftPressed: decrementCurrentIndex()
@@ -639,6 +645,77 @@ Item {
                             GradientStop { position: 0.0; color: "transparent" }
                             GradientStop { position: 1.0; color: Theme.surface }
                         }
+                    }
+                }
+                ScrollBar {
+                    id: reviewQueueScrollBar
+                    objectName: "reviewQueueScrollBar"
+                    readonly property real scrollExtent: reviewQueuePreviewList.width + reviewQueuePreviewList.scrollSpan
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 18
+                    orientation: Qt.Horizontal
+                    policy: ScrollBar.AlwaysOn
+                    active: true
+                    interactive: reviewQueuePreviewList.scrollSpan > 0
+                    activeFocusOnTab: interactive
+                    hoverEnabled: true
+                    topPadding: 6
+                    bottomPadding: 6
+                    size: scrollExtent > 0 ? reviewQueuePreviewList.width / scrollExtent : 1
+                    position: scrollExtent > 0 ? (reviewQueuePreviewList.contentX - reviewQueuePreviewList.minimumScroll) / scrollExtent : 0
+                    stepSize: scrollExtent > 0 ? reviewQueuePreviewList.stride / scrollExtent : 0
+                    Accessible.role: Accessible.ScrollBar
+                    Accessible.name: "Review timeline position"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Scroll through the review deck. Arrow keys move one card; Page Up and Page Down move one view; Home and End move to the first and last card."
+                    function moveToContent(value) {
+                        reviewQueuePreviewList.cancelFlick()
+                        reviewQueuePreviewList.contentX = Math.max(reviewQueuePreviewList.minimumScroll, Math.min(reviewQueuePreviewList.maximumScroll, value))
+                    }
+                    function applyPosition() {
+                        if (interactive)
+                            moveToContent(reviewQueuePreviewList.minimumScroll + position * scrollExtent)
+                    }
+                    onPositionChanged: {
+                        if (pressed)
+                            applyPosition()
+                    }
+                    onPressedChanged: {
+                        if (pressed)
+                            applyPosition()
+                    }
+                    Keys.onLeftPressed: moveToContent(reviewQueuePreviewList.contentX - reviewQueuePreviewList.stride)
+                    Keys.onRightPressed: moveToContent(reviewQueuePreviewList.contentX + reviewQueuePreviewList.stride)
+                    Keys.onPressed: event => {
+                        switch (event.key) {
+                        case Qt.Key_PageUp:
+                            moveToContent(reviewQueuePreviewList.contentX - reviewQueuePreviewList.width)
+                            break
+                        case Qt.Key_PageDown:
+                            moveToContent(reviewQueuePreviewList.contentX + reviewQueuePreviewList.width)
+                            break
+                        case Qt.Key_Home:
+                            moveToContent(reviewQueuePreviewList.minimumScroll)
+                            break
+                        case Qt.Key_End:
+                            moveToContent(reviewQueuePreviewList.maximumScroll)
+                            break
+                        default:
+                            return
+                        }
+                        event.accepted = true
+                    }
+                    background: Rectangle {
+                        anchors.centerIn: parent
+                        width: parent.width
+                        height: 2
+                        radius: 1
+                        color: Theme.rule
+                    }
+                    contentItem: Rectangle {
+                        implicitHeight: 6
+                        radius: 3
+                        color: reviewQueueScrollBar.pressed || reviewQueueScrollBar.activeFocus ? Theme.accent : Theme.inkMuted
                     }
                 }
             }
