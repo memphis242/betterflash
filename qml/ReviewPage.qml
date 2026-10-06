@@ -8,9 +8,11 @@ Item {
     required property var ui
     readonly property bool hasCard: !!app.currentCard.id
     readonly property bool reviewModalVisible: reviewDialog.visible
+    readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
     property var timelineCompleted: []
     property var timelineCurrentCard: ({})
     property string timelineCurrentVariant: ""
+    property int timelineReviewedCount: 0
     readonly property var queueStats: [
         { key: "due", label: "Due now", count: deckCount("dueCount"), hint: "Review variants due in this deck and its subdecks" },
         { key: "new", label: "New due", count: deckCount("newDueCount"), hint: "Due variants that have never been reviewed" },
@@ -96,6 +98,7 @@ Item {
         function onReviewingChanged() {
             if (app.reviewing) {
                 page.timelineCompleted = []
+                page.timelineReviewedCount = app.reviewedCount
                 page.timelineCurrentCard = app.currentCard
                 page.timelineCurrentVariant = app.currentCard.variantId || ""
                 page.openReviewModal()
@@ -104,7 +107,7 @@ Item {
         }
         function onCurrentCardChanged() {
             const nextVariant = app.currentCard.variantId || ""
-            if (page.timelineCurrentVariant && nextVariant && nextVariant !== page.timelineCurrentVariant) {
+            if (app.reviewedCount > page.timelineReviewedCount && page.timelineCurrentVariant && nextVariant !== page.timelineCurrentVariant) {
                 const recorded = app.history.find(review => review.variantId === page.timelineCurrentVariant)
                 if (recorded)
                     page.timelineCompleted = page.timelineCompleted.concat([{
@@ -112,6 +115,7 @@ Item {
                         grade: recorded.grade
                     }]).slice(-2)
             }
+            page.timelineReviewedCount = app.reviewedCount
             page.timelineCurrentCard = app.currentCard
             page.timelineCurrentVariant = nextVariant
         }
@@ -395,7 +399,7 @@ Item {
                 objectName: "reviewQueueBar"
                 Layout.fillWidth: true
                 spacing: 0
-                ListView {
+                Flickable {
                     id: reviewQueuePreviewList
                     objectName: "reviewQueuePreview"
                     readonly property bool timelineMode: true
@@ -411,33 +415,81 @@ Item {
                     readonly property bool previousCardsFaded: true
                     readonly property bool upcomingCardsHazy: true
                     readonly property bool previousOutlines: true
-                    readonly property real slotWidth: Math.max(74, Math.min(158, (width - 48) / 7))
-                    readonly property real leadingTrack: Math.max(0, width / 2 - (2 * (slotWidth + spacing) + slotWidth / 2))
-                    readonly property real scrollGutter: width
+                    readonly property var timelineItems: page.reviewTimelineItems()
+                    readonly property int count: timelineItems.length
+                    readonly property real slotWidth: Math.max(92, Math.min(158, (width - 32) / 5))
+                    readonly property real spacing: 8
+                    readonly property real stride: slotWidth + spacing
+                    readonly property real fadeWidth: Math.min(32, width * 0.08)
+                    readonly property real leadingTrack: Math.max(0, (width - slotWidth) / 2)
+                    readonly property int firstCardIndex: timelineItems.findIndex(item => item.kind !== "empty")
+                    readonly property real minimumScroll: firstCardIndex < 0 ? 0 : Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
+                    readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth + fadeWidth - width)
+                    property int currentIndex: 2
+                    property string selectedVariantToCenter: ""
                     visible: count > 0
                     Layout.fillWidth: true
                     Layout.preferredHeight: page.ui.width < 600 ? 82 : 92
                     clip: true
-                    orientation: ListView.Horizontal
                     interactive: true
-                    keyNavigationEnabled: true
                     activeFocusOnTab: true
-                    cacheBuffer: 10000
-                    model: page.reviewTimelineItems()
-                    spacing: 8
+                    flickableDirection: Flickable.HorizontalFlick
+                    boundsBehavior: Flickable.StopAtBounds
+                    boundsMovement: Flickable.StopAtBounds
+                    contentWidth: width + maximumScroll
+                    contentHeight: height
                     Accessible.name: "Upcoming review timeline"
-                    currentIndex: app.pendingCards.length > 0 ? 2 : -1
-                    header: Item {
-                        width: reviewQueuePreviewList.leadingTrack + reviewQueuePreviewList.scrollGutter
-                        height: reviewQueuePreviewList.height
+                    function clampScroll() {
+                        const bounded = Math.max(minimumScroll, Math.min(maximumScroll, contentX))
+                        if (Math.abs(contentX - bounded) > 0.01)
+                            contentX = bounded
                     }
-                    footer: Item {
-                        width: reviewQueuePreviewList.leadingTrack + reviewQueuePreviewList.scrollGutter
-                        height: reviewQueuePreviewList.height
+                    function activeIndex() {
+                        return timelineItems.findIndex(item => item.card && item.card.variantId === app.currentCard.variantId)
                     }
                     function centerCurrent() {
-                        if (currentIndex >= 0 && currentIndex < count)
-                            positionViewAtIndex(currentIndex, ListView.Center)
+                        const index = activeIndex()
+                        if (index < 0)
+                            return
+                        currentIndex = index
+                        contentX = Math.max(minimumScroll, Math.min(maximumScroll, leadingTrack + index * stride + slotWidth / 2 - width / 2))
+                    }
+                    function focusIndex(index) {
+                        currentIndex = index
+                        const left = leadingTrack + index * stride
+                        const right = left + slotWidth
+                        if (left < contentX + fadeWidth)
+                            contentX = Math.max(minimumScroll, left - fadeWidth)
+                        else if (right > contentX + width - fadeWidth)
+                            contentX = Math.min(maximumScroll, right + fadeWidth - width)
+                    }
+                    function decrementCurrentIndex() {
+                        focusIndex(Math.max(firstCardIndex, currentIndex - 1))
+                    }
+                    function incrementCurrentIndex() {
+                        focusIndex(Math.min(count - 1, Math.max(firstCardIndex, currentIndex + 1)))
+                    }
+                    function selectVariant(variantId) {
+                        if (!variantId || app.busy)
+                            return
+                        selectedVariantToCenter = variantId
+                        app.selectReviewCard(variantId)
+                        if (app.currentCard.variantId === variantId) {
+                            selectedVariantToCenter = ""
+                            Qt.callLater(centerCurrent)
+                        }
+                    }
+                    function selectIndex(index) {
+                        const item = timelineItems[index]
+                        if (item && item.card)
+                            selectVariant(item.card.variantId)
+                    }
+                    onContentXChanged: clampScroll()
+                    onMinimumScrollChanged: Qt.callLater(clampScroll)
+                    onMaximumScrollChanged: Qt.callLater(clampScroll)
+                    onTimelineItemsChanged: {
+                        currentIndex = Math.max(firstCardIndex, Math.min(count - 1, currentIndex))
+                        Qt.callLater(clampScroll)
                     }
                     Component.onCompleted: Qt.callLater(centerCurrent)
                     Connections {
@@ -446,81 +498,134 @@ Item {
                             Qt.callLater(reviewQueuePreviewList.centerCurrent)
                         }
                     }
+                    Connections {
+                        target: app
+                        function onCurrentCardChanged() {
+                            if (reviewQueuePreviewList.selectedVariantToCenter === app.currentCard.variantId) {
+                                reviewQueuePreviewList.selectedVariantToCenter = ""
+                                Qt.callLater(reviewQueuePreviewList.centerCurrent)
+                            }
+                        }
+                        function onBusyChanged() {
+                            if (!app.busy)
+                                Qt.callLater(function() {
+                                    if (!app.busy && reviewQueuePreviewList.selectedVariantToCenter !== app.currentCard.variantId)
+                                        reviewQueuePreviewList.selectedVariantToCenter = ""
+                                })
+                        }
+                    }
                     Keys.onLeftPressed: decrementCurrentIndex()
                     Keys.onRightPressed: incrementCurrentIndex()
-                    delegate: Rectangle {
-                        required property var modelData
-                        required property int index
-                        readonly property var card: modelData.card || {}
-                        readonly property string variantId: card.variantId || card.id || ""
-                        readonly property bool isPrevious: modelData.kind === "previous"
-                        readonly property bool isCurrent: modelData.kind === "current"
-                        readonly property bool isUpcoming: modelData.kind === "upcoming"
-                        readonly property bool currentLabelVisible: false
-                        readonly property int reviewedGrade: isPrevious ? Number(modelData.grade) : -1
-                        readonly property bool reviewOutline: isPrevious
-                        readonly property string timelineRole: modelData.kind
-                        objectName: isCurrent ? "reviewQueueCurrent" : isUpcoming ? "reviewQueueItem" + (modelData.index - 3) : "reviewTimelineItem" + index
-                        width: isUpcoming
-                               ? Math.max(42, reviewQueuePreviewList.slotWidth * (1 - 0.22 * (modelData.distance - 1)))
-                               : reviewQueuePreviewList.slotWidth
-                        height: isCurrent ? 72 : 62
-                        ToolTip.visible: queueHover.hovered
-                        ToolTip.text: isPrevious ? "Reviewed " + page.gradeName(reviewedGrade) + ": " + page.reviewSnippet(card) : page.reviewSnippet(card)
-                        Accessible.name: isPrevious ? "Reviewed " + page.gradeName(reviewedGrade) + " card: " + page.reviewSnippet(card) : isCurrent ? "Current card: " + page.reviewSnippet(card) : "Upcoming card: " + page.reviewSnippet(card)
-                        visible: modelData.kind !== "empty"
-                        opacity: isPrevious ? 0.52 : isCurrent ? 1 : Math.max(0.18, 0.58 - ((modelData.distance - 1) * 0.10))
-                        color: isCurrent ? Theme.surfaceRaised : Theme.canvas
-                        border.color: isPrevious ? page.gradeColor(modelData.grade) : isCurrent ? Theme.accent : Theme.rule
-                        border.width: isCurrent ? 2 : 1
-                        radius: isCurrent ? 7 : 5
-                        HoverHandler { id: queueHover }
-                        Label {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            textFormat: Text.PlainText
-                            text: modelData.kind === "empty" ? "" : page.reviewSnippet(card)
-                            color: isCurrent ? Theme.ink : Theme.inkMuted
-                            elide: Text.ElideRight
-                            maximumLineCount: 2
-                            wrapMode: Text.Wrap
-                            verticalAlignment: Text.AlignVCenter
-                            horizontalAlignment: isCurrent ? Text.AlignHCenter : Text.AlignLeft
-                        }
-                        Label {
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 7
-                            visible: isPrevious
-                            textFormat: Text.PlainText
-                            text: page.gradeMark(reviewedGrade)
-                            color: page.gradeColor(reviewedGrade)
-                            font.family: Theme.monoFont
-                            font.pixelSize: 11
+                    Keys.onReturnPressed: selectIndex(currentIndex)
+                    Keys.onEnterPressed: selectIndex(currentIndex)
+                    Keys.onSpacePressed: selectIndex(currentIndex)
+                    Row {
+                        x: reviewQueuePreviewList.leadingTrack
+                        height: reviewQueuePreviewList.height
+                        spacing: reviewQueuePreviewList.spacing
+                        Repeater {
+                            model: reviewQueuePreviewList.timelineItems
+                            delegate: Item {
+                                id: timelineSlot
+                                required property var modelData
+                                required property int index
+                                readonly property var card: modelData.card || {}
+                                readonly property string variantId: card.variantId || card.id || ""
+                                readonly property bool isPrevious: modelData.kind === "previous"
+                                readonly property bool isCurrent: variantId.length > 0 && variantId === app.currentCard.variantId
+                                readonly property bool isUpcoming: modelData.kind === "upcoming"
+                                readonly property bool currentLabelVisible: false
+                                readonly property int reviewedGrade: isPrevious ? Number(modelData.grade) : -1
+                                readonly property bool reviewOutline: isPrevious
+                                readonly property string timelineRole: modelData.kind
+                                readonly property real renderedOpacity: previewCard.opacity
+                                readonly property real viewportLeft: reviewQueuePreviewList.leadingTrack + index * reviewQueuePreviewList.stride - reviewQueuePreviewList.contentX
+                                readonly property real revealAmount: isUpcoming && !isCurrent ? Math.max(0, Math.min(1, (reviewQueuePreviewList.width - reviewQueuePreviewList.fadeWidth - viewportLeft) / width)) : 1
+                                objectName: isCurrent ? "reviewQueueCurrent" : isUpcoming ? "reviewQueueItem" + (modelData.index - 3) : "reviewTimelineItem" + index
+                                width: reviewQueuePreviewList.slotWidth
+                                height: reviewQueuePreviewList.height
+                                Rectangle {
+                                    id: previewCard
+                                    anchors.centerIn: parent
+                                    width: parent.width * (0.38 + 0.62 * timelineSlot.revealAmount)
+                                    height: timelineSlot.isCurrent ? 72 : 66
+                                    visible: timelineSlot.modelData.kind !== "empty"
+                                    opacity: timelineSlot.isPrevious && !timelineSlot.isCurrent ? 0.52 : timelineSlot.isCurrent ? 1 : 0.25 + 0.75 * timelineSlot.revealAmount
+                                    color: timelineSlot.isCurrent ? Theme.surfaceRaised : Theme.canvas
+                                    border.color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : timelineSlot.isCurrent ? Theme.accent : Theme.rule
+                                    border.width: timelineSlot.isCurrent ? 2 : 1
+                                    radius: timelineSlot.isCurrent ? 7 : 5
+                                    ToolTip.visible: queueHover.hovered
+                                    ToolTip.text: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + ": " + page.reviewSnippet(timelineSlot.card) : page.reviewSnippet(timelineSlot.card)
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + " card: " + page.reviewSnippet(timelineSlot.card) : timelineSlot.isCurrent ? "Current card: " + page.reviewSnippet(timelineSlot.card) : "Upcoming card: " + page.reviewSnippet(timelineSlot.card)
+                                    Accessible.onPressAction: reviewQueuePreviewList.selectIndex(timelineSlot.index)
+                                    HoverHandler { id: queueHover }
+                                    TapHandler {
+                                        onTapped: {
+                                            reviewQueuePreviewList.forceActiveFocus()
+                                            reviewQueuePreviewList.selectIndex(timelineSlot.index)
+                                        }
+                                    }
+                                    Label {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        anchors.rightMargin: timelineSlot.isPrevious ? 18 : 8
+                                        textFormat: Text.PlainText
+                                        text: page.reviewSnippet(timelineSlot.card)
+                                        color: timelineSlot.isCurrent ? Theme.ink : Theme.inkMuted
+                                        elide: Text.ElideRight
+                                        maximumLineCount: timelineSlot.revealAmount > 0.65 ? 3 : 2
+                                        wrapMode: Text.Wrap
+                                        verticalAlignment: Text.AlignVCenter
+                                        horizontalAlignment: timelineSlot.isCurrent ? Text.AlignHCenter : Text.AlignLeft
+                                    }
+                                    Label {
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: 7
+                                        visible: timelineSlot.isPrevious
+                                        textFormat: Text.PlainText
+                                        text: page.gradeMark(timelineSlot.reviewedGrade)
+                                        color: page.gradeColor(timelineSlot.reviewedGrade)
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 11
+                                    }
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: -3
+                                        visible: reviewQueuePreviewList.activeFocus && reviewQueuePreviewList.currentIndex === timelineSlot.index
+                                        color: "transparent"
+                                        border.color: Theme.inkMuted
+                                        border.width: 1
+                                        radius: previewCard.radius + 3
+                                    }
+                                }
+                            }
                         }
                     }
                     Rectangle {
+                        parent: reviewQueuePreviewList
                         z: 1
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        width: Math.min(48, parent.width * 0.12)
-                        color: Theme.surface
-                        opacity: 0.92
+                        width: reviewQueuePreviewList.fadeWidth
                         gradient: Gradient {
+                            orientation: Gradient.Horizontal
                             GradientStop { position: 0.0; color: Theme.surface }
                             GradientStop { position: 1.0; color: "transparent" }
                         }
                     }
                     Rectangle {
+                        parent: reviewQueuePreviewList
                         z: 1
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        width: Math.min(48, parent.width * 0.12)
-                        color: Theme.surface
-                        opacity: 0.92
+                        width: reviewQueuePreviewList.fadeWidth
                         gradient: Gradient {
+                            orientation: Gradient.Horizontal
                             GradientStop { position: 0.0; color: "transparent" }
                             GradientStop { position: 1.0; color: Theme.surface }
                         }
@@ -558,7 +663,7 @@ Item {
                         visible: !app.answerRevealed
                         text: "Reveal answer"
                         hint: shortcuts.bindings.review
-                        primary: true
+                        primary: false
                         Layout.fillWidth: true
                         Layout.preferredHeight: page.ui.width < 600 ? 148 : 188
                         font.pixelSize: page.ui.width < 600 ? 19 : 22
@@ -613,7 +718,7 @@ Item {
                 spacing: 10
                 Label {
                     objectName: "reviewTimer"
-                    readonly property bool running: !app.paused && app.reviewing
+                    readonly property bool running: !app.paused && app.reviewing && !app.reviewingCompletedCard
                     readonly property real elapsedSeconds: app.responseSeconds
                     textFormat: Text.PlainText
                     text: page.formatElapsed(app.responseSeconds)
@@ -624,7 +729,7 @@ Item {
                     Layout.fillWidth: true
                 }
                 RowLayout {
-                    visible: app.answerRevealed
+                    visible: app.answerRevealed && !app.reviewingCompletedCard
                     Layout.fillWidth: true
                     spacing: page.ui.width < 600 ? 5 : 10
                     Repeater {
@@ -668,7 +773,17 @@ Item {
                         }
                     }
                 }
+                AppButton {
+                    objectName: "returnToReview"
+                    visible: app.reviewingCompletedCard
+                    text: "Return to review"
+                    primary: true
+                    enabled: app.pendingCards.length > 0 && !app.busy
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: reviewQueuePreviewList.selectVariant(app.pendingCards[0].variantId)
+                }
                 RowLayout {
+                    visible: !app.reviewingCompletedCard
                     Layout.fillWidth: true
                     AppButton {
                         objectName: "deferCard"

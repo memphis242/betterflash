@@ -96,8 +96,12 @@ int main(int argc, char **argv) {
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
 
     const auto speakQuestion = [&] {
-        if (voice.enabled() && app.reviewing() && !app.paused())
-            voice.speak(MarkdownView::plainText(app.currentCard().value(QStringLiteral("question")).toString()));
+        if (voice.enabled() && app.reviewing() && !app.paused()) {
+            QString narration = MarkdownView::plainText(app.currentCard().value(QStringLiteral("question")).toString());
+            if (app.reviewingCompletedCard())
+                narration += QStringLiteral(". ") + MarkdownView::plainText(app.currentCard().value(QStringLiteral("answer")).toString());
+            voice.speak(narration);
+        }
     };
     bool voiceSummaryPending = false;
     QObject::connect(&ai, &Summarizer::changed, &application, [&] {
@@ -116,7 +120,7 @@ int main(int argc, char **argv) {
         QTimer::singleShot(0, &application, speakQuestion);
     });
     QObject::connect(&app, &AppController::answerRevealedChanged, &application, [&] {
-        if (voice.enabled() && app.answerRevealed())
+        if (voice.enabled() && app.answerRevealed() && !app.reviewingCompletedCard())
             voice.speak(MarkdownView::plainText(app.currentCard().value(QStringLiteral("answer")).toString())
                 + QStringLiteral(". Choose missed, partial, hard, good, or easy."));
     });

@@ -532,7 +532,9 @@ ApplicationWindow {
                 return review.reviewModalVisible || app.paused
             if (!review.reviewModalVisible)
                 return false
-            if (app.paused || !app.currentCard.id)
+            if (app.paused || app.reviewingCompletedCard || !app.currentCard.id)
+                return false
+            if (action === "review" && review.previewHasFocus)
                 return false
             return action.indexOf("grade") !== 0 || app.answerRevealed
         default:

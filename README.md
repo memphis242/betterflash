@@ -59,7 +59,11 @@ For an isolated demonstration:
 - Review cards in a rounded modal over the deck page. Pause sits directly beside
   the bounded deck title. The queue opens as a centered, horizontally scrollable
   timeline with fading edges; it has no rail or current label, and the current
-  card may scroll out of view. A timer sits above the controls, and a large
+  card may scroll out of view when the queue is long. Upcoming cards disclose
+  more text and become clearer as they enter the view. Scrolling stops with
+  the first card at the center or the final card fully visible. Click a pending
+  preview to review it next, or a completed preview to inspect its answer without
+  recording another review. A timer sits above the controls, and a large
   rounded Reveal answer cover appears below the prompt. Closing the modal pauses
   the session; Resume continues the same card and queue.
 - Defer moves the current item to the queue's tail without changing its schedule.
@@ -94,8 +98,9 @@ The deck browser also accepts Left/Right to choose a deck, Down to browse its
 subdecks, and Up to return to the parent level. Tree rows use Left/Right to
 collapse or expand their branches.
 In the review modal, Tab focuses the review timeline; Left/Right moves through
-timeline cards without changing the review queue. The timeline can also be
-scrolled horizontally without recentering the current card.
+timeline cards without changing the review queue. Enter or Space selects the
+focused preview. The timeline can also be scrolled horizontally without
+recentering the current card.
 
 ## Voice and language models
 

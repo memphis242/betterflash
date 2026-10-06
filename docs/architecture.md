@@ -67,7 +67,12 @@ Active review cards open in a rounded native modal, with a pinned header and
 grading controls around a bounded Markdown view. Pause sits directly beside the
 bounded deck title. The queue opens as a centered, horizontally scrollable
 timeline with fading edges, without a rail or current label; the current
-variant can scroll out of view. A timer sits above the controls, and a large
+variant can scroll out of view in long queues. Viewport position controls
+upcoming card disclosure and haze. Bounds keep the first card from moving past
+the center and stop after the final card enters fully. Selecting a pending
+variant brings it forward while preserving the relative order of the rest;
+completed variants open for inspection without scheduling mutations.
+A timer sits above the controls, and a large
 rounded Reveal answer cover sits below the prompt. Dismissing the modal pauses
 the response timer and retains the queue;
 resuming reopens the same session.
