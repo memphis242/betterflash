@@ -22,6 +22,8 @@ The first build downloads two small, pinned source dependencies for native math
 rendering: MicroTeX and tinyxml2. Neither a browser engine nor Electron is used.
 Build output lives on `/workspace`, separate from the source checkout. Set
 `BETTERFLASH_BUILD_DIR` to choose another build directory.
+The run script updates that build before launching, so source changes in this
+worktree are included even when an older executable already exists.
 The user launcher points at this worktree and its build. It also supplies the
 desktop entry used by native desktop portals; it refuses to overwrite a launcher
 owned by another checkout.
