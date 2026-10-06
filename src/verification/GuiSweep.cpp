@@ -792,16 +792,16 @@ private:
 
         const int previousCount = preview->property("previousCount").toInt();
         const int upcomingCount = preview->property("upcomingCount").toInt();
-        const int expectedUpcoming = std::min(5, std::max(0, static_cast<int>(m_app.pendingCards().size()) - 1));
-        check(previousCount >= 0 && previousCount <= 2 && upcomingCount == expectedUpcoming
-              && preview->property("count").toInt() == upcomingCount + 3,
+        const int expectedUpcoming = std::max(0, static_cast<int>(m_app.pendingCards().size()) - 1);
+        check(previousCount >= 0 && previousCount == m_app.reviewedCount() && upcomingCount == expectedUpcoming
+              && preview->property("count").toInt() == upcomingCount + std::max(2, previousCount) + 1,
               "review_timeline_role_counts_match_" + suffix,
               QStringLiteral("previous=%1 upcoming=%2 expectedUpcoming=%3 count=%4").arg(previousCount).arg(upcomingCount)
                   .arg(expectedUpcoming).arg(preview->property("count").toInt()));
         check(preview->property("previousSpaceReserved").toBool(),
               "review_timeline_reserves_leading_space_" + suffix);
         if (previousCount > 0) {
-            QObject *const previous = require("reviewTimelineItem1");
+            QObject *const previous = require("reviewTimelineItem" + QString::number(std::max(2, previousCount) - 1));
             check(previous->property("timelineRole").toString() == QStringLiteral("previous")
                       && !previous->property("variantId").toString().isEmpty()
                       && previous->property("reviewOutline").toBool()
@@ -819,8 +819,33 @@ private:
         const qreal initial = preview->property("contentX").toDouble();
         const qreal minimum = preview->property("minimumScroll").toDouble();
         const qreal maximum = preview->property("maximumScroll").toDouble();
+        if (upcomingCount >= 3 && object("reviewQueueItem1") && object("reviewQueueItem2")) {
+            QObject *const second = require("reviewQueueItem1");
+            QObject *const third = require("reviewQueueItem2");
+            const qreal secondWidth = second->property("renderedWidth").toDouble();
+            const qreal thirdWidth = third->property("renderedWidth").toDouble();
+            const qreal gap = third->property("renderedLeft").toDouble()
+                - second->property("renderedLeft").toDouble() - secondWidth;
+            preview->setProperty("contentX", std::min(maximum, initial + preview->property("stride").toDouble() * 2.0));
+            QTest::qWait(80);
+            QObject *const movedSecond = require("reviewQueueItem1");
+            QObject *const movedThird = require("reviewQueueItem2");
+            const qreal movedGap = movedThird->property("renderedLeft").toDouble()
+                - movedSecond->property("renderedLeft").toDouble() - movedSecond->property("renderedWidth").toDouble();
+            check(secondWidth > 0 && thirdWidth > 0 && gap > 0
+                      && std::abs(movedGap - gap) < 0.1
+                      && std::abs(movedSecond->property("renderedWidth").toDouble() - secondWidth) < 0.1
+                      && std::abs(movedThird->property("renderedWidth").toDouble() - thirdWidth) < 0.1,
+                  "review_preview_card_widths_and_gaps_stay_constant_" + suffix);
+            preview->setProperty("contentX", initial);
+            QTest::qWait(60);
+        }
         check(maximum >= minimum, "review_preview_has_valid_scroll_bounds_" + suffix);
-        QObject *const upcoming = upcomingCount > 0 ? require("reviewQueueItem" + QString::number(upcomingCount - 1)) : nullptr;
+        if (preview->property("count").toInt() > 12)
+            check(preview->property("virtualized").toBool()
+                      && preview->property("renderedCount").toInt() < preview->property("count").toInt(),
+                  "review_preview_renders_only_viewport_cards_" + suffix);
+        QObject *const upcoming = upcomingCount > 0 ? object("reviewQueueItem" + QString::number(upcomingCount - 1)) : nullptr;
         const qreal initialDisclosure = upcoming ? upcoming->property("revealAmount").toDouble() : 0.0;
         preview->setProperty("contentX", maximum + 500.0);
         QTest::qWait(100);
@@ -832,14 +857,14 @@ private:
             check(tail.left() >= viewport.left() - 1.1 && tail.right() <= viewport.right() + 1.1,
                   "review_preview_tail_is_fully_visible_" + suffix);
             if (maximum > initial + 5.0 && initialDisclosure < 0.99)
-                check(upcoming->property("revealAmount").toDouble() > initialDisclosure,
+                check(require("reviewQueueItem" + QString::number(upcomingCount - 1))->property("revealAmount").toDouble() > initialDisclosure,
                       "review_preview_discloses_upcoming_card_as_it_enters_" + suffix);
         }
         preview->setProperty("contentX", minimum - 500.0);
         QTest::qWait(100);
         check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0,
               "review_preview_stops_at_first_card_" + suffix);
-        const QString firstName = previousCount == 2 ? QStringLiteral("reviewTimelineItem0")
+        const QString firstName = previousCount >= 2 ? QStringLiteral("reviewTimelineItem0")
             : previousCount == 1 ? QStringLiteral("reviewTimelineItem1") : QStringLiteral("reviewQueueCurrent");
         check(rect(firstName).center().x() <= viewport.center().x() + 2.0,
               "review_preview_first_card_cannot_pass_center_" + suffix);
@@ -864,6 +889,46 @@ private:
         m_app.startReview(m_deckA);
         if (!check(waitUntil([this] { return !m_app.busy() && m_app.reviewing() && visible("reviewDialog"); }),
                    "review_lifecycle_restart")) return;
+        const int fullCount = m_app.queueCount();
+        const QString oldestVariant = currentVariant();
+        check(fullCount > 8, "long_review_fixture_has_more_than_five_future_cards");
+        for (int index = 0; index < 5 && m_app.queueCount() > 1; ++index) {
+            const int before = m_app.queueCount();
+            m_app.revealAnswer();
+            m_app.grade(3);
+            check(waitUntil([this,before] { return !m_app.busy() && m_app.queueCount() == before - 1; }),
+                  "long_review_records_grade_" + QString::number(index));
+        }
+        checkReviewQueuePreview("full_session_history");
+        QObject *const fullPreview = require("reviewQueuePreview");
+        check(fullPreview->property("previousCount").toInt() == 5
+                  && fullPreview->property("count").toInt() == fullCount,
+              "review_timeline_retains_every_completed_and_pending_card");
+        const QVariantList remaining = m_app.pendingCards();
+        const QVariantList historyBeforeSelection = m_app.history();
+        const QString tailVariant = remaining.last().toMap().value("variantId").toString();
+        fullPreview->setProperty("contentX", fullPreview->property("maximumScroll"));
+        QTest::qWait(100);
+        const QString tailHook = "reviewQueueItem" + QString::number(remaining.size() - 2);
+        check(require(tailHook)->property("variantId").toString() == tailVariant,
+              "review_timeline_reaches_actual_queue_end");
+        click(tailHook);
+        const QVariantList expectedRemaining = remaining;
+        check(waitUntil([this,tailVariant] { return !m_app.busy() && currentVariant() == tailVariant; })
+                  && m_app.pendingCards() == expectedRemaining && m_app.history() == historyBeforeSelection,
+              "review_timeline_selects_card_beyond_initial_preview");
+        QTest::qWait(80);
+        check(std::abs(rect("reviewQueueCurrent").center().x() - rect("reviewQueuePreview").center().x()) < 2.0,
+              "review_timeline_centers_selected_tail_in_original_position");
+        fullPreview->setProperty("contentX", fullPreview->property("minimumScroll"));
+        QTest::qWait(100);
+        check(require("reviewTimelineItem0")->property("variantId").toString() == oldestVariant,
+              "review_timeline_reaches_first_completed_card");
+        click("reviewTimelineItem0");
+        check(waitUntil([this,oldestVariant] { return !m_app.busy() && currentVariant() == oldestVariant; })
+                  && m_app.reviewingCompletedCard() && m_app.pendingCards() == expectedRemaining
+                  && m_app.history() == historyBeforeSelection,
+              "review_timeline_inspects_oldest_completed_card_without_mutation");
         m_app.stopReview();
         check(waitUntil([this] { return !m_app.busy() && !m_app.reviewing() && !visible("reviewDialog"); }),
               "review_stop_closes_modal");
@@ -912,7 +977,7 @@ private:
             const QString target = originalQueue.at(1).toMap().value("variantId").toString();
             click("reviewQueueItem0");
             check(waitUntil([this,target] { return !m_app.busy() && currentVariant() == target; })
-                      && m_app.pendingCards().size() == originalQueue.size()
+                      && m_app.pendingCards() == originalQueue
                       && !m_app.answerRevealed() && m_app.history() == originalHistory
                       && m_app.cards() == originalCards,
                   "review_preview_click_selects_without_grading_" + theme);

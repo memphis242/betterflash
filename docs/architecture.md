@@ -68,9 +68,11 @@ grading controls around a bounded Markdown view. Pause sits directly beside the
 bounded deck title. The queue opens as a centered, horizontally scrollable
 timeline with fading edges, without a rail or current label; the current
 variant can scroll out of view in long queues. Viewport position controls
-upcoming card disclosure and haze. Bounds keep the first card from moving past
-the center and stop after the final card enters fully. Selecting a pending
-variant brings it forward while preserving the relative order of the rest;
+upcoming card disclosure and haze while card widths and gaps stay fixed.
+The timeline retains the entire pending queue and completed session history,
+instantiating only the cards near the viewport. Bounds keep the first card from moving past
+the center and stop when the final card reaches the center. Selecting a pending
+variant moves the review cursor and centers that slot without reordering cards;
 completed variants open for inspection without scheduling mutations.
 A timer sits above the controls, and a large
 rounded Reveal answer cover sits below the prompt. Dismissing the modal pauses

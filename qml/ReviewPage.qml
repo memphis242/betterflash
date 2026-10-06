@@ -75,23 +75,19 @@ Item {
         const remaining = total % 60
         return (minutes < 10 ? "0" : "") + minutes + ":" + (remaining < 10 ? "0" : "") + remaining
     }
-    function reviewTimelineItems() {
-        const items = []
-        const completed = Math.min(timelineCompleted.length, 2)
-        for (let index = 0; index < 2; ++index) {
-            if (index < 2 - completed)
-                items.push({ kind: "empty", index: index })
-            else {
-                const completedCard = timelineCompleted[index - (2 - completed)] || {}
-                items.push({ kind: "previous", card: completedCard.card || {}, grade: completedCard.grade, index: index })
-            }
+    function reviewTimelineItem(index) {
+        const emptyCount = Math.max(0, 2 - timelineCompleted.length)
+        if (index < emptyCount)
+            return { kind: "empty", index: index }
+        const completedIndex = index - emptyCount
+        if (completedIndex < timelineCompleted.length) {
+            const completedCard = timelineCompleted[completedIndex]
+            return { kind: "previous", card: completedCard.card, grade: completedCard.grade, index: index }
         }
-        if (app.pendingCards.length > 0)
-            items.push({ kind: "current", card: app.pendingCards[0], index: 2 })
-        const upcoming = app.pendingCards.slice(1, 6)
-        for (let index = 0; index < upcoming.length; ++index)
-            items.push({ kind: "upcoming", card: upcoming[index], distance: index + 1, index: index + 3 })
-        return items
+        const pendingIndex = index - Math.max(2, timelineCompleted.length)
+        const card = app.pendingCards[pendingIndex]
+        const current = card && card.variantId === app.currentCard.variantId
+        return { kind: current ? "current" : "upcoming", card: card, pendingIndex: pendingIndex, upcomingIndex: pendingIndex - 1, index: index }
     }
     Connections {
         target: app
@@ -113,7 +109,7 @@ Item {
                     page.timelineCompleted = page.timelineCompleted.concat([{
                         card: page.timelineCurrentCard,
                         grade: recorded.grade
-                    }]).slice(-2)
+                    }])
             }
             page.timelineReviewedCount = app.reviewedCount
             page.timelineCurrentCard = app.currentCard
@@ -409,23 +405,26 @@ Item {
                     readonly property bool railVisible: false
                     readonly property bool currentLabelVisible: false
                     readonly property int previousCount: page.timelineCompleted.length
-                    readonly property int upcomingCount: Math.min(5, Math.max(0, app.pendingCards.length - 1))
+                    readonly property int upcomingCount: Math.max(0, app.pendingCards.length - 1)
                     readonly property bool previousSpaceReserved: true
                     readonly property bool fadeEnds: true
                     readonly property bool previousCardsFaded: true
                     readonly property bool upcomingCardsHazy: true
                     readonly property bool previousOutlines: true
-                    readonly property var timelineItems: page.reviewTimelineItems()
-                    readonly property int count: timelineItems.length
+                    readonly property int count: Math.max(2, page.timelineCompleted.length) + app.pendingCards.length
+                    readonly property bool virtualized: true
+                    readonly property int visibleStartIndex: Math.max(0, Math.min(count, Math.floor((contentX - leadingTrack) / stride) - 1))
+                    readonly property int visibleEndIndex: Math.max(visibleStartIndex, Math.min(count, Math.ceil((contentX + width - leadingTrack) / stride) + 1))
+                    readonly property int renderedCount: visibleEndIndex - visibleStartIndex
                     readonly property real slotWidth: Math.max(92, Math.min(158, (width - 32) / 5))
                     readonly property real spacing: 8
                     readonly property real stride: slotWidth + spacing
                     readonly property real fadeWidth: Math.min(32, width * 0.08)
                     readonly property real leadingTrack: Math.max(0, (width - slotWidth) / 2)
-                    readonly property int firstCardIndex: timelineItems.findIndex(item => item.kind !== "empty")
+                    readonly property int firstCardIndex: Math.max(0, 2 - page.timelineCompleted.length)
                     readonly property real minimumScroll: firstCardIndex < 0 ? 0 : Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
-                    readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth + fadeWidth - width)
-                    property int currentIndex: 2
+                    readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth / 2 - width / 2)
+                    property int currentIndex: Math.max(2, page.timelineCompleted.length)
                     property string selectedVariantToCenter: ""
                     visible: count > 0
                     Layout.fillWidth: true
@@ -445,7 +444,15 @@ Item {
                             contentX = bounded
                     }
                     function activeIndex() {
-                        return timelineItems.findIndex(item => item.card && item.card.variantId === app.currentCard.variantId)
+                        const currentVariant = app.currentCard.variantId
+                        if (!currentVariant)
+                            return -1
+                        if (!app.reviewingCompletedCard) {
+                            const pendingIndex = app.pendingCards.findIndex(card => card.variantId === currentVariant)
+                            return pendingIndex < 0 ? -1 : Math.max(2, page.timelineCompleted.length) + pendingIndex
+                        }
+                        const completedIndex = page.timelineCompleted.findIndex(item => item.card.variantId === currentVariant)
+                        return completedIndex < 0 ? -1 : firstCardIndex + completedIndex
                     }
                     function centerCurrent() {
                         const index = activeIndex()
@@ -480,14 +487,14 @@ Item {
                         }
                     }
                     function selectIndex(index) {
-                        const item = timelineItems[index]
-                        if (item && item.card)
+                        const item = page.reviewTimelineItem(index)
+                        if (item.card)
                             selectVariant(item.card.variantId)
                     }
                     onContentXChanged: clampScroll()
                     onMinimumScrollChanged: Qt.callLater(clampScroll)
                     onMaximumScrollChanged: Qt.callLater(clampScroll)
-                    onTimelineItemsChanged: {
+                    onCountChanged: {
                         currentIndex = Math.max(firstCardIndex, Math.min(count - 1, currentIndex))
                         Qt.callLater(clampScroll)
                     }
@@ -520,15 +527,16 @@ Item {
                     Keys.onEnterPressed: selectIndex(currentIndex)
                     Keys.onSpacePressed: selectIndex(currentIndex)
                     Row {
-                        x: reviewQueuePreviewList.leadingTrack
+                        x: reviewQueuePreviewList.leadingTrack + reviewQueuePreviewList.visibleStartIndex * reviewQueuePreviewList.stride
                         height: reviewQueuePreviewList.height
                         spacing: reviewQueuePreviewList.spacing
                         Repeater {
-                            model: reviewQueuePreviewList.timelineItems
+                            model: reviewQueuePreviewList.renderedCount
                             delegate: Item {
                                 id: timelineSlot
-                                required property var modelData
                                 required property int index
+                                readonly property int timelineIndex: reviewQueuePreviewList.visibleStartIndex + index
+                                readonly property var modelData: page.reviewTimelineItem(timelineIndex)
                                 readonly property var card: modelData.card || {}
                                 readonly property string variantId: card.variantId || card.id || ""
                                 readonly property bool isPrevious: modelData.kind === "previous"
@@ -539,15 +547,17 @@ Item {
                                 readonly property bool reviewOutline: isPrevious
                                 readonly property string timelineRole: modelData.kind
                                 readonly property real renderedOpacity: previewCard.opacity
-                                readonly property real viewportLeft: reviewQueuePreviewList.leadingTrack + index * reviewQueuePreviewList.stride - reviewQueuePreviewList.contentX
+                                readonly property real renderedWidth: previewCard.width
+                                readonly property real renderedLeft: reviewQueuePreviewList.leadingTrack + timelineIndex * reviewQueuePreviewList.stride + previewCard.x
+                                readonly property real viewportLeft: reviewQueuePreviewList.leadingTrack + timelineIndex * reviewQueuePreviewList.stride - reviewQueuePreviewList.contentX
                                 readonly property real revealAmount: isUpcoming && !isCurrent ? Math.max(0, Math.min(1, (reviewQueuePreviewList.width - reviewQueuePreviewList.fadeWidth - viewportLeft) / width)) : 1
-                                objectName: isCurrent ? "reviewQueueCurrent" : isUpcoming ? "reviewQueueItem" + (modelData.index - 3) : "reviewTimelineItem" + index
+                                objectName: isCurrent ? "reviewQueueCurrent" : isUpcoming ? (modelData.pendingIndex === 0 ? "reviewQueuePendingFirst" : "reviewQueueItem" + modelData.upcomingIndex) : "reviewTimelineItem" + timelineIndex
                                 width: reviewQueuePreviewList.slotWidth
                                 height: reviewQueuePreviewList.height
                                 Rectangle {
                                     id: previewCard
                                     anchors.centerIn: parent
-                                    width: parent.width * (0.38 + 0.62 * timelineSlot.revealAmount)
+                                    width: parent.width
                                     height: timelineSlot.isCurrent ? 72 : 66
                                     visible: timelineSlot.modelData.kind !== "empty"
                                     opacity: timelineSlot.isPrevious && !timelineSlot.isCurrent ? 0.52 : timelineSlot.isCurrent ? 1 : 0.25 + 0.75 * timelineSlot.revealAmount
@@ -559,12 +569,12 @@ Item {
                                     ToolTip.text: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + ": " + page.reviewSnippet(timelineSlot.card) : page.reviewSnippet(timelineSlot.card)
                                     Accessible.role: Accessible.Button
                                     Accessible.name: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + " card: " + page.reviewSnippet(timelineSlot.card) : timelineSlot.isCurrent ? "Current card: " + page.reviewSnippet(timelineSlot.card) : "Upcoming card: " + page.reviewSnippet(timelineSlot.card)
-                                    Accessible.onPressAction: reviewQueuePreviewList.selectIndex(timelineSlot.index)
+                                    Accessible.onPressAction: reviewQueuePreviewList.selectIndex(timelineSlot.timelineIndex)
                                     HoverHandler { id: queueHover }
                                     TapHandler {
                                         onTapped: {
                                             reviewQueuePreviewList.forceActiveFocus()
-                                            reviewQueuePreviewList.selectIndex(timelineSlot.index)
+                                            reviewQueuePreviewList.selectIndex(timelineSlot.timelineIndex)
                                         }
                                     }
                                     Label {
@@ -594,7 +604,7 @@ Item {
                                     Rectangle {
                                         anchors.fill: parent
                                         anchors.margins: -3
-                                        visible: reviewQueuePreviewList.activeFocus && reviewQueuePreviewList.currentIndex === timelineSlot.index
+                                        visible: reviewQueuePreviewList.activeFocus && reviewQueuePreviewList.currentIndex === timelineSlot.timelineIndex
                                         color: "transparent"
                                         border.color: Theme.inkMuted
                                         border.width: 1
@@ -780,7 +790,7 @@ Item {
                     primary: true
                     enabled: app.pendingCards.length > 0 && !app.busy
                     Layout.alignment: Qt.AlignHCenter
-                    onClicked: reviewQueuePreviewList.selectVariant(app.pendingCards[0].variantId)
+                    onClicked: reviewQueuePreviewList.selectVariant(app.reviewCursorVariantId)
                 }
                 RowLayout {
                     visible: !app.reviewingCompletedCard
