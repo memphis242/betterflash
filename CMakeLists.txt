@@ -39,7 +39,7 @@ qt_add_resources(betterflash application_fonts PREFIX /fonts BASE packaging/font
     packaging/fonts/IBMPlexMono-Italic.ttf packaging/fonts/IBMPlexMono-BoldItalic.ttf)
 file(GLOB LICENSE_NOTICES CONFIGURE_DEPENDS packaging/licenses/*.txt)
 qt_add_resources(betterflash license_notices PREFIX /licenses BASE packaging/licenses FILES ${LICENSE_NOTICES})
-file(GLOB_RECURSE QML_SOURCES CONFIGURE_DEPENDS qml/*.qml)
+file(GLOB_RECURSE QML_SOURCES CONFIGURE_DEPENDS qml/*.qml qml/*.js)
 foreach(qml_file IN LISTS QML_SOURCES)
     file(RELATIVE_PATH qml_alias "${CMAKE_CURRENT_SOURCE_DIR}/qml" "${qml_file}")
     set_source_files_properties("${qml_file}" PROPERTIES QT_RESOURCE_ALIAS "${qml_alias}")
@@ -82,7 +82,8 @@ include(CTest)
 if(BUILD_TESTING AND NOT ANDROID)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/verification/GuiSweep.cpp")
-        target_sources(betterflash PRIVATE src/verification/GuiSweep.cpp src/verification/GuiSweep.h)
+        target_sources(betterflash PRIVATE src/verification/GuiSweep.cpp src/verification/GuiSweep.h
+            src/verification/QueueDesignCapture.cpp src/verification/QueueDesignCapture.h)
         target_link_libraries(betterflash PRIVATE Qt6::Test)
         target_compile_definitions(betterflash PRIVATE BETTERFLASH_GUI_SWEEP)
         add_test(NAME gui COMMAND "${CMAKE_COMMAND}"

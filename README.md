@@ -39,6 +39,10 @@ For an isolated demonstration:
 
 ## Cards and review
 
+The isolated [review queue design studies](docs/queue-design-studies.md) gallery
+compares twelve native QML queue treatments without opening the collection.
+Launch it with `./scripts/run-desktop.sh --queue-designs`.
+
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.
   Attach local copies of web images; card content does not trigger external image

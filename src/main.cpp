@@ -15,6 +15,7 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSettings>
@@ -23,6 +24,7 @@
 
 #ifdef BETTERFLASH_GUI_SWEEP
 #include "verification/GuiSweep.h"
+#include "verification/QueueDesignCapture.h"
 #endif
 
 int main(int argc, char **argv) {
@@ -57,10 +59,17 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("data-dir"), QStringLiteral("Use an isolated collection and settings directory."), QStringLiteral("directory")});
     parser.addOption({QStringLiteral("demo"), QStringLiteral("Create the optional example deck in an empty collection.")});
     parser.addOption({QStringLiteral("screenshot"), QStringLiteral("Save a window capture after startup."), QStringLiteral("file")});
+    parser.addOption({QStringLiteral("queue-designs"), QStringLiteral("Open the isolated review queue design gallery.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
+    parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
 #endif
     parser.process(application);
+    bool queueDesigns=parser.isSet(QStringLiteral("queue-designs"));
+#ifdef BETTERFLASH_GUI_SWEEP
+    queueDesigns=queueDesigns||parser.isSet(QStringLiteral("export-queue-designs"));
+#endif
+    if (queueDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Queue Designs"));
     QString dataDirectory = parser.isSet(QStringLiteral("data-dir")) ? QDir(parser.value(QStringLiteral("data-dir"))).absolutePath()
         : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (!QDir().mkpath(dataDirectory)) {
@@ -69,6 +78,36 @@ int main(int argc, char **argv) {
     }
     if (parser.isSet(QStringLiteral("data-dir")))
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
+
+    if (queueDesigns) {
+        QQmlApplicationEngine galleryEngine;
+        galleryEngine.setProperty("queueDesignWarnings",QStringList());
+        QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,
+            [&galleryEngine](const QList<QQmlError> &errors) {
+                QStringList warnings=galleryEngine.property("queueDesignWarnings").toStringList();
+                for (const QQmlError &error:errors) warnings.append(error.toString());
+                galleryEngine.setProperty("queueDesignWarnings",warnings);
+            });
+        QObject::connect(&galleryEngine,&QQmlApplicationEngine::objectCreationFailed,&application,
+            [] {QCoreApplication::exit(1);},Qt::QueuedConnection);
+        galleryEngine.loadFromModule(QStringLiteral("BetterFlash"),QStringLiteral("QueueDesignGallery"));
+        if (galleryEngine.rootObjects().isEmpty()) return 1;
+        if (parser.isSet(QStringLiteral("screenshot"))) {
+            const QString output=parser.value(QStringLiteral("screenshot"));
+            QTimer::singleShot(1000,&application,[&galleryEngine,output] {
+                auto *const window=qobject_cast<QQuickWindow *>(galleryEngine.rootObjects().first());
+                if (!window||!window->grabWindow().save(output))
+                    qWarning().noquote()<<QStringLiteral("CAPTURE_WRITE: Could not save %1.").arg(output);
+            });
+        }
+#ifdef BETTERFLASH_GUI_SWEEP
+        if (parser.isSet(QStringLiteral("export-queue-designs"))) {
+            const QString directory=QDir(parser.value(QStringLiteral("export-queue-designs"))).absolutePath();
+            QTimer::singleShot(250,&application,[&galleryEngine,directory] {runQueueDesignCapture(galleryEngine,directory);});
+        }
+#endif
+        return application.exec();
+    }
 
     AppController app(dataDirectory);
     MediaStore media(dataDirectory);
