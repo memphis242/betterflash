@@ -25,6 +25,7 @@
 #ifdef BETTERFLASH_GUI_SWEEP
 #include "verification/GuiSweep.h"
 #include "verification/QueueDesignCapture.h"
+#include "verification/ReviewControlCapture.h"
 #endif
 
 int main(int argc, char **argv) {
@@ -60,16 +61,25 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("demo"), QStringLiteral("Create the optional example deck in an empty collection.")});
     parser.addOption({QStringLiteral("screenshot"), QStringLiteral("Save a window capture after startup."), QStringLiteral("file")});
     parser.addOption({QStringLiteral("queue-designs"), QStringLiteral("Open the isolated review queue design gallery.")});
+    parser.addOption({QStringLiteral("control-designs"), QStringLiteral("Open the isolated review control design gallery.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
+    parser.addOption({QStringLiteral("export-control-designs"), QStringLiteral("Capture and verify the isolated review control gallery, then exit."), QStringLiteral("directory")});
 #endif
     parser.process(application);
     bool queueDesigns=parser.isSet(QStringLiteral("queue-designs"));
+    bool controlDesigns=parser.isSet(QStringLiteral("control-designs"));
 #ifdef BETTERFLASH_GUI_SWEEP
     queueDesigns=queueDesigns||parser.isSet(QStringLiteral("export-queue-designs"));
+    controlDesigns=controlDesigns||parser.isSet(QStringLiteral("export-control-designs"));
 #endif
+    if (queueDesigns && controlDesigns) {
+        qCritical().noquote()<<QStringLiteral("DESIGN_MODE: Choose either --queue-designs or --control-designs for one gallery window.");
+        return 1;
+    }
     if (queueDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Queue Designs"));
+    if (controlDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Control Designs"));
     QString dataDirectory = parser.isSet(QStringLiteral("data-dir")) ? QDir(parser.value(QStringLiteral("data-dir"))).absolutePath()
         : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (!QDir().mkpath(dataDirectory)) {
@@ -79,18 +89,19 @@ int main(int argc, char **argv) {
     if (parser.isSet(QStringLiteral("data-dir")))
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
 
-    if (queueDesigns) {
+    if (queueDesigns || controlDesigns) {
         QQmlApplicationEngine galleryEngine;
-        galleryEngine.setProperty("queueDesignWarnings",QStringList());
+        const char *const warningProperty=controlDesigns?"controlDesignWarnings":"queueDesignWarnings";
+        galleryEngine.setProperty(warningProperty,QStringList());
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,
-            [&galleryEngine](const QList<QQmlError> &errors) {
-                QStringList warnings=galleryEngine.property("queueDesignWarnings").toStringList();
+            [&galleryEngine,warningProperty](const QList<QQmlError> &errors) {
+                QStringList warnings=galleryEngine.property(warningProperty).toStringList();
                 for (const QQmlError &error:errors) warnings.append(error.toString());
-                galleryEngine.setProperty("queueDesignWarnings",warnings);
+                galleryEngine.setProperty(warningProperty,warnings);
             });
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::objectCreationFailed,&application,
             [] {QCoreApplication::exit(1);},Qt::QueuedConnection);
-        galleryEngine.loadFromModule(QStringLiteral("BetterFlash"),QStringLiteral("QueueDesignGallery"));
+        galleryEngine.loadFromModule(QStringLiteral("BetterFlash"),controlDesigns?QStringLiteral("ReviewControlGallery"):QStringLiteral("QueueDesignGallery"));
         if (galleryEngine.rootObjects().isEmpty()) return 1;
         if (parser.isSet(QStringLiteral("screenshot"))) {
             const QString output=parser.value(QStringLiteral("screenshot"));
@@ -104,6 +115,10 @@ int main(int argc, char **argv) {
         if (parser.isSet(QStringLiteral("export-queue-designs"))) {
             const QString directory=QDir(parser.value(QStringLiteral("export-queue-designs"))).absolutePath();
             QTimer::singleShot(250,&application,[&galleryEngine,directory] {runQueueDesignCapture(galleryEngine,directory);});
+        }
+        if (parser.isSet(QStringLiteral("export-control-designs"))) {
+            const QString directory=QDir(parser.value(QStringLiteral("export-control-designs"))).absolutePath();
+            QTimer::singleShot(250,&application,[&galleryEngine,directory] {runReviewControlCapture(galleryEngine,directory);});
         }
 #endif
         return application.exec();

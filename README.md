@@ -42,6 +42,8 @@ For an isolated demonstration:
 The isolated [review queue design studies](docs/queue-design-studies.md) gallery
 compares twelve native QML queue treatments without opening the collection.
 Launch it with `./scripts/run-desktop.sh --queue-designs`.
+The [review control studies](docs/review-control-studies.md) compare five icon
+button treatments using `./scripts/run-desktop.sh --control-designs`.
 
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.

@@ -83,7 +83,8 @@ if(BUILD_TESTING AND NOT ANDROID)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/verification/GuiSweep.cpp")
         target_sources(betterflash PRIVATE src/verification/GuiSweep.cpp src/verification/GuiSweep.h
-            src/verification/QueueDesignCapture.cpp src/verification/QueueDesignCapture.h)
+            src/verification/QueueDesignCapture.cpp src/verification/QueueDesignCapture.h
+            src/verification/ReviewControlCapture.cpp src/verification/ReviewControlCapture.h)
         target_link_libraries(betterflash PRIVATE Qt6::Test)
         target_compile_definitions(betterflash PRIVATE BETTERFLASH_GUI_SWEEP)
         add_test(NAME gui COMMAND "${CMAKE_COMMAND}"

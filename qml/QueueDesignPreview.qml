@@ -10,6 +10,7 @@ Item {
     readonly property var design: Studies.get(designIndex)
     readonly property var tokens: Theme.dark ? design.dark : design.light
     property int selectedIndex: 2
+    property Component returnControl: null
     readonly property int count: Studies.cards.length
     property alias contentX: timeline.contentX
     readonly property real minimumScroll: 0
@@ -48,9 +49,16 @@ Item {
             Layout.minimumHeight: 30
             Layout.maximumHeight: 30
             Item { Layout.fillWidth: true }
+            Loader {
+                active: preview.returnControl !== null
+                visible: active && preview.activeOffscreen
+                sourceComponent: preview.returnControl
+                Layout.preferredWidth: item ? item.implicitWidth : 0
+                Layout.preferredHeight: item ? item.implicitHeight : 0
+            }
             AppButton {
                 objectName: "designReturn"
-                visible: preview.activeOffscreen
+                visible: preview.activeOffscreen && preview.returnControl === null
                 text: "Return to active card"
                 hint: "Center the active card without changing your review queue"
                 implicitHeight: 30
