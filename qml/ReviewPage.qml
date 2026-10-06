@@ -323,6 +323,12 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                     Accessible.name: "Next review cards"
+                    function keepCurrentVisible() {
+                        if (currentIndex >= 0 && currentIndex < count)
+                            positionViewAtIndex(currentIndex, ListView.Contain)
+                    }
+                    onCurrentIndexChanged: Qt.callLater(keepCurrentVisible)
+                    onWidthChanged: Qt.callLater(keepCurrentVisible)
                     delegate: Rectangle {
                         required property var modelData
                         required property int index

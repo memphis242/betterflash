@@ -88,6 +88,8 @@ do not consume characters typed into editors or dialogs.
 The deck browser also accepts Left/Right to choose a deck, Down to browse its
 subdecks, and Up to return to the parent level. Tree rows use Left/Right to
 collapse or expand their branches.
+In the review modal, Tab focuses the queue preview; Left/Right brings each
+upcoming question into view.
 
 ## Voice and language models
 
