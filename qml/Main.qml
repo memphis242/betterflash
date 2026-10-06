@@ -534,7 +534,7 @@ ApplicationWindow {
                 return false
             if (app.paused || app.reviewingCompletedCard || !app.currentCard.id)
                 return false
-            if (action === "review" && review.previewHasFocus)
+            if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus))
                 return false
             return action.indexOf("grade") !== 0 || app.answerRevealed
         default:

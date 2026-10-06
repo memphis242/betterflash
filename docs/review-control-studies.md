@@ -3,6 +3,12 @@
 Five native studies compare icon-only Defer to queue end, Later date, and
 Return to active card controls around the approved Review ledger queue.
 
+The production app uses **Utility circles** with 44 px buttons and 22 px
+glyphs. Defer and Later date form a centered pair, the microphone stays on the
+right, and Return occupies a reserved row above the queue. Tooltips show each
+action and its configured shortcut. The comparison studies below use their
+individual sizes and placements.
+
 | # | Study | Footer placement | Size | Hover treatment |
 |---:|---|---|---|---|
 | 1 | Utility circles | Pair at the left | 36 px | Tinted circle and accent outline |

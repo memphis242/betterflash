@@ -79,6 +79,9 @@ button treatments using `./scripts/run-desktop.sh --control-designs`.
   the session; Resume continues the same card and queue.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.
+  Their circular icon buttons sit together at the center of the review footer;
+  voice stays at the right. These controls and Return use 44 px targets with
+  descriptive tooltips, configured shortcut hints, and keyboard activation.
 - Decks, source notes, review schedules, history, and images can be backed up and
   synchronized. API keys are excluded from collection data.
 

@@ -869,6 +869,22 @@ private:
                       && std::abs(rect("reviewQueueCurrent").center().x() - viewport.center().x()) < 2.0
                       && rect("reviewQueuePreview") == viewport,
                   "review_timeline_return_centers_active_without_layout_shift_" + suffix);
+            if (suffix.endsWith("_initial")) {
+                const bool revealed=m_app.answerRevealed();
+                const QVariantList history=m_app.history(),schedules=m_app.cards();
+                for (const Qt::Key activation:{Qt::Key_Space,Qt::Key_Return}) {
+                    preview->setProperty("contentX",maximum);QTest::qWait(60);
+                    focus("reviewQueueReturn");key(activation);
+                    const QString keyName=activation==Qt::Key_Space?QStringLiteral("space"):QStringLiteral("return");
+                    check(!visible("reviewQueueReturn")&&currentVariant()==beforeVariant
+                              &&m_app.pendingCards()==unchangedQueue&&m_app.history()==history&&m_app.cards()==schedules
+                              &&m_app.answerRevealed()==revealed
+                              &&std::abs(rect("reviewQueueCurrent").center().x()-viewport.center().x())<2.0
+                              &&rect("reviewQueuePreview")==viewport,
+                          "review_utility_return_"+keyName+"_centers_without_review_mutation_"+suffix);
+                }
+                focus("reviewQuestion");
+            }
             preview->setProperty("contentX", maximum);
             QTest::qWait(60);
         }
@@ -1174,6 +1190,40 @@ private:
         const QString last = pending.isEmpty() ? QString() : pending.last().toMap().value("variantId",pending.last().toMap().value("id")).toString();
         check(m_app.queueCount() == deferredCount && m_app.history().size() == historyCount+1 && last == deferred,
               "defer_moves_to_end_without_grade_" + theme);
+        {
+            const QString selected=currentVariant();
+            const QVariantList before=m_app.pendingCards(),recordedHistory=m_app.history(),schedules=m_app.cards();
+            QVariantList expected=before;
+            QString successor;
+            for (qsizetype index=0;index<before.size();++index) {
+                if (before[index].toMap().value("variantId").toString()!=selected) continue;
+                successor=before[(index+1)%before.size()].toMap().value("variantId").toString();
+                expected.append(expected.takeAt(index));break;
+            }
+            const int completed=m_app.reviewedCount(),total=m_app.sessionTotal();
+            focus("deferCard");key(Qt::Key_Space);
+            check(waitUntil([this,&successor] {return !m_app.busy()&&currentVariant()==successor;})
+                      &&m_app.pendingCards()==expected&&!m_app.answerRevealed()
+                      &&m_app.history()==recordedHistory&&m_app.cards()==schedules
+                      &&m_app.reviewedCount()==completed&&m_app.sessionTotal()==total,
+                  "review_utility_defer_space_dispatches_once_without_grading_"+theme);
+            focus("reviewQuestion");
+        }
+        {
+            const QString selected=currentVariant();
+            const bool revealed=m_app.answerRevealed();
+            const QVariantList before=m_app.pendingCards(),recordedHistory=m_app.history(),schedules=m_app.cards();
+            focus("postponeCard");key(Qt::Key_Space);
+            check(visible("postponeDialog")&&currentVariant()==selected&&m_app.pendingCards()==before
+                      &&m_app.answerRevealed()==revealed&&m_app.history()==recordedHistory&&m_app.cards()==schedules,
+                  "review_utility_postpone_space_opens_without_review_mutation_"+theme);
+            key(Qt::Key_Escape);
+            check(!visible("postponeDialog")&&visible("reviewDialog")&&currentVariant()==selected
+                      &&m_app.pendingCards()==before&&m_app.answerRevealed()==revealed
+                      &&m_app.history()==recordedHistory&&m_app.cards()==schedules,
+                  "review_utility_postpone_cancel_preserves_review_"+theme);
+            focus("reviewQuestion");
+        }
         const int postponedCount = m_app.queueCount();
         key(Qt::Key_S);
         check(visible("postponeDialog"), "postpone_keyboard_" + theme);

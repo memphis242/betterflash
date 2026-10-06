@@ -9,6 +9,7 @@ Item {
     readonly property bool hasCard: !!app.currentCard.id
     readonly property bool reviewModalVisible: reviewDialog.visible
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
+    readonly property bool reviewUtilityHasFocus: returnToActive.activeFocus || deferUtility.activeFocus || postponeUtility.activeFocus || voiceUtility.activeFocus
     property var timelineCompleted: []
     property var timelineCurrentCard: ({})
     property string timelineCurrentVariant: ""
@@ -397,18 +398,16 @@ Item {
                 spacing: 4
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 30
-                    Layout.minimumHeight: 30
-                    Layout.maximumHeight: 30
+                    Layout.preferredHeight: 44
+                    Layout.minimumHeight: 44
+                    Layout.maximumHeight: 44
                     Item { Layout.fillWidth: true }
-                    AppButton {
+                    ReviewUtilityButton {
+                        id: returnToActive
                         objectName: "reviewQueueReturn"
                         visible: !reviewQueuePreviewList.activeCardVisible && reviewQueuePreviewList.logicalActiveIndex >= 0
-                        text: "Return to active card"
+                        glyph: "return-card"
                         hint: "Center the active card in the review timeline"
-                        implicitHeight: 30
-                        font.pixelSize: 11
-                        padding: 6
                         onClicked: reviewQueuePreviewList.centerCurrent()
                     }
                 }
@@ -930,26 +929,38 @@ Item {
                     Layout.alignment: Qt.AlignHCenter
                     onClicked: reviewQueuePreviewList.selectVariant(app.reviewCursorVariantId)
                 }
-                RowLayout {
+                Item {
+                    objectName: "reviewUtilityFooter"
                     visible: !app.reviewingCompletedCard
                     Layout.fillWidth: true
-                    AppButton {
-                        objectName: "deferCard"
-                        text: page.ui.width < 600 ? "Queue end" : "Defer to queue end"
-                        hint: shortcuts.bindings.defer
-                        enabled: !app.paused && !app.busy
-                        onClicked: app.deferCard()
+                    Layout.preferredHeight: 48
+                    Layout.minimumHeight: 48
+                    Layout.maximumHeight: 48
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 12
+                        ReviewUtilityButton {
+                            id: deferUtility
+                            objectName: "deferCard"
+                            glyph: "queue-tail"
+                            hint: "Defer this card to the end of the review queue" + (shortcuts.bindings.defer ? " (" + shortcuts.bindings.defer + ")" : "")
+                            enabled: !app.paused && !app.busy
+                            onClicked: app.deferCard()
+                        }
+                        ReviewUtilityButton {
+                            id: postponeUtility
+                            objectName: "postponeCard"
+                            glyph: "calendar-day"
+                            hint: "Review this card on a later date" + (shortcuts.bindings.postpone ? " (" + shortcuts.bindings.postpone + ")" : "")
+                            enabled: !app.paused && !app.busy
+                            onClicked: ui.openPostpone()
+                        }
                     }
-                    AppButton {
-                        objectName: "postponeCard"
-                        text: "Later date"
-                        hint: shortcuts.bindings.postpone
-                        enabled: !app.paused && !app.busy
-                        onClicked: ui.openPostpone()
-                    }
-                    Item { Layout.fillWidth: true }
-                    GlyphButton {
+                    ReviewUtilityButton {
+                        id: voiceUtility
                         objectName: "voiceToggle"
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
                         glyph: "mic"
                         selected: voice.enabled
                         hint: voice.enabled ? "Disable voice review" : "Enable voice review"
