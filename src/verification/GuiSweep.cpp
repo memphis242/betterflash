@@ -763,31 +763,53 @@ private:
     void checkReviewQueuePreview(const QString &suffix)
     {
         QObject *const preview = require("reviewQueuePreview");
-        const int expected = static_cast<int>(std::clamp<qsizetype>(m_app.pendingCards().size()-1,0,5));
-        check(preview->property("count").toInt() == expected, "review_preview_count_" + suffix,
-              QStringLiteral("actual=%1 expected=%2 pending=%3").arg(preview->property("count").toInt()).arg(expected).arg(m_app.pendingCards().size()));
-        for (int index = 0; index < expected; ++index) {
-            QObject *const row = object(QStringLiteral("reviewQueueItem%1").arg(index));
-            const QVariantMap pending = m_app.pendingCards().at(index + 1).toMap();
-            const QString expectedId = pending.value("variantId",pending.value("id")).toString();
-            check(row && row->property("variantId").toString() == expectedId,
-                  "review_preview_order_" + suffix + QString::number(index),
-                  QStringLiteral("actual=%1 expected=%2").arg(row ? row->property("variantId").toString() : QStringLiteral("missing"),expectedId));
+        check(preview->property("timelineMode").toBool(), "review_preview_is_timeline_" + suffix);
+        check(preview->property("count").toInt() >= 1, "review_timeline_has_current_card_" + suffix,
+              QStringLiteral("count=%1 pending=%2").arg(preview->property("count").toInt()).arg(m_app.pendingCards().size()));
+
+        const QRectF viewport = rect("reviewQueuePreview");
+        const QRectF surface = rect("reviewDialogSurface");
+        check(viewport.left() >= surface.left() - 1.1 && viewport.right() <= surface.right() + 1.1
+              && viewport.top() >= surface.top() - 1.1 && viewport.bottom() <= surface.bottom() + 1.1,
+              "review_timeline_inside_modal_" + suffix);
+        check(viewport.width() >= surface.width() - 48.0,
+              "review_timeline_spans_modal_section_" + suffix,
+              QStringLiteral("timeline=%1 modal=%2").arg(viewport.width()).arg(surface.width()));
+
+        const int currentIndex = preview->property("currentIndex").toInt();
+        const QRectF currentBounds = rect("reviewQueueCurrent");
+        check(preview->property("currentIndex").isValid() && currentIndex >= 0
+              && std::abs(currentBounds.center().x() - viewport.center().x()) <= viewport.width() * .18,
+              "review_timeline_current_card_is_centered_" + suffix,
+              QStringLiteral("index=%1 currentCenter=%2 timelineCenter=%3").arg(currentIndex)
+                  .arg(currentBounds.center().x()).arg(viewport.center().x()));
+        check(require("reviewQueueCurrent")->property("timelineRole").toString() == QStringLiteral("current"),
+              "review_timeline_marks_current_role_" + suffix);
+
+        const int previousCount = preview->property("previousCount").toInt();
+        const int upcomingCount = preview->property("upcomingCount").toInt();
+        const int expectedUpcoming = std::min(5, std::max(0, static_cast<int>(m_app.pendingCards().size()) - 1));
+        check(previousCount >= 0 && previousCount <= 2 && upcomingCount == expectedUpcoming
+              && preview->property("count").toInt() == upcomingCount + 3,
+              "review_timeline_role_counts_match_" + suffix,
+              QStringLiteral("previous=%1 upcoming=%2 expectedUpcoming=%3 count=%4").arg(previousCount).arg(upcomingCount)
+                  .arg(expectedUpcoming).arg(preview->property("count").toInt()));
+        check(preview->property("previousSpaceReserved").toBool(),
+              "review_timeline_reserves_leading_space_" + suffix);
+        if (previousCount > 0) {
+            QObject *const previous = require("reviewTimelineItem1");
+            check(previous->property("timelineRole").toString() == QStringLiteral("previous")
+                      && !previous->property("variantId").toString().isEmpty()
+                      && previous->property("reviewOutline").toBool()
+                      && previous->property("reviewedGrade").toInt() >= 0
+                      && previous->property("reviewedGrade").toInt() <= 4
+                      && previous->property("opacity").toDouble() < 1.0,
+                  "review_timeline_previous_card_carries_a_faded_grade_" + suffix);
         }
-        if (expected > 0) {
-            const QRectF viewport = rect("reviewQueuePreview");
-            const QRectF surface = rect("reviewDialogSurface");
-            check(viewport.left() >= surface.left() - 1.1 && viewport.right() <= surface.right() + 1.1
-                  && viewport.top() >= surface.top() - 1.1 && viewport.bottom() <= surface.bottom() + 1.1,
-                  "review_preview_inside_modal_" + suffix);
-            if (m_window->width() >= 1000) {
-                for (int index = 0; index < expected; ++index) {
-                    const QRectF rowBounds = rect(QStringLiteral("reviewQueueItem%1").arg(index));
-                    check(rowBounds.left() >= viewport.left() - 1.1 && rowBounds.right() <= viewport.right() + 1.1,
-                          "review_preview_item_fits_viewport_" + suffix + QString::number(index));
-                }
-            }
-        }
+        check(preview->property("fadeEnds").toBool(), "review_timeline_has_faded_ends_" + suffix);
+        check(preview->property("previousCardsFaded").toBool() && preview->property("upcomingCardsHazy").toBool(),
+              "review_timeline_applies_directional_fade_" + suffix);
+        check(preview->property("previousOutlines").toBool(), "review_timeline_previous_cards_have_review_outlines_" + suffix);
     }
     void reviewLifecycle()
     {
@@ -798,7 +820,8 @@ private:
                    "short_review_starts")) return;
         check(visible("reviewDialog"), "short_review_modal_visible");
         QObject *const shortPreview = require("reviewQueuePreview");
-        check(shortPreview->property("count").toInt() == 0, "short_review_has_no_phantom_preview_items");
+        check(shortPreview->property("count").toInt() >= 1 && shortPreview->property("currentIndex").toInt() >= 0,
+              "short_review_timeline_has_current_card");
         m_app.revealAnswer();
         m_app.grade(3);
         check(waitUntil([this] { return !m_app.busy() && !m_app.reviewing(); })
@@ -826,8 +849,14 @@ private:
               && surface.bottom() <= m_window->height() + 1.1
               && require("reviewDialogSurface")->property("radius").toDouble() > 0,
               "review_dialog_is_bounded_and_rounded_" + theme);
-        check(rect("reviewPause").left() <= rect("reviewQueuePreview").left() + 1.1,
-              "review_pause_precedes_queue_preview_" + theme);
+        const QRectF modalHeader = rect("reviewModalHeader");
+        const QRectF pause = rect("reviewPause");
+        check(pause.top() >= modalHeader.top() - 1.1 && pause.bottom() <= modalHeader.bottom() + 1.1
+              && pause.right() <= modalHeader.right() + 1.1 && pause.left() >= modalHeader.left() - 1.1,
+              "review_pause_sits_in_title_bar_" + theme);
+        check(pause.right() >= modalHeader.right() - 180.0,
+              "review_pause_is_to_right_of_deck_title_" + theme,
+              QStringLiteral("pauseRight=%1 headerRight=%2").arg(pause.right()).arg(modalHeader.right()));
         checkReviewQueuePreview(theme + "_initial");
         const QString modalVariant = currentVariant();
         const int modalQueue = m_app.queueCount();

@@ -54,9 +54,10 @@ For an isolated demonstration:
   numbered cloze group separately.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
   fraction remembered. Response time contributes a bounded adjustment.
-- Review cards in a rounded modal over the deck page. The next five question
-  prompts appear beside Pause in queue order. Closing the modal pauses the
-  session; Resume continues the same card and queue.
+- Review cards in a rounded modal over the deck page. Pause sits beside the
+  deck title, and a centered timeline shows completed review results, the
+  current card, and up to five increasingly hazy upcoming prompts. Closing the
+  modal pauses the session; Resume continues the same card and queue.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.
 - Decks, source notes, review schedules, history, and images can be backed up and
@@ -88,8 +89,8 @@ do not consume characters typed into editors or dialogs.
 The deck browser also accepts Left/Right to choose a deck, Down to browse its
 subdecks, and Up to return to the parent level. Tree rows use Left/Right to
 collapse or expand their branches.
-In the review modal, Tab focuses the queue preview; Left/Right brings each
-upcoming question into view.
+In the review modal, Tab focuses the review timeline; Left/Right moves through
+timeline cards without changing the review queue.
 
 ## Voice and language models
 
