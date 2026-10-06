@@ -553,6 +553,7 @@ Item {
                         baseFontSize: page.ui.width < 600 ? 20 : 24
                     }
                     AppButton {
+                        id: revealAnswer
                         objectName: "revealAnswer"
                         visible: !app.answerRevealed
                         text: "Reveal answer"
