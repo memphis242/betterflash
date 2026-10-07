@@ -163,6 +163,7 @@ Item {
         }
     }
     ColumnLayout {
+        visible: !app.reviewing
         anchors.fill: parent
         anchors.margins: page.ui.gutter
         spacing: 16
@@ -424,6 +425,9 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 30
+                Item {
+                    Layout.fillWidth: true
+                }
                 ReviewUtilityButton {
                     id: returnToActive
                     objectName: "reviewQueueReturn"
@@ -431,9 +435,6 @@ Item {
                     glyph: "return-card"
                     hint: "Center the active card in the review timeline"
                     onClicked: reviewQueuePreviewList.centerCurrent()
-                }
-                Item {
-                    Layout.fillWidth: true
                 }
                 GlyphButton {
                     objectName: "reviewQueueCollapse"

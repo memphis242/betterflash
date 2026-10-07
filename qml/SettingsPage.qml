@@ -240,7 +240,7 @@ Item {
                     }
                     Label {
                         textFormat: Text.PlainText
-                        text: "Say 'start review', 'show answer', 'good', 'defer', 'postpone three days', 'pause', or 'resume'. Partial recall also accepts 'two of three points'."
+                        text: "Say 'start review', 'show answer', 'good', 'next card', 'previous card', 'defer', 'pause', or 'resume'. Partial recall accepts 'two of three points'. Use 'confirm rating' or 'keep rating' when correcting an earlier result."
                         color: Theme.inkMuted
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true

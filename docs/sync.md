@@ -35,13 +35,19 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 | `card.upsert` | source `card` and exactly its independently scheduled `variants` |
 | `card.delete` | source `id` |
 | `review.add` | initial `review` and its updated `variant` |
-| `review.correct` | corrected `review` and recalculated `variant`, preserving the review identity, timestamp, response duration, and review count |
+| `review.correct` | corrected `review` and recalculated `variant`, with `previousReview` and `previousVariant` preconditions; review identity, timestamp, response duration, and review count are preserved |
 | `variant.upsert` | `variant`, including a postponed due date |
 
 Imported historical reviews can use `historyOnly: true` without changing a
 schedule. Variant identifiers are UUID version 5 values derived from the source
 card identifier and direction or cloze key. Nested payloads are validated before
 events enter the server log.
+
+Corrections cannot use `historyOnly`. A local correction requires the stored
+review and variant to match the session's last saved result. Remote corrections
+wait for pending writes and dependencies, then compare their preconditions.
+A conflict preserves the current data and reports `SYNC_REVIEW_CONFLICT` while
+consuming the event, allowing later sync pages to continue.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically.
 Upload referenced assets before sending a card event. A card and a received page
