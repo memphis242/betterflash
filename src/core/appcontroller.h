@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QSet>
 #include <functional>
 
 class QThread;
@@ -34,6 +35,8 @@ class AppController final : public QObject {
     Q_PROPERTY(double responseSeconds READ responseSeconds NOTIFY responseSecondsChanged)
     Q_PROPERTY(QString spokenAnswer READ spokenAnswer NOTIFY spokenAnswerChanged)
     Q_PROPERTY(QVariantList pendingCards READ pendingCards NOTIFY reviewStateChanged)
+    Q_PROPERTY(QVariantList reviewCards READ reviewCards NOTIFY reviewStateChanged)
+    Q_PROPERTY(QVariantMap pendingGradeCorrection READ pendingGradeCorrection NOTIFY pendingGradeCorrectionChanged)
 public:
     explicit AppController(const QString &storageDir, QObject *parent = nullptr);
     ~AppController() override;
@@ -59,6 +62,8 @@ public:
     double responseSeconds() const { return m_responseSeconds; }
     QString spokenAnswer() const { return m_spokenAnswer; }
     QVariantList pendingCards() const { return m_pendingCards; }
+    QVariantList reviewCards() const { return m_reviewCards; }
+    QVariantMap pendingGradeCorrection() const { return m_pendingGradeCorrection; }
 
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
     Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
@@ -71,8 +76,11 @@ public:
     Q_INVOKABLE bool replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
     Q_INVOKABLE void startReview(const QString &deckId = {});
     Q_INVOKABLE void selectReviewCard(const QString &variantId);
+    Q_INVOKABLE void navigateReview(int offset);
     Q_INVOKABLE void revealAnswer();
     Q_INVOKABLE void grade(int grade, double recallFraction = -1.0);
+    Q_INVOKABLE void confirmGradeCorrection();
+    Q_INVOKABLE void cancelGradeCorrection();
     Q_INVOKABLE void deferCard();
     Q_INVOKABLE void postponeCard(const QString &date);
     Q_INVOKABLE void postponeDays(int days);
@@ -93,6 +101,7 @@ signals:
     void lastErrorChanged(); void busyChanged(); void reviewingChanged();
     void answerRevealedChanged(); void pausedChanged(); void reviewStateChanged();
     void responseSecondsChanged(); void spokenAnswerChanged();
+    void pendingGradeCorrectionChanged();
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
     void syncBatchReady(const QVariantMap &batch);
     void syncBatchFailed(const QString &code, const QString &message);
@@ -120,8 +129,9 @@ private:
     QString m_statusMessage;
     QString m_spokenAnswer;
     QString m_reviewCursorVariantId;
-    QVariantList m_decks,m_cards,m_history,m_pendingCards;
-    QVariantMap m_currentCard,m_lastError;
+    QVariantList m_decks,m_cards,m_history,m_pendingCards,m_reviewCards;
+    QVariantMap m_currentCard,m_lastError,m_pendingGradeCorrection;
+    QSet<QString> m_leftReviewedVariants;
     bool m_busy = true;
     bool m_reviewing = false;
     bool m_reviewingCompletedCard = false;
@@ -135,4 +145,5 @@ private:
     double m_accumulatedSeconds = 0.0;
     QElapsedTimer m_elapsed;
     QTimer m_elapsedTick;
+    void clearPendingGradeCorrection();
 };

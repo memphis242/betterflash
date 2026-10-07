@@ -239,6 +239,25 @@ bool DatabaseWorker::insertReview(const struct model::Review &r)
     }
     return execute("INSERT INTO reviews(id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due) VALUES(?,?,?,?,?,?,?,?,?)",{r.id,r.cardId,r.variantId,r.deckName,r.grade,r.recallFraction,r.responseSeconds,r.reviewedAt,r.due});
 }
+std::optional<struct model::Review> DatabaseWorker::review(const QString &id)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due FROM reviews WHERE id=?");
+    q.addBindValue(id);
+    if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
+    return q.next()?std::optional<struct model::Review>(readReview(q)):std::nullopt;
+}
+bool DatabaseWorker::correctReview(const struct model::Review &record,const struct model::Review &previous)
+{
+    assert(record.id==previous.id&&record.cardId==previous.cardId&&record.variantId==previous.variantId);
+    assert(record.reviewedAt==previous.reviewedAt&&record.responseSeconds==previous.responseSeconds&&record.deckName==previous.deckName);
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE reviews SET grade=?,recall_fraction=?,due=? WHERE id=? AND card_id=? AND variant_id=? AND reviewed_at=? AND response_seconds=? AND deck_name=? AND grade=? AND recall_fraction=? AND due=?");
+    for (const QVariant &value:QVariantList{record.grade,record.recallFraction,record.due,previous.id,previous.cardId,previous.variantId,previous.reviewedAt,previous.responseSeconds,previous.deckName,previous.grade,previous.recallFraction,previous.due}) q.addBindValue(value);
+    if (!q.exec()) {m_sqlDetail=q.lastError().text();return false;}
+    if (q.numRowsAffected()!=1) {m_sqlDetail="The review changed or no longer exists. Refresh before changing its result.";return false;}
+    return true;
+}
 bool DatabaseWorker::replaceVariants(const struct model::Card &record, const QList<struct model::Variant> &variants)
 {
     QSet<QString> keep;
@@ -389,6 +408,17 @@ QVariantMap DatabaseWorker::reviewCard(const struct model::Card &note,const stru
     result.insert("readingBudgetSeconds",model::readingBudget(result.value("question").toString()));result.insert("deckName",deckName);
     return result;
 }
+QVariantMap DatabaseWorker::sessionCard(const QString &variantId, const QVariantMap &card) const
+{
+    QVariantMap result=card;
+    const auto grade=m_sessionGrades.constFind(variantId);
+    const bool graded=grade!=m_sessionGrades.cend();
+    result.insert("sessionGrade",graded?grade->savedReview.grade:-1);
+    result.insert("sessionRecall",graded?grade->savedReview.recallFraction:-1.0);
+    result.insert("sessionReviewId",graded?grade->savedReview.id:QString());
+    result.insert("responseSeconds",graded?grade->savedReview.responseSeconds:0.0);
+    return result;
+}
 std::optional<QVariantMap> DatabaseWorker::reviewCardByVariant(const QString &variantId)
 {
     const auto schedule=variant(variantId);
@@ -402,16 +432,16 @@ std::optional<QVariantMap> DatabaseWorker::reviewCardByVariant(const QString &va
 bool DatabaseWorker::publishQueue(bool resetCurrent)
 {
     QVariantList cards;
-    const qsizetype selectedPosition=m_queue.indexOf(m_selectedVariant);
-    if (m_queueDirty&&!m_queue.isEmpty()) {
-        const QSet<QString> members(m_queue.cbegin(),m_queue.cend());
+    if (m_queueDirty&&!m_sessionOrder.isEmpty()) {
+        const QSet<QString> members(m_sessionOrder.cbegin(),m_sessionOrder.cend());
+        const QString now=model::nowUtc();
         QHash<QString,QVariantMap> cache;
         QSqlQuery q(m_db);
-        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,d.name FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id WHERE v.due<=?");q.addBindValue(model::nowUtc());
+        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,d.name FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
         if (!q.exec()) {fail("REVIEW_LOAD","Could not load the review queue. Refresh and try again.",q.lastError().text());return false;}
         while (q.next()) {
             const struct model::Variant schedule=readVariant(q);
-            if (!members.contains(schedule.id)) continue;
+            if (!members.contains(schedule.id)||(!m_sessionGrades.contains(schedule.id)&&schedule.due>now)) continue;
             const struct model::Card note{schedule.cardId,q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString(),q.value(12).toInt()};
             const auto keys=model::variantKeys(note);
             if (!keys||!keys->contains(schedule.key)) continue;
@@ -420,22 +450,16 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         m_queueCache=std::move(cache);
     }
     m_queueDirty=false;
-    for (auto it=m_queue.begin();it!=m_queue.end();) {
+    for (auto it=m_sessionOrder.begin();it!=m_sessionOrder.end();) {
         const auto cached=m_queueCache.constFind(*it);
-        if (cached==m_queueCache.cend()) {it=m_queue.erase(it);continue;}
-        cards.append(*cached);++it;
+        if (cached==m_queueCache.cend()) {const QString missing=*it;it=m_sessionOrder.erase(it);m_queue.removeAll(missing);m_sessionGrades.remove(missing);continue;}
+        cards.append(sessionCard(*it,*cached));++it;
     }
-    if (m_queue.isEmpty()) {m_sessionActive=false;m_queueCache.clear();m_selectedVariant.clear();m_inspectedVariant.clear();}
-    else if (!m_queue.contains(m_selectedVariant)) advanceAfterRemoval(std::max(qsizetype(0),selectedPosition));
-    QVariantMap selectedCard;
-    if (!m_inspectedVariant.isEmpty()) {
-        const auto selected=reviewCardByVariant(m_inspectedVariant);
-        if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load the selected card. Refresh and try again.",m_sqlDetail);return false;}
-        if (selected) selectedCard=*selected;
-        else m_inspectedVariant.clear();
-    }
-    if (m_inspectedVariant.isEmpty()&&!m_selectedVariant.isEmpty()) selectedCard=m_queueCache.value(m_selectedVariant);
-    emit reviewQueueReady(cards,m_sessionTotal,resetCurrent,selectedCard,!m_inspectedVariant.isEmpty(),m_selectedVariant);
+    m_sessionTotal=m_sessionOrder.size();
+    if (m_sessionOrder.isEmpty()) {m_sessionActive=false;m_queueCache.clear();m_selectedVariant.clear();}
+    else if (!m_sessionOrder.contains(m_selectedVariant)) m_selectedVariant=m_sessionOrder.first();
+    const QVariantMap selectedCard=m_selectedVariant.isEmpty()?QVariantMap():sessionCard(m_selectedVariant,m_queueCache.value(m_selectedVariant));
+    emit reviewQueueReady(cards,m_sessionTotal,resetCurrent,selectedCard,m_sessionGrades.contains(m_selectedVariant),m_selectedVariant);
     return true;
 }
 void DatabaseWorker::advanceAfterRemoval(qsizetype position)
@@ -564,7 +588,7 @@ void DatabaseWorker::beginReview(const QString &deckId)
     q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants)")+" ORDER BY v.due,n.id,v.variant_key");
     q.addBindValue(model::nowUtc());if (!deckId.isEmpty()) q.addBindValue(deckId);
     if (!q.exec()) {fail("REVIEW_START","Could not start review. Refresh and try again.",q.lastError().text());return;}
-    m_queue.clear();m_queueCache.clear();m_sessionReviewedVariants.clear();m_selectedVariant.clear();m_inspectedVariant.clear();m_queueDirty=true;while (q.next()) m_queue.append(q.value(0).toString());
+    m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();m_selectedVariant.clear();m_queueDirty=true;while (q.next()) { const QString id=q.value(0).toString(); m_queue.append(id); m_sessionOrder.append(id); }
     if (!m_queue.isEmpty()) m_selectedVariant=m_queue.first();
     m_sessionTotal=m_queue.size();m_sessionActive=!m_queue.isEmpty();
     if (publishQueue(true)) done(m_queue.isEmpty()?"No cards are due in this deck":"Review started");
@@ -572,41 +596,42 @@ void DatabaseWorker::beginReview(const QString &deckId)
 void DatabaseWorker::selectReviewCard(const QString &variantId)
 {
     if (!ready()) return;
-    if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before choosing a card.");return;}
-    const qsizetype position=m_queue.indexOf(variantId);
-    if (!model::validUuid(variantId)||(position<0&&!m_sessionReviewedVariants.contains(variantId))) {
+    if (!m_sessionActive||m_sessionOrder.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before choosing a card.");return;}
+    if (!model::validUuid(variantId)||!m_sessionOrder.contains(variantId)) {
         fail("REVIEW_STALE","This card is no longer in the review session. Choose a card in the current queue.");return;
     }
     const auto selected=reviewCardByVariant(variantId);
     if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load the selected card. Refresh and try again.",m_sqlDetail);return;}
-    if (!selected||(position>=0&&selected->value("due").toString()>model::nowUtc())) {
-        fail("REVIEW_STALE","This card is no longer available for review. Refresh and choose another card.");return;
+    if (!selected) {
+        m_queueDirty=true;
+        if (publishQueue(false)) fail("REVIEW_STALE","This card is no longer available for review. Choose another card.");
+        return;
     }
-    if (position>=0) {
-        if (variantId==m_selectedVariant&&m_inspectedVariant.isEmpty()) {done();return;}
-        m_inspectedVariant.clear();
-        m_selectedVariant=variantId;
-        m_queueCache.insert(variantId,*selected);
-    } else m_inspectedVariant=variantId;
+    if (variantId==m_selectedVariant) {done();return;}
+    m_selectedVariant=variantId;
+    m_queueCache.insert(variantId,*selected);
     assert(m_queue.size()<=m_sessionTotal);
-    if (publishQueue(true)) done(position>=0?"Review card selected":"Completed card opened");
+    if (publishQueue(true)) done(m_sessionGrades.contains(variantId)?"Reviewed card selected":"Review card selected");
 }
 void DatabaseWorker::endReview()
 {
     if (!ready()) return;
-    m_queue.clear();m_sessionActive=false;m_selectedVariant.clear();m_inspectedVariant.clear();m_sessionReviewedVariants.clear();
+    m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
+    m_sessionActive=false;m_selectedVariant.clear();m_queueDirty=true;
     emit reviewQueueReady({},m_sessionTotal,true,{},false,{});done("Review ended");
 }
 void DatabaseWorker::defer()
 {
     if (!ready()) return;
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before deferring a card.");return;}
-    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
     const qsizetype position=m_queue.indexOf(m_selectedVariant);
-    assert(position>=0);
+    if (position<0) {fail("REVIEW_COMPLETED","This card is already graded. Choose an ungraded card to defer.");return;}
     const QString deferred=m_queue.takeAt(position);
     advanceAfterRemoval(position);
     m_queue.append(deferred);
+    const qsizetype sessionPosition=m_sessionOrder.indexOf(deferred);
+    assert(sessionPosition>=0);
+    m_sessionOrder.removeAt(sessionPosition);m_sessionOrder.append(deferred);
     if (m_selectedVariant.isEmpty()) m_selectedVariant=deferred;
     if (publishQueue(true)) done("Card moved to the queue end");
 }
@@ -616,40 +641,61 @@ void DatabaseWorker::postpone(const QString &date)
     const QDate day=QDate::fromString(date,Qt::ISODate);
     if (!day.isValid()||date!=day.toString(Qt::ISODate)||day<=QDate::currentDate()) {fail("INVALID_POSTPONE_DATE","Choose a later date in YYYY-MM-DD format.");return;}
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before postponing a card.");return;}
-    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
     const qsizetype position=m_queue.indexOf(m_selectedVariant);
-    assert(position>=0);
+    if (position<0) {fail("REVIEW_COMPLETED","This card is already graded. Choose an ungraded card to postpone.");return;}
     const auto existing=variant(m_selectedVariant);
     if (!existing) {m_queueDirty=true;if (publishQueue(true)) fail("CARD_NOT_FOUND","This review card no longer exists. Continue with the next card.");return;}
     const QDateTime localStart=day.startOfDay(QTimeZone::systemTimeZone());
     if (!localStart.isValid()) {fail("INVALID_POSTPONE_DATE","The selected date has no local start of day. Choose another date.");return;}
     struct model::Variant schedule=*existing;schedule.due=localStart.toUTC().toString(Qt::ISODateWithMs);
     if (!mutate([&]{return upsertVariant(schedule)&&enqueue("variant.upsert",{{"variant",model::toMap(schedule)}});})) {fail("REVIEW_POSTPONE","Could not postpone this card. Check storage and try again.",m_sqlDetail);return;}
-    m_queue.removeAt(position);advanceAfterRemoval(position);
+    m_queue.removeAt(position);m_sessionOrder.removeAll(m_selectedVariant);advanceAfterRemoval(position);
     if (publishSnapshot()&&publishQueue(true)) done("Review postponed to "+date);
 }
 void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QString &expectedVariant)
 {
     if (!ready()) return;
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
-    if (!m_sessionActive||m_queue.isEmpty()||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
-    if (!m_inspectedVariant.isEmpty()) {fail("REVIEW_INSPECTION","Choose an upcoming card to continue reviewing.");return;}
+    if (!m_sessionActive||!m_sessionOrder.contains(expectedVariant)||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
     const auto old=variant(expectedVariant);
     const auto note=old?card(old->cardId):std::nullopt;
     const auto sourceDeck=note?deck(note->deckId):std::nullopt;
-    if (!old||!note||!sourceDeck) {m_queueDirty=true;if (publishQueue(true)) fail("CARD_NOT_FOUND","This review card no longer exists. Continue with the next card.");return;}
-    if (old->reviewCount>=1000000000) {fail("REVIEW_LIMIT","This variant has reached the review count limit. Export the collection and inspect its schedule.");return;}
-    const double readingBudget=model::readingBudget(model::question(*note,old->key));
-    const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(old->stability,old->difficulty,grade,recall,seconds,old->reviewCount,readingBudget);
-    const QString reviewedAt=model::nowUtc();
+    if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load this review. Refresh and try again.",m_sqlDetail);return;}
+    if (!old||!note||!sourceDeck) {m_queueDirty=true;if (publishQueue(false)) fail("CARD_NOT_FOUND","This review card no longer exists. Choose another card.");return;}
+    const bool correction=m_sessionGrades.contains(expectedVariant);
+    if (old->reviewCount>=1000000000&&!correction) {fail("REVIEW_LIMIT","This variant has reached the review count limit. Export the collection and inspect its schedule.");return;}
+    const struct SessionGrade previous=correction?m_sessionGrades.value(expectedVariant):SessionGrade{*old,{}, {},model::readingBudget(model::question(*note,old->key))};
+    const struct model::Variant baseline=previous.baseline;
+    const QString reviewedAt=correction?previous.savedReview.reviewedAt:model::nowUtc();
+    const double effectiveSeconds=correction?previous.savedReview.responseSeconds:seconds;
+    const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(baseline.stability,baseline.difficulty,grade,recall,effectiveSeconds,baseline.reviewCount,previous.readingBudget);
     const QString due=QDateTime::fromString(reviewedAt,Qt::ISODateWithMs).addDays(result.intervalDays).toString(Qt::ISODateWithMs);
-    const struct model::Variant schedule{old->id,old->cardId,old->key,due,old->reviewCount+1,result.stability,result.difficulty};
-    const struct model::Review review{model::uuid(),old->cardId,old->id,sourceDeck->name,grade,recall,seconds,reviewedAt,due};
-    if (!mutate([&]{return upsertVariant(schedule)&&insertReview(review)&&enqueue("review.add",{{"review",model::toMap(review)},{"variant",model::toMap(schedule)}});})) {fail("REVIEW_SAVE","Could not save this review. Check storage and retry the grade.",m_sqlDetail);return;}
-    const qsizetype position=m_queue.indexOf(expectedVariant);
-    assert(position>=0);
-    m_sessionReviewedVariants.insert(expectedVariant);m_queue.removeAt(position);advanceAfterRemoval(position);emit gradeCommitted();
-    if (publishSnapshot()&&publishQueue(true)) done("Review saved");
+    const struct model::Variant schedule{old->id,old->cardId,old->key,due,baseline.reviewCount+1,result.stability,result.difficulty};
+    const struct model::Review record{correction?previous.savedReview.id:model::uuid(),old->cardId,old->id,correction?previous.savedReview.deckName:sourceDeck->name,grade,recall,effectiveSeconds,reviewedAt,due};
+    QVariantMap payload{{"review",model::toMap(record)},{"variant",model::toMap(schedule)}};
+    if (correction) {payload.insert("previousReview",model::toMap(previous.savedReview));payload.insert("previousVariant",model::toMap(previous.savedSchedule));}
+    bool stale=false;
+    if (!mutate([&]{
+        const auto persisted=variant(expectedVariant);
+        if (!m_sqlDetail.isEmpty()) return false;
+        const struct model::Variant expected=correction?previous.savedSchedule:*old;
+        if (!persisted||model::toMap(*persisted)!=model::toMap(expected)) {stale=true;return false;}
+        if (correction) {
+            const auto persistedReview=review(previous.savedReview.id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (!persistedReview||model::toMap(*persistedReview)!=model::toMap(previous.savedReview)) {stale=true;return false;}
+            if (!correctReview(record,previous.savedReview)) return false;
+        } else if (!insertReview(record)) return false;
+        return upsertVariant(schedule)&&enqueue(correction?QStringLiteral("review.correct"):QStringLiteral("review.add"),payload);
+    })) {
+        if (stale) fail("REVIEW_CONFLICT","This review or its schedule changed on another device. End this review session, sync, and start a new session before grading again.");
+        else fail("REVIEW_SAVE","Could not save this review. Check storage and retry the grade.",m_sqlDetail);
+        return;
+    }
+    m_sessionGrades.insert(expectedVariant,SessionGrade{baseline,schedule,record,previous.readingBudget});
+    m_queue.removeAll(expectedVariant);m_queueDirty=true;
+    emit gradeCommitted(correction);
+    if (publishSnapshot()&&publishQueue(false)) done(correction?"Review result updated":"Review saved");
 }
 
 
@@ -726,22 +772,49 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         }
         return m_sqlDetail.isEmpty();
     }
-    if (type==QStringLiteral("review.add")&&payload.value("historyOnly").toBool()) {
-        return !executeEffects||insertReview(*model::reviewFromMap(object(payload,"review")));
+    const bool reviewAdded=type==QStringLiteral("review.add");
+    const bool correction=type==QStringLiteral("review.correct");
+    const std::optional<struct model::Review> record=(reviewAdded||correction)?std::optional<struct model::Review>(*model::reviewFromMap(object(payload,"review"))):std::nullopt;
+    if (reviewAdded&&payload.value("historyOnly").toBool()) {
+        if (!executeEffects) return recordSequence("review",record->id,seq);
+        if (seq<=entitySequence("review",record->id)) return m_sqlDetail.isEmpty();
+        return insertReview(*record)&&recordSequence("review",record->id,seq);
     }
     const struct model::Variant schedule=*model::variantFromMap(object(payload,"variant"));
-    if (type==QStringLiteral("review.add")&&executeEffects) {
-        const struct model::Review review=*model::reviewFromMap(object(payload,"review"));
-        if (!insertReview(review)) return false;
+    if (!executeEffects) return recordSequence("variant",schedule.id,seq)&&(!record||recordSequence("review",record->id,seq));
+    if (pendingEntity("card",schedule.cardId)||pendingEntity("variant",schedule.id)) {applied=false;return m_sqlDetail.isEmpty();}
+    if (!m_sqlDetail.isEmpty()) return false;
+    if (reviewAdded&&seq>entitySequence("review",record->id)) {
+        if (!insertReview(*record)||!recordSequence("review",record->id,seq)) return false;
     }
-    if (!executeEffects) return recordSequence("variant",schedule.id,seq);
+    if (!m_sqlDetail.isEmpty()) return false;
     if (isDeleted("card",schedule.cardId)) return m_sqlDetail.isEmpty();
-    if (seq<=entitySequence("variant",schedule.id)) return m_sqlDetail.isEmpty();
+    if (seq<=entitySequence("variant",schedule.id)) {
+        if (!reviewAdded) return m_sqlDetail.isEmpty();
+        const auto persisted=variant(schedule.id);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!persisted||schedule.reviewCount<=persisted->reviewCount) return true;
+        // A correction must not hide an independently completed later review.
+        m_syncReviewConflicts.append(record->id);
+    }
     const auto source=card(schedule.cardId);
     if (!source) {applied=false;return m_sqlDetail.isEmpty();}
     if (isDeleted("deck",source->deckId)) return m_sqlDetail.isEmpty();
     if (!model::variantKeys(*source)->contains(schedule.key)) return true;
-    if (pendingEntity("card",source->id)||pendingEntity("variant",schedule.id)) {applied=false;return m_sqlDetail.isEmpty();}
+    if (correction) {
+        if (seq<=entitySequence("review",record->id)) return m_sqlDetail.isEmpty();
+        const struct model::Review expectedReview=*model::reviewFromMap(object(payload,"previousReview"));
+        const struct model::Variant expectedSchedule=*model::variantFromMap(object(payload,"previousVariant"));
+        const auto persistedReview=review(record->id);
+        const auto persistedSchedule=variant(schedule.id);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!persistedReview||!persistedSchedule||model::toMap(*persistedReview)!=model::toMap(expectedReview)
+            ||model::toMap(*persistedSchedule)!=model::toMap(expectedSchedule)) {
+            m_syncReviewConflicts.append(record->id);
+            return true;
+        }
+        if (!correctReview(*record,expectedReview)||!recordSequence("review",record->id,seq)) return false;
+    }
     return upsertVariant(schedule)&&recordSequence("variant",schedule.id,seq);
 }
 bool DatabaseWorker::applyRemoteEvent(const QVariantMap &event,qint64 seq,bool &applied)
@@ -858,6 +931,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     const qint64 cursor=response.value("cursor").toLongLong();
     QSet<QString> acceptedIds;for (const QVariant &id:response.value("acceptedIds").toList()) acceptedIds.insert(id.toString());
     bool hasPendingOutbox=false;
+    m_syncReviewConflicts.clear();
     const bool ok=mutate([&] {
         for (const QVariant &value : events) {
             const QVariantMap wrapper=value.toMap();
@@ -875,7 +949,10 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     if (!ok) {fail("SYNC_APPLY","Could not apply sync changes. Existing records and pending uploads were preserved.",m_sqlDetail);appliedSignal(false,false);return;}
     m_cursor=cursor;m_queueDirty=true;
     const bool hasMore=response.value("hasMore").toBool()||hasPendingOutbox;
-    if (publishSnapshot()&&publishQueue(false)) done("Sync applied");
+    if (publishSnapshot()&&publishQueue(false)) {
+        if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
+        else fail("SYNC_REVIEW_CONFLICT","Sync finished, but a conflicting review correction was not applied. Review the affected cards in History before grading them again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
+    }
     appliedSignal(true,hasMore);
 }
 

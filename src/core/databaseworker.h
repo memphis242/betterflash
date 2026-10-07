@@ -43,7 +43,7 @@ signals:
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
                           bool inspecting, const QString &cursorVariantId);
-    void gradeCommitted();
+    void gradeCommitted(bool correction);
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
     void syncBatchReady(const QVariantMap &batch);
     void syncBatchFailed(const QString &code, const QString &message);
@@ -64,10 +64,17 @@ private:
     QHash<QString,struct SyncRequest> m_requests;
     QStringList m_requestOrder;
     QStringList m_queue;
+    QStringList m_sessionOrder;
     QHash<QString,QVariantMap> m_queueCache;
-    QSet<QString> m_sessionReviewedVariants;
+    struct SessionGrade {
+        struct betterflash::model::Variant baseline;
+        struct betterflash::model::Variant savedSchedule;
+        struct betterflash::model::Review savedReview;
+        double readingBudget = 12.0;
+    };
+    QHash<QString,struct SessionGrade> m_sessionGrades;
+    QStringList m_syncReviewConflicts;
     QString m_selectedVariant;
-    QString m_inspectedVariant;
     bool m_queueDirty = true;
     int m_sessionTotal = 0;
     bool m_sessionActive = false;
@@ -84,6 +91,7 @@ private:
     bool publishSnapshot();
     bool publishQueue(bool resetCurrent);
     void advanceAfterRemoval(qsizetype position);
+    QVariantMap sessionCard(const QString &variantId, const QVariantMap &card) const;
     std::optional<struct betterflash::model::Deck> deck(const QString &id);
     std::optional<struct betterflash::model::Card> card(const QString &id);
     std::optional<struct betterflash::model::Variant> variant(const QString &id);
@@ -92,6 +100,9 @@ private:
     bool upsertCard(const struct betterflash::model::Card &record);
     bool upsertVariant(const struct betterflash::model::Variant &record);
     bool insertReview(const struct betterflash::model::Review &record);
+    std::optional<struct betterflash::model::Review> review(const QString &id);
+    bool correctReview(const struct betterflash::model::Review &record,
+                       const struct betterflash::model::Review &previous);
     bool replaceVariants(const struct betterflash::model::Card &record,
                          const QList<struct betterflash::model::Variant> &variants);
     bool tombstone(const QString &type, const QString &id, qint64 seq = 0);
