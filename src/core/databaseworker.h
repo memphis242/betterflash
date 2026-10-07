@@ -91,6 +91,7 @@ private:
     bool publishSnapshot();
     bool publishQueue(bool resetCurrent);
     void advanceAfterRemoval(qsizetype position);
+    void advanceReview(const QString &variantId);
     QVariantMap sessionCard(const QString &variantId, const QVariantMap &card) const;
     std::optional<struct betterflash::model::Deck> deck(const QString &id);
     std::optional<struct betterflash::model::Card> card(const QString &id);
@@ -98,7 +99,8 @@ private:
     QList<struct betterflash::model::Variant> cardVariants(const QString &id);
     bool upsertDeck(const struct betterflash::model::Deck &record);
     bool upsertCard(const struct betterflash::model::Card &record);
-    bool upsertVariant(const struct betterflash::model::Variant &record);
+    bool upsertVariant(const struct betterflash::model::Variant &record,const QString &reviewId = {});
+    QString reviewOwner(const QString &variantId);
     bool insertReview(const struct betterflash::model::Review &record);
     std::optional<struct betterflash::model::Review> review(const QString &id);
     bool correctReview(const struct betterflash::model::Review &record,

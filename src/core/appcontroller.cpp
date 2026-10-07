@@ -146,7 +146,6 @@ void AppController::grade(int grade,double recall)
     const double fraction=recall==-1.0?(grade==0?0.0:grade==1?0.5:1.0):recall;
     const int existing=m_currentCard.value("sessionGrade",-1).toInt();
     const double currentRecall=m_currentCard.value("sessionRecall",-1.0).toDouble();
-    if (existing==grade&&qFuzzyCompare(currentRecall+1.0,fraction+1.0)) {clearPendingGradeCorrection();return;}
     if (existing>=0&&m_leftReviewedVariants.contains(m_currentCard.value("variantId").toString())
         &&(existing!=grade||!qFuzzyCompare(currentRecall+1.0,fraction+1.0))) {
         m_pendingGradeCorrection={{"variantId",m_currentCard.value("variantId")},{"card",m_currentCard},{"currentGrade",existing},{"currentRecall",m_currentCard.value("sessionRecall",-1.0)},{"requestedGrade",grade},{"requestedRecall",fraction}};
@@ -240,7 +239,13 @@ void AppController::handleQueue(const QVariantList &cards,int total,bool resetCu
     const bool moved=m_currentCard.value("variantId")!=selectedCard.value("variantId");
     const bool contentChanged=m_currentCard.value("front")!=selectedCard.value("front")||m_currentCard.value("back")!=selectedCard.value("back");
     const bool changed=resetCurrent||moved||contentChanged;
-    if (moved&&m_currentCard.value("sessionGrade",-1).toInt()>=0) m_leftReviewedVariants.insert(m_currentCard.value("variantId").toString());
+    if (moved) {
+        const QString previous=m_currentCard.value("variantId").toString();
+        const bool graded=m_currentCard.value("sessionGrade",-1).toInt()>=0||std::any_of(cards.cbegin(),cards.cend(),[&](const QVariant &value){
+            const QVariantMap card=value.toMap();return card.value("variantId").toString()==previous&&card.value("sessionGrade",-1).toInt()>=0;
+        });
+        if (graded) m_leftReviewedVariants.insert(previous);
+    }
     if (changed||m_currentCard.value("sessionReviewId")!=selectedCard.value("sessionReviewId")
         ||m_currentCard.value("sessionGrade")!=selectedCard.value("sessionGrade")||m_currentCard.value("sessionRecall")!=selectedCard.value("sessionRecall")) clearPendingGradeCorrection();
     const bool wasCompleted=m_reviewingCompletedCard;
