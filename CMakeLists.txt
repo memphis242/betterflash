@@ -32,8 +32,16 @@ target_link_libraries(betterflash_integrations PUBLIC betterflash_core Qt6::Netw
 target_link_libraries(betterflash_voice PRIVATE betterflash_integrations)
 
 qt_add_executable(betterflash src/main.cpp)
-qt_add_resources(betterflash application_icon PREFIX /icons BASE packaging
-    FILES packaging/betterflash.svg)
+set(BETTERFLASH_ICON_SIZES 16 24 32 48 64 128 256 512)
+set(BETTERFLASH_ICON_FILES)
+foreach(icon_size IN LISTS BETTERFLASH_ICON_SIZES)
+    list(APPEND BETTERFLASH_ICON_FILES "packaging/icons/${icon_size}x${icon_size}/betterflash.png")
+endforeach()
+qt_add_resources(betterflash application_icons PREFIX /icons BASE packaging/icons
+    FILES ${BETTERFLASH_ICON_FILES})
+qt_add_resources(betterflash branding_assets PREFIX /branding BASE packaging/branding
+    FILES packaging/branding/walnut.png packaging/branding/walnut-blueberry.png
+    packaging/branding/walnut-spinach.png)
 qt_add_resources(betterflash application_fonts PREFIX /fonts BASE packaging/fonts
     FILES packaging/fonts/IBMPlexMono-Regular.ttf packaging/fonts/IBMPlexMono-Bold.ttf
     packaging/fonts/IBMPlexMono-Italic.ttf packaging/fonts/IBMPlexMono-BoldItalic.ttf)
@@ -75,7 +83,10 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS betterflash RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/org.betterflash.BetterFlash.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES packaging/betterflash.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+foreach(icon_size IN LISTS BETTERFLASH_ICON_SIZES)
+    install(FILES "packaging/icons/${icon_size}x${icon_size}/betterflash.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${icon_size}x${icon_size}/apps")
+endforeach()
 install(FILES ${LICENSE_NOTICES} THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/betterflash)
 
 include(CTest)

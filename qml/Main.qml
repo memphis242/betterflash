@@ -703,22 +703,9 @@ ApplicationWindow {
             spacing: 10
             Item {
                 objectName: "appMark"
-                Layout.preferredWidth: 22
-                Layout.preferredHeight: 22
-                ToolTip.visible: logoHover.containsMouse
-                ToolTip.text: "BetterFlash"
-                Accessible.name: "BetterFlash"
-                Icon {
-                    anchors.fill: parent
-                    kind: "cards"
-                    stroke: Theme.ink
-                }
-                MouseArea {
-                    id: logoHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                }
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                BrandMark { anchors.fill: parent }
             }
             Item {
                 Layout.fillWidth: true

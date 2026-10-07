@@ -67,7 +67,7 @@ fi
 
 env_command="$(command -v env)"
 run_script="${project_dir}/scripts/run-desktop.sh"
-icon_file="${project_dir}/packaging/betterflash.svg"
+icon_file="${project_dir}/packaging/icons/512x512/betterflash.png"
 cat >"$desktop_file" <<EOF
 [Desktop Entry]
 Type=Application

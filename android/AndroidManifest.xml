@@ -17,7 +17,7 @@
         </intent>
     </queries>
     <application android:name="org.qtproject.qt.android.bindings.QtApplication"
-        android:label="BetterFlash" android:icon="@drawable/betterflash_icon"
+        android:label="BetterFlash" android:icon="@mipmap/betterflash_icon"
         android:allowBackup="false" android:supportsRtl="true"
         android:hardwareAccelerated="true" android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="false">

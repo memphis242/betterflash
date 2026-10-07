@@ -55,7 +55,7 @@ ApplicationWindow {
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             spacing: 14
-            Icon { kind: "cards"; stroke: Theme.ink; Layout.preferredWidth: 23; Layout.preferredHeight: 23 }
+            BrandMark { Layout.preferredWidth: 32; Layout.preferredHeight: 32 }
             ColumnLayout {
                 spacing: 3
                 Label { text: "Queue studies"; font.pixelSize: 20; font.bold: true; color: Theme.ink }

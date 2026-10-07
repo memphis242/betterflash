@@ -50,7 +50,11 @@ int main(int argc, char **argv) {
         }
     }
     application.setFont(QFont(QStringLiteral("IBM Plex Mono")));
-    application.setWindowIcon(QIcon(QStringLiteral(":/icons/betterflash.svg")));
+    QIcon applicationIcon;
+    for (const int iconSize : {16, 24, 32, 48, 64, 128, 256, 512}) {
+        applicationIcon.addFile(QStringLiteral(":/icons/%1x%1/betterflash.png").arg(iconSize));
+    }
+    application.setWindowIcon(applicationIcon);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QCommandLineParser parser;
