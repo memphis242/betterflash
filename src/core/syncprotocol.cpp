@@ -51,18 +51,34 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
         }
         return true;
     }
-    if (type==QStringLiteral("review.add")&&payload.value("historyOnly").toBool()) {
-        if (payload.value("historyOnly").metaType().id()!=QMetaType::Bool) {detail="historyOnly must be a boolean.";return false;}
-        const auto review=model::reviewFromMap(object(payload,"review"));
-        if (!review) {detail=review.error();return false;}return true;
-    }
-    if (type==QStringLiteral("variant.upsert")||type==QStringLiteral("review.add")) {
+    if (type==QStringLiteral("variant.upsert")) {
         const auto schedule=model::variantFromMap(object(payload,"variant"));
         if (!schedule) {detail=schedule.error();return false;}
-        if (type==QStringLiteral("review.add")) {
-            const auto review=model::reviewFromMap(object(payload,"review"));
-            if (!review) {detail=review.error();return false;}
-            if (review->cardId!=schedule->cardId||review->variantId!=schedule->id||review->due!=schedule->due) {detail="Review and schedule dependencies do not match.";return false;}
+        return true;
+    }
+    if (type==QStringLiteral("review.add")||type==QStringLiteral("review.correct")) {
+        const bool correction=type==QStringLiteral("review.correct");
+        if (payload.contains("historyOnly")&&payload.value("historyOnly").metaType().id()!=QMetaType::Bool) {detail="historyOnly must be a boolean.";return false;}
+        const auto review=model::reviewFromMap(object(payload,"review"));
+        if (!review) {detail=review.error();return false;}
+        if (payload.value("historyOnly").toBool()) {
+            if (correction) {detail="A review correction must include its schedule.";return false;}
+            return true;
+        }
+        const auto schedule=model::variantFromMap(object(payload,"variant"));
+        if (!schedule) {detail=schedule.error();return false;}
+        if (review->cardId!=schedule->cardId||review->variantId!=schedule->id||review->due!=schedule->due) {detail="Review and schedule dependencies do not match.";return false;}
+        if (correction) {
+            const auto previousReview=model::reviewFromMap(object(payload,"previousReview"));
+            const auto previousSchedule=model::variantFromMap(object(payload,"previousVariant"));
+            if (!previousReview) {detail=previousReview.error();return false;}
+            if (!previousSchedule) {detail=previousSchedule.error();return false;}
+            if (review->id!=previousReview->id||review->cardId!=previousReview->cardId||review->variantId!=previousReview->variantId
+                ||review->deckName!=previousReview->deckName||review->reviewedAt!=previousReview->reviewedAt||review->responseSeconds!=previousReview->responseSeconds
+                ||schedule->id!=previousSchedule->id||schedule->cardId!=previousSchedule->cardId||schedule->key!=previousSchedule->key
+                ||schedule->reviewCount!=previousSchedule->reviewCount||schedule->reviewCount<1||previousReview->due!=previousSchedule->due) {
+                detail="A correction must preserve the review identity, time, response duration, and review count.";return false;
+            }
         }
         return true;
     }

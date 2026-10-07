@@ -28,7 +28,7 @@ MEDIA_LIMIT = 20 * 1024 * 1024
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif))$")
-EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "variant.upsert"))
+EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert"))
 MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
 
 
@@ -178,16 +178,28 @@ def validate_payload(kind, payload):
                 if variant["cardId"] != card["id"] or variant["key"] not in expected or variant["key"] in keys:
                     raise ProtocolError("INVALID_EVENT", "Card variant dependencies are invalid or duplicated.")
                 keys.add(variant["key"])
-        case "review.add":
+        case "review.add" | "review.correct":
             review = payload.get("review")
             validate_review(review)
             if "historyOnly" in payload and type(payload["historyOnly"]) is not bool:
                 raise ProtocolError("INVALID_EVENT", "historyOnly must be a boolean.")
+            if kind == "review.correct" and payload.get("historyOnly", False):
+                raise ProtocolError("INVALID_EVENT", "A review correction must include its schedule.")
             if not payload.get("historyOnly", False):
                 variant = payload.get("variant")
                 validate_variant(variant)
                 if review["cardId"] != variant["cardId"] or review["variantId"] != variant["id"] or instant(review["due"]) != instant(variant["due"]):
                     raise ProtocolError("INVALID_EVENT", "Review and schedule dependencies do not match.")
+                if kind == "review.correct":
+                    previous_review, previous_variant = payload.get("previousReview"), payload.get("previousVariant")
+                    validate_review(previous_review)
+                    validate_variant(previous_variant)
+                    if (any(review[key] != previous_review[key] for key in ("id", "cardId", "variantId", "deckName", "responseSeconds"))
+                            or instant(review["reviewedAt"]) != instant(previous_review["reviewedAt"])
+                            or any(variant[key] != previous_variant[key] for key in ("id", "cardId", "key", "reviewCount"))
+                            or variant["reviewCount"] < 1
+                            or instant(previous_review["due"]) != instant(previous_variant["due"])):
+                        raise ProtocolError("INVALID_EVENT", "A correction must preserve the review identity, time, response duration, and review count.")
         case "variant.upsert":
             validate_variant(payload.get("variant"))
 
