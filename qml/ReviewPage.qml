@@ -2,18 +2,23 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml
+import QtCore
 
 Item {
     id: page
     required property var ui
     readonly property bool hasCard: !!app.currentCard.id
-    readonly property bool reviewModalVisible: reviewDialog.visible
+    readonly property bool correctionDialogVisible: gradeCorrectionDialog.visible
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
+    readonly property bool timelineScrollHasFocus: reviewQueueScrollBar.activeFocus
     readonly property bool reviewUtilityHasFocus: returnToActive.activeFocus || deferUtility.activeFocus || postponeUtility.activeFocus || voiceUtility.activeFocus
-    property var timelineCompleted: []
-    property var timelineCurrentCard: ({})
-    property string timelineCurrentVariant: ""
-    property int timelineReviewedCount: 0
+    property bool queueCollapsed: preferences.reviewQueueCollapsed
+    property Settings preferences: Settings {
+        category: "review"
+        property bool reviewQueueCollapsed: false
+    }
+    onQueueCollapsedChanged: preferences.reviewQueueCollapsed = queueCollapsed
+    readonly property var reviewCards: app.reviewCards
     readonly property var queueStats: [
         { key: "due", label: "Due now", count: deckCount("dueCount"), hint: "Review variants due in this deck and its subdecks" },
         { key: "new", label: "New due", count: deckCount("newDueCount"), hint: "Due variants that have never been reviewed" },
@@ -25,13 +30,17 @@ Item {
             return ui.selectedDeck[key] || 0
         return app.decks.filter(deck => !deck.parentId).reduce((total, deck) => total + (deck[key] || 0), 0)
     }
-    function openReviewModal() {
-        if (app.reviewing)
-            reviewDialog.open()
+    function cardTags(card) {
+        const raw = card && (card.tags || card.labels || [])
+        if (Array.isArray(raw))
+            return raw.filter(tag => String(tag).trim().length > 0).map(tag => String(tag).trim())
+        return String(raw || "").split(",").map(tag => tag.trim()).filter(tag => tag.length > 0)
     }
-    function dismissReviewModal() {
-        if (reviewDialog.visible)
-            reviewDialog.close()
+    function cardGrade(card) {
+        if (!card)
+            return -1
+        const grade = Number(card.sessionGrade)
+        return Number.isFinite(grade) ? grade : -1
     }
     function reviewSnippet(variant) {
         const prefix = "Ask the question that this answers based on deck context: \n\n"
@@ -77,56 +86,13 @@ Item {
         return (minutes < 10 ? "0" : "") + minutes + ":" + (remaining < 10 ? "0" : "") + remaining
     }
     function reviewTimelineItem(index) {
-        const emptyCount = Math.max(0, 2 - timelineCompleted.length)
-        if (index < emptyCount)
+        const cards = page.reviewCards || []
+        const card = cards[index]
+        if (!card)
             return { kind: "empty", index: index }
-        const completedIndex = index - emptyCount
-        if (completedIndex < timelineCompleted.length) {
-            const completedCard = timelineCompleted[completedIndex]
-            return { kind: "previous", card: completedCard.card, grade: completedCard.grade, index: index }
-        }
-        const pendingIndex = index - Math.max(2, timelineCompleted.length)
-        const card = app.pendingCards[pendingIndex]
-        const current = card && card.variantId === app.currentCard.variantId
-        return { kind: current ? "current" : "upcoming", card: card, pendingIndex: pendingIndex, upcomingIndex: pendingIndex - 1, index: index }
-    }
-    Connections {
-        target: app
-        function onReviewingChanged() {
-            if (app.reviewing) {
-                page.timelineCompleted = []
-                page.timelineReviewedCount = app.reviewedCount
-                page.timelineCurrentCard = app.currentCard
-                page.timelineCurrentVariant = app.currentCard.variantId || ""
-                page.openReviewModal()
-            } else if (reviewDialog.visible)
-                reviewDialog.close()
-        }
-        function onCurrentCardChanged() {
-            const nextVariant = app.currentCard.variantId || ""
-            if (app.reviewedCount > page.timelineReviewedCount && page.timelineCurrentVariant && nextVariant !== page.timelineCurrentVariant) {
-                const recorded = app.history.find(review => review.variantId === page.timelineCurrentVariant)
-                if (recorded)
-                    page.timelineCompleted = page.timelineCompleted.concat([{
-                        card: page.timelineCurrentCard,
-                        grade: recorded.grade
-                    }])
-            }
-            page.timelineReviewedCount = app.reviewedCount
-            page.timelineCurrentCard = app.currentCard
-            page.timelineCurrentVariant = nextVariant
-        }
-        function onPausedChanged() {
-            if (app.reviewing && !app.paused)
-                page.openReviewModal()
-        }
-    }
-    Connections {
-        target: voice
-        function onEnabledChanged() {
-            if (voice.enabled && app.reviewing)
-                page.openReviewModal()
-        }
+        const grade = page.cardGrade(card)
+        const current = card.variantId === app.currentCard.variantId
+        return { kind: current ? "current" : grade >= 0 ? "previous" : "upcoming", card: card, grade: grade, pendingIndex: index, upcomingIndex: index, index: index }
     }
     ColumnLayout {
         anchors.fill: parent
@@ -161,12 +127,13 @@ Item {
         Item {
             id: idle
             objectName: "reviewIdle"
-            visible: true
+            visible: !app.reviewing
             Layout.fillWidth: true
             Layout.fillHeight: true
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 20
+                visible: !app.reviewing
                 ScrollView {
                     id: idleScroll
                     objectName: "reviewDeckBrowserScroll"
@@ -265,7 +232,6 @@ Item {
                             enabled: !app.busy && (app.reviewing || !app.decks.length || page.deckCount("cardCount") === 0 || page.deckCount("dueCount") > 0)
                             onClicked: {
                                 if (app.reviewing) {
-                                    page.openReviewModal()
                                     if (app.paused)
                                         app.resumeReview()
                                 } else if (!app.decks.length)
@@ -290,41 +256,16 @@ Item {
             }
         }
     }
-    Dialog {
+    Item {
         id: reviewDialog
-        objectName: "reviewDialog"
-        parent: Overlay.overlay
-        modal: true
+        objectName: "reviewWorkspace"
+        visible: app.reviewing
         focus: true
-        anchors.centerIn: parent
-        width: Math.min(1120, page.ui.width - 2 * page.ui.gutter)
-        height: Math.min(780, page.ui.height - 2 * page.ui.gutter)
-        padding: page.ui.width < 600 ? 14 : 22
-        closePolicy: Popup.CloseOnEscape
-        onClosed: {
-            if (app.reviewing && !app.paused)
-                app.pauseReview()
-        }
-        background: Rectangle {
-            objectName: "reviewDialogSurface"
-            color: Theme.surface
-            radius: 16
-            border.color: Theme.rule
-            border.width: 1
-        }
-        Overlay.modal: Rectangle { color: Theme.scrim }
-        contentItem: ColumnLayout {
+        anchors.fill: parent
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: page.ui.gutter
             spacing: 14
-            Instantiator {
-                model: ui.shortcutCommands.filter(c => c.action.indexOf("editor") !== 0 && c.action !== "saveCard").map(c => c.action)
-                delegate: Shortcut {
-                    required property string modelData
-                    sequence: shortcuts.bindings[modelData] || ""
-                    context: Qt.WindowShortcut
-                    enabled: reviewDialog.visible && ui.shortcutAllowed(modelData)
-                    onActivated: ui.runAction(modelData)
-                }
-            }
             RowLayout {
                 objectName: "reviewModalHeader"
                 Layout.fillWidth: true
@@ -373,12 +314,6 @@ Item {
                 }
                 Item { Layout.fillWidth: true }
                 GlyphButton {
-                    objectName: "reviewClose"
-                    glyph: "close"
-                    hint: "Close review and pause"
-                    onClicked: reviewDialog.close()
-                }
-                GlyphButton {
                     objectName: "reviewMenuButton"
                     glyph: "more"
                     hint: "Review actions"
@@ -388,47 +323,75 @@ Item {
                         y: parent.height
                         MenuItem { text: "Edit current card"; onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id) }
                         MenuItem { text: "Summarize remaining cards"; enabled: app.queueCount > 0; onTriggered: ui.openSummary() }
-                        MenuItem { text: "End review"; onTriggered: app.stopReview() }
+                        MenuItem { text: app.reviewedCount >= app.sessionTotal ? "Finish review" : "End review"; onTriggered: app.stopReview() }
                     }
+                }
+            }
+            ProgressBar {
+                id: reviewProgress
+                objectName: "reviewProgress"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 8
+                from: 0
+                to: Math.max(1, page.reviewCards.length)
+                value: app.reviewedCount
+                Accessible.name: "Review progress: " + app.reviewedCount + " of " + page.reviewCards.length + " cards reviewed"
+                background: Row {
+                    spacing: page.reviewCards.length > 0 && width / page.reviewCards.length >= 3 ? Math.min(3, width / page.reviewCards.length / 2) : 0
+                    Repeater {
+                        model: page.reviewCards.length
+                        delegate: Rectangle {
+                            required property int index
+                            width: Math.max(0.5, (reviewProgress.width - (page.reviewCards.length - 1) * parent.spacing) / Math.max(1, page.reviewCards.length))
+                            height: 4
+                            radius: 2
+                            color: page.cardGrade(page.reviewCards[index]) >= 0 ? page.gradeColor(page.cardGrade(page.reviewCards[index])) : Theme.transparent
+                            border.width: page.cardGrade(page.reviewCards[index]) >= 0 ? 0 : 1
+                            border.color: Theme.rule
+                            ToolTip.visible: progressHover.hovered
+                            ToolTip.text: "Card " + (index + 1) + " of " + page.reviewCards.length + ": " + (page.cardGrade(page.reviewCards[index]) >= 0 ? page.gradeName(page.cardGrade(page.reviewCards[index])) : "Not reviewed")
+                            HoverHandler { id: progressHover }
+                        }
+                    }
+                }
+                contentItem: Item { }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 30
+                ReviewUtilityButton {
+                    id: returnToActive
+                    objectName: "reviewQueueReturn"
+                    visible: !reviewQueuePreviewList.activeCardVisible && reviewQueuePreviewList.logicalActiveIndex >= 0
+                    glyph: "return-card"
+                    hint: "Center the active card in the review timeline"
+                    onClicked: reviewQueuePreviewList.centerCurrent()
+                }
+                Item { Layout.fillWidth: true }
+                GlyphButton {
+                    objectName: "reviewQueueCollapse"
+                    visible: !page.queueCollapsed
+                    glyph: "up"
+                    hint: "Hide review queue"
+                    onClicked: page.queueCollapsed = true
+                }
+                GlyphButton {
+                    objectName: "reviewQueueReopen"
+                    visible: page.queueCollapsed
+                    glyph: "down"
+                    hint: "Show review queue"
+                    onClicked: page.queueCollapsed = false
                 }
             }
             ColumnLayout {
                 objectName: "reviewQueueBar"
                 Layout.fillWidth: true
                 spacing: 4
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 44
-                    Layout.minimumHeight: 44
-                    Layout.maximumHeight: 44
-                    Item { Layout.fillWidth: true }
-                    ReviewUtilityButton {
-                        id: returnToActive
-                        objectName: "reviewQueueReturn"
-                        visible: !reviewQueuePreviewList.activeCardVisible && reviewQueuePreviewList.logicalActiveIndex >= 0
-                        glyph: "return-card"
-                        hint: "Center the active card in the review timeline"
-                        onClicked: reviewQueuePreviewList.centerCurrent()
-                    }
-                }
+                visible: !page.queueCollapsed
                 Flickable {
                     id: reviewQueuePreviewList
                     objectName: "reviewQueuePreview"
-                    readonly property bool timelineMode: true
-                    readonly property bool scrollable: interactive
-                    readonly property bool horizontalScrollable: true
-                    readonly property bool autoCentersCurrent: false
-                    readonly property bool railVisible: false
-                    readonly property bool currentLabelVisible: false
-                    readonly property int previousCount: page.timelineCompleted.length
-                    readonly property int upcomingCount: Math.max(0, app.pendingCards.length - 1)
-                    readonly property bool previousSpaceReserved: true
-                    readonly property bool fadeEnds: true
-                    readonly property bool previousCardsFaded: true
-                    readonly property bool upcomingCardsHazy: true
-                    readonly property bool previousOutlines: true
-                    readonly property int count: Math.max(2, page.timelineCompleted.length) + app.pendingCards.length
-                    readonly property bool virtualized: true
+                    readonly property int count: page.reviewCards.length
                     readonly property int visibleStartIndex: Math.max(0, Math.min(count, Math.floor((contentX - leadingTrack) / stride) - 1))
                     readonly property int visibleEndIndex: Math.max(visibleStartIndex, Math.min(count, Math.ceil((contentX + width - leadingTrack) / stride) + 1))
                     readonly property int renderedCount: visibleEndIndex - visibleStartIndex
@@ -437,10 +400,10 @@ Item {
                     readonly property real stride: slotWidth + spacing
                     readonly property real fadeWidth: Math.min(24, width * 0.08)
                     readonly property real leadingTrack: Math.max(0, (width - slotWidth) / 2)
-                    readonly property int firstCardIndex: Math.max(0, 2 - page.timelineCompleted.length)
-                    readonly property real minimumScroll: firstCardIndex < 0 ? 0 : Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
+                    readonly property int firstCardIndex: 0
+                    readonly property real minimumScroll: Math.max(0, leadingTrack + firstCardIndex * stride + slotWidth / 2 - width / 2)
                     readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth / 2 - width / 2)
-                    property int currentIndex: Math.max(2, page.timelineCompleted.length)
+                    property int currentIndex: Math.max(0, page.reviewCards.findIndex(card => card.variantId === app.currentCard.variantId))
                     readonly property int logicalActiveIndex: activeIndex()
                     readonly property real activeCardLeft: leadingTrack + logicalActiveIndex * stride
                     readonly property bool activeCardVisible: logicalActiveIndex >= 0 && activeCardLeft + slotWidth > contentX && activeCardLeft < contentX + width
@@ -466,12 +429,7 @@ Item {
                         const currentVariant = app.currentCard.variantId
                         if (!currentVariant)
                             return -1
-                        if (!app.reviewingCompletedCard) {
-                            const pendingIndex = app.pendingCards.findIndex(card => card.variantId === currentVariant)
-                            return pendingIndex < 0 ? -1 : Math.max(2, page.timelineCompleted.length) + pendingIndex
-                        }
-                        const completedIndex = page.timelineCompleted.findIndex(item => item.card.variantId === currentVariant)
-                        return completedIndex < 0 ? -1 : firstCardIndex + completedIndex
+                        return page.reviewCards.findIndex(card => card.variantId === currentVariant)
                     }
                     function centerCurrent() {
                         const index = logicalActiveIndex
@@ -491,10 +449,19 @@ Item {
                             contentX = Math.min(maximumScroll, right + fadeWidth - width)
                     }
                     function decrementCurrentIndex() {
-                        focusIndex(Math.max(firstCardIndex, currentIndex - 1))
+                        const nextIndex = Math.max(firstCardIndex, currentIndex - 1)
+                        focusIndex(nextIndex)
+                        selectIndex(nextIndex)
                     }
                     function incrementCurrentIndex() {
-                        focusIndex(Math.min(count - 1, Math.max(firstCardIndex, currentIndex + 1)))
+                        const nextIndex = Math.min(count - 1, Math.max(firstCardIndex, currentIndex + 1))
+                        focusIndex(nextIndex)
+                        selectIndex(nextIndex)
+                    }
+                    function navigateOffset(offset) {
+                        if (app.busy || app.paused)
+                            return
+                        app.navigateReview(offset)
                     }
                     function selectVariant(variantId) {
                         if (!variantId || app.busy)
@@ -521,13 +488,12 @@ Item {
                     }
                     Component.onCompleted: Qt.callLater(centerCurrent)
                     Connections {
-                        target: reviewDialog
-                        function onOpened() {
-                            Qt.callLater(reviewQueuePreviewList.centerCurrent)
+                        target: app
+                        function onReviewingChanged() {
+                            if (app.reviewing)
+                                Qt.callLater(reviewQueuePreviewList.centerCurrent)
                         }
                     }
-                    Keys.onLeftPressed: decrementCurrentIndex()
-                    Keys.onRightPressed: incrementCurrentIndex()
                     Keys.onReturnPressed: selectIndex(currentIndex)
                     Keys.onEnterPressed: selectIndex(currentIndex)
                     Keys.onSpacePressed: selectIndex(currentIndex)
@@ -547,15 +513,10 @@ Item {
                                 readonly property bool isPrevious: modelData.kind === "previous"
                                 readonly property bool isCurrent: variantId.length > 0 && variantId === app.currentCard.variantId
                                 readonly property bool isUpcoming: modelData.kind === "upcoming"
-                                readonly property bool currentLabelVisible: false
-                                readonly property int reviewedGrade: isPrevious ? Number(modelData.grade) : -1
-                                readonly property bool reviewOutline: isPrevious
-                                readonly property string timelineRole: modelData.kind
+                                readonly property int reviewedGrade: page.cardGrade(card)
+                                readonly property bool isReviewed: reviewedGrade >= 0
                                 readonly property int cardNumber: timelineIndex - reviewQueuePreviewList.firstCardIndex + 1
                                 readonly property string ordinal: (cardNumber < 10 ? "0" : "") + cardNumber
-                                readonly property real renderedOpacity: previewCard.opacity
-                                readonly property real renderedWidth: previewCard.width
-                                readonly property real renderedLeft: reviewQueuePreviewList.leadingTrack + timelineIndex * reviewQueuePreviewList.stride + previewCard.x
                                 readonly property real viewportLeft: reviewQueuePreviewList.leadingTrack + timelineIndex * reviewQueuePreviewList.stride - reviewQueuePreviewList.contentX
                                 readonly property real revealAmount: isUpcoming && !isCurrent ? Math.max(0, Math.min(1, (reviewQueuePreviewList.width - reviewQueuePreviewList.fadeWidth - viewportLeft) / width)) : 1
                                 objectName: isCurrent ? "reviewQueueCurrent" : isUpcoming ? (modelData.pendingIndex === 0 ? "reviewQueuePendingFirst" : "reviewQueueItem" + modelData.upcomingIndex) : "reviewTimelineItem" + timelineIndex
@@ -571,7 +532,7 @@ Item {
                                     color: timelineSlot.isCurrent ? Theme.ledgerSurfaceRaised : Theme.ledgerSurface
                                     border.color: timelineSlot.isCurrent ? Theme.accent : timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.ledgerRule
                                     border.width: timelineSlot.isCurrent ? 3 : 1
-                                    radius: 2
+                                    radius: 10
                                     ToolTip.visible: queueHover.hovered
                                     ToolTip.text: timelineSlot.isPrevious ? "Reviewed " + page.gradeName(timelineSlot.reviewedGrade) + ": " + page.reviewSnippet(timelineSlot.card) : page.reviewSnippet(timelineSlot.card)
                                     Accessible.role: Accessible.Button
@@ -584,23 +545,33 @@ Item {
                                             reviewQueuePreviewList.selectIndex(timelineSlot.timelineIndex)
                                         }
                                     }
+                                    Rectangle {
+                                        x: 5
+                                        y: 6
+                                        width: 6
+                                        height: parent.height - 12
+                                        radius: 3
+                                        color: timelineSlot.isReviewed ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.ledgerRule
+                                        opacity: timelineSlot.isCurrent ? 1 : 0.72
+                                    }
                                     Label {
-                                        x: 12
+                                        x: 18
                                         y: 35
                                         textFormat: Text.PlainText
                                         text: timelineSlot.ordinal
                                         color: timelineSlot.isCurrent ? Theme.accent : Theme.inkMuted
                                         font.family: Theme.monoFont
-                                        font.pixelSize: 15
+                                        font.pixelSize: 16
+                                        font.bold: true
                                         Accessible.name: "Review card " + timelineSlot.cardNumber + " of " + (reviewQueuePreviewList.count - reviewQueuePreviewList.firstCardIndex)
                                         ToolTip.visible: ordinalHover.hovered
                                         ToolTip.text: "Review card " + timelineSlot.cardNumber + " of " + (reviewQueuePreviewList.count - reviewQueuePreviewList.firstCardIndex)
                                         HoverHandler { id: ordinalHover }
                                     }
                                     Label {
-                                        x: 50
+                                        x: 58
                                         y: 12
-                                        width: parent.width - 64
+                                        width: Math.max(0, parent.width - 74)
                                         textFormat: Text.PlainText
                                         text: (timelineSlot.card.deckName || page.ui.selectedDeck.name || "Review").toUpperCase()
                                         color: Theme.inkMuted
@@ -609,38 +580,69 @@ Item {
                                         elide: Text.ElideRight
                                     }
                                     Label {
-                                        x: 50
+                                        x: 58
                                         y: 33
-                                        width: parent.width - 89
-                                        height: parent.height - 45
+                                        width: Math.max(0, parent.width - 100)
+                                        height: 34
                                         textFormat: Text.PlainText
                                         text: page.reviewSnippet(timelineSlot.card)
                                         color: Theme.ink
                                         font.family: Theme.monoFont
                                         font.pixelSize: 13
                                         elide: Text.ElideRight
-                                        maximumLineCount: timelineSlot.revealAmount > 0.65 ? 3 : 2
+                                        maximumLineCount: 2
                                         wrapMode: Text.Wrap
                                         verticalAlignment: Text.AlignTop
+                                    }
+                                    Row {
+                                        x: 58
+                                        y: parent.height - 25
+                                        width: Math.max(0, parent.width - 94)
+                                        height: 18
+                                        spacing: 5
+                                        Repeater {
+                                            model: page.cardTags(timelineSlot.card).slice(0, 1)
+                                            delegate: Rectangle {
+                                                required property string modelData
+                                                width: Math.min(120, tagLabel.implicitWidth + 12)
+                                                height: 18
+                                                radius: 9
+                                                color: Theme.transparent
+                                                border.color: Theme.ledgerRule
+                                                Label {
+                                                    id: tagLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData
+                                                    width: parent.width - 10
+                                                    color: Theme.inkMuted
+                                                    font.family: Theme.monoFont
+                                                    font.pixelSize: 9
+                                                    elide: Text.ElideRight
+                                                }
+                                                ToolTip.visible: tagHover.hovered
+                                                ToolTip.text: "Tag: " + modelData
+                                                HoverHandler { id: tagHover }
+                                            }
+                                        }
                                     }
                                     Rectangle {
                                         x: parent.width - 28
                                         y: 33
-                                        width: 18
+                                                width: 18
                                         height: 24
                                         radius: 3
                                         color: Theme.transparent
                                         border.width: timelineSlot.isCurrent ? 2 : 1
-                                        border.color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : timelineSlot.isCurrent ? Theme.accent : Theme.ledgerRule
-                                        Accessible.name: timelineSlot.isPrevious ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
+                                        border.color: timelineSlot.isReviewed ? page.gradeColor(timelineSlot.reviewedGrade) : timelineSlot.isCurrent ? Theme.accent : Theme.ledgerRule
+                                        Accessible.name: timelineSlot.isReviewed ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
                                         ToolTip.visible: verdictHover.hovered
-                                        ToolTip.text: timelineSlot.isPrevious ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
+                                        ToolTip.text: timelineSlot.isReviewed ? "Review result: " + page.gradeName(timelineSlot.reviewedGrade) : "Not yet reviewed"
                                         HoverHandler { id: verdictHover }
                                         Label {
                                             anchors.centerIn: parent
                                             textFormat: Text.PlainText
-                                            text: timelineSlot.isPrevious ? page.gradeMark(timelineSlot.reviewedGrade) : "·"
-                                            color: timelineSlot.isPrevious ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.inkMuted
+                                            text: timelineSlot.isReviewed ? page.gradeMark(timelineSlot.reviewedGrade) : "·"
+                                            color: timelineSlot.isReviewed ? page.gradeColor(timelineSlot.reviewedGrade) : Theme.inkMuted
                                             font.family: Theme.monoFont
                                             font.pixelSize: 11
                                         }
@@ -779,7 +781,38 @@ Item {
                     }
                 }
             }
-            ScrollView {
+            Rectangle {
+                id: reviewBody
+                objectName: "reviewCardBody"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: Theme.surface
+                radius: 16
+                border.color: Theme.rule
+                border.width: 1
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+                    Item {
+                        objectName: "reviewPreviousCardBar"
+                        Layout.preferredWidth: 38
+                        Layout.fillHeight: true
+                        GlyphButton {
+                            anchors.centerIn: parent
+                            glyph: "arrow-left"
+                            glyphSize: 25
+                            hint: "Previous card"
+                            enabled: reviewQueuePreviewList.logicalActiveIndex > reviewQueuePreviewList.firstCardIndex && !app.busy && !app.paused
+                            onClicked: reviewQueuePreviewList.navigateOffset(-1)
+                        }
+                    }
+                    ColumnLayout {
+                        id: reviewBodyCenter
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 10
+                        ScrollView {
                 id: reviewModalScroll
                 objectName: "reviewScroll"
                 Layout.fillWidth: true
@@ -789,6 +822,38 @@ Item {
                 ColumnLayout {
                     width: reviewModalScroll.availableWidth
                     spacing: 18
+                    Flow {
+                        visible: page.cardTags(app.currentCard).length > 0
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(54, implicitHeight)
+                        Layout.maximumHeight: 54
+                        clip: true
+                        spacing: 6
+                        Repeater {
+                            model: page.cardTags(app.currentCard)
+                            delegate: Rectangle {
+                                required property string modelData
+                                width: Math.min(180, mainTagLabel.implicitWidth + 16)
+                                height: 24
+                                radius: 12
+                                color: Theme.accentSoft
+                                border.color: Theme.rule
+                                Label {
+                                    id: mainTagLabel
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    width: parent.width - 14
+                                    color: Theme.inkMuted
+                                    font.family: Theme.monoFont
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                }
+                                ToolTip.visible: mainTagHover.hovered
+                                ToolTip.text: "Tag: " + modelData
+                                HoverHandler { id: mainTagHover }
+                            }
+                        }
+                    }
                     Label {
                         textFormat: Text.PlainText
                         text: "Question"
@@ -859,7 +924,8 @@ Item {
                     }
                 }
             }
-            ColumnLayout {
+                        }
+                        ColumnLayout {
                 objectName: "reviewToolbar"
                 Layout.fillWidth: true
                 spacing: 10
@@ -876,7 +942,7 @@ Item {
                     Layout.fillWidth: true
                 }
                 RowLayout {
-                    visible: app.answerRevealed && !app.reviewingCompletedCard
+                    visible: app.answerRevealed
                     Layout.fillWidth: true
                     spacing: page.ui.width < 600 ? 5 : 10
                     Repeater {
@@ -889,6 +955,7 @@ Item {
                         ]
                         delegate: AppButton {
                             required property var modelData
+                            readonly property bool selectedGrade: page.cardGrade(app.currentCard) === modelData.grade
                             objectName: "grade" + modelData.grade
                             Layout.fillWidth: true
                             Layout.preferredHeight: 51
@@ -916,22 +983,26 @@ Item {
                                     color: Theme.ink
                                 }
                             }
-                            onClicked: modelData.grade === 1 ? ui.openPartial() : app.grade(modelData.grade)
+                            background: Rectangle {
+                                radius: 8
+                                color: selectedGrade ? Theme.accentSoft : (parent.hovered || parent.down ? Theme.accentSoft : Theme.transparent)
+                                border.width: selectedGrade ? 3 : parent.activeFocus ? 2 : 1
+                                border.color: selectedGrade ? Theme.accent : parent.activeFocus ? Theme.accent : Theme.rule
+                            }
+                            onClicked: modelData.grade === 1 ? app.grade(1, app.currentCard.sessionGrade === 1 ? Number(app.currentCard.sessionRecall) : 0.5) : app.grade(modelData.grade)
                         }
                     }
                 }
                 AppButton {
-                    objectName: "returnToReview"
-                    visible: app.reviewingCompletedCard
-                    text: "Return to review"
-                    primary: true
-                    enabled: app.pendingCards.length > 0 && !app.busy
+                    objectName: "partialRecallAmount"
+                    visible: app.answerRevealed && page.cardGrade(app.currentCard) === 1
+                    text: "Partial recall: " + Math.round((Number(app.currentCard.sessionRecall) || 0.5) * 100) + "%"
+                    hint: "Adjust the number of answer points recalled"
                     Layout.alignment: Qt.AlignHCenter
-                    onClicked: reviewQueuePreviewList.selectVariant(app.reviewCursorVariantId)
+                    onClicked: ui.openPartial()
                 }
                 Item {
                     objectName: "reviewUtilityFooter"
-                    visible: !app.reviewingCompletedCard
                     Layout.fillWidth: true
                     Layout.preferredHeight: 48
                     Layout.minimumHeight: 48
@@ -944,7 +1015,7 @@ Item {
                             objectName: "deferCard"
                             glyph: "queue-tail"
                             hint: "Defer this card to the end of the review queue" + (shortcuts.bindings.defer ? " (" + shortcuts.bindings.defer + ")" : "")
-                            enabled: !app.paused && !app.busy
+                            enabled: !app.paused && !app.busy && page.cardGrade(app.currentCard) < 0
                             onClicked: app.deferCard()
                         }
                         ReviewUtilityButton {
@@ -952,7 +1023,7 @@ Item {
                             objectName: "postponeCard"
                             glyph: "calendar-day"
                             hint: "Review this card on a later date" + (shortcuts.bindings.postpone ? " (" + shortcuts.bindings.postpone + ")" : "")
-                            enabled: !app.paused && !app.busy
+                            enabled: !app.paused && !app.busy && page.cardGrade(app.currentCard) < 0
                             onClicked: ui.openPostpone()
                         }
                     }
@@ -977,6 +1048,64 @@ Item {
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
+                        }
+                    }
+                    Item {
+                        objectName: "reviewNextCardBar"
+                        Layout.preferredWidth: 38
+                        Layout.fillHeight: true
+                        GlyphButton {
+                            anchors.centerIn: parent
+                            glyph: "arrow-right"
+                            glyphSize: 25
+                            hint: "Next card"
+                            enabled: reviewQueuePreviewList.logicalActiveIndex < reviewQueuePreviewList.count - 1 && !app.busy && !app.paused
+                            onClicked: reviewQueuePreviewList.navigateOffset(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Dialog {
+        id: gradeCorrectionDialog
+        objectName: "gradeCorrectionDialog"
+        parent: Overlay.overlay
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(460, page.ui.width - 2 * page.ui.gutter)
+        title: "Change rating"
+        standardButtons: Dialog.Cancel
+        visible: !!(app.pendingGradeCorrection && app.pendingGradeCorrection.variantId)
+        onRejected: app.cancelGradeCorrection()
+        background: Rectangle {
+            color: Theme.surface
+            radius: 12
+            border.color: Theme.rule
+            border.width: 1
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label {
+                text: {
+                    const change = app.pendingGradeCorrection || {}
+                    return "Change this card from " + (page.gradeName(Number(change.currentGrade)) || "unrated") + " to " + (page.gradeName(Number(change.requestedGrade)) || "unrated") + "?"
+                }
+                color: Theme.ink
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            Label {
+                text: "The original review time and schedule will be preserved. Only the difficulty rating and recall result will change."
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            AppButton {
+                text: "Change rating"
+                primary: true
+                Layout.alignment: Qt.AlignRight
+                onClicked: app.confirmGradeCorrection()
             }
         }
     }
