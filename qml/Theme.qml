@@ -22,7 +22,7 @@ QtObject {
     readonly property color success: dark ? "#a9c79b" : "#38704a"
     readonly property color warning: dark ? "#e6c17a" : "#815714"
     readonly property color error: dark ? "#ee9a9a" : "#a13939"
-    readonly property color recallMissed: dark ? "#c9b7c0" : "#685a63"
+    readonly property color recallMissed: dark ? "#ee9a9a" : "#a13939"
     readonly property color recallPartial: dark ? "#e6c17a" : "#815714"
     readonly property color recallHard: dark ? "#e7a17d" : "#a34b34"
     readonly property color recallGood: dark ? "#a9c79b" : "#38704a"

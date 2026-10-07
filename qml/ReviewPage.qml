@@ -1131,7 +1131,7 @@ Item {
                                         }
                                         background: Rectangle {
                                             radius: 8
-                                            color: selectedGrade ? Theme.accentSoft : (parent.hovered || parent.down ? Theme.accentSoft : Theme.transparent)
+                                            color: parent.hovered || parent.down ? Theme.accentSoft : Theme.transparent
                                             border.width: selectedGrade ? 3 : parent.activeFocus ? 2 : 1
                                             border.color: selectedGrade ? page.gradeColor(modelData.grade) : parent.activeFocus ? Theme.accent : Theme.rule
                                         }
