@@ -228,8 +228,12 @@ bool DatabaseWorker::upsertCard(const struct model::Card &r)
 { return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount}); }
 bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString &reviewId)
 {
+    const auto previous=variant(r.id);
+    if (!m_sqlDetail.isEmpty()) return false;
+    const bool unchanged=previous&&model::toMap(*previous)==model::toMap(r);
     if (!execute("INSERT INTO review_variants(id,card_id,variant_key,due,review_count,stability,difficulty) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due,review_count=excluded.review_count,stability=excluded.stability,difficulty=excluded.difficulty",{r.id,r.cardId,r.key,r.due,r.reviewCount,r.stability,r.difficulty})
         ||!execute("DELETE FROM tombstones WHERE entity_type='variant' AND entity_id=?",{r.id})) return false;
+    if (reviewId.isEmpty()&&unchanged) return true;
     const QString key=QStringLiteral("review_owner:")+r.id;
     return reviewId.isEmpty()?execute("DELETE FROM metadata WHERE key=?",{key})
         :execute("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",{key,reviewId});
