@@ -1,0 +1,21 @@
+{
+  "tool": "built-in image_gen",
+  "mode": "background-extraction",
+  "assets": [
+    {
+      "file": "walnut.png",
+      "reference": "docs/design/food-logos/n1-walnut-kernel.png",
+      "prompt": "Use case: background-extraction\nAsset type: production BetterFlash app logo with true alpha transparency.\nInput image: edit target, the approved logo presentation board.\nPrimary request: Extract ONLY the sole golden walnut kernel emblem from the supplied board. Remove the dark presentation background and ALL text (top caption and bottom BetterFlash wordmark). Preserve the exact colored illustration, silhouette, internal curves, warm shading, proportions, and ivory outside contour from the reference. This is a faithful extraction, not a redesign.\nComposition: one emblem centered on a square transparent canvas, emblem occupies about 88 percent of canvas width or height (whichever is larger), fully visible with modest even padding.\nConstraints: genuine transparent pixels outside emblem, including any holes between parts. No backdrop, tile, halo, cast shadow, words, captions, or additional objects. Preserve all colors and detail inside the emblem."
+    },
+    {
+      "file": "walnut-blueberry.png",
+      "reference": "docs/design/food-logos/walnut-combinations/n1a-walnut-blueberry.png",
+      "prompt": "Use case: background-extraction\nAsset type: production BetterFlash app logo with true alpha transparency.\nInput image: edit target, the approved logo presentation board.\nPrimary request: Extract ONLY the golden walnut kernel with its one overlapping blueberry emblem from the supplied board. Remove the dark presentation background and ALL text (top caption and bottom BetterFlash wordmark). Preserve the exact colored illustration, silhouette, internal curves, warm shading, proportions, and ivory outside contour from the reference. This is a faithful extraction, not a redesign.\nComposition: one emblem centered on a square transparent canvas, emblem occupies about 88 percent of canvas width or height (whichever is larger), fully visible with modest even padding.\nConstraints: genuine transparent pixels outside emblem, including any holes between parts. No backdrop, tile, halo, cast shadow, words, captions, or additional objects. Preserve all colors and detail inside the emblem."
+    },
+    {
+      "file": "walnut-spinach.png",
+      "reference": "docs/design/food-logos/walnut-combinations/n1b-walnut-spinach.png",
+      "prompt": "Use case: background-extraction\nAsset type: production BetterFlash app logo with true alpha transparency.\nInput image: edit target, the approved logo presentation board.\nPrimary request: Extract ONLY the golden walnut kernel with its one spinach leaf emblem from the supplied board. Remove the dark presentation background and ALL text (top caption and bottom BetterFlash wordmark). Preserve the exact colored illustration, silhouette, internal curves, warm shading, proportions, and ivory outside contour from the reference. This is a faithful extraction, not a redesign.\nComposition: one emblem centered on a square transparent canvas, emblem occupies about 88 percent of canvas width or height (whichever is larger), fully visible with modest even padding.\nConstraints: genuine transparent pixels outside emblem, including any holes between parts. No backdrop, tile, halo, cast shadow, words, captions, or additional objects. Preserve all colors and detail inside the emblem."
+    }
+  ]
+}
