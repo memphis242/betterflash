@@ -226,9 +226,20 @@ bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
 { return execute("INSERT INTO decks(id,name,description,created_at,parent_id) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id",{r.id,r.name,r.description,r.createdAt,r.parentId}); }
 bool DatabaseWorker::upsertCard(const struct model::Card &r)
 { return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount}); }
-bool DatabaseWorker::upsertVariant(const struct model::Variant &r)
-{ return execute("INSERT INTO review_variants(id,card_id,variant_key,due,review_count,stability,difficulty) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due,review_count=excluded.review_count,stability=excluded.stability,difficulty=excluded.difficulty",{r.id,r.cardId,r.key,r.due,r.reviewCount,r.stability,r.difficulty})
-    &&execute("DELETE FROM tombstones WHERE entity_type='variant' AND entity_id=?",{r.id}); }
+bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString &reviewId)
+{
+    if (!execute("INSERT INTO review_variants(id,card_id,variant_key,due,review_count,stability,difficulty) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due,review_count=excluded.review_count,stability=excluded.stability,difficulty=excluded.difficulty",{r.id,r.cardId,r.key,r.due,r.reviewCount,r.stability,r.difficulty})
+        ||!execute("DELETE FROM tombstones WHERE entity_type='variant' AND entity_id=?",{r.id})) return false;
+    const QString key=QStringLiteral("review_owner:")+r.id;
+    return reviewId.isEmpty()?execute("DELETE FROM metadata WHERE key=?",{key})
+        :execute("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",{key,reviewId});
+}
+QString DatabaseWorker::reviewOwner(const QString &variantId)
+{
+    QSqlQuery q(m_db);q.prepare("SELECT value FROM metadata WHERE key=?");q.addBindValue(QStringLiteral("review_owner:")+variantId);
+    if (!q.exec()) {m_sqlDetail=q.lastError().text();return {};}
+    return q.next()?q.value(0).toString():QString();
+}
 bool DatabaseWorker::insertReview(const struct model::Review &r)
 {
     QSqlQuery existing(m_db);existing.prepare("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due FROM reviews WHERE id=?");existing.addBindValue(r.id);
@@ -263,7 +274,7 @@ bool DatabaseWorker::replaceVariants(const struct model::Card &record, const QLi
     QSet<QString> keep;
     for (const struct model::Variant &v : variants) {keep.insert(v.id);if (!upsertVariant(v)) return false;}
     for (const struct model::Variant &v : cardVariants(record.id))
-        if (!keep.contains(v.id) && (!tombstone("variant",v.id)||!execute("DELETE FROM review_variants WHERE id=?",{v.id}))) return false;
+        if (!keep.contains(v.id) && (!tombstone("variant",v.id)||!execute("DELETE FROM metadata WHERE key=?",{QStringLiteral("review_owner:")+v.id})||!execute("DELETE FROM review_variants WHERE id=?",{v.id}))) return false;
     return m_sqlDetail.isEmpty();
 }
 QVariantMap DatabaseWorker::cardPayload(const struct model::Card &record)
@@ -303,7 +314,9 @@ bool DatabaseWorker::isDeleted(const QString &type, const QString &id)
     return q.next();
 }
 bool DatabaseWorker::eraseCard(const QString &id, qint64 seq)
-{ return tombstone("card",id,seq) && execute("DELETE FROM notes WHERE id=?",{id}); }
+{ return tombstone("card",id,seq)
+    &&execute("DELETE FROM metadata WHERE key IN (SELECT 'review_owner:'||id FROM review_variants WHERE card_id=?)",{id})
+    &&execute("DELETE FROM notes WHERE id=?",{id}); }
 bool DatabaseWorker::eraseDeck(const QString &id, qint64 seq)
 {
     QSqlQuery descendants(m_db);descendants.prepare("WITH RECURSIVE descendants(id) AS (SELECT ? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants");descendants.addBindValue(id);
@@ -466,6 +479,19 @@ void DatabaseWorker::advanceAfterRemoval(qsizetype position)
 {
     assert(position>=0);
     m_selectedVariant=m_queue.isEmpty()?QString():m_queue.at(position<m_queue.size()?position:0);
+}
+
+void DatabaseWorker::advanceReview(const QString &variantId)
+{
+    if (!m_queue.isEmpty()) {
+        const qsizetype current=m_sessionOrder.indexOf(variantId);
+        assert(current>=0);
+        const QSet<QString> pending(m_queue.cbegin(),m_queue.cend());
+        for (qsizetype offset=1;offset<=m_sessionOrder.size();++offset) {
+            const QString &candidate=m_sessionOrder.at((current+offset)%m_sessionOrder.size());
+            if (pending.contains(candidate)) {m_selectedVariant=candidate;break;}
+        }
+    }
 }
 
 void DatabaseWorker::createDeck(const QString &name, const QString &description, const QString &parentId)
@@ -665,6 +691,11 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     const bool correction=m_sessionGrades.contains(expectedVariant);
     if (old->reviewCount>=1000000000&&!correction) {fail("REVIEW_LIMIT","This variant has reached the review count limit. Export the collection and inspect its schedule.");return;}
     const struct SessionGrade previous=correction?m_sessionGrades.value(expectedVariant):SessionGrade{*old,{}, {},model::readingBudget(model::question(*note,old->key))};
+    if (correction&&previous.savedReview.grade==grade&&qFuzzyCompare(previous.savedReview.recallFraction+1.0,recall+1.0)) {
+        advanceReview(expectedVariant);
+        if (publishQueue(false)) done("Review card selected");
+        return;
+    }
     const struct model::Variant baseline=previous.baseline;
     const QString reviewedAt=correction?previous.savedReview.reviewedAt:model::nowUtc();
     const double effectiveSeconds=correction?previous.savedReview.responseSeconds:seconds;
@@ -681,19 +712,21 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
         const struct model::Variant expected=correction?previous.savedSchedule:*old;
         if (!persisted||model::toMap(*persisted)!=model::toMap(expected)) {stale=true;return false;}
         if (correction) {
+            if (reviewOwner(expectedVariant)!=previous.savedReview.id) {stale=m_sqlDetail.isEmpty();return false;}
             const auto persistedReview=review(previous.savedReview.id);
             if (!m_sqlDetail.isEmpty()) return false;
             if (!persistedReview||model::toMap(*persistedReview)!=model::toMap(previous.savedReview)) {stale=true;return false;}
             if (!correctReview(record,previous.savedReview)) return false;
         } else if (!insertReview(record)) return false;
-        return upsertVariant(schedule)&&enqueue(correction?QStringLiteral("review.correct"):QStringLiteral("review.add"),payload);
+        return upsertVariant(schedule,record.id)&&enqueue(correction?QStringLiteral("review.correct"):QStringLiteral("review.add"),payload);
     })) {
-        if (stale) fail("REVIEW_CONFLICT","This review or its schedule changed on another device. End this review session, sync, and start a new session before grading again.");
+        if (stale) fail("REVIEW_CONFLICT","This review or its schedule changed. End this review session, sync, and start a new session before grading again.");
         else fail("REVIEW_SAVE","Could not save this review. Check storage and retry the grade.",m_sqlDetail);
         return;
     }
     m_sessionGrades.insert(expectedVariant,SessionGrade{baseline,schedule,record,previous.readingBudget});
     m_queue.removeAll(expectedVariant);m_queueDirty=true;
+    advanceReview(expectedVariant);
     emit gradeCommitted(correction);
     if (publishSnapshot()&&publishQueue(false)) done(correction?"Review result updated":"Review saved");
 }
@@ -760,7 +793,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
             if (!upsertCard(record)||!recordSequence("card",record.id,seq)) return false;
             QSet<QString> ids;for (const struct model::Variant &v : schedules) ids.insert(v.id);
             for (const struct model::Variant &v : cardVariants(record.id))
-                if (!ids.contains(v.id)&&(!tombstone("variant",v.id,seq)||!execute("DELETE FROM review_variants WHERE id=?",{v.id}))) return false;
+                if (!ids.contains(v.id)&&(!tombstone("variant",v.id,seq)||!execute("DELETE FROM metadata WHERE key=?",{QStringLiteral("review_owner:")+v.id})||!execute("DELETE FROM review_variants WHERE id=?",{v.id}))) return false;
         }
         const auto current=card(record.id);
         if (!current) {applied=false;return m_sqlDetail.isEmpty();}
@@ -781,41 +814,56 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         return insertReview(*record)&&recordSequence("review",record->id,seq);
     }
     const struct model::Variant schedule=*model::variantFromMap(object(payload,"variant"));
-    if (!executeEffects) return recordSequence("variant",schedule.id,seq)&&(!record||recordSequence("review",record->id,seq));
+    if (!executeEffects) return recordSequence("variant",schedule.id,seq)
+        &&(!record||recordSequence("review",record->id,seq))&&(!reviewAdded||recordSequence("review-start",record->id,seq));
     if (pendingEntity("card",schedule.cardId)||pendingEntity("variant",schedule.id)) {applied=false;return m_sqlDetail.isEmpty();}
     if (!m_sqlDetail.isEmpty()) return false;
-    if (reviewAdded&&seq>entitySequence("review",record->id)) {
-        if (!insertReview(*record)||!recordSequence("review",record->id,seq)) return false;
+    if (reviewAdded) {
+        if (seq>entitySequence("review",record->id)&&(!insertReview(*record)||!recordSequence("review",record->id,seq))) return false;
+        if (!recordSequence("review-start",record->id,seq)) return false;
     }
     if (!m_sqlDetail.isEmpty()) return false;
-    if (isDeleted("card",schedule.cardId)) return m_sqlDetail.isEmpty();
-    if (seq<=entitySequence("variant",schedule.id)) {
-        if (!reviewAdded) return m_sqlDetail.isEmpty();
-        const auto persisted=variant(schedule.id);
+    if (correction) {
+        if (seq<=entitySequence("review",record->id)) return m_sqlDetail.isEmpty();
+        const auto persistedReview=review(record->id);
+        const bool deleted=isDeleted("card",schedule.cardId);
+        const auto source=card(schedule.cardId);
         if (!m_sqlDetail.isEmpty()) return false;
-        if (!persisted||schedule.reviewCount<=persisted->reviewCount) return true;
-        // A correction must not hide an independently completed later review.
-        m_syncReviewConflicts.append(record->id);
+        if (!deleted&&!source) {applied=false;return true;}
+        if (!persistedReview||persistedReview->cardId!=record->cardId||persistedReview->variantId!=record->variantId
+            ||persistedReview->reviewedAt!=record->reviewedAt||persistedReview->responseSeconds!=record->responseSeconds||persistedReview->deckName!=record->deckName) {
+            m_syncReviewConflicts.append(record->id);
+            return true;
+        }
+        // Review results use server order while identity and timing remain immutable.
+        if (!correctReview(*record,*persistedReview)||!recordSequence("review",record->id,seq)) return false;
     }
+    if (isDeleted("card",schedule.cardId)) return m_sqlDetail.isEmpty();
     const auto source=card(schedule.cardId);
     if (!source) {applied=false;return m_sqlDetail.isEmpty();}
     if (isDeleted("deck",source->deckId)) return m_sqlDetail.isEmpty();
     if (!model::variantKeys(*source)->contains(schedule.key)) return true;
+    const auto persistedSchedule=variant(schedule.id);
+    const QString owner=reviewOwner(schedule.id);
+    const qint64 variantSequence=entitySequence("variant",schedule.id);
+    if (!m_sqlDetail.isEmpty()) return false;
     if (correction) {
-        if (seq<=entitySequence("review",record->id)) return m_sqlDetail.isEmpty();
-        const struct model::Review expectedReview=*model::reviewFromMap(object(payload,"previousReview"));
-        const struct model::Variant expectedSchedule=*model::variantFromMap(object(payload,"previousVariant"));
-        const auto persistedReview=review(record->id);
-        const auto persistedSchedule=variant(schedule.id);
-        if (!m_sqlDetail.isEmpty()) return false;
-        if (!persistedReview||!persistedSchedule||model::toMap(*persistedReview)!=model::toMap(expectedReview)
-            ||model::toMap(*persistedSchedule)!=model::toMap(expectedSchedule)) {
+        if (!persistedSchedule||owner!=record->id||schedule.reviewCount!=persistedSchedule->reviewCount||seq<=variantSequence) {
             m_syncReviewConflicts.append(record->id);
             return true;
         }
-        if (!correctReview(*record,expectedReview)||!recordSequence("review",record->id,seq)) return false;
-    }
-    return upsertVariant(schedule)&&recordSequence("variant",schedule.id,seq);
+    } else if (reviewAdded) {
+        if (persistedSchedule&&schedule.reviewCount<persistedSchedule->reviewCount) return true;
+        if (seq<=variantSequence) {
+            // Independent reviews retain their order even after a correction echo.
+            const bool laterReview=persistedSchedule&&!owner.isEmpty()
+                &&(schedule.reviewCount>persistedSchedule->reviewCount||seq>entitySequence("review-start",owner));
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (!laterReview) return true;
+            m_syncReviewConflicts.append(record->id);
+        }
+    } else if (seq<=variantSequence) return true;
+    return upsertVariant(schedule,record?record->id:QString())&&recordSequence("variant",schedule.id,seq);
 }
 bool DatabaseWorker::applyRemoteEvent(const QVariantMap &event,qint64 seq,bool &applied)
 {
@@ -951,7 +999,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     const bool hasMore=response.value("hasMore").toBool()||hasPendingOutbox;
     if (publishSnapshot()&&publishQueue(false)) {
         if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
-        else fail("SYNC_REVIEW_CONFLICT","Sync finished, but a conflicting review correction was not applied. Review the affected cards in History before grading them again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
+        else fail("SYNC_REVIEW_CONFLICT","Sync finished with conflicting review schedules. The latest review results are in History; a newer or explicitly changed schedule was preserved. End this review session before grading these cards again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
     }
     appliedSignal(true,hasMore);
 }
