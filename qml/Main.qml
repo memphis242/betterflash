@@ -703,15 +703,13 @@ ApplicationWindow {
             spacing: 10
             Item {
                 objectName: "appMark"
-                Layout.preferredWidth: 22
-                Layout.preferredHeight: 22
+                Layout.preferredWidth: 28
+                Layout.preferredHeight: 28
                 ToolTip.visible: logoHover.containsMouse
                 ToolTip.text: "BetterFlash"
                 Accessible.name: "BetterFlash"
-                Icon {
+                BrandMark {
                     anchors.fill: parent
-                    kind: "cards"
-                    stroke: Theme.ink
                 }
                 MouseArea {
                     id: logoHover

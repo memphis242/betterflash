@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Network Multimedia TextToSpeech Concurrent)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Svg Sql Network Multimedia TextToSpeech Concurrent)
 qt_standard_project_setup(REQUIRES 6.6)
 include(cmake/MicroTeX.cmake)
 
@@ -34,6 +34,8 @@ target_link_libraries(betterflash_voice PRIVATE betterflash_integrations)
 qt_add_executable(betterflash src/main.cpp)
 qt_add_resources(betterflash application_icon PREFIX /icons BASE packaging
     FILES packaging/betterflash.svg)
+qt_add_resources(betterflash brand_assets PREFIX /branding BASE packaging/branding
+    FILES packaging/branding/recall-fold.svg packaging/branding/recall-fold-light.svg)
 qt_add_resources(betterflash application_fonts PREFIX /fonts BASE packaging/fonts
     FILES packaging/fonts/IBMPlexMono-Regular.ttf packaging/fonts/IBMPlexMono-Bold.ttf
     packaging/fonts/IBMPlexMono-Italic.ttf packaging/fonts/IBMPlexMono-BoldItalic.ttf)
@@ -48,7 +50,7 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(betterflash URI BetterFlash VERSION 1.0 QML_FILES ${QML_SOURCES}
     NO_CACHEGEN)
 target_link_libraries(betterflash PRIVATE betterflash_core betterflash_voice betterflash_render
-    betterflash_integrations Qt6::QuickControls2)
+    betterflash_integrations Qt6::QuickControls2 Qt6::Svg)
 target_compile_options(betterflash PRIVATE -Wall -Wextra -Wpedantic)
 foreach(target betterflash_core betterflash_voice betterflash_render betterflash_integrations)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
@@ -76,6 +78,11 @@ include(GNUInstallDirs)
 install(TARGETS betterflash RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/org.betterflash.BetterFlash.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES packaging/betterflash.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+set(BETTERFLASH_ICON_SIZES 16 20 22 24 32 40 48 64 96 128 192 256 512 1024)
+foreach(icon_size IN LISTS BETTERFLASH_ICON_SIZES)
+    install(FILES "packaging/icons/${icon_size}x${icon_size}/betterflash.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${icon_size}x${icon_size}/apps")
+endforeach()
 install(FILES ${LICENSE_NOTICES} THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/betterflash)
 
 include(CTest)

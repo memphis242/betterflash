@@ -6,6 +6,9 @@ The desktop prototype keeps its collection in SQLite on the device. Markdown is
 the source of truth for both sides of a card. The interface uses a warm aubergine
 dark theme, a separate paper light theme, IBM Plex Mono typography, and a
 collapsible left navigation pane whose icons remain available when collapsed.
+The Recall fold mark and launcher icon sources are documented in
+[the branding guide](docs/branding.md); packaged desktop icons include the
+standard PNG sizes alongside the scalable SVG launcher icon.
 
 ## Run on Fedora
 
