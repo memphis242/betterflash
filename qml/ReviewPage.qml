@@ -424,7 +424,9 @@ Item {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 30
+                Layout.preferredHeight: 44
+                Layout.minimumHeight: 44
+                Layout.maximumHeight: 44
                 Item {
                     Layout.fillWidth: true
                 }
@@ -1104,7 +1106,8 @@ Item {
                                 Layout.minimumHeight: 48
                                 Layout.maximumHeight: 48
                                 Row {
-                                    anchors.centerIn: parent
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    x: Math.max(0, Math.min((parent.width - width) / 2, parent.width - width - voiceUtility.width - 12))
                                     spacing: 12
                                     ReviewUtilityButton {
                                         id: deferUtility
