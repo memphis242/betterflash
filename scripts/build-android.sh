@@ -54,7 +54,7 @@ fi
 if [[ -z "${QT_ANDROID_ROOT:-}" || ! -f "${QT_ANDROID_ROOT}/lib/cmake/Qt6/qt.toolchain.cmake" ]]; then
     missing 'ANDROID_QT_KIT_MISSING: Install the Qt 6.11 arm64-v8a Android kit and set QT_ANDROID_ROOT to its root.'
 else
-    for android_module in Core Concurrent Gui Quick QuickControls2 Svg Sql Network Multimedia TextToSpeech; do
+    for android_module in Core Concurrent Gui Quick QuickControls2 Sql Network Multimedia TextToSpeech; do
         if [[ ! -f "${QT_ANDROID_ROOT}/lib/cmake/Qt6${android_module}/Qt6${android_module}Config.cmake" ]]; then
             missing "ANDROID_QT_MODULE_MISSING: Add Qt ${android_module} to the Android kit."
         fi

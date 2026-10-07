@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="64dp" android:height="64dp" android:viewportWidth="512" android:viewportHeight="512">
-    <path android:fillColor="@color/betterflash_launcher_background" android:pathData="M96,0 C42.98,0 0,42.98 0,96 L0,416 C0,469.02 42.98,512 96,512 L416,512 C469.02,512 512,469.02 512,416 L512,96 C512,42.98 469.02,0 416,0 Z"/>
-    <path android:fillColor="@color/betterflash_icon_ink" android:fillType="evenOdd" android:pathData="M194 38C213 38 228 50 246 60L356 120C371 129 380 142 380 159V454C380 471 365 481 351 471L256 413L161 471C147 481 132 471 132 456V111C132 72 163 38 194 38ZM194 58C183 57 177 68 177 84V213L325 156L203 89C191 82 186 70 194 58ZM177 255L334 194V411L268 370Q256 362 244 370L177 412Z"/>
+    android:width="64dp" android:height="64dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:pathData="M15,15 L45,15 Q48,15 48,18 L48,46 Q48,49 45,49 L15,49 Q12,49 12,46 L12,18 Q12,15 15,15 Z M19,10 L49,10 Q53,10 53,14 L53,43 M20,27 L40,27 M20,35 L34,35"
+        android:fillColor="@android:color/transparent" android:strokeColor="@color/betterflash_icon_ink"
+        android:strokeWidth="3" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

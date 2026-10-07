@@ -1,5 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <title>BetterFlash launcher icon</title>
-  <rect width="512" height="512" rx="96" fill="#211722"/>
-  <path fill="#f7eee8" fill-rule="evenodd" d="M194 38C213 38 228 50 246 60L356 120C371 129 380 142 380 159V454C380 471 365 481 351 471L256 413L161 471C147 481 132 471 132 456V111C132 72 163 38 194 38ZM194 58C183 57 177 68 177 84V213L325 156L203 89C191 82 186 70 194 58ZM177 255L334 194V411L268 370Q256 362 244 370L177 412Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect x="12" y="15" width="36" height="34" rx="3" fill="none" stroke="#e7a17d" stroke-width="3"/>
+  <path d="M19 10h30a4 4 0 0 1 4 4v29M20 27h20M20 35h14" fill="none" stroke="#e7a17d" stroke-width="3" stroke-linecap="round"/>
 </svg>

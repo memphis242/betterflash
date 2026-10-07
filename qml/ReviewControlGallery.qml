@@ -67,7 +67,7 @@ ApplicationWindow {
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             spacing: 14
-            BrandMark { Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
+            Icon { kind: "cards"; stroke: Theme.ink; Layout.preferredWidth: 23; Layout.preferredHeight: 23 }
             Label { text: "Review controls"; font.pixelSize: 20; font.bold: true; color: Theme.ink }
             Item { Layout.fillWidth: true }
             Label { text: "5 studies  /  Alt + ← →"; font.pixelSize: 11; color: Theme.inkMuted }

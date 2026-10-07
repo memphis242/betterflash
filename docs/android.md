@@ -10,7 +10,7 @@ The desktop Qt development packages do not include an Android Qt kit. The build 
 ./scripts/build-android.sh --check
 ```
 
-Install a Qt 6.11 arm64 Android kit with Core, Concurrent, GUI, Quick, Quick Controls, SVG, SQL, Network, Multimedia, and Text to Speech modules, plus the matching desktop Qt host tools. Use a full JDK 21 or later and set `JAVA_HOME`; a Java runtime alone cannot compile Android code. The checked SDK components are platform 36, Build Tools 36.0.0, platform tools, and NDK r27c `27.2.12479018`. [Qt 6.11 supported configurations](https://doc.qt.io/qt-6.11/android.html), [Qt Android prerequisites](https://doc.qt.io/qt-6.11/android-configure-dev-environment.html)
+Install a Qt 6.11 arm64 Android kit with Core, Concurrent, GUI, Quick, Quick Controls, SQL, Network, Multimedia, and Text to Speech modules, plus the matching desktop Qt host tools. Use a full JDK 21 or later and set `JAVA_HOME`; a Java runtime alone cannot compile Android code. The checked SDK components are platform 36, Build Tools 36.0.0, platform tools, and NDK r27c `27.2.12479018`. [Qt 6.11 supported configurations](https://doc.qt.io/qt-6.11/android.html), [Qt Android prerequisites](https://doc.qt.io/qt-6.11/android-configure-dev-environment.html)
 
 With Android command line tools installed, the SDK packages are:
 
