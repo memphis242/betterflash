@@ -551,7 +551,8 @@ ApplicationWindow {
                 return false
             if ((action === "defer" || action === "postpone") && app.reviewingCompletedCard)
                 return false
-            if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus))
+            if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus
+                || activeFocusItem && activeFocusItem.pressed !== undefined && activeFocusItem.checkable !== undefined))
                 return false
             return action.indexOf("grade") !== 0 || app.answerRevealed
         default:

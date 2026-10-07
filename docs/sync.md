@@ -51,6 +51,11 @@ If an independent review has advanced the schedule, the historical rating is
 corrected but that newer schedule is preserved, with `SYNC_REVIEW_CONFLICT`
 reported. The cursor still advances so later sync pages can continue.
 
+Install a client and server version supporting `review.correct` on every synced
+device before using corrections; older clients reject the new event type.
+For upgraded collections and imported backups without review ownership metadata,
+an exact match to the correction's previous schedule establishes ownership.
+
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically.
 Upload referenced assets before sending a card event. A card and a received page
 can reference at most 64 unique images and 64 MiB of attached data. The server

@@ -852,7 +852,10 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
     const qint64 variantSequence=entitySequence("variant",schedule.id);
     if (!m_sqlDetail.isEmpty()) return false;
     if (correction) {
-        if (!persistedSchedule||owner!=record->id||schedule.reviewCount!=persistedSchedule->reviewCount||seq<=variantSequence) {
+        const struct model::Variant previousSchedule=*model::variantFromMap(object(payload,"previousVariant"));
+        const bool matchesUnownedSchedule=owner.isEmpty()&&persistedSchedule
+            &&model::toMap(*persistedSchedule)==model::toMap(previousSchedule);
+        if (!persistedSchedule||(owner!=record->id&&!matchesUnownedSchedule)||schedule.reviewCount!=persistedSchedule->reviewCount||seq<=variantSequence) {
             m_syncReviewConflicts.append(record->id);
             return true;
         }
