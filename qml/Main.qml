@@ -544,6 +544,8 @@ ApplicationWindow {
                 return true
             if (app.paused || !app.currentCard.id)
                 return false
+            if ((action === "previousCard" || action === "nextCard") && review.timelineScrollHasFocus)
+                return false
             if ((action === "defer" || action === "postpone") && app.reviewingCompletedCard)
                 return false
             if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus))
@@ -2113,6 +2115,10 @@ ApplicationWindow {
     }
     Connections {
         target: app
+        function onReviewingChanged() {
+            if (app.reviewing)
+                window.page = 0
+        }
         function onDecksChanged() {
             if (window.pendingDeckName) {
                 const created = app.decks.find(deck => deck.name === window.pendingDeckName && window.knownDeckIds.indexOf(deck.id) < 0)

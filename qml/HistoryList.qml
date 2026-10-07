@@ -29,7 +29,7 @@ ListView {
                 Label {
                     textFormat: Text.PlainText
                     text: history.ui.gradeLabel(modelData.grade)
-                    color: history.ui.gradeLabel(modelData.grade) === "Partial" ? Theme.warning : history.ui.gradeLabel(modelData.grade) === "Good" || history.ui.gradeLabel(modelData.grade) === "Easy" ? Theme.success : Theme.inkMuted
+                    color: [Theme.recallMissed, Theme.recallPartial, Theme.recallHard, Theme.recallGood, Theme.recallEasy][Number(modelData.grade)] || Theme.inkMuted
                     font.family: Theme.monoFont
                     font.pixelSize: 11
                 }
