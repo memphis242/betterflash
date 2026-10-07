@@ -62,7 +62,7 @@ button treatments using `./scripts/run-desktop.sh --control-designs`.
   numbered cloze group separately.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
   fraction remembered. Response time contributes a bounded adjustment.
-- Review cards inside the app in a rounded container. Pause sits beside the deck
+- Review cards in a rounded modal. Pause sits beside the deck
   title. The collapsible ledger queue has fading edges, rounded cards, bold
   numbers, thicker left rails, and a tag capsule below each preview. All tags
   appear above the question. Upcoming cards become clearer as they enter view;
@@ -70,13 +70,14 @@ button treatments using `./scripts/run-desktop.sh --control-designs`.
   scroll position. The persistent queue scrollbar and Return to active card
   control let you explore and return without changing the active card.
 - A segmented bar above the queue fills with each card's recall outcome. Previous
-  and next arrow bars span the sides of the main card. Choosing a grade highlights
-  and saves it while keeping the card open. Move onward with Left/Right, the arrow
-  bars, or a queue preview. Adjust a grade freely before leaving the card;
-  changing it after returning requires confirmation. Corrections preserve the
-  original review time and response duration without adding another review.
-  A timer sits above the controls and a rounded Reveal answer cover sits below
-  the prompt. Leaving Review pauses the session; Resume continues it.
+  and next arrow bars span the sides of the main card. Choosing a grade saves it
+  and advances to the next pending card. Left/Right, the arrow bars, and queue
+  previews also let you navigate. Returning to a graded card and changing its
+  result requires confirmation. Corrections preserve the original review time
+  and response duration without adding another review. Partial recall opens an
+  amount picker before recording the grade. A timer sits above the controls and
+  a rounded Reveal answer cover sits below the prompt. Closing the modal pauses
+  the session; Resume continues it. The final card stays open until Finish review.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.
   Their circular icon buttons sit together at the center of the review footer;
@@ -101,6 +102,7 @@ optimized retention. See [the scheduling design](docs/scheduling.md).
 | Previous / next review card | `Left` / `Right` |
 | Missed / Partial / Hard / Good / Easy | `1` / `2` / `3` / `4` / `5` |
 | Defer / postpone / pause | `D` / `S` / `P` |
+| Close review and pause | `Escape` |
 | Insert or cross front/back separator | `Ctrl+Enter` |
 | Turn selected text into a cloze | `Ctrl+Shift+C` |
 | Attach an image | `Ctrl+Shift+I` |

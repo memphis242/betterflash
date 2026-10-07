@@ -188,7 +188,9 @@ int main(int argc, char **argv) {
             QTimer::singleShot(0, &application, speakQuestion);
         } else if (ratingChanged && voice.enabled() && card.value(QStringLiteral("sessionGrade"), -1).toInt() >= 0) {
             voice.speak(betterflash::model::gradeLabel(card.value(QStringLiteral("sessionGrade")).toInt())
-                + QStringLiteral(" selected. Say next card to continue, or choose another rating."));
+                + (app.queueCount() == 0
+                    ? QStringLiteral(" selected. All cards are reviewed. Say end review to finish, or previous card to revisit a result.")
+                    : QStringLiteral(" selected. Say next card to continue.")));
         }
     });
     QObject::connect(&app, &AppController::pendingGradeCorrectionChanged, &application, [&] {

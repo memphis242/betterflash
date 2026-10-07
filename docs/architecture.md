@@ -23,7 +23,7 @@ The interface, Qt networking objects, speech synthesis, and native text painting
 belong to the application thread. A dedicated worker owns its SQLite connection
 and all database transactions. Queued signals publish completed snapshots and
 review sessions; the interface displays a selected grade after its durable
-transaction commits. Navigation is an explicit user action. Audio capture, sample conversion, voice activity detection,
+transaction commits. Grading advances after the commit; previous/next navigation is also explicit. Audio capture, sample conversion, voice activity detection,
 and optional local recognition have a separate worker thread. Image validation
 and content-addressed import run in the Qt thread pool.
 
@@ -63,7 +63,7 @@ themes, keyboard bindings, page selection, and detail-pane sizing.
 Review's idle view contains a bounded horizontal deck browser, an optional deck
 tree, actual queue counts, and a large start action in the lower portion of the
 page. Deck parents are stored and synchronized independently of their names.
-Active review cards occupy a rounded container in the Review page, with a pinned
+Active review cards occupy a rounded modal over the Review page, with a pinned
 header and grading controls around a bounded Markdown view. Pause sits beside
 the deck title. The collapsible ledger queue retains every card in session order,
 instantiating only cards near the viewport. Viewport position controls upcoming
@@ -75,12 +75,13 @@ when the card is outside the viewport; a persistent scrollbar maps the extent.
 A previous/next arrow bar spans each side of the main card. One tag capsule
 appears in each preview and all tags appear above the prompt. The queue can be
 collapsed without hiding progress or navigation. A segmented progress strip uses
-the same outcome colors as the queue and grades. Leaving Review pauses the timer
+the same outcome colors as the queue and grades. Closing the modal or leaving Review pauses the timer
 and retains the queue. A timer sits above the controls, and a rounded Reveal
 answer cover sits below the prompt.
 
-The worker owns the ordered session list, including graded items. A grade leaves
-the current item selected. Corrections reuse the original review identifier,
+The worker owns the ordered session list, including graded items. A grade advances
+to the next pending item after it is saved. The final graded card remains open
+until Finish review. Corrections reuse the original review identifier,
 timestamp, response duration, and pre-review scheduling baseline. They do not
 increment the review count again. A correction after leaving the card requires
 confirmation. Each correction and its outgoing event commit together. The list

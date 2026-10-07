@@ -8,6 +8,7 @@ Item {
     id: page
     required property var ui
     readonly property bool hasCard: !!app.currentCard.id
+    readonly property bool reviewModalVisible: reviewDialog.visible
     readonly property bool correctionDialogVisible: gradeCorrectionDialog.visible
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
     readonly property bool timelineScrollHasFocus: reviewQueueScrollBar.activeFocus
@@ -49,6 +50,15 @@ Item {
         if (ui.selectedDeck.id)
             return ui.selectedDeck[key] || 0;
         return app.decks.filter(deck => !deck.parentId).reduce((total, deck) => total + (deck[key] || 0), 0);
+    }
+    function openReviewModal() {
+        if (app.reviewing) {
+            page.ui.page = 0;
+            reviewDialog.open();
+        }
+    }
+    function dismissReviewModal() {
+        reviewDialog.close();
     }
     function cardTags(card) {
         const raw = card && (card.tags || card.labels || []);
@@ -154,6 +164,16 @@ Item {
     property string scrollVariantId: ""
     Connections {
         target: app
+        function onReviewingChanged() {
+            if (app.reviewing)
+                page.openReviewModal();
+            else
+                reviewDialog.close();
+        }
+        function onPausedChanged() {
+            if (app.reviewing && !app.paused)
+                page.openReviewModal();
+        }
         function onCurrentCardChanged() {
             const id = app.currentCard.variantId || "";
             if (page.scrollVariantId !== id) {
@@ -163,7 +183,6 @@ Item {
         }
     }
     ColumnLayout {
-        visible: !app.reviewing
         anchors.fill: parent
         anchors.margins: page.ui.gutter
         spacing: 16
@@ -196,7 +215,6 @@ Item {
         Item {
             id: idle
             objectName: "reviewIdle"
-            visible: !app.reviewing
             Layout.fillWidth: true
             Layout.fillHeight: true
             ColumnLayout {
@@ -305,6 +323,7 @@ Item {
                                 if (app.reviewing) {
                                     if (app.paused)
                                         app.resumeReview();
+                                    page.openReviewModal();
                                 } else if (!app.decks.length)
                                     page.ui.openDeckEditor("");
                                 else if (page.deckCount("cardCount") === 0)
@@ -327,16 +346,41 @@ Item {
             }
         }
     }
-    Item {
+    Dialog {
         id: reviewDialog
-        objectName: "reviewWorkspace"
-        visible: app.reviewing
+        objectName: "reviewDialog"
+        parent: Overlay.overlay
+        modal: true
         focus: true
-        anchors.fill: parent
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: page.ui.gutter
+        anchors.centerIn: parent
+        width: Math.min(1120, page.ui.width - 2 * page.ui.gutter)
+        height: Math.min(820, page.ui.height - 2 * page.ui.gutter)
+        padding: page.ui.width < 600 ? 12 : 20
+        closePolicy: Popup.CloseOnEscape
+        onClosed: {
+            if (app.reviewing)
+                app.pauseReview();
+        }
+        background: Rectangle {
+            color: Theme.surface
+            radius: 16
+            border.color: Theme.rule
+        }
+        Overlay.modal: Rectangle {
+            color: Theme.scrim
+        }
+        contentItem: ColumnLayout {
             spacing: 14
+            Instantiator {
+                model: ui.shortcutCommands.filter(c => c.action.indexOf("editor") !== 0 && c.action !== "saveCard").map(c => c.action)
+                delegate: Shortcut {
+                    required property string modelData
+                    sequence: shortcuts.bindings[modelData] || ""
+                    context: Qt.WindowShortcut
+                    enabled: reviewDialog.visible && ui.shortcutAllowed(modelData)
+                    onActivated: ui.runAction(modelData)
+                }
+            }
             RowLayout {
                 objectName: "reviewModalHeader"
                 Layout.fillWidth: true
@@ -415,6 +459,11 @@ Item {
                             onTriggered: app.stopReview()
                         }
                     }
+                }
+                GlyphButton {
+                    glyph: "close"
+                    hint: "Close review and pause (Escape)"
+                    onClicked: reviewDialog.close()
                 }
             }
             ReviewProgress {
@@ -1086,7 +1135,7 @@ Item {
                                             border.width: selectedGrade ? 3 : parent.activeFocus ? 2 : 1
                                             border.color: selectedGrade ? page.gradeColor(modelData.grade) : parent.activeFocus ? Theme.accent : Theme.rule
                                         }
-                                        onClicked: modelData.grade === 1 ? app.grade(1, app.currentCard.sessionGrade === 1 ? Number(app.currentCard.sessionRecall) : 0.5) : app.grade(modelData.grade)
+                                        onClicked: modelData.grade === 1 ? ui.openPartial() : app.grade(modelData.grade)
                                     }
                                 }
                             }

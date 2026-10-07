@@ -30,8 +30,9 @@ The prototype reads prompts using the system text to speech engine through Qt. F
 
 The prefix `flashcard` is optional for every command. Commands must match the whole utterance; words such as “good” or “partial” inside an answer stay part of that answer. Partial recall accepts digit or English number forms from zero to one hundred, with a positive denominator and recalled points no greater than total points. Postponement accepts days or weeks within 3650 days. Answers are not semantically graded: the user chooses a grade after hearing the answer.
 
-Grading leaves the current card open. Say `next card` to continue. Corrections to
-a revisited card ask for confirmation and preserve the original review time.
+Grading advances to the next pending card. Say `previous card` to revisit a
+result. Corrections to a revisited card ask for confirmation and preserve the
+original review time. The final card stays open; say `end review` to finish.
 
 Audio capture, sample conversion, voice activity detection, and optional local decoding run on a dedicated worker thread. Native microphone formats are downmixed and resampled to mono 16 kHz, 16-bit PCM. Leading silence uses at most 200 ms of pre-roll; audio shorter than 80 ms of detected speech is discarded. An utterance ends after 900 ms of silence or at 60 seconds. Groq requests are asynchronous, have a 30-second transfer timeout, and reject redirects. Audio is held in memory for the active utterance and request, then discarded.
 
