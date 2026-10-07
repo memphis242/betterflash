@@ -16,6 +16,9 @@ The prototype reads prompts using the system text to speech engine through Qt. F
 | `partial` | Grade with half recall. |
 | `partial two of three` or `two of three` | Grade with the stated recall fraction. |
 | `hard`, `good`, or `easy` | Apply the stated recall grade. |
+| `next card` or `previous card` | Select the adjacent card in the session. |
+| `confirm rating` | Confirm a correction to a previously visited card's rating. |
+| `keep rating` or `cancel rating` | Dismiss the rating correction. |
 | `defer` or `skip` | Move the card to the queue's end. |
 | `postpone fourteen days` | Move the review date forward by the stated number of days. |
 | `postpone one week` | Postpone for seven days. |
@@ -26,6 +29,9 @@ The prototype reads prompts using the system text to speech engine through Qt. F
 | `summarize remaining cards` | Request and read the configured language model's deck summary. |
 
 The prefix `flashcard` is optional for every command. Commands must match the whole utterance; words such as “good” or “partial” inside an answer stay part of that answer. Partial recall accepts digit or English number forms from zero to one hundred, with a positive denominator and recalled points no greater than total points. Postponement accepts days or weeks within 3650 days. Answers are not semantically graded: the user chooses a grade after hearing the answer.
+
+Grading leaves the current card open. Say `next card` to continue. Corrections to
+a revisited card ask for confirmation and preserve the original review time.
 
 Audio capture, sample conversion, voice activity detection, and optional local decoding run on a dedicated worker thread. Native microphone formats are downmixed and resampled to mono 16 kHz, 16-bit PCM. Leading silence uses at most 200 ms of pre-roll; audio shorter than 80 ms of detected speech is discarded. An utterance ends after 900 ms of silence or at 60 seconds. Groq requests are asynchronous, have a 30-second transfer timeout, and reject redirects. Audio is held in memory for the active utterance and request, then discarded.
 

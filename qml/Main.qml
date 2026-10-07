@@ -69,7 +69,7 @@ ApplicationWindow {
     property string summarizedQueue: ""
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -97,6 +97,14 @@ ApplicationWindow {
         {
             action: "review",
             label: "Reveal answer"
+        },
+        {
+            action: "previousCard",
+            label: "Previous review card"
+        },
+        {
+            action: "nextCard",
+            label: "Next review card"
         },
         {
             action: "gradeMissed",
@@ -227,8 +235,10 @@ ApplicationWindow {
     }
     onPageChanged: {
         preferences.page = page
-        if (page !== 0 && review && review.reviewModalVisible)
-            review.dismissReviewModal()
+        if (page !== 0 && app.reviewing) {
+            app.pauseReview()
+            voice.enabled = false
+        }
     }
     onNavCollapsedChanged: preferences.navCollapsed = navCollapsed
     onDeckBrowserParentIdChanged: preferences.deckBrowserParentId = deckBrowserParentId
@@ -518,6 +528,8 @@ ApplicationWindow {
             return false
         switch (action) {
         case "review":
+        case "previousCard":
+        case "nextCard":
         case "gradeMissed":
         case "gradePartial":
         case "gradeHard":
@@ -526,13 +538,13 @@ ApplicationWindow {
         case "defer":
         case "postpone":
         case "pause":
-            if ((page !== 0 && !review.reviewModalVisible) || typing || !app.reviewing)
+            if (page !== 0 || typing || !app.reviewing || app.busy)
                 return false
             if (action === "pause")
-                return review.reviewModalVisible || app.paused
-            if (!review.reviewModalVisible)
+                return true
+            if (app.paused || !app.currentCard.id)
                 return false
-            if (app.paused || app.reviewingCompletedCard || !app.currentCard.id)
+            if ((action === "defer" || action === "postpone") && app.reviewingCompletedCard)
                 return false
             if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus))
                 return false
@@ -547,7 +559,6 @@ ApplicationWindow {
             commandPalette.open()
             break
         case "deckSearch":
-            review.dismissReviewModal()
             page = 1
             deckPicker.open()
             break
@@ -559,7 +570,7 @@ ApplicationWindow {
             break
         case "editCard":
             {
-                const id = (review.reviewModalVisible || page === 0) && app.currentCard.id ? (app.currentCard.cardId || app.currentCard.id) : selectedCardId
+                const id = page === 0 && app.currentCard.id ? (app.currentCard.cardId || app.currentCard.id) : selectedCardId
                 if (id)
                     openCardEditor(id)
                 else {
@@ -575,7 +586,6 @@ ApplicationWindow {
             else {
                 if (app.paused)
                     app.resumeReview()
-                review.openReviewModal()
             }
             break
         case "summary":
@@ -586,29 +596,31 @@ ApplicationWindow {
             openAtomicize(selectedCardId)
             break
         case "reviewPage":
-            review.dismissReviewModal()
             page = 0
             break
         case "libraryPage":
-            review.dismissReviewModal()
             page = 1
             break
         case "historyPage":
-            review.dismissReviewModal()
             page = 2
             break
         case "settingsPage":
-            review.dismissReviewModal()
             page = 3
             break
         case "review":
             app.revealAnswer()
             break
+        case "previousCard":
+            app.navigateReview(-1)
+            break
+        case "nextCard":
+            app.navigateReview(1)
+            break
         case "gradeMissed":
             app.grade(0)
             break
         case "gradePartial":
-            partialDialog.open()
+            app.grade(1, app.currentCard.sessionGrade === 1 ? app.currentCard.sessionRecall : 0.5)
             break
         case "gradeHard":
             app.grade(2)
@@ -1371,8 +1383,9 @@ ApplicationWindow {
         objectName: "partialDialog"
         title: "Partial recall"
         onOpened: {
-            recalled.value = Math.max(1, Math.floor((app.currentCard.pointCount || 1) / 2))
-            recallFraction.value = 0.5
+            const fraction = app.currentCard.sessionGrade === 1 ? app.currentCard.sessionRecall : 0.5
+            recalled.value = Math.round((app.currentCard.pointCount || 1) * fraction)
+            recallFraction.value = fraction
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -1430,8 +1443,9 @@ ApplicationWindow {
                 text: "Record partial recall"
                 primary: true
                 onClicked: {
-                    app.grade(1, (app.currentCard.pointCount || 1) > 1 ? recalled.value / app.currentCard.pointCount : recallFraction.value)
+                    const fraction = (app.currentCard.pointCount || 1) > 1 ? recalled.value / app.currentCard.pointCount : recallFraction.value
                     partialDialog.close()
+                    app.grade(1, fraction)
                 }
             }
         }
@@ -2144,7 +2158,7 @@ ApplicationWindow {
             required property string modelData
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
-            enabled: !review.reviewModalVisible && window.shortcutAllowed(modelData)
+            enabled: window.shortcutAllowed(modelData)
             onActivated: window.runAction(modelData)
         }
     }

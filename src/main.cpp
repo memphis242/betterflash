@@ -1,4 +1,5 @@
 #include "core/appcontroller.h"
+#include "core/cardmodel.h"
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
 #include "integrations/ShortcutManager.h"
@@ -173,9 +174,26 @@ int main(int argc, char **argv) {
             else voice.startListening();
         }
     });
+    QVariantMap narratedCard;
     QObject::connect(&app, &AppController::currentCardChanged, &application, [&] {
-        voice.cancelPendingRecognition();
-        QTimer::singleShot(0, &application, speakQuestion);
+        const QVariantMap card = app.currentCard();
+        const bool contentChanged = card.value(QStringLiteral("variantId")) != narratedCard.value(QStringLiteral("variantId"))
+            || card.value(QStringLiteral("question")) != narratedCard.value(QStringLiteral("question"))
+            || card.value(QStringLiteral("answer")) != narratedCard.value(QStringLiteral("answer"));
+        const bool ratingChanged = card.value(QStringLiteral("sessionGrade")) != narratedCard.value(QStringLiteral("sessionGrade"))
+            || card.value(QStringLiteral("sessionRecall")) != narratedCard.value(QStringLiteral("sessionRecall"));
+        narratedCard = card;
+        if (contentChanged) {
+            voice.cancelPendingRecognition();
+            QTimer::singleShot(0, &application, speakQuestion);
+        } else if (ratingChanged && voice.enabled() && card.value(QStringLiteral("sessionGrade"), -1).toInt() >= 0) {
+            voice.speak(betterflash::model::gradeLabel(card.value(QStringLiteral("sessionGrade")).toInt())
+                + QStringLiteral(" selected. Say next card to continue, or choose another rating."));
+        }
+    });
+    QObject::connect(&app, &AppController::pendingGradeCorrectionChanged, &application, [&] {
+        if (voice.enabled() && !app.pendingGradeCorrection().isEmpty())
+            voice.speak(QStringLiteral("Change the earlier rating? Say confirm rating to change it, or keep rating to cancel. The original review time will be kept."));
     });
     QObject::connect(&app, &AppController::answerRevealedChanged, &application, [&] {
         if (voice.enabled() && app.answerRevealed() && !app.reviewingCompletedCard())
@@ -196,13 +214,14 @@ int main(int argc, char **argv) {
             voice.speak(app.lastError().value(QStringLiteral("message")).toString());
     });
     QObject::connect(&voice, &VoiceController::answerRecognized, &application, [&](const QString &answer) {
-        if (!app.reviewing() || app.paused()) return;
+        if (!app.reviewing() || app.paused() || !app.pendingGradeCorrection().isEmpty()) return;
         app.setSpokenAnswer(answer);
         if (!app.answerRevealed()) app.revealAnswer();
     });
     enum class VoiceCommand : quint8 {
         Unknown, StartReview, ShowAnswer, Repeat, GradeMissed, GradePartial, GradeHard,
-        GradeGood, GradeEasy, Defer, Postpone, Pause, Resume, Summarize, Stop
+        GradeGood, GradeEasy, Defer, Postpone, Pause, Resume, Summarize, Stop,
+        Next, Previous, ConfirmRating, CancelRating
     };
     const QHash<QString, VoiceCommand> commandKinds{
         {QStringLiteral("start_review"), VoiceCommand::StartReview},
@@ -219,10 +238,20 @@ int main(int argc, char **argv) {
         {QStringLiteral("pause"), VoiceCommand::Pause},
         {QStringLiteral("resume"), VoiceCommand::Resume},
         {QStringLiteral("summarize"), VoiceCommand::Summarize},
-        {QStringLiteral("stop"), VoiceCommand::Stop}
+        {QStringLiteral("stop"), VoiceCommand::Stop},
+        {QStringLiteral("next"), VoiceCommand::Next},
+        {QStringLiteral("previous"), VoiceCommand::Previous},
+        {QStringLiteral("confirm_rating"), VoiceCommand::ConfirmRating},
+        {QStringLiteral("cancel_rating"), VoiceCommand::CancelRating}
     };
     QObject::connect(&voice, &VoiceController::commandRecognized, &application,
         [&](const QString &command, const QVariant &argument) {
+            if (!app.pendingGradeCorrection().isEmpty()
+                && command != QStringLiteral("confirm_rating") && command != QStringLiteral("cancel_rating")
+                && command != QStringLiteral("stop")) {
+                voice.speak(QStringLiteral("Say confirm rating to change the rating, or keep rating to cancel."));
+                return;
+            }
             switch (commandKinds.value(command, VoiceCommand::Unknown)) {
             case VoiceCommand::StartReview: {
                 QString deckId = app.selectedDeckId();
@@ -250,6 +279,10 @@ int main(int argc, char **argv) {
             case VoiceCommand::GradeHard: app.grade(2); break;
             case VoiceCommand::GradeGood: app.grade(3); break;
             case VoiceCommand::GradeEasy: app.grade(4); break;
+            case VoiceCommand::Next: app.navigateReview(1); break;
+            case VoiceCommand::Previous: app.navigateReview(-1); break;
+            case VoiceCommand::ConfirmRating: app.confirmGradeCorrection(); break;
+            case VoiceCommand::CancelRating: app.cancelGradeCorrection(); break;
             case VoiceCommand::Defer: app.deferCard(); break;
             case VoiceCommand::Postpone: app.postponeDays(argument.toInt()); break;
             case VoiceCommand::Pause:

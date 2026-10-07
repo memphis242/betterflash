@@ -55,7 +55,19 @@ Let `s` be old stability, `d` old difficulty, and `r` recall fraction:
 Difficulty is clamped to `[0, 1]`; stability to `[0.25, 3650]` days. The next
 interval is at least one day and otherwise the floor of stability. The first
 successful review is capped at two days. A missed answer returns the next day.
-Reviews are saved atomically with the changed schedule before the queue advances.
+Reviews are saved atomically with the changed schedule. Selecting a grade leaves
+the card open; navigation to another card is explicit.
+
+## Correcting a rating
+
+A selected grade can be adjusted while the same card stays open. Returning to a
+graded card and choosing a different grade or recall fraction opens a confirmation.
+The correction updates the same review, preserving its original timestamp and
+response duration. It recalculates stability, difficulty, and due date from the
+schedule before that review, using the corrected grade. The due date is anchored
+to the original review timestamp. The review count is not incremented again.
+Corrections are available during the active session, including after every item
+has been graded; Finish review ends that session.
 
 ## Deferral and postponement
 

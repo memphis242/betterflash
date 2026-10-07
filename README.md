@@ -62,21 +62,21 @@ button treatments using `./scripts/run-desktop.sh --control-designs`.
   numbered cloze group separately.
 - Review with Missed, Partial, Hard, Good, or Easy. Partial recall records the
   fraction remembered. Response time contributes a bounded adjustment.
-- Review cards in a rounded modal over the deck page. Pause sits directly beside
-  the bounded deck title. The queue opens as a centered, horizontally scrollable
-  ledger lane with fading edges. Wide, low cards show their queue position on
-  the left and recall verdict on the right; a heavier outline marks the active
-  card. The current card may scroll out of view when the queue is long. Upcoming
-  cards disclose more text and become clearer as they enter the view, with fixed card widths
-  and gaps. The timeline includes all pending and completed cards in the session.
-  Scrolling stops with the first or final card at the center. Click a pending
-  preview to highlight and review it in place, keeping the queue order and scroll
-  position, or click a completed preview to inspect its answer without recording
-  another review. An always-visible scrollbar shows the timeline extent; a Return
-  to active card button appears above it when the active card is off-screen.
-  A timer sits above the controls, and a large rounded Reveal answer cover appears
-  below the prompt. Closing the modal pauses
-  the session; Resume continues the same card and queue.
+- Review cards inside the app in a rounded container. Pause sits beside the deck
+  title. The collapsible ledger queue has fading edges, rounded cards, bold
+  numbers, thicker left rails, and a tag capsule below each preview. All tags
+  appear above the question. Upcoming cards become clearer as they enter view;
+  card widths and gaps stay fixed. Selecting a card preserves queue order and
+  scroll position. The persistent queue scrollbar and Return to active card
+  control let you explore and return without changing the active card.
+- A segmented bar above the queue fills with each card's recall outcome. Previous
+  and next arrow bars span the sides of the main card. Choosing a grade highlights
+  and saves it while keeping the card open. Move onward with Left/Right, the arrow
+  bars, or a queue preview. Adjust a grade freely before leaving the card;
+  changing it after returning requires confirmation. Corrections preserve the
+  original review time and response duration without adding another review.
+  A timer sits above the controls and a rounded Reveal answer cover sits below
+  the prompt. Leaving Review pauses the session; Resume continues it.
 - Defer moves the current item to the queue's tail without changing its schedule.
   Postpone chooses a future date and removes the item from the current queue.
   Their circular icon buttons sit together at the center of the review footer;
@@ -98,9 +98,9 @@ optimized retention. See [the scheduling design](docs/scheduling.md).
 | Edit the selected card | `Ctrl+E` |
 | Review / Library / History / Settings | `Alt+1` / `Alt+2` / `Alt+3` / `Alt+4` |
 | Reveal answer | `Space` |
+| Previous / next review card | `Left` / `Right` |
 | Missed / Partial / Hard / Good / Easy | `1` / `2` / `3` / `4` / `5` |
 | Defer / postpone / pause | `D` / `S` / `P` |
-| Close the review modal and pause | `Escape` |
 | Insert or cross front/back separator | `Ctrl+Enter` |
 | Turn selected text into a cloze | `Ctrl+Shift+C` |
 | Attach an image | `Ctrl+Shift+I` |
@@ -111,10 +111,8 @@ do not consume characters typed into editors or dialogs.
 The deck browser also accepts Left/Right to choose a deck, Down to browse its
 subdecks, and Up to return to the parent level. Tree rows use Left/Right to
 collapse or expand their branches.
-In the review modal, Tab focuses the review timeline; Left/Right moves through
-timeline cards without changing the review queue. Enter or Space selects the
-focused preview. The timeline can also be scrolled horizontally without
-recentering the current card.
+Left/Right selects the adjacent review card without reordering the queue.
+The timeline can also be scrolled horizontally without recentering the current card.
 
 ## Voice and language models
 

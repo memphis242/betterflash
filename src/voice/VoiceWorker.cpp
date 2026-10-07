@@ -94,7 +94,11 @@ struct VoiceWorker::ParsedUtterance VoiceWorker::parseUtterance(const QString &u
         Command{"pause", "pause"}, Command{"pause review", "pause"}, Command{"resume", "resume"},
         Command{"resume review", "resume"}, Command{"stop", "stop"}, Command{"end review", "stop"},
         Command{"stop review", "stop"}, Command{"repeat", "repeat"}, Command{"read card", "repeat"},
-        Command{"repeat card", "repeat"}, Command{"summarize remaining cards", "summarize"}
+        Command{"repeat card", "repeat"}, Command{"summarize remaining cards", "summarize"},
+        Command{"next", "next"}, Command{"next card", "next"},
+        Command{"previous", "previous"}, Command{"previous card", "previous"},
+        Command{"confirm rating", "confirm_rating"}, Command{"change rating", "confirm_rating"},
+        Command{"cancel rating", "cancel_rating"}, Command{"keep rating", "cancel_rating"}
     };
     for (const struct Command &command : commands) {
         if (text == QLatin1String(command.phrase))

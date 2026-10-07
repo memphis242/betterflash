@@ -22,8 +22,8 @@ flowchart TB
 The interface, Qt networking objects, speech synthesis, and native text painting
 belong to the application thread. A dedicated worker owns its SQLite connection
 and all database transactions. Queued signals publish completed snapshots and
-review queues; the interface advances a graded item only after its durable
-transaction commits. Audio capture, sample conversion, voice activity detection,
+review sessions; the interface displays a selected grade after its durable
+transaction commits. Navigation is an explicit user action. Audio capture, sample conversion, voice activity detection,
 and optional local recognition have a separate worker thread. Image validation
 and content-addressed import run in the Qt thread pool.
 
@@ -40,7 +40,7 @@ Python's standard library.
 
 ## Collection and credentials
 
-Source notes, independent review variants, immutable review history, deletion
+Source notes, independent review variants, review history, deletion
 tombstones, device metadata, and the outgoing event log live in local SQLite.
 Each user mutation and its event are one transaction. Review queues are temporary
 session state. Attached images live beside the database in `media/`, with
@@ -63,24 +63,28 @@ themes, keyboard bindings, page selection, and detail-pane sizing.
 Review's idle view contains a bounded horizontal deck browser, an optional deck
 tree, actual queue counts, and a large start action in the lower portion of the
 page. Deck parents are stored and synchronized independently of their names.
-Active review cards open in a rounded native modal, with a pinned header and
-grading controls around a bounded Markdown view. Pause sits directly beside the
-bounded deck title. The queue opens as a centered, horizontally scrollable
-timeline with fading edges, without a rail or current label; the current
-variant can scroll out of view in long queues. Viewport position controls
-upcoming card disclosure and haze while card widths and gaps stay fixed.
-The timeline retains the entire pending queue and completed session history,
-instantiating only the cards near the viewport. Bounds keep the first card from moving past
-the center and stop when the final card reaches the center. Selecting a pending
-variant moves the review cursor and highlight without scrolling or reordering cards;
-completed variants open for inspection without scheduling mutations. A reserved
-control row shows Return to active card only when its body is outside the viewport.
-A persistent horizontal scrollbar below the timeline maps its legal scroll bounds
-and supports dragging and keyboard navigation.
-A timer sits above the controls, and a large
-rounded Reveal answer cover sits below the prompt. Dismissing the modal pauses
-the response timer and retains the queue;
-resuming reopens the same session.
+Active review cards occupy a rounded container in the Review page, with a pinned
+header and grading controls around a bounded Markdown view. Pause sits beside
+the deck title. The collapsible ledger queue retains every card in session order,
+instantiating only cards near the viewport. Viewport position controls upcoming
+card disclosure and haze while card widths and gaps stay fixed. Bounds keep the
+first and final cards from moving past the center. Selection changes the active
+card without recentering the timeline. A Return to active card control appears
+when the card is outside the viewport; a persistent scrollbar maps the extent.
+
+A previous/next arrow bar spans each side of the main card. One tag capsule
+appears in each preview and all tags appear above the prompt. The queue can be
+collapsed without hiding progress or navigation. A segmented progress strip uses
+the same outcome colors as the queue and grades. Leaving Review pauses the timer
+and retains the queue. A timer sits above the controls, and a rounded Reveal
+answer cover sits below the prompt.
+
+The worker owns the ordered session list, including graded items. A grade leaves
+the current item selected. Corrections reuse the original review identifier,
+timestamp, response duration, and pre-review scheduling baseline. They do not
+increment the review count again. A correction after leaving the card requires
+confirmation. Each correction and its outgoing event commit together. The list
+of pending cards exposed to summaries contains only ungraded items.
 
 The Android draft uses the same native modules. Its build preflight checks the
 matching Qt kit, host tools, full JDK, SDK, NDK, and OpenSSL libraries. Voice is

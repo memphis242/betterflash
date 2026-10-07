@@ -9,6 +9,8 @@ QVariantMap ShortcutManager::defaultBindings() {
         {QStringLiteral("newDeck"), QStringLiteral("Ctrl+Shift+N")},
         {QStringLiteral("editCard"), QStringLiteral("Ctrl+E")},
         {QStringLiteral("review"), QStringLiteral("Space")},
+        {QStringLiteral("previousCard"), QStringLiteral("Left")},
+        {QStringLiteral("nextCard"), QStringLiteral("Right")},
         {QStringLiteral("gradeMissed"), QStringLiteral("1")},
         {QStringLiteral("gradePartial"), QStringLiteral("2")},
         {QStringLiteral("gradeHard"), QStringLiteral("3")},

@@ -34,7 +34,8 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 | `deck.delete` | `id` |
 | `card.upsert` | source `card` and exactly its independently scheduled `variants` |
 | `card.delete` | source `id` |
-| `review.add` | immutable `review` and its updated `variant` |
+| `review.add` | initial `review` and its updated `variant` |
+| `review.correct` | corrected `review` and recalculated `variant`, preserving the review identity, timestamp, response duration, and review count |
 | `variant.upsert` | `variant`, including a postponed due date |
 
 Imported historical reviews can use `historyOnly: true` without changing a
@@ -51,7 +52,8 @@ when sync downloads a verified replacement.
 
 ## Conflict behavior and scope
 
-The client retains every review as immutable history. Concurrent note and
+The client retains each review in history. Rating corrections update the same
+history entry; correction events remain in the ordered event log. Concurrent note and
 schedule changes follow server event order; they are not merged by an LLM.
 Child decks received before their parent are retained and retried when the parent
 arrives. A hierarchy cycle is rejected without advancing the cursor. Deleting a
