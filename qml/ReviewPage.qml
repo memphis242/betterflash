@@ -331,6 +331,10 @@ Item {
         id: reviewWorkspace
         objectName: "reviewWorkspace"
         visible: app.reviewing
+        onVisibleChanged: {
+            if (visible && !page.ui.modalOpen)
+                forceActiveFocus(Qt.OtherFocusReason);
+        }
         anchors.fill: parent
         anchors.margins: page.ui.gutter
         ColumnLayout {
