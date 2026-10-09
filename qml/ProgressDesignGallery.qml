@@ -24,7 +24,7 @@ ApplicationWindow {
 
     readonly property int cardCount: 12
     property int reviewedCount: 7
-    readonly property var grades: [4, 3, 2, 1, 0, 3, 4]
+    readonly property var grades: [4, 3, 2, 1, 0, 3, 4, 2, 3, 1, 4, 3]
 
     Component.onCompleted: {
         if (!Theme.hasChoice) {

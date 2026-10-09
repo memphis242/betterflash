@@ -44,6 +44,10 @@ compares twelve native QML queue treatments without opening the collection.
 Launch it with `./scripts/run-desktop.sh --queue-designs`.
 The [review control studies](docs/review-control-studies.md) compare five icon
 button treatments using `./scripts/run-desktop.sh --control-designs`.
+Compare three progress-bar treatments together using
+`./scripts/run-desktop.sh --progress-designs`. The shared slider previews the same
+review count in all three bars; the theme button switches their palette.
+The gallery uses sample outcomes and its own settings, without opening a collection.
 
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.

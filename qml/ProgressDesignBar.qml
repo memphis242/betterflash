@@ -7,7 +7,7 @@ Item {
     property int variant: 0
     property int cardCount: 12
     property int reviewedCount: 7
-    property var grades: [4, 3, 2, 1, 0, 3, 4]
+    property var grades: [4, 3, 2, 1, 0, 3, 4, 2, 3, 1, 4, 3]
     implicitHeight: variant === 1 ? 34 : variant === 2 ? 30 : 26
     Accessible.role: Accessible.ProgressBar
     Accessible.name: reviewedCount + " of " + cardCount + " cards reviewed"
@@ -15,6 +15,7 @@ Item {
     readonly property var outcomeColors: [Theme.recallMissed, Theme.recallPartial,
         Theme.recallHard, Theme.recallGood, Theme.recallEasy]
     readonly property color neutralColor: variant === 1 ? Theme.ledgerSurfaceRaised : Theme.surfaceRaised
+    readonly property color insetColor: Theme.ledgerSurface
     readonly property color outerRule: variant === 1 ? Theme.ledgerRule : Theme.rule
 
     function gradeAt(index) {
@@ -43,6 +44,7 @@ Item {
     onVariantChanged: drawing.requestPaint()
     onOutcomeColorsChanged: drawing.requestPaint()
     onNeutralColorChanged: drawing.requestPaint()
+    onInsetColorChanged: drawing.requestPaint()
     onOuterRuleChanged: drawing.requestPaint()
 
     Canvas {
@@ -66,7 +68,7 @@ Item {
             const segment = bodyWidth / count
             const middle = height / 2
             const gap = bar.variant === 2 ? Math.min(7, segment * 0.32) : Math.min(4, segment * 0.18)
-            const slant = bar.variant === 2 ? Math.min(13, segment * 0.48) : Math.min(10, segment * 0.34)
+            const slant = bar.variant === 2 ? Math.min(13, segment * 0.48) : Math.min(bar.variant === 0 ? 14 : 10, segment * 0.34)
 
             function silhouette(left, top, right, bottom) {
                 const tip = right
@@ -89,13 +91,9 @@ Item {
                 ctx.lineWidth = 1
                 silhouette(0.5, 0.5, width - 0.5, height - 0.5)
                 ctx.stroke()
-                ctx.save()
-                ctx.beginPath()
-                ctx.rect(inset, inset, Math.max(0, right - inset), Math.max(0, height - inset * 2))
-                ctx.clip()
-                ctx.fillStyle = Theme.ledgerSurface
-                ctx.fillRect(inset, inset, Math.max(0, right - inset), Math.max(0, height - inset * 2))
-                ctx.restore()
+                ctx.fillStyle = bar.insetColor
+                silhouette(inset, inset, right, height - inset)
+                ctx.fill()
             } else {
                 ctx.fillStyle = bar.neutralColor
                 silhouette(0, 0, width, height)
@@ -103,11 +101,10 @@ Item {
             }
 
             ctx.save()
-            silhouette(0, 0, width, height)
+            silhouette(inset, inset, right, height - inset)
             ctx.clip()
             const fillTop = inset
             const fillBottom = height - inset
-            const fillHeight = Math.max(0, fillBottom - fillTop)
             for (let i = 0; i < count; ++i) {
                 const grade = bar.gradeAt(i)
                 if (grade < 0)
@@ -118,8 +115,8 @@ Item {
                 ctx.fillStyle = bar.outcomeColors[grade]
                 ctx.beginPath()
                 if (bar.variant === 2) {
-                    const leftTop = i === 0 ? x0 : x0 + slant / 2
-                    const leftMiddle = i === 0 ? x0 : x0 - slant / 2
+                    const leftTop = i === 0 ? x0 : x0 - slant / 2
+                    const leftMiddle = i === 0 ? x0 : x0 + slant / 2
                     const rightTop = isLast ? x1 : x1 - slant / 2
                     const rightMiddle = isLast ? x1 : x1 + slant / 2
                     ctx.moveTo(leftMiddle, middle)
@@ -127,7 +124,7 @@ Item {
                     ctx.lineTo(rightTop, fillTop)
                     ctx.lineTo(rightMiddle, middle)
                     ctx.lineTo(isLast ? x1 : x1 - slant / 2, fillBottom)
-                    ctx.lineTo(i === 0 ? x0 : x0 + slant / 2, fillBottom)
+                    ctx.lineTo(i === 0 ? x0 : x0 - slant / 2, fillBottom)
                 } else {
                     const topLeft = i === 0 ? x0 : x0 + slant / 2
                     const bottomLeft = i === 0 ? x0 : x0 - slant / 2
@@ -162,12 +159,14 @@ Item {
                     const bottomCenter = center - slant / 2
                     ctx.beginPath()
                     if (bar.variant === 2) {
-                        ctx.moveTo(center - gap / 2, fillTop)
-                        ctx.lineTo(center + gap / 2, fillTop)
-                        ctx.lineTo(center + gap / 2, middle)
-                        ctx.lineTo(center + gap / 2, fillBottom)
-                        ctx.lineTo(center - gap / 2, fillBottom)
-                        ctx.lineTo(center - gap / 2, middle)
+                        const edgeCenter = center - slant / 2
+                        const tipCenter = center + slant / 2
+                        ctx.moveTo(edgeCenter - gap / 2, fillTop)
+                        ctx.lineTo(edgeCenter + gap / 2, fillTop)
+                        ctx.lineTo(tipCenter + gap / 2, middle)
+                        ctx.lineTo(edgeCenter + gap / 2, fillBottom)
+                        ctx.lineTo(edgeCenter - gap / 2, fillBottom)
+                        ctx.lineTo(tipCenter - gap / 2, middle)
                     } else {
                         ctx.moveTo(topCenter - gap / 2, fillTop)
                         ctx.lineTo(topCenter + gap / 2, fillTop)

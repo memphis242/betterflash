@@ -67,6 +67,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("screenshot"), QStringLiteral("Save a window capture after startup."), QStringLiteral("file")});
     parser.addOption({QStringLiteral("queue-designs"), QStringLiteral("Open the isolated review queue design gallery.")});
     parser.addOption({QStringLiteral("control-designs"), QStringLiteral("Open the isolated review control design gallery.")});
+    parser.addOption({QStringLiteral("progress-designs"), QStringLiteral("Open three review progress bar studies on one page.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -75,16 +76,18 @@ int main(int argc, char **argv) {
     parser.process(application);
     bool queueDesigns=parser.isSet(QStringLiteral("queue-designs"));
     bool controlDesigns=parser.isSet(QStringLiteral("control-designs"));
+    const bool progressDesigns = parser.isSet(QStringLiteral("progress-designs"));
 #ifdef BETTERFLASH_GUI_SWEEP
     queueDesigns=queueDesigns||parser.isSet(QStringLiteral("export-queue-designs"));
     controlDesigns=controlDesigns||parser.isSet(QStringLiteral("export-control-designs"));
 #endif
-    if (queueDesigns && controlDesigns) {
-        qCritical().noquote()<<QStringLiteral("DESIGN_MODE: Choose either --queue-designs or --control-designs for one gallery window.");
+    if (static_cast<int>(queueDesigns) + static_cast<int>(controlDesigns) + static_cast<int>(progressDesigns) > 1) {
+        qCritical().noquote()<<QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, or --progress-designs.");
         return 1;
     }
     if (queueDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Queue Designs"));
     if (controlDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Control Designs"));
+    if (progressDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Progress Designs"));
     QString dataDirectory = parser.isSet(QStringLiteral("data-dir")) ? QDir(parser.value(QStringLiteral("data-dir"))).absolutePath()
         : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (!QDir().mkpath(dataDirectory)) {
@@ -94,9 +97,10 @@ int main(int argc, char **argv) {
     if (parser.isSet(QStringLiteral("data-dir")))
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
 
-    if (queueDesigns || controlDesigns) {
+    if (queueDesigns || controlDesigns || progressDesigns) {
         QQmlApplicationEngine galleryEngine;
-        const char *const warningProperty=controlDesigns?"controlDesignWarnings":"queueDesignWarnings";
+        const char *const warningProperty = progressDesigns ? "progressDesignWarnings"
+            : controlDesigns ? "controlDesignWarnings" : "queueDesignWarnings";
         galleryEngine.setProperty(warningProperty,QStringList());
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,
             [&galleryEngine,warningProperty](const QList<QQmlError> &errors) {
@@ -106,7 +110,9 @@ int main(int argc, char **argv) {
             });
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::objectCreationFailed,&application,
             [] {QCoreApplication::exit(1);},Qt::QueuedConnection);
-        galleryEngine.loadFromModule(QStringLiteral("BetterFlash"),controlDesigns?QStringLiteral("ReviewControlGallery"):QStringLiteral("QueueDesignGallery"));
+        const QString galleryModule = progressDesigns ? QStringLiteral("ProgressDesignGallery")
+            : controlDesigns ? QStringLiteral("ReviewControlGallery") : QStringLiteral("QueueDesignGallery");
+        galleryEngine.loadFromModule(QStringLiteral("BetterFlash"), galleryModule);
         if (galleryEngine.rootObjects().isEmpty()) return 1;
         if (parser.isSet(QStringLiteral("screenshot"))) {
             const QString output=parser.value(QStringLiteral("screenshot"));
