@@ -5,7 +5,7 @@ Item {
     id: strip
     required property var cards
     required property int reviewedCount
-    implicitHeight: 10
+    implicitHeight: 22
     Accessible.role: Accessible.ProgressBar
     Accessible.name: reviewedCount + " of " + cards.length + " cards reviewed"
     readonly property var outcomeColors: [Theme.recallMissed, Theme.recallPartial, Theme.recallHard, Theme.recallGood, Theme.recallEasy]
@@ -15,6 +15,16 @@ Item {
     onRuleColorChanged: drawing.requestPaint()
     function gradeAt(index) {
         return index >= 0 && index < cards.length ? Number(cards[index].sessionGrade) : -1;
+    }
+    function cardAtX(x) {
+        const cardCount = cards.length;
+        if (!cardCount || width <= 0)
+            return -1;
+        const arrowWidth = Math.min(width, Math.max(4, Math.min(18, width * 0.12)));
+        const bodyWidth = Math.max(0, width - arrowWidth);
+        if (x >= bodyWidth || bodyWidth <= 0)
+            return cardCount - 1;
+        return Math.max(0, Math.min(cardCount - 1, Math.floor(x / bodyWidth * cardCount)));
     }
     Canvas {
         id: drawing
@@ -26,21 +36,88 @@ Item {
             ctx.reset();
             if (!strip.cards.length || width <= 0)
                 return;
-            const step = width / strip.cards.length;
-            const gap = Math.min(3, step * 0.18);
-            const segment = step - gap;
-            for (let i = 0; i < strip.cards.length; ++i) {
+            const cardCount = strip.cards.length;
+            const arrowWidth = Math.min(width, Math.max(4, Math.min(18, width * 0.12)));
+            const bodyWidth = Math.max(0, width - arrowWidth);
+            const segment = bodyWidth / cardCount;
+            const gapWidth = Math.min(3, height * 0.18, segment * 0.4);
+            const slant = Math.min(10, segment * 0.4);
+            const midpoint = height / 2;
+
+            // The track is one continuous silhouette: square at the left and pointed at the right.
+            ctx.fillStyle = strip.ruleColor;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(bodyWidth, 0);
+            ctx.lineTo(width, midpoint);
+            ctx.lineTo(bodyWidth, height);
+            ctx.lineTo(0, height);
+            ctx.closePath();
+            ctx.fill();
+
+            // Keep fills and transparent cuts inside the arrow-shaped silhouette.
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(bodyWidth, 0);
+            ctx.lineTo(width, midpoint);
+            ctx.lineTo(bodyWidth, height);
+            ctx.lineTo(0, height);
+            ctx.closePath();
+            ctx.clip();
+
+            for (let i = 0; i < cardCount; ++i) {
                 const grade = strip.gradeAt(i);
-                const x = i * step;
                 if (grade >= 0 && grade < strip.outcomeColors.length) {
+                    const x0 = i * segment;
+                    const x1 = (i + 1) * segment;
                     ctx.fillStyle = strip.outcomeColors[grade];
-                    ctx.fillRect(x, 1, segment, height - 2);
-                } else {
-                    ctx.strokeStyle = strip.ruleColor;
-                    ctx.lineWidth = Math.min(1, segment / 3);
-                    ctx.strokeRect(x + ctx.lineWidth / 2, 1.5, segment - ctx.lineWidth, height - 3);
+                    const topLeft = i === 0 ? x0 : x0 + slant / 2;
+                    const bottomLeft = i === 0 ? x0 : x0 - slant / 2;
+                    const topRight = i === cardCount - 1 ? x1 : x1 + slant / 2;
+                    const bottomRight = i === cardCount - 1 ? x1 : x1 - slant / 2;
+                    ctx.beginPath();
+                    ctx.moveTo(bottomLeft, height);
+                    ctx.lineTo(topLeft, 0);
+                    ctx.lineTo(topRight, 0);
+                    ctx.lineTo(bottomRight, height);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // The final completed slot owns the arrowhead.
+                    if (i === cardCount - 1) {
+                        ctx.beginPath();
+                        ctx.moveTo(bodyWidth, 0);
+                        ctx.lineTo(width, midpoint);
+                        ctx.lineTo(bodyWidth, height);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
                 }
             }
+
+            // Erase a constant-width slanted cut only where at least one side is complete.
+            if (gapWidth > 0 && segment > 0) {
+                ctx.globalCompositeOperation = "destination-out";
+                for (let boundary = 1; boundary < cardCount; ++boundary) {
+                    const leftComplete = strip.gradeAt(boundary - 1) >= 0 && strip.gradeAt(boundary - 1) < strip.outcomeColors.length;
+                    const rightComplete = strip.gradeAt(boundary) >= 0 && strip.gradeAt(boundary) < strip.outcomeColors.length;
+                    if (!leftComplete && !rightComplete)
+                        continue;
+                    const center = boundary * segment;
+                    const topCenter = center + slant / 2;
+                    const bottomCenter = center - slant / 2;
+                    ctx.beginPath();
+                    ctx.moveTo(topCenter - gapWidth / 2, 0);
+                    ctx.lineTo(topCenter + gapWidth / 2, 0);
+                    ctx.lineTo(bottomCenter + gapWidth / 2, height);
+                    ctx.lineTo(bottomCenter - gapWidth / 2, height);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.globalCompositeOperation = "source-over";
+            }
+            ctx.restore();
         }
     }
     MouseArea {
@@ -48,7 +125,7 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
-        readonly property int cardIndex: Math.min(strip.cards.length - 1, Math.floor(mouseX / Math.max(1, width) * strip.cards.length))
+        readonly property int cardIndex: strip.cardAtX(mouseX)
         ToolTip.visible: containsMouse && strip.cards.length > 0
         ToolTip.text: "Card " + (cardIndex + 1) + " of " + strip.cards.length + ": " + (["Missed", "Partial", "Hard", "Good", "Easy"][strip.gradeAt(cardIndex)] || "Not reviewed")
     }
