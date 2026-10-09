@@ -8,7 +8,6 @@ Item {
     id: page
     required property var ui
     readonly property bool hasCard: !!app.currentCard.id
-    readonly property bool reviewModalVisible: reviewDialog.visible
     readonly property bool correctionDialogVisible: gradeCorrectionDialog.visible
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
     readonly property bool timelineScrollHasFocus: reviewQueueScrollBar.activeFocus
@@ -50,15 +49,6 @@ Item {
         if (ui.selectedDeck.id)
             return ui.selectedDeck[key] || 0;
         return app.decks.filter(deck => !deck.parentId).reduce((total, deck) => total + (deck[key] || 0), 0);
-    }
-    function openReviewModal() {
-        if (app.reviewing) {
-            page.ui.page = 0;
-            reviewDialog.open();
-        }
-    }
-    function dismissReviewModal() {
-        reviewDialog.close();
     }
     function cardTags(card) {
         const raw = card && (card.tags || card.labels || []);
@@ -164,25 +154,20 @@ Item {
     property string scrollVariantId: ""
     Connections {
         target: app
-        function onReviewingChanged() {
-            if (app.reviewing)
-                page.openReviewModal();
-            else
-                reviewDialog.close();
-        }
         function onPausedChanged() {
             if (app.reviewing && !app.paused)
-                page.openReviewModal();
+                page.ui.page = 0;
         }
         function onCurrentCardChanged() {
             const id = app.currentCard.variantId || "";
             if (page.scrollVariantId !== id) {
                 page.scrollVariantId = id;
-                reviewModalScroll.contentItem.contentY = 0;
+                reviewContentScroll.contentItem.contentY = 0;
             }
         }
     }
     ColumnLayout {
+        visible: !app.reviewing
         anchors.fill: parent
         anchors.margins: page.ui.gutter
         spacing: 16
@@ -311,7 +296,7 @@ Item {
                         }
                         AppButton {
                             objectName: "reviewPrimary"
-                            text: app.reviewing ? "Resume review" : !app.decks.length ? "Create deck" : page.deckCount("cardCount") === 0 ? "Add card" : "Start review"
+                            text: !app.decks.length ? "Create deck" : page.deckCount("cardCount") === 0 ? "Add card" : "Start review"
                             hint: "Review due cards in the selected deck and its subdecks"
                             primary: true
                             Layout.alignment: Qt.AlignHCenter
@@ -320,11 +305,7 @@ Item {
                             font.pixelSize: page.ui.width < 600 ? 21 : 25
                             enabled: !app.busy && (app.reviewing || !app.decks.length || page.deckCount("cardCount") === 0 || page.deckCount("dueCount") > 0)
                             onClicked: {
-                                if (app.reviewing) {
-                                    if (app.paused)
-                                        app.resumeReview();
-                                    page.openReviewModal();
-                                } else if (!app.decks.length)
+                                if (!app.decks.length)
                                     page.ui.openDeckEditor("");
                                 else if (page.deckCount("cardCount") === 0)
                                     page.ui.openCardEditor("");
@@ -346,48 +327,22 @@ Item {
             }
         }
     }
-    Dialog {
-        id: reviewDialog
-        objectName: "reviewDialog"
-        parent: Overlay.overlay
-        modal: true
-        focus: true
-        anchors.centerIn: parent
-        width: Math.min(1120, page.ui.width - 2 * page.ui.gutter)
-        height: Math.min(820, page.ui.height - 2 * page.ui.gutter)
-        padding: page.ui.width < 600 ? 12 : 20
-        closePolicy: Popup.CloseOnEscape
-        onClosed: {
-            if (app.reviewing)
-                app.pauseReview();
-        }
-        background: Rectangle {
-            color: Theme.surface
-            radius: 16
-            border.color: Theme.rule
-        }
-        Overlay.modal: Rectangle {
-            color: Theme.scrim
-        }
-        contentItem: ColumnLayout {
+    Item {
+        id: reviewWorkspace
+        objectName: "reviewWorkspace"
+        visible: app.reviewing
+        anchors.fill: parent
+        anchors.margins: page.ui.gutter
+        ColumnLayout {
+            anchors.fill: parent
             spacing: 14
-            Instantiator {
-                model: ui.shortcutCommands.filter(c => c.action.indexOf("editor") !== 0 && c.action !== "saveCard").map(c => c.action)
-                delegate: Shortcut {
-                    required property string modelData
-                    sequence: shortcuts.bindings[modelData] || ""
-                    context: Qt.WindowShortcut
-                    enabled: reviewDialog.visible && ui.shortcutAllowed(modelData)
-                    onActivated: ui.runAction(modelData)
-                }
-            }
             RowLayout {
-                objectName: "reviewModalHeader"
+                objectName: "reviewHeader"
                 Layout.fillWidth: true
                 spacing: 10
                 ColumnLayout {
                     id: reviewHeaderInfo
-                    readonly property real titleMaxWidth: Math.max(120, reviewDialog.width * 0.42)
+                    readonly property real titleMaxWidth: Math.max(120, reviewWorkspace.width * 0.42)
                     Layout.minimumWidth: 0
                     Layout.preferredWidth: titleLabel.width + reviewPause.width + 10
                     spacing: 3
@@ -460,11 +415,6 @@ Item {
                         }
                     }
                 }
-                GlyphButton {
-                    glyph: "close"
-                    hint: "Close review and pause (Escape)"
-                    onClicked: reviewDialog.close()
-                }
             }
             ReviewProgress {
                 Layout.fillWidth: true
@@ -485,7 +435,7 @@ Item {
                     visible: !page.queueCollapsed && !reviewQueuePreviewList.activeCardVisible && reviewQueuePreviewList.logicalActiveIndex >= 0
                     glyph: "return-card"
                     hint: "Center the active card in the review timeline"
-                    onClicked: reviewQueuePreviewList.centerCurrent()
+                    onClicked: reviewQueuePreviewList.centerCurrent(true)
                 }
                 GlyphButton {
                     objectName: "reviewQueueCollapse"
@@ -524,6 +474,7 @@ Item {
                     readonly property real maximumScroll: Math.max(minimumScroll, leadingTrack + (count - 1) * stride + slotWidth / 2 - width / 2)
                     property int currentIndex: Math.max(0, page.reviewCards.findIndex(card => card.variantId === app.currentCard.variantId))
                     readonly property int logicalActiveIndex: activeIndex()
+                    readonly property string activeVariantId: app.currentCard.variantId || ""
                     readonly property real activeCardLeft: leadingTrack + logicalActiveIndex * stride
                     readonly property bool activeCardVisible: logicalActiveIndex >= 0 && activeCardLeft + slotWidth > contentX && activeCardLeft < contentX + width
                     readonly property real scrollSpan: maximumScroll - minimumScroll
@@ -550,37 +501,42 @@ Item {
                             return -1;
                         return page.reviewCards.findIndex(card => card.variantId === currentVariant);
                     }
-                    function centerCurrent() {
+                    function centerCurrent(animate) {
+                        centering.stop();
                         const index = logicalActiveIndex;
                         if (index < 0)
                             return;
                         cancelFlick();
                         currentIndex = index;
-                        contentX = Math.max(minimumScroll, Math.min(maximumScroll, leadingTrack + index * stride + slotWidth / 2 - width / 2));
+                        const target = Math.max(minimumScroll, Math.min(maximumScroll, leadingTrack + index * stride + slotWidth / 2 - width / 2));
+                        if (animate && visible && !Theme.reducedMotion && Math.abs(contentX - target) > 1) {
+                            centering.from = contentX;
+                            centering.to = target;
+                            centering.start();
+                        } else {
+                            contentX = target;
+                        }
                     }
-                    function focusIndex(index) {
-                        currentIndex = index;
-                        const left = leadingTrack + index * stride;
-                        const right = left + slotWidth;
-                        if (left < contentX + fadeWidth)
-                            contentX = Math.max(minimumScroll, left - fadeWidth);
-                        else if (right > contentX + width - fadeWidth)
-                            contentX = Math.min(maximumScroll, right + fadeWidth - width);
+                    function centerAnimated() {
+                        centerCurrent(true);
                     }
-                    function decrementCurrentIndex() {
-                        const nextIndex = Math.max(firstCardIndex, currentIndex - 1);
-                        focusIndex(nextIndex);
-                        selectIndex(nextIndex);
+                    function centerImmediately() {
+                        centerCurrent(false);
                     }
-                    function incrementCurrentIndex() {
-                        const nextIndex = Math.min(count - 1, Math.max(firstCardIndex, currentIndex + 1));
-                        focusIndex(nextIndex);
-                        selectIndex(nextIndex);
+                    NumberAnimation {
+                        id: centering
+                        target: reviewQueuePreviewList
+                        property: "contentX"
+                        duration: 210
+                        easing.type: Easing.OutCubic
                     }
-                    function navigateOffset(offset) {
-                        if (app.busy || app.paused)
-                            return;
-                        app.navigateReview(offset);
+                    WheelHandler {
+                        target: null
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: event => {
+                            centering.stop();
+                            event.accepted = false;
+                        }
                     }
                     function selectVariant(variantId) {
                         if (!variantId || app.busy || app.paused || ui.modalOpen)
@@ -594,10 +550,19 @@ Item {
                         if (item.card)
                             selectVariant(item.card.variantId);
                     }
-                    onLogicalActiveIndexChanged: {
-                        if (logicalActiveIndex >= 0)
-                            currentIndex = logicalActiveIndex;
+                    onLogicalActiveIndexChanged: Qt.callLater(centerAnimated)
+                    onActiveVariantIdChanged: Qt.callLater(centerAnimated)
+                    onDraggingChanged: {
+                        if (dragging)
+                            centering.stop();
                     }
+                    onVisibleChanged: {
+                        if (visible)
+                            Qt.callLater(centerImmediately);
+                        else
+                            centering.stop();
+                    }
+                    onWidthChanged: Qt.callLater(centerImmediately)
                     onContentXChanged: clampScroll()
                     onMinimumScrollChanged: Qt.callLater(clampScroll)
                     onMaximumScrollChanged: Qt.callLater(clampScroll)
@@ -605,12 +570,12 @@ Item {
                         currentIndex = Math.max(firstCardIndex, Math.min(count - 1, currentIndex));
                         Qt.callLater(clampScroll);
                     }
-                    Component.onCompleted: Qt.callLater(centerCurrent)
+                    Component.onCompleted: Qt.callLater(centerImmediately)
                     Connections {
-                        target: app
-                        function onReviewingChanged() {
-                            if (app.reviewing)
-                                Qt.callLater(reviewQueuePreviewList.centerCurrent);
+                        target: Theme
+                        function onReducedMotionChanged() {
+                            if (Theme.reducedMotion && centering.running)
+                                reviewQueuePreviewList.centerImmediately();
                         }
                     }
                     Keys.onReturnPressed: selectIndex(currentIndex)
@@ -870,6 +835,7 @@ Item {
                     ToolTip.visible: hovered
                     ToolTip.text: "Scroll through the review deck. Arrow keys move one card; Page Up and Page Down move one view; Home and End move to the first and last card."
                     function moveToContent(value) {
+                        centering.stop();
                         reviewQueuePreviewList.cancelFlick();
                         reviewQueuePreviewList.contentX = Math.max(reviewQueuePreviewList.minimumScroll, Math.min(reviewQueuePreviewList.maximumScroll, value));
                     }
@@ -948,14 +914,14 @@ Item {
                         Layout.fillHeight: true
                         spacing: 10
                         ScrollView {
-                            id: reviewModalScroll
+                            id: reviewContentScroll
                             objectName: "reviewScroll"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             contentWidth: availableWidth
                             clip: true
                             ColumnLayout {
-                                width: reviewModalScroll.availableWidth
+                                width: reviewContentScroll.availableWidth
                                 spacing: 18
                                 ScrollView {
                                     id: questionTags

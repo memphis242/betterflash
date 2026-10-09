@@ -63,20 +63,25 @@ themes, keyboard bindings, page selection, and detail-pane sizing.
 Review's idle view contains a bounded horizontal deck browser, an optional deck
 tree, actual queue counts, and a large start action in the lower portion of the
 page. Deck parents are stored and synchronized independently of their names.
-Active review cards occupy a rounded modal over the Review page, with a pinned
-header and grading controls around a bounded Markdown view. Pause sits beside
+Active review fills the Review page, with a pinned header and grading controls
+around a bounded Markdown view inside a rounded card container. Pause sits beside
 the deck title. The collapsible ledger queue retains every card in session order,
 instantiating only cards near the viewport. Viewport position controls upcoming
 card disclosure and haze while card widths and gaps stay fixed. Bounds keep the
-first and final cards from moving past the center. Selection changes the active
-card without recentering the timeline. A Return to active card control appears
+first and final cards from moving past the center. Selection and grading center
+the active card with a short easing animation. Dragging, wheel input, or the scrollbar
+interrupts the animation; the persisted Reduce motion preference bypasses it.
+A Return to active card control appears
 when the card is outside the viewport; a persistent scrollbar maps the extent.
 
 A previous/next arrow bar spans each side of the main card. One tag capsule
 appears in each preview and all tags appear above the prompt. The queue can be
-collapsed without hiding progress or navigation. A segmented progress strip uses
-the same outcome colors as the queue and grades. Closing the modal or leaving Review pauses the timer
-and retains the queue. A timer sits above the controls, and a rounded Reveal
+collapsed without hiding progress or navigation. A 22 px progress bar has a
+square left edge and an arrow tip. Reviewed slots
+use the same outcome colors as the queue and grades, separated by transparent
+slanted cuts. Ungraded slots form a continuous neutral track. Leaving Review
+pauses the timer and retains the queue. A timer sits above the controls, and a
+rounded Reveal
 answer cover sits below the prompt.
 
 The worker owns the ordered session list, including graded items. A grade advances

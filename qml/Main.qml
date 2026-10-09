@@ -236,7 +236,6 @@ ApplicationWindow {
     onPageChanged: {
         preferences.page = page
         if (page !== 0 && app.reviewing) {
-            review.dismissReviewModal()
             app.pauseReview()
             voice.enabled = false
         }
@@ -542,9 +541,7 @@ ApplicationWindow {
             if (page !== 0 || typing || !app.reviewing || app.busy)
                 return false
             if (action === "pause")
-                return review.reviewModalVisible || app.paused
-            if (!review.reviewModalVisible)
-                return false
+                return true
             if (app.paused || !app.currentCard.id)
                 return false
             if ((action === "previousCard" || action === "nextCard") && review.timelineScrollHasFocus)
@@ -592,7 +589,6 @@ ApplicationWindow {
             else {
                 if (app.paused)
                     app.resumeReview()
-                review.openReviewModal()
             }
             break
         case "summary":
@@ -2169,7 +2165,7 @@ ApplicationWindow {
             required property string modelData
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
-            enabled: !review.reviewModalVisible && window.shortcutAllowed(modelData)
+            enabled: window.shortcutAllowed(modelData)
             onActivated: window.runAction(modelData)
         }
     }

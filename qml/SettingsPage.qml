@@ -110,6 +110,13 @@ Item {
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
+                    Switch {
+                        text: "Reduce motion"
+                        checked: Theme.reducedMotion
+                        onToggled: Theme.preferences.reducedMotion = checked
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Move directly to the active card without animating the review queue."
+                    }
                 }
                 ColumnLayout {
                     visible: settingsPage.section === 1

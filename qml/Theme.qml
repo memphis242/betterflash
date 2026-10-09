@@ -5,6 +5,7 @@ import QtQml
 
 QtObject {
     id: theme
+    readonly property bool reducedMotion: preferences.reducedMotion
     readonly property bool hasChoice: preferences.hasThemeChoice
     readonly property bool dark: hasChoice ? preferences.savedDark : Qt.styleHints.colorScheme !== Qt.Light
     readonly property color canvas: dark ? "#211722" : "#f5f0e7"
@@ -34,6 +35,7 @@ QtObject {
     readonly property string monoFont: "IBM Plex Mono"
     property Settings preferences: Settings {
         category: "appearance"
+        property bool reducedMotion: false
         property bool savedDark: true
         property bool hasThemeChoice: false
     }
