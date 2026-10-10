@@ -1,13 +1,17 @@
 #include "Summarizer.h"
 #include "core/appcontroller.h"
+#include "core/cardmodel.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSet>
 #include <QUrl>
 
 Summarizer::Summarizer(AppController *app, QObject *parent) : QObject(parent), m_app(app) {
@@ -80,13 +84,102 @@ void Summarizer::cancel() {
 }
 void Summarizer::summarizeRemaining() {
     if (m_busy) return;
+    m_summaryDeckId.clear();
     m_error.clear();
     m_summary.clear();
+    m_pendingCount = 0;
+    summarizePending(m_app->pendingCards(), QString(), QStringLiteral("the review queue"));
+}
+
+void Summarizer::summarizeDeck(const QString &deckId) {
+    if (m_busy) return;
+    const QString requestedId = deckId.trimmed();
+    m_summaryDeckId = requestedId;
+    m_error.clear();
+    m_summary.clear();
+    m_pendingCount = 0;
+
+    QHash<QString, QString> names;
+    QHash<QString, QString> parents;
+    for (const QVariant &entry : m_app->decks()) {
+        const QVariantMap deck = entry.toMap();
+        const QString id = deck.value(QStringLiteral("id")).toString();
+        if (id.isEmpty()) continue;
+        names.insert(id, deck.value(QStringLiteral("name")).toString());
+        parents.insert(id, deck.value(QStringLiteral("parentId")).toString());
+    }
+    if (!names.contains(requestedId)) {
+        fail(QStringLiteral("LLM_DECK_NOT_FOUND"), QStringLiteral("Choose a saved deck before generating its summary."));
+        return;
+    }
+
+    const auto belongsToDeck = [&parents, &requestedId](const QString &candidateId) {
+        QString current = candidateId;
+        QSet<QString> visited;
+        while (!current.isEmpty()) {
+            if (current == requestedId) return true;
+            if (visited.contains(current)) return false;
+            visited.insert(current);
+            current = parents.value(current);
+        }
+        return false;
+    };
+
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QVariantList pending;
+    for (const QVariant &entry : m_app->cards()) {
+        const QVariantMap card = entry.toMap();
+        const QString cardDeckId = card.value(QStringLiteral("deckId")).toString();
+        if (!belongsToDeck(cardDeckId)) continue;
+        const auto parsedCard = betterflash::model::cardFromMap(card);
+        if (!parsedCard) {
+            fail(QStringLiteral("LLM_CARD_INVALID"),
+                QStringLiteral("A card in this deck is invalid. Repair or remove it before generating a summary."));
+            return;
+        }
+        const auto validKeys = betterflash::model::variantKeys(*parsedCard);
+        if (!validKeys) {
+            fail(QStringLiteral("LLM_CARD_INVALID"),
+                QStringLiteral("A card in this deck has an unsupported card format. Repair it before generating a summary."));
+            return;
+        }
+        const QVariantList variants = card.value(QStringLiteral("variants")).toList();
+        for (const QVariant &variantEntry : variants) {
+            const QVariantMap variant = variantEntry.toMap();
+            const QString dueText = variant.value(QStringLiteral("due")).toString();
+            const QDateTime due = QDateTime::fromString(dueText, Qt::ISODateWithMs).toUTC();
+            if (!due.isValid()) {
+                fail(QStringLiteral("LLM_VARIANT_INVALID"),
+                    QStringLiteral("A review schedule in this deck has an invalid due date. Repair the schedule before generating a summary."));
+                return;
+            }
+            const QString key = variant.value(QStringLiteral("key")).toString();
+            if (!validKeys->contains(key)) {
+                fail(QStringLiteral("LLM_VARIANT_INVALID"),
+                    QStringLiteral("A review schedule in this deck has an invalid card direction. Repair the schedule before generating a summary."));
+                return;
+            }
+            if (due > now) continue;
+            const QString question = betterflash::model::question(*parsedCard, key);
+            pending.append(QVariantMap{{QStringLiteral("deckName"), names.value(cardDeckId)},
+                {QStringLiteral("question"), question}});
+        }
+    }
+    summarizePending(pending, requestedId, names.value(requestedId));
+}
+
+void Summarizer::summarizePending(const QVariantList &pending, const QString &scopeDeckId,
+                                  const QString &scopeName) {
+    Q_ASSERT(!m_busy);
     const auto request = configuredRequest();
     if (!request) { fail(request.error().code, request.error().message); return; }
-    const QVariantList pending = m_app->pendingCards();
     m_pendingCount = static_cast<int>(pending.size());
-    if (pending.isEmpty()) { fail(QStringLiteral("LLM_QUEUE_EMPTY"), QStringLiteral("Start a review with due cards before generating a summary.")); return; }
+    if (pending.isEmpty()) {
+        fail(QStringLiteral("LLM_QUEUE_EMPTY"), scopeDeckId.isEmpty()
+            ? QStringLiteral("Start a review with due cards before generating a summary.")
+            : QStringLiteral("This deck has no cards due for review."));
+        return;
+    }
     QJsonArray prompts;
     int characters = 0;
     for (const QVariant &entry : pending) {
@@ -105,7 +198,8 @@ void Summarizer::summarizeRemaining() {
         "Give a concise Markdown overview grouped into at most five topic groups. Identify repeated concepts. "
         "Do not answer the questions, expose cloze answers, evaluate the user's knowledge, or invent topics. "
         "Do not use emoji. State only what is supported by the prompts. Use at most 220 words.");
-    const QString user = QStringLiteral("Total remaining review items: %1. Prompts included: %2. Card prompt data:\n%3")
+    const QString scope = scopeName.isEmpty() ? QString() : QStringLiteral("Deck: %1. ").arg(scopeName);
+    const QString user = scope + QStringLiteral("Total remaining review items: %1. Prompts included: %2. Card prompt data:\n%3")
         .arg(pending.size()).arg(prompts.size()).arg(QString::fromUtf8(QJsonDocument(prompts).toJson(QJsonDocument::Compact)));
     const QJsonArray messages{
         QJsonObject{{QStringLiteral("role"), QStringLiteral("system")}, {QStringLiteral("content"), system}},
@@ -114,8 +208,11 @@ void Summarizer::summarizeRemaining() {
     const QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("temperature"), 0.2},
         {QStringLiteral("max_tokens"), 600}, {QStringLiteral("messages"), messages}};
     m_busy = true;
-    m_status = prompts.size() == pending.size() ? QStringLiteral("Summarizing %1 remaining items.").arg(pending.size())
-        : QStringLiteral("Summarizing the first %1 of %2 remaining items.").arg(prompts.size()).arg(pending.size());
+    m_status = prompts.size() == pending.size()
+        ? QStringLiteral("Summarizing %1 remaining items in %2.").arg(pending.size())
+            .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName)
+        : QStringLiteral("Summarizing the first %1 of %2 remaining items in %3.").arg(prompts.size()).arg(pending.size())
+            .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName);
     m_reply = m_network.post(*request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
     QNetworkReply *const reply = m_reply;
     connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {

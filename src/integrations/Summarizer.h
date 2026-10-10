@@ -25,6 +25,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QString summary READ summary NOTIFY changed)
+    Q_PROPERTY(QString summaryDeckId READ summaryDeckId NOTIFY changed)
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY changed)
 public:
     explicit Summarizer(AppController *app, QObject *parent = nullptr);
@@ -37,6 +38,7 @@ public:
     QString status() const { return m_status; }
     QString error() const { return m_error; }
     QString summary() const { return m_summary; }
+    QString summaryDeckId() const { return m_summaryDeckId; }
     int pendingCount() const { return m_pendingCount; }
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
@@ -44,6 +46,7 @@ public:
     Q_INVOKABLE void setApiKey(const QString &key) { m_credentials->setKey(key); }
     Q_INVOKABLE void clearApiKey() { m_credentials->clear(); }
     Q_INVOKABLE void summarizeRemaining();
+    Q_INVOKABLE void summarizeDeck(const QString &deckId);
     Q_INVOKABLE void cancel();
 signals:
     void configurationChanged();
@@ -51,6 +54,7 @@ signals:
     void changed();
 private:
     void fail(const QString &code, const QString &message);
+    void summarizePending(const QVariantList &pending, const QString &scopeDeckId, const QString &scopeName);
     void configureCredentials();
     AppController *const m_app;
     SecretStore *m_credentials = nullptr;
@@ -62,6 +66,7 @@ private:
     QString m_status;
     QString m_error;
     QString m_summary;
+    QString m_summaryDeckId;
     bool m_busy = false;
     int m_pendingCount = 0;
 };
