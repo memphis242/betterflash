@@ -21,11 +21,53 @@ Item {
     property real viewScale: 1
     readonly property color lineColor: Theme.rule
     readonly property color activeColor: Theme.accent
+    property bool selectionNeedsReveal: false
     onSelectedIdChanged: edges.requestPaint()
     onDiagramChanged: edges.requestPaint()
     onLineColorChanged: edges.requestPaint()
     onActiveColorChanged: edges.requestPaint()
     onViewScaleChanged: edges.requestPaint()
+    onVisibleChanged: if (visible && selectionNeedsReveal) selectionReveal.restart()
+
+    function generationLabel(depth) {
+        switch (depth) {
+        case 0: return "Root deck";
+        case 1: return "Children";
+        case 2: return "Grandchildren";
+        default: return "Great-" + "great-".repeat(depth - 3) + "grandchildren";
+        }
+    }
+    function revealSelection() {
+        selectionNeedsReveal = true;
+        selectionReveal.restart();
+    }
+    Timer {
+        id: selectionReveal
+        interval: 16
+        onTriggered: {
+            if (!graph.visible || viewport.width <= 0 || viewport.height <= 0) return;
+            graph.positionSelection();
+        }
+    }
+    function positionSelection() {
+        if (!visibleDecks.some(d => d.id === selectedId)) {
+            const expanded = Object.assign({}, expandedBranches);
+            ancestorIds(selectedId).slice(1).forEach(id => expanded[id] = true);
+            expandedBranches = expanded;
+        }
+        Qt.callLater(function() {
+            if (!graph.visible || viewport.width <= 0 || viewport.height <= 0) return;
+            const node = graph.diagram.nodes.find(n => n.id === graph.selectedId);
+            if (!node) return;
+            graph.selectionNeedsReveal = false;
+            const x = node.x * graph.viewScale + scene.x;
+            const y = node.y * graph.viewScale + scene.y;
+            const margin = node.diameter * graph.viewScale / 2 + 24;
+            graph.clampScroll(
+                x - margin < viewport.contentX || x + margin > viewport.contentX + viewport.width ? x - viewport.width / 2 : viewport.contentX,
+                y - margin < viewport.contentY || y + margin > viewport.contentY + viewport.height ? y - viewport.height / 2 : viewport.contentY);
+        });
+    }
 
     function clampScroll(x, y) {
         viewport.contentX = Math.max(0, Math.min(Math.max(0, viewport.contentWidth - viewport.width), x));
@@ -145,6 +187,7 @@ Item {
             Layout.preferredHeight: 58
             spacing: 8
             Label {
+                visible: graph.width >= 620
                 text: graph.captions[graph.variant]
                 color: Theme.inkMuted
                 font.pixelSize: 11
@@ -157,12 +200,14 @@ Item {
                 onClicked: graph.toggleOverview()
             }
             AppButton {
+                visible: graph.width >= 460
                 text: "-"
                 implicitWidth: 34
                 hint: "Zoom out"
                 onClicked: graph.changeZoom(1 / 1.2)
             }
             Label {
+                visible: graph.width >= 460
                 text: Math.round(graph.viewScale * 100) + "%"
                 color: Theme.inkMuted
                 font.pixelSize: 11
@@ -170,12 +215,14 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
             }
             AppButton {
+                visible: graph.width >= 460
                 text: "+"
                 implicitWidth: 34
                 hint: "Zoom in"
                 onClicked: graph.changeZoom(1.2)
             }
             AppButton {
+                visible: graph.width >= 460
                 text: "100%"
                 hint: "Restore the default node size"
                 onClicked: graph.changeZoom(1 / graph.viewScale)
@@ -198,8 +245,14 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             onContentXChanged: edges.requestPaint()
             onContentYChanged: edges.requestPaint()
-            onWidthChanged: edges.requestPaint()
-            onHeightChanged: edges.requestPaint()
+            onWidthChanged: {
+                edges.requestPaint();
+                if (graph.selectionNeedsReveal) selectionReveal.restart();
+            }
+            onHeightChanged: {
+                edges.requestPaint();
+                if (graph.selectionNeedsReveal) selectionReveal.restart();
+            }
             ScrollBar.horizontal: ScrollBar { policy: viewport.contentWidth > viewport.width ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
             ScrollBar.vertical: ScrollBar { policy: viewport.contentHeight > viewport.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
             WheelHandler {
@@ -326,19 +379,32 @@ Item {
                         }
                     }
                 }
+            }
+            Rectangle {
+                visible: graph.variant === 1
+                x: viewport.contentX
+                y: viewport.contentY
+                width: viewport.width
+                height: 32
+                color: Theme.canvas
+                z: 2
+                clip: true
                 Row {
-                    visible: graph.variant === 1
-                    x: 75
-                    y: 14
-                    spacing: 0
+                    x: scene.x + 75 * graph.viewScale - viewport.contentX
+                    y: 9
                     Repeater {
                         model: graph.diagram.depthCount
                         delegate: Label {
                             required property int index
-                            width: 300
-                            text: index === 0 ? "DECK" : "SUBDECK"
+                            width: 300 * graph.viewScale
+                            text: graph.generationLabel(index)
                             font.pixelSize: 11
                             color: Theme.inkMuted
+                            elide: Text.ElideRight
+                            rightPadding: 24
+                            ToolTip.visible: generationHover.hovered
+                            ToolTip.text: text + " · level " + index
+                            HoverHandler { id: generationHover }
                         }
                     }
                 }

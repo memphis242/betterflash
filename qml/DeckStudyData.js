@@ -45,7 +45,7 @@ function makeDecks() {
     return definitions.map(d => byId[d.id]);
 }
 
-function fromCollection(decks, cards, history) {
+function fromCollection(decks, cards, history, previewSummaries) {
     const byId = ({});
     decks.forEach(d => byId[d.id] = d);
     function path(id) {
@@ -72,7 +72,7 @@ function fromCollection(decks, cards, history) {
             outcomes: outcomes, reviewCount: reviews.length,
             recall: reviews.reduce((sum, r) => sum + r.recallFraction, 0) / Math.max(1, reviews.length),
             seconds: reviews.reduce((sum, r) => sum + r.responseSeconds, 0) / Math.max(1, reviews.length),
-            summary: deck.name === "BetterFlash examples"
+            summary: !previewSummaries ? "" : deck.name === "BetterFlash examples"
                 ? "The remaining prompts cover Markdown editing, recall grades and review scheduling. Revisit how deferring differs from postponing, then work through the examples of reversible and cloze cards."
                 : "The pending prompts ask you to explain concepts in your own words and apply them to short examples. Start with the main distinctions, then recall the supporting details."
         };

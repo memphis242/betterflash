@@ -1,5 +1,8 @@
 # Deck hierarchy studies
 
+**Branch ledger** is the selected main-app Review layout. The gallery retains
+both studies for reference and opens Branch ledger by default.
+
 Open the native gallery:
 
 ```sh
@@ -26,6 +29,9 @@ Ctrl+wheel change the node size; **100%** restores it. Each tab retains its own
 scroll position, zoom and expanded branches while the window is open.
 Tab focuses nodes, Left/Right traverses decks, Up selects the parent and Down
 selects the first child. Keyboard selection scrolls its node into view.
+Branch ledger names its columns Root deck, Children, Grandchildren,
+Great-grandchildren, and further great-grandchild generations. These headings
+stay pinned vertically while tracking horizontal scrolling.
 
 The overview shows roots and their immediate subdecks. Each branch has a +/−
 control; double-clicking its node also opens or closes the branch. Expand all
@@ -44,7 +50,10 @@ to match its edge. The pane contains:
   working collection these use the deck's records in the latest 200 collection
   reviews, not a lifetime aggregate.
 - A preview of an automatic summary of remaining material.
-- An editable deck description, using a modal editor.
+- An editable deck description: its I-beam cursor indicates inline editing.
+  Double-click, Enter, F2 or touch long-press starts editing in place.
+  Ctrl+Enter saves, Escape cancels, and Enter inserts a newline. Compact Save
+  and Cancel controls appear during editing. Drafts stay with their deck.
 
 The gallery is a design preview. Summary text is illustrative; no language
 model requests are made. Description edits last only for the current window.
@@ -54,6 +63,26 @@ sample collection. With one, the Working decks / Sample decks control switches
 between the actual hierarchy and a fully populated comparison dataset.
 
 Use `--deck-graph-variant 1` or `2` to open a particular tab directly.
+
+## Main-app integration
+
+The normal Review page saves descriptions through the database worker and
+sync outbox. Its inline draft remains available if saving fails. The right pane is
+collapsible, keeps its chosen width, and uses the same menu/dock controls as
+the left navigation. Narrow windows show the deck tree or details at full
+width; collapse details to return to the tree.
+
+With a configured language model key, selecting a deck automatically summarizes
+its due review prompts after a short delay. Results are cached in memory for
+up to twelve deck/content/provider combinations, preventing repeat requests
+when revisiting unchanged decks. Leaving the view or starting a review cancels
+its pending request. The request uses due variants including descendants,
+preserves cloze masking and reverse prompts, and follows the existing payload
+limits. No review session is started to generate a summary. Errors appear in
+the pane with a retry action; without a key, the pane points to Settings.
+
+The main app uses actual generated summaries. Illustrative summaries and
+window-local description edits are confined to the design gallery.
 
 ## Working example hierarchy
 

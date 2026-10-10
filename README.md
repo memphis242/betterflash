@@ -43,6 +43,20 @@ For an isolated demonstration:
 
 ## Cards and review
 
+The Review page uses **Branch ledger**: circular deck nodes form a scrollable
+forest, with columns for **Root deck**, **Children**, **Grandchildren**,
+**Great-grandchildren**, and deeper generations. Column headings stay visible
+while scrolling. Branches expand without shrinking the nodes.
+
+Selecting a deck opens its resizable right pane with due counts, recent review
+performance, a remaining-card summary, and a description. The description area
+uses an I-beam cursor; double-click to edit it in place. Enter, F2 and touch
+long-press also begin editing. Ctrl+Enter saves, Escape cancels, and plain Enter
+inserts a newline. Drafts stay with their deck when navigating away.
+Descriptions are saved to the collection and queued for sync.
+Start review includes the selected deck's descendants;
+an empty deck offers Add card instead.
+
 The isolated [review queue design studies](docs/queue-design-studies.md) gallery
 compares twelve native QML queue treatments without opening the collection.
 Launch it with `./scripts/run-desktop.sh --queue-designs`.
@@ -71,7 +85,7 @@ call a model or start a real review. See [the deck graph studies](docs/deck-grap
 ### Development reset controls
 
 Desktop builds made with `scripts/build-desktop.sh` include **Reset deck** on the
-Review page after selecting a deck, and **Reset card** in the Library's selected
+Review page's deck actions menu, and **Reset card** in the Library's selected
 card details. Both are also available in the review actions menu. Deck resets
 include all subdecks; card resets include every reverse and cloze variant.
 A confirmation explains the scope. Resetting returns schedules to new and due
@@ -172,10 +186,12 @@ Speech synthesis initially uses the system Qt speech engine. A remote TTS
 provider can be added once selected. The optional local recognition setup is a
 test facility, not a required app dependency. See [voice setup](docs/voice.md).
 
-The optional remaining-card summary sends the remaining question prompts to a
-configured chat-completions provider only when requested. It does not grade
-answers or alter scheduling. Groq is the initial default; the endpoint and model
-can be changed in Settings.
+With a configured key, the Review landing page automatically summarizes a
+selected deck's due question prompts, including descendants. It waits briefly
+after selection and caches unchanged results for the session. During a review,
+the remaining-queue summary is generated on request. Neither summary grades
+answers nor alters scheduling. Groq is the initial default; the endpoint and
+model can be changed in Settings. See [deck summaries](docs/deck-graph-studies.md#main-app-integration).
 
 Atomicize proposes two through five focused cards from one saved note, or
 recommends keeping a related list or procedure together. Review and edit the

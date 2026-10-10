@@ -34,7 +34,7 @@ ApplicationWindow {
     property var descriptions: ({})
     readonly property var sampleDecks: Study.makeDecks()
     readonly property var sourceDecks: useCollection && deckStudyApp
-        ? Study.fromCollection(deckStudyApp.decks, deckStudyApp.cards, deckStudyApp.history) : sampleDecks
+        ? Study.fromCollection(deckStudyApp.decks, deckStudyApp.cards, deckStudyApp.history, true) : sampleDecks
     readonly property var decks: sourceDecks.map(d => Object.assign({}, d, {description: descriptions[d.id] !== undefined ? descriptions[d.id] : d.description}))
     readonly property var selectedDeck: decks.find(d => d.id === selectedId) || ({})
     readonly property bool paneOpen: !!selectedDeck.id && paneStates[variant]

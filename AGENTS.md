@@ -15,7 +15,7 @@ automatic agent co-author attribution, or a remote session label.
 - Voice is BYOK by default. Local models are optional test tools. Keep keys out
   of Markdown, backups, SQLite collection tables, sync payloads, and logs.
 - UI defaults to the warm dark theme. Keep left navigation collapsible and
-  pinned, page actions visible, lists bounded, and editing in modal dialogs.
+  pinned, page actions visible, and lists bounded.
 - Images imported by the user are stored by SHA-256. Never read arbitrary local
   files just because a card contains a Markdown URL.
 - Preserve independent schedules for reverse directions and numbered clozes.
@@ -29,3 +29,17 @@ automatic agent co-author attribution, or a remote session label.
   microphone permissions and lifecycle. Do not imply background voice is ready.
 - Launch the completed desktop build for the user from this worktree. Give a
   fallback command. Manual user confirmation remains part of GUI handoff.
+
+## GUI interaction preferences
+
+- Default to editing existing text in place. The text area shows an I-beam
+  cursor, and double-clicking turns that same area into an editor. Apply this
+  to deck descriptions and comparable text fields throughout the application.
+- Keep the idle text area free of add/edit buttons and instructional hover
+  tooltips. Keep editing in its original context rather than opening a modal.
+- Provide keyboard entry into inline editing, a way to save and cancel, and
+  touch access. For multiline descriptions, Enter inserts a newline,
+  Ctrl+Enter saves, and Escape cancels.
+- Retain drafts when navigating between records. Bind each draft and pending
+  save to its record ID. Discard drafts on explicit Cancel or after their
+  matching save succeeds.
