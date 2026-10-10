@@ -58,10 +58,12 @@ and at a larger size in the same themed window.
 Compare three Review icons, five expand/collapse controls, and grouped versus
 full-height navigation with `./scripts/run-desktop.sh --sidebar-designs`.
 The two live sidebar previews expand independently and share the selected glyphs.
-Compare three circular-node deck hierarchies with
+Compare two circular-node deck hierarchies with
 `./scripts/run-desktop.sh --deck-graph-designs --data-dir /workspace/betterflash-demo`.
-The tabs show **Canopy**, **Branch ledger**, and **Orbit map**. Select a node to
-open its resizable right-hand details pane; drag or zoom the graph to explore.
+The tabs show **Canopy** and **Branch ledger**. Trees grow at a fixed node size
+and stack vertically, moving later trees down as branches expand. Scroll or
+drag to explore; Ctrl+wheel zooms and **100%** restores the default node size.
+Select a node to open its resizable right-hand details pane.
 Omit `--data-dir` for the populated sample collection. The gallery uses sample
 LLM summary text and keeps description edits in its own window. It does not
 call a model or start a real review. See [the deck graph studies](docs/deck-graph-studies.md).

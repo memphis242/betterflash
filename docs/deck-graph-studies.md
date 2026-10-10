@@ -6,19 +6,26 @@ Open the native gallery:
 ./scripts/run-desktop.sh --deck-graph-designs --data-dir /workspace/betterflash-demo
 ```
 
-The three tabs present the same hierarchy and selected deck:
+The two tabs present the same hierarchy and selected deck:
 
 | Study | Hierarchy | Character |
 | --- | --- | --- |
-| 01 Canopy | Parents above their children, separate roots across the top | Open branches and generous space between levels |
+| 01 Canopy | Parents above their children, independent trees stacked vertically | Open branches and generous space between levels |
 | 02 Branch ledger | Parents at the left, successive child levels in columns | Ruled tree groups and consistent depth alignment |
-| 03 Orbit map | Parents nearer the center, descendants branching outward | A compact map of related deck families |
 
 Decks are circular nodes. Selection uses a heavier outline; the path to the
 selected node is highlighted. No deck title or separate statistic cards occupy
-the graph area. The viewport supports dragging, scrollbars when needed, Fit,
-zoom buttons and Ctrl+wheel zoom. Tab focuses nodes, Left/Right traverses decks,
-Up selects the parent and Down selects the first child.
+the graph area. Nodes start at 100% size. Expanded branches grow the scrollable
+canvas; each tree reserves its expanded width and height, and later trees move
+down or up as needed. Expanding branches and resizing the pane do not change
+zoom. The branch being opened stays in view when the scroll limits allow it.
+
+Use the mouse wheel, trackpad, scrollbars or dragging to explore both axes.
+Scrollbars stay visible whenever their axis overflows. Zoom buttons and
+Ctrl+wheel change the node size; **100%** restores it. Each tab retains its own
+scroll position, zoom and expanded branches while the window is open.
+Tab focuses nodes, Left/Right traverses decks, Up selects the parent and Down
+selects the first child. Keyboard selection scrolls its node into view.
 
 The overview shows roots and their immediate subdecks. Each branch has a +/−
 control; double-clicking its node also opens or closes the branch. Expand all
@@ -46,7 +53,7 @@ continue in the main application. Without `--data-dir`, the gallery uses a
 sample collection. With one, the Working decks / Sample decks control switches
 between the actual hierarchy and a fully populated comparison dataset.
 
-Use `--deck-graph-variant 1`, `2`, or `3` to open a particular tab directly.
+Use `--deck-graph-variant 1` or `2` to open a particular tab directly.
 
 ## Working example hierarchy
 

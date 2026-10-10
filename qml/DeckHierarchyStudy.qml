@@ -17,17 +17,35 @@ Item {
     readonly property var diagram: Study.layout(visibleDecks, variant)
     readonly property bool allExpanded: decks.filter(d => decks.some(c => c.parent === d.id)).every(d => isExpanded(d))
     readonly property var ancestors: ancestorIds(selectedId)
-    readonly property var captions: ["Parents above, subdecks below", "Follow each branch from left to right", "Independent deck trees, arranged radially"]
-    property bool autoFit: true
-    property real manualScale: 1
-    readonly property real fitScale: Math.max(0.3, Math.min((viewport.width - 32) / diagram.width, (viewport.height - 32) / diagram.height))
-    readonly property real viewScale: autoFit ? fitScale : manualScale
+    readonly property var captions: ["Parents above, subdecks below", "Follow each branch from left to right"]
+    property real viewScale: 1
     readonly property color lineColor: Theme.rule
     readonly property color activeColor: Theme.accent
     onSelectedIdChanged: edges.requestPaint()
     onDiagramChanged: edges.requestPaint()
     onLineColorChanged: edges.requestPaint()
     onActiveColorChanged: edges.requestPaint()
+    onViewScaleChanged: edges.requestPaint()
+
+    function clampScroll(x, y) {
+        viewport.contentX = Math.max(0, Math.min(Math.max(0, viewport.contentWidth - viewport.width), x));
+        viewport.contentY = Math.max(0, Math.min(Math.max(0, viewport.contentHeight - viewport.height), y));
+    }
+    function nodePosition(id) {
+        const node = diagram.nodes.find(n => n.id === id);
+        return node ? {x: node.x * viewScale + scene.x - viewport.contentX,
+                       y: node.y * viewScale + scene.y - viewport.contentY} : null;
+    }
+    function restorePosition(id, position) {
+        Qt.callLater(function() {
+            const node = graph.diagram.nodes.find(n => n.id === id);
+            if (node && position)
+                graph.clampScroll(node.x * graph.viewScale + scene.x - position.x,
+                                  node.y * graph.viewScale + scene.y - position.y);
+            else
+                graph.clampScroll(viewport.contentX, viewport.contentY);
+        });
+    }
 
     function isExpanded(deck) {
         return expandedBranches[deck.id] === undefined ? !deck.parent : expandedBranches[deck.id];
@@ -47,16 +65,19 @@ Item {
     function toggleBranch(id) {
         const deck = decks.find(d => d.id === id);
         if (!deck) return;
+        const position = nodePosition(id);
         const changed = Object.assign({}, expandedBranches);
         changed[id] = !isExpanded(deck);
         expandedBranches = changed;
         deckSelected(id);
+        restorePosition(id, position);
     }
     function toggleOverview() {
+        const position = nodePosition(selectedId);
         const expanded = ({});
         if (!allExpanded) decks.forEach(d => expanded[d.id] = true);
         expandedBranches = expanded;
-        fit();
+        restorePosition(selectedId, position);
     }
 
     function ancestorIds(id) {
@@ -72,20 +93,15 @@ Item {
         const old = viewScale;
         const centerX = (viewport.contentX + viewport.width / 2 - scene.x) / old;
         const centerY = (viewport.contentY + viewport.height / 2 - scene.y) / old;
-        manualScale = Math.max(fitScale * 0.75, Math.min(2.25, old * factor));
-        autoFit = false;
+        viewScale = Math.max(0.5, Math.min(2.25, old * factor));
         Qt.callLater(function() {
-            viewport.contentX = Math.max(0, Math.min(viewport.contentWidth - viewport.width, centerX * graph.viewScale + scene.x - viewport.width / 2));
-            viewport.contentY = Math.max(0, Math.min(viewport.contentHeight - viewport.height, centerY * graph.viewScale + scene.y - viewport.height / 2));
+            graph.clampScroll(centerX * graph.viewScale + scene.x - viewport.width / 2,
+                              centerY * graph.viewScale + scene.y - viewport.height / 2);
         });
-    }
-    function fit() {
-        autoFit = true;
-        viewport.contentX = 0;
-        viewport.contentY = 0;
     }
     function navigate(id, key) {
         const index = visibleDecks.findIndex(d => d.id === id);
+        if (index < 0) return false;
         let target = null;
         switch (key) {
         case Qt.Key_Left: target = visibleDecks[Math.max(0, index - 1)]; break;
@@ -160,9 +176,9 @@ Item {
                 onClicked: graph.changeZoom(1.2)
             }
             AppButton {
-                text: "Fit"
-                hint: "Fit every deck in the graph area"
-                onClicked: graph.fit()
+                text: "100%"
+                hint: "Restore the default node size"
+                onClicked: graph.changeZoom(1 / graph.viewScale)
             }
             PaneToggleButton {
                 visible: !graph.detailsVisible
@@ -180,8 +196,12 @@ Item {
             contentWidth: Math.max(width, graph.diagram.width * graph.viewScale + 32)
             contentHeight: Math.max(height, graph.diagram.height * graph.viewScale + 32)
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            onContentXChanged: edges.requestPaint()
+            onContentYChanged: edges.requestPaint()
+            onWidthChanged: edges.requestPaint()
+            onHeightChanged: edges.requestPaint()
+            ScrollBar.horizontal: ScrollBar { policy: viewport.contentWidth > viewport.width ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            ScrollBar.vertical: ScrollBar { policy: viewport.contentHeight > viewport.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
             WheelHandler {
                 target: null
                 acceptedModifiers: Qt.ControlModifier
@@ -190,61 +210,56 @@ Item {
                     event.accepted = true
                 }
             }
+            Canvas {
+                id: edges
+                x: viewport.contentX
+                y: viewport.contentY
+                width: viewport.width
+                height: viewport.height
+                onPaint: {
+                    const c = getContext("2d");
+                    c.reset();
+                    // Rasterize only the visible viewport, even for a tall forest.
+                    c.translate(scene.x - viewport.contentX, scene.y - viewport.contentY);
+                    c.scale(graph.viewScale, graph.viewScale);
+                    c.lineCap = "round";
+                    if (graph.variant === 1) {
+                        c.strokeStyle = graph.lineColor;
+                        c.lineWidth = 1;
+                        for (const group of graph.diagram.groups) {
+                            c.beginPath(); c.moveTo(24, group.top); c.lineTo(graph.diagram.width - 24, group.top); c.stroke();
+                        }
+                    }
+                    for (const edge of graph.diagram.edges) {
+                        const from = edge.from, to = edge.to;
+                        const selected = graph.ancestors.indexOf(to.id) >= 0;
+                        c.strokeStyle = selected ? graph.activeColor : graph.lineColor;
+                        c.lineWidth = selected ? 2.5 : 1.5;
+                        c.beginPath();
+                        if (graph.variant === 0) {
+                            const y1 = from.y + from.diameter / 2;
+                            const y2 = to.y - to.diameter / 2;
+                            c.moveTo(from.x, y1);
+                            c.bezierCurveTo(from.x, (y1 + y2) / 2, to.x, (y1 + y2) / 2, to.x, y2);
+                        } else {
+                            const x1 = from.x + from.diameter / 2;
+                            const x2 = to.x - to.diameter / 2;
+                            const mid = (x1 + x2) / 2;
+                            c.moveTo(x1, from.y);
+                            c.bezierCurveTo(mid, from.y, mid, to.y, x2, to.y);
+                        }
+                        c.stroke();
+                    }
+                }
+            }
             Item {
                 id: scene
                 width: graph.diagram.width
                 height: graph.diagram.height
-                x: (viewport.contentWidth - width * graph.viewScale) / 2
-                y: (viewport.contentHeight - height * graph.viewScale) / 2
+                x: 16
+                y: 16
                 scale: graph.viewScale
                 transformOrigin: Item.TopLeft
-                Canvas {
-                    id: edges
-                    anchors.fill: parent
-                    onPaint: {
-                        const c = getContext("2d");
-                        c.reset();
-                        c.lineCap = "round";
-                        if (graph.variant === 1) {
-                            c.strokeStyle = graph.lineColor;
-                            c.lineWidth = 1;
-                            for (const root of graph.diagram.nodes.filter(n => n.root)) {
-                                const y = 35 + root.firstSlot * 106;
-                                c.beginPath(); c.moveTo(35, y); c.lineTo(width - 35, y); c.stroke();
-                            }
-                        }
-                        for (const edge of graph.diagram.edges) {
-                            const from = edge.from, to = edge.to;
-                            const selected = graph.ancestors.indexOf(to.id) >= 0;
-                            c.strokeStyle = selected ? graph.activeColor : graph.lineColor;
-                            c.lineWidth = selected ? 2.5 : 1.5;
-                            c.beginPath();
-                            if (graph.variant === 0) {
-                                const y1 = from.y + from.diameter / 2;
-                                const y2 = to.y - to.diameter / 2;
-                                c.moveTo(from.x, y1);
-                                c.bezierCurveTo(from.x, (y1 + y2) / 2, to.x, (y1 + y2) / 2, to.x, y2);
-                            } else if (graph.variant === 1) {
-                                const x1 = from.x + from.diameter / 2;
-                                const x2 = to.x - to.diameter / 2;
-                                const mid = (x1 + x2) / 2;
-                                c.moveTo(x1, from.y);
-                                c.bezierCurveTo(mid, from.y, mid, to.y, x2, to.y);
-                            } else {
-                                const dx = to.x - from.x, dy = to.y - from.y;
-                                const distance = Math.sqrt(dx * dx + dy * dy);
-                                const ux = dx / distance, uy = dy / distance;
-                                const x1 = from.x + ux * from.diameter / 2;
-                                const y1 = from.y + uy * from.diameter / 2;
-                                const x2 = to.x - ux * to.diameter / 2;
-                                const y2 = to.y - uy * to.diameter / 2;
-                                c.moveTo(x1, y1);
-                                c.quadraticCurveTo((x1 + x2) / 2 - uy * 14, (y1 + y2) / 2 + ux * 14, x2, y2);
-                            }
-                            c.stroke();
-                        }
-                    }
-                }
                 Repeater {
                     id: nodeRepeater
                     model: graph.diagram.nodes
@@ -281,7 +296,7 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                             wrapMode: Text.WordWrap
                             fontSizeMode: Text.Fit
-                            minimumPixelSize: 10
+                            minimumPixelSize: 13
                         }
                         background: Rectangle {
                             radius: width / 2
@@ -317,7 +332,7 @@ Item {
                     y: 14
                     spacing: 0
                     Repeater {
-                        model: Math.max(1, ...graph.diagram.nodes.map(n => n.depth)) + 1
+                        model: graph.diagram.depthCount
                         delegate: Label {
                             required property int index
                             width: 300
@@ -332,7 +347,7 @@ Item {
         Label {
             Layout.fillWidth: true
             Layout.margins: 18
-            text: "Select a deck. Use + to open branches. Drag to pan. Ctrl+wheel to zoom."
+            text: "Scroll to explore. Use + to open branches. Drag to pan. Ctrl+wheel to zoom."
             color: Theme.inkMuted
             font.pixelSize: 11
             horizontalAlignment: Text.AlignHCenter

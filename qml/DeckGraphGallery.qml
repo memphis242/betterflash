@@ -30,7 +30,7 @@ ApplicationWindow {
     property int variant: deckStudyStartVariant
     property bool useCollection: deckStudyApp !== null
     property string selectedId: ""
-    property var paneStates: [true, true, true]
+    property var paneStates: [true, true]
     property var descriptions: ({})
     readonly property var sampleDecks: Study.makeDecks()
     readonly property var sourceDecks: useCollection && deckStudyApp
@@ -38,7 +38,7 @@ ApplicationWindow {
     readonly property var decks: sourceDecks.map(d => Object.assign({}, d, {description: descriptions[d.id] !== undefined ? descriptions[d.id] : d.description}))
     readonly property var selectedDeck: decks.find(d => d.id === selectedId) || ({})
     readonly property bool paneOpen: !!selectedDeck.id && paneStates[variant]
-    readonly property var names: ["01  Canopy", "02  Branch ledger", "03  Orbit map"]
+    readonly property var names: ["01  Canopy", "02  Branch ledger"]
     property Settings preferences: Settings {
         category: "deckGraphStudies"
         property real paneWidth: 360
@@ -114,7 +114,7 @@ ApplicationWindow {
                 Layout.minimumWidth: 500
                 currentIndex: gallery.variant
                 Repeater {
-                    model: 3
+                    model: gallery.names.length
                     delegate: DeckHierarchyStudy {
                         required property int index
                         decks: gallery.decks

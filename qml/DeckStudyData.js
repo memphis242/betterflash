@@ -81,61 +81,48 @@ function fromCollection(decks, cards, history) {
 
 function layout(decks, variant) {
     const nodes = [];
-    const byId = ({});
-    const children = id => decks.filter(d => d.parent === id);
-    const roots = children("");
-    let leaf = 0;
-    function visit(deck, depth) {
-        const descendants = children(deck.id);
-        const start = leaf;
-        for (const child of descendants)
-            visit(child, depth + 1);
-        if (!descendants.length)
-            ++leaf;
-        const slot = (start + leaf - 1) / 2;
-        const node = {id: deck.id, deck: deck, depth: depth, slot: slot, firstSlot: start, root: !deck.parent};
-        byId[node.id] = node;
-        nodes.push(node);
+    const groups = [];
+    const byId = new Map();
+    const children = new Map();
+    for (const deck of decks) {
+        if (!children.has(deck.parent)) children.set(deck.parent, []);
+        children.get(deck.parent).push(deck);
     }
-    roots.forEach(deck => visit(deck, 0));
-    const depthCount = Math.max(1, ...nodes.map(n => n.depth)) + 1;
-    let width = variant === 1 ? Math.max(1120, (depthCount - 1) * 300 + 250) : Math.max(1200, leaf * 170 + 10);
-    let height = variant === 1 ? Math.max(760, leaf * 106 + 110) : Math.max(720, depthCount * 205 + 60);
-    for (const node of nodes) {
-        if (variant === 0) {
-            node.x = 90 + node.slot * 170;
-            node.y = 125 + node.depth * 205;
-            node.diameter = [132, 116, 104][Math.min(2, node.depth)];
-        } else if (variant === 1) {
-            node.x = 130 + node.depth * 300;
-            node.y = 106 + node.slot * 106;
-            node.diameter = [120, 100, 94][Math.min(2, node.depth)];
+    let treeTop = variant === 1 ? 48 : 24;
+    let width = 0;
+    let depthCount = 0;
+    for (const root of children.get("") || []) {
+        const treeNodes = [];
+        let leaf = 0;
+        function visit(deck, depth) {
+            const descendants = children.get(deck.id) || [];
+            const firstLeaf = leaf;
+            for (const child of descendants) visit(child, depth + 1);
+            if (!descendants.length) ++leaf;
+            const slot = (firstLeaf + leaf - 1) / 2;
+            const node = {
+                id: deck.id, deck: deck, depth: depth, root: !deck.parent,
+                diameter: [160, 150, 144][Math.min(2, depth)],
+                x: variant === 0 ? 120 + slot * 200 : 120 + depth * 300,
+                y: treeTop + 88 + (variant === 0 ? depth * 220 : slot * 180)
+            };
+            depthCount = Math.max(depthCount, depth + 1);
+            byId.set(node.id, node);
+            treeNodes.push(node);
         }
+        visit(root, 0);
+        let bottom = treeTop;
+        for (const node of treeNodes) {
+            // Leave space for the branch control outside each circle.
+            width = Math.max(width, node.x + node.diameter / 2 + 56);
+            bottom = Math.max(bottom, node.y + node.diameter / 2);
+            nodes.push(node);
+        }
+        groups.push({id: root.id, top: treeTop, bottom: bottom});
+        // Each root owns its full expanded height, keeping later trees clear.
+        treeTop = bottom + 72;
     }
-    if (variant === 2) {
-        // Each independent root owns a sector; descendants occupy the next ring.
-        const center = {x: 600, y: 360};
-        const placements = {
-            biology: [270, 128], cells: [230, 232], membranes: [218, 382], organelles: [260, 360],
-            physiology: [310, 232], neurons: [315, 385],
-            languages: [150, 150], spanish: [148, 340], japanese: [185, 365],
-            computing: [30, 160], cpp: [60, 385], ownership: [45, 510], algorithms: [2, 385]
-        };
-        const fixture = decks.every(d => !!placements[d.id]);
-        if (!fixture) {
-            const radius = 135 + (depthCount - 1) * 160;
-            width = 2 * radius + 170;
-            height = 2 * radius * 0.68 + 170;
-            center.x = width / 2; center.y = height / 2;
-        }
-        for (const node of nodes) {
-            const placement = fixture ? placements[node.id] : [-165 + (node.slot + 0.5) / Math.max(1, leaf) * 330, 135 + node.depth * 160];
-            const angle = placement[0] * Math.PI / 180;
-            node.x = center.x + Math.cos(angle) * placement[1];
-            node.y = center.y + Math.sin(angle) * placement[1] * 0.67;
-            node.diameter = node.root ? 128 : node.depth === 1 ? 110 : 96;
-        }
-    }
-    const edges = nodes.filter(n => n.deck.parent).map(n => ({from: byId[n.deck.parent], to: n}));
-    return {nodes: nodes, edges: edges, width: width, height: height};
+    const edges = nodes.filter(n => n.deck.parent).map(n => ({from: byId.get(n.deck.parent), to: n}));
+    return {nodes: nodes, edges: edges, groups: groups, depthCount: depthCount,
+        width: Math.max(1, width), height: Math.max(1, treeTop - 40)};
 }

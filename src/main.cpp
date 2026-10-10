@@ -71,8 +71,8 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("progress-designs"), QStringLiteral("Open three review progress bar studies on one page.")});
     parser.addOption({QStringLiteral("logo-studies"), QStringLiteral("Compare three steaming teacups with the original blueberry logo.")});
     parser.addOption({QStringLiteral("sidebar-designs"), QStringLiteral("Compare review icons, navigation toggles and sidebar layouts.")});
-    parser.addOption({QStringLiteral("deck-graph-designs"), QStringLiteral("Compare three deck hierarchy layouts. Add --data-dir to preview a working collection.")});
-    parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1, 2, or 3."), QStringLiteral("number"), QStringLiteral("1")});
+    parser.addOption({QStringLiteral("deck-graph-designs"), QStringLiteral("Compare Canopy and Branch ledger deck layouts. Add --data-dir to preview a working collection.")});
+    parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1 or 2."), QStringLiteral("number"), QStringLiteral("1")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -125,8 +125,8 @@ int main(int argc, char **argv) {
         const bool deckGraphs = parser.isSet(QStringLiteral("deck-graph-designs"));
         bool validVariant = false;
         const int deckVariant = parser.value(QStringLiteral("deck-graph-variant")).toInt(&validVariant);
-        if (deckGraphs && (!validVariant || deckVariant < 1 || deckVariant > 3)) {
-            qCritical().noquote() << QStringLiteral("DESIGN_VARIANT: Choose --deck-graph-variant 1, 2, or 3.");
+        if (deckGraphs && (!validVariant || deckVariant < 1 || deckVariant > 2)) {
+            qCritical().noquote() << QStringLiteral("DESIGN_VARIANT: Choose --deck-graph-variant 1 or 2.");
             return 1;
         }
         std::unique_ptr<AppController> deckStudyApp;
