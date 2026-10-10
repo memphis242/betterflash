@@ -42,6 +42,11 @@ qt_add_resources(betterflash application_icons PREFIX /icons BASE packaging/icon
 qt_add_resources(betterflash branding_assets PREFIX /branding BASE packaging/branding
     FILES packaging/branding/walnut.png packaging/branding/walnut-blueberry.png
     packaging/branding/walnut-spinach.png)
+qt_add_resources(betterflash logo_study_assets PREFIX /logo-studies BASE packaging/branding/tea-studies
+    FILES packaging/branding/tea-studies/tea-01-ceramic.png
+    packaging/branding/tea-studies/tea-02-glass.png
+    packaging/branding/tea-studies/tea-03-porcelain.png
+    packaging/branding/tea-studies/blueberry.png)
 qt_add_resources(betterflash application_fonts PREFIX /fonts BASE packaging/fonts
     FILES packaging/fonts/IBMPlexMono-Regular.ttf packaging/fonts/IBMPlexMono-Bold.ttf
     packaging/fonts/IBMPlexMono-Italic.ttf packaging/fonts/IBMPlexMono-BoldItalic.ttf)

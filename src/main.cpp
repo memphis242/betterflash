@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("queue-designs"), QStringLiteral("Open the isolated review queue design gallery.")});
     parser.addOption({QStringLiteral("control-designs"), QStringLiteral("Open the isolated review control design gallery.")});
     parser.addOption({QStringLiteral("progress-designs"), QStringLiteral("Open three review progress bar studies on one page.")});
+    parser.addOption({QStringLiteral("logo-studies"), QStringLiteral("Compare three steaming teacups with the original blueberry logo.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -77,17 +78,34 @@ int main(int argc, char **argv) {
     bool queueDesigns=parser.isSet(QStringLiteral("queue-designs"));
     bool controlDesigns=parser.isSet(QStringLiteral("control-designs"));
     const bool progressDesigns = parser.isSet(QStringLiteral("progress-designs"));
+    const bool logoStudies = parser.isSet(QStringLiteral("logo-studies"));
 #ifdef BETTERFLASH_GUI_SWEEP
     queueDesigns=queueDesigns||parser.isSet(QStringLiteral("export-queue-designs"));
     controlDesigns=controlDesigns||parser.isSet(QStringLiteral("export-control-designs"));
 #endif
-    if (static_cast<int>(queueDesigns) + static_cast<int>(controlDesigns) + static_cast<int>(progressDesigns) > 1) {
-        qCritical().noquote()<<QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, or --progress-designs.");
-        return 1;
+    struct GalleryMode {
+        bool enabled{};
+        const char *applicationName{};
+        const char *moduleName{};
+        const char *warningProperty{};
+    };
+    const struct GalleryMode galleryModes[] = {
+        {queueDesigns, "BetterFlash Queue Designs", "QueueDesignGallery", "queueDesignWarnings"},
+        {controlDesigns, "BetterFlash Control Designs", "ReviewControlGallery", "controlDesignWarnings"},
+        {progressDesigns, "BetterFlash Progress Designs", "ProgressDesignGallery", "progressDesignWarnings"},
+        {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"}
+    };
+    const struct GalleryMode *selectedGallery = nullptr;
+    for (const struct GalleryMode &mode : galleryModes) {
+        if (!mode.enabled) continue;
+        if (selectedGallery) {
+            qCritical().noquote() << QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, --progress-designs, or --logo-studies.");
+            return 1;
+        }
+        selectedGallery = &mode;
     }
-    if (queueDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Queue Designs"));
-    if (controlDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Control Designs"));
-    if (progressDesigns) QCoreApplication::setApplicationName(QStringLiteral("BetterFlash Progress Designs"));
+    if (selectedGallery)
+        QCoreApplication::setApplicationName(QString::fromLatin1(selectedGallery->applicationName));
     QString dataDirectory = parser.isSet(QStringLiteral("data-dir")) ? QDir(parser.value(QStringLiteral("data-dir"))).absolutePath()
         : QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (!QDir().mkpath(dataDirectory)) {
@@ -97,10 +115,9 @@ int main(int argc, char **argv) {
     if (parser.isSet(QStringLiteral("data-dir")))
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
 
-    if (queueDesigns || controlDesigns || progressDesigns) {
+    if (selectedGallery) {
         QQmlApplicationEngine galleryEngine;
-        const char *const warningProperty = progressDesigns ? "progressDesignWarnings"
-            : controlDesigns ? "controlDesignWarnings" : "queueDesignWarnings";
+        const char *const warningProperty = selectedGallery->warningProperty;
         galleryEngine.setProperty(warningProperty,QStringList());
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,
             [&galleryEngine,warningProperty](const QList<QQmlError> &errors) {
@@ -110,8 +127,7 @@ int main(int argc, char **argv) {
             });
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::objectCreationFailed,&application,
             [] {QCoreApplication::exit(1);},Qt::QueuedConnection);
-        const QString galleryModule = progressDesigns ? QStringLiteral("ProgressDesignGallery")
-            : controlDesigns ? QStringLiteral("ReviewControlGallery") : QStringLiteral("QueueDesignGallery");
+        const QString galleryModule = QString::fromLatin1(selectedGallery->moduleName);
         galleryEngine.loadFromModule(QStringLiteral("BetterFlash"), galleryModule);
         if (galleryEngine.rootObjects().isEmpty()) return 1;
         if (parser.isSet(QStringLiteral("screenshot"))) {

@@ -1,0 +1,30 @@
+{
+  "created": "2026-10-10",
+  "generator": "Built-in image_gen tool",
+  "purpose": "Steaming-teacup candidates and the original blueberry for in-app comparison",
+  "concepts": [
+    {
+      "file": "tea-01-ceramic.png",
+      "prompt": "Use case: logo-brand.\nAsset type: BetterFlash educational desktop and Android app identity study, one standalone icon.\nStyle: sleek, modern, professional but gently cartoonish editorial illustration, confident rounded silhouette, bold simple contours and a few broad flat tonal planes. Readable at 24-32 px. No face or anthropomorphism, no emoji style, no tiny details, no gradients, no glows, no drop shadow, no background disk or tile, no decorative stars, no text or letters.\nComposition: a single centered steaming teacup, full cup and steam visible, square image, occupy about 85 percent of the available area with balanced clear margins. Actual transparent alpha background. Cream edge accents keep the mark legible against aubergine and paper app themes. Steam is two or three distinct thick rounded rising curved strokes, visibly steam rather than a lid or a hat.\nVariant 01 Ceramic: a compact low rounded terracotta ceramic teacup with one sturdy rounded handle on the right, warm amber tea visible as a narrow ellipse, two warm ivory curling steam strokes above. Muted burnt orange and peach body with one broad lighter tone. No saucer. Calm, substantial, optical balance. Steam and cup form a compact unified mark.",
+      "source": "/home/aalmo/.codex/generated_images/01a10d10-a4d7-7b63-aca3-630a09dd8b41/exec-a8c96429-c14d-41d6-ab2c-f0e28a0d0439.png"
+    },
+    {
+      "file": "tea-02-glass.png",
+      "prompt": "Use case: logo-brand.\nAsset type: BetterFlash educational desktop and Android app identity study, one standalone icon.\nStyle: sleek, modern, professional but gently cartoonish editorial illustration, confident rounded silhouette, bold simple contours and a few broad flat tonal planes. Readable at 24-32 px. No face or anthropomorphism, no emoji style, no tiny details, no gradients, no glows, no drop shadow, no background disk or tile, no decorative stars, no text or letters.\nComposition: a single centered steaming teacup, full cup and steam visible, square image, occupy about 85 percent of the available area with balanced clear margins. Actual transparent alpha background. Cream edge accents keep the mark legible against aubergine and paper app themes. Steam is two or three distinct thick rounded rising curved strokes, visibly steam rather than a lid or a hat.\nVariant 02 Glass: a friendly rounded clear glass teacup with one broad loop handle on the right, half filled with warm golden-green tea. Interpret glass as bold ivory and muted sage contour shapes with a few translucent-looking flat color planes, not realistic reflections. Three short ivory steam curves above. Distinct squat cylindrical silhouette and gently curved base, no saucer. Enough solid color to remain identifiable at small icon sizes.",
+      "source": "/home/aalmo/.codex/generated_images/01a10d10-a4d7-7b63-aca3-630a09dd8b41/exec-7de4e6c1-e5ad-472f-9cf1-18fc040caf37.png"
+    },
+    {
+      "file": "tea-03-porcelain.png",
+      "prompt": "Use case: logo-brand.\nAsset type: BetterFlash educational desktop and Android app identity study, one standalone icon.\nStyle: sleek, modern, professional but gently cartoonish editorial illustration, confident rounded silhouette, bold simple contours and a few broad flat tonal planes. Readable at 24-32 px. No face or anthropomorphism, no emoji style, no tiny details, no gradients, no glows, no drop shadow, no background disk or tile, no decorative stars, no text or letters.\nComposition: a single centered steaming teacup, full cup and steam visible, square image, occupy about 85 percent of the available area with balanced clear margins. Actual transparent alpha background. Cream edge accents keep the mark legible against aubergine and paper app themes. Steam is two or three distinct thick rounded rising curved strokes, visibly steam rather than a lid or a hat.\nVariant 03 Porcelain: a classic wide shallow ivory porcelain teacup sitting on a simple elliptical saucer, warm gold tea inside the oval rim, a small round side handle, two broad curling rising steam strokes. Plum and warm orange contour accents, cream body with one restrained peach shadow plane. Sophisticated softly cartoonish silhouette, no ornament or floral pattern. Make saucer substantial enough to read at 32 pixels.",
+      "source": "/home/aalmo/.codex/generated_images/01a10d10-a4d7-7b63-aca3-630a09dd8b41/exec-b6296ba2-5f69-4308-bf29-52afcdbf123d.png"
+    },
+    {
+      "file": "blueberry.png",
+      "prompt": "Use case: background-extraction.\nAsset type: original BetterFlash blueberry logo isolated for comparison.\nInput image: edit target, the original B1 / Blueberry presentation board.\nExtract ONLY the existing single blueberry mark in the center of the supplied image. Preserve its exact asymmetrical silhouette, ivory outline, periwinkle highlight, indigo body, rounded five-lobed calyx, proportions and colors. Do not redesign or add anything. Remove the aubergine background and ALL lettering including B1 / Blueberry and BetterFlash. Return the original blueberry alone on a genuinely transparent alpha background, centered in a square with about 85 percent occupancy and balanced clear margins. No added shadow, no new shapes.",
+      "referenced_image_paths": [
+        "/workspace/worktree/betterflash/review-finish/docs/design/food-logos/b1-blueberry.png"
+      ],
+      "source": "/home/aalmo/.codex/generated_images/01a10d10-a4d7-7b63-aca3-630a09dd8b41/exec-cabb651a-6cc7-4cc0-b040-823cf32494a5.png"
+    }
+  ]
+}

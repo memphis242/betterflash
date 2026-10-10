@@ -1103,6 +1103,8 @@ Item {
                                                 text: modelData.label
                                                 horizontalAlignment: Text.AlignHCenter
                                                 font.pixelSize: page.ui.width < 600 ? 15 : 17
+                                                fontSizeMode: Text.Fit
+                                                minimumPixelSize: 12
                                                 color: Theme.ink
                                             }
                                         }

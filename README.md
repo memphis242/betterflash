@@ -48,6 +48,9 @@ Compare three progress-bar treatments together using
 `./scripts/run-desktop.sh --progress-designs`. The shared slider previews the same
 review count in all three bars; the theme button switches their palette.
 The gallery uses sample outcomes and its own settings, without opening a collection.
+Compare three steaming-teacup logo candidates alongside the original blueberry
+using `./scripts/run-desktop.sh --logo-studies`. Each appears in a header bar
+and at a larger size in the same themed window.
 
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.
@@ -69,8 +72,9 @@ The gallery uses sample outcomes and its own settings, without opening a collect
 - Review cards inside the main app, with a rounded question-and-answer
   container. Pause sits beside the deck title. The collapsible ledger queue has
   fading edges, rounded cards, bold
-  numbers, thicker left rails, and a tag capsule below each preview. All tags
-  appear above the question. Upcoming cards become clearer as they enter view;
+  numbers, thicker left rails, and a filled tag capsule below each preview. All tags
+  appear above the question, with stable purple, orange, green, or red colors
+  for each tag. The pause/play control sits beside the deck title. Upcoming cards become clearer as they enter view;
   card widths and gaps stay fixed. The active card glides into the center as you
   navigate or grade cards, preserving queue order. The persistent queue scrollbar
   and Return to active card

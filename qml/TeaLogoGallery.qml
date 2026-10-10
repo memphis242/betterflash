@@ -10,7 +10,7 @@ ApplicationWindow {
     width: 1120
     height: 780
     minimumWidth: 760
-    minimumHeight: 650
+    minimumHeight: 720
     visible: true
     title: "BetterFlash - Logo studies"
     color: Theme.canvas
@@ -106,9 +106,9 @@ ApplicationWindow {
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
-                    Layout.minimumHeight: 120
-                    Layout.preferredHeight: 120
-                    Layout.maximumHeight: 140
+                    Layout.minimumHeight: 132
+                    Layout.preferredHeight: 140
+                    Layout.maximumHeight: 144
                     spacing: 5
 
                     Label {
@@ -151,13 +151,13 @@ ApplicationWindow {
                                     Accessible.name: studyRow.modelData.caption + " app icon"
                                 }
 
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 1
-                                    Layout.alignment: Qt.AlignBottom
-                                    color: Theme.rule
-                                    opacity: 0.7
-                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: 1
+                                color: Theme.rule
                             }
                         }
 
