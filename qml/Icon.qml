@@ -102,7 +102,12 @@ Canvas {
                 c.lineTo(15, y)
             }
             break
+        case "dock-right":
         case "dock-left":
+            if (kind === "dock-right") {
+                c.translate(18, 0)
+                c.scale(-1, 1)
+            }
             c.moveTo(3, 3)
             c.lineTo(3, 15)
             c.moveTo(10, 5)
@@ -167,9 +172,12 @@ Canvas {
                 c.lineTo(9 + 8 * Math.cos(a), 9 + 8 * Math.sin(a))
             }
             break
+        case "minus":
         case "plus":
-            c.moveTo(9, 3)
-            c.lineTo(9, 15)
+            if (kind === "plus") {
+                c.moveTo(9, 3)
+                c.lineTo(9, 15)
+            }
             c.moveTo(3, 9)
             c.lineTo(15, 9)
             break

@@ -22,6 +22,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
+#include <memory>
 
 #ifdef BETTERFLASH_GUI_SWEEP
 #include "verification/GuiSweep.h"
@@ -70,6 +71,8 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("progress-designs"), QStringLiteral("Open three review progress bar studies on one page.")});
     parser.addOption({QStringLiteral("logo-studies"), QStringLiteral("Compare three steaming teacups with the original blueberry logo.")});
     parser.addOption({QStringLiteral("sidebar-designs"), QStringLiteral("Compare review icons, navigation toggles and sidebar layouts.")});
+    parser.addOption({QStringLiteral("deck-graph-designs"), QStringLiteral("Compare three deck hierarchy layouts. Add --data-dir to preview a working collection.")});
+    parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1, 2, or 3."), QStringLiteral("number"), QStringLiteral("1")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -95,13 +98,14 @@ int main(int argc, char **argv) {
         {controlDesigns, "BetterFlash Control Designs", "ReviewControlGallery", "controlDesignWarnings"},
         {progressDesigns, "BetterFlash Progress Designs", "ProgressDesignGallery", "progressDesignWarnings"},
         {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"},
-        {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"}
+        {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"},
+        {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {
         if (!mode.enabled) continue;
         if (selectedGallery) {
-            qCritical().noquote() << QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, --progress-designs, --logo-studies, or --sidebar-designs.");
+            qCritical().noquote() << QStringLiteral("DESIGN_MODE: Choose one design gallery at a time.");
             return 1;
         }
         selectedGallery = &mode;
@@ -118,7 +122,21 @@ int main(int argc, char **argv) {
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
 
     if (selectedGallery) {
+        const bool deckGraphs = parser.isSet(QStringLiteral("deck-graph-designs"));
+        bool validVariant = false;
+        const int deckVariant = parser.value(QStringLiteral("deck-graph-variant")).toInt(&validVariant);
+        if (deckGraphs && (!validVariant || deckVariant < 1 || deckVariant > 3)) {
+            qCritical().noquote() << QStringLiteral("DESIGN_VARIANT: Choose --deck-graph-variant 1, 2, or 3.");
+            return 1;
+        }
+        std::unique_ptr<AppController> deckStudyApp;
+        if (deckGraphs && parser.isSet(QStringLiteral("data-dir")))
+            deckStudyApp = std::make_unique<AppController>(dataDirectory);
         QQmlApplicationEngine galleryEngine;
+        if (deckGraphs) {
+            galleryEngine.rootContext()->setContextProperty(QStringLiteral("deckStudyApp"), deckStudyApp.get());
+            galleryEngine.rootContext()->setContextProperty(QStringLiteral("deckStudyStartVariant"), deckVariant - 1);
+        }
         const char *const warningProperty = selectedGallery->warningProperty;
         galleryEngine.setProperty(warningProperty,QStringList());
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,

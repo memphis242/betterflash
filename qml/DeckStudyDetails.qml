@@ -54,6 +54,7 @@ Rectangle {
             total += outcomeCount(index)
         return total
     }
+    readonly property int visibleOutcomes: [0, 1, 2, 3, 4].filter(index => outcomeCount(index) > 0).length
 
     ColumnLayout {
         anchors.fill: parent
@@ -89,12 +90,11 @@ Rectangle {
                     wrapMode: Text.Wrap
                 }
             }
-            GlyphButton {
-                Layout.preferredWidth: 38
-                Layout.preferredHeight: 38
+            PaneToggleButton {
+                Layout.preferredWidth: 48
+                Layout.preferredHeight: 48
                 Layout.alignment: Qt.AlignTop
-                glyph: "arrow-right"
-                glyphSize: 19
+                rightSide: true
                 hint: "Collapse deck details"
                 onClicked: pane.collapseRequested()
                 Accessible.onPressAction: pane.collapseRequested()
@@ -125,11 +125,14 @@ Rectangle {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: pane.integer("total") + " total cards including subdecks"
+                        text: pane.integer("total") + " cards · " + pane.integer("variantTotal") + " review items"
                         textFormat: Text.PlainText
                         color: Theme.inkMuted
                         font.family: Theme.monoFont
                         font.pixelSize: 10
+                        ToolTip.visible: totalsHover.hovered
+                        ToolTip.text: "Includes subdecks. Reversed cards and cloze groups have separate review items."
+                        HoverHandler { id: totalsHover }
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -234,7 +237,8 @@ Rectangle {
                             model: [0, 1, 2, 3, 4]
                             delegate: Rectangle {
                                 required property int modelData
-                                width: pane.outcomeTotal() > 0 ? (outcomeBar.width - outcomeBar.spacing * 4) * pane.outcomeCount(modelData) / pane.outcomeTotal() : 0
+                                visible: pane.outcomeCount(modelData) > 0
+                                width: pane.outcomeTotal() > 0 ? Math.max(0, outcomeBar.width - outcomeBar.spacing * Math.max(0, pane.visibleOutcomes - 1)) * pane.outcomeCount(modelData) / pane.outcomeTotal() : 0
                                 height: 10
                                 radius: 2
                                 color: [Theme.recallMissed, Theme.recallPartial, Theme.recallHard, Theme.recallGood, Theme.recallEasy][modelData]

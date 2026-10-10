@@ -26,32 +26,17 @@ Rectangle {
         width: parent.width
         height: rail.toggleVisible ? 64 : 12
         visible: rail.toggleVisible
-        ToolButton {
+        PaneToggleButton {
             id: toggle
             objectName: "navToggle"
             anchors.centerIn: parent
             width: rail.collapsed ? 52 : parent.width - 20
             height: 48
-            padding: 0
-            ToolTip.visible: hovered || activeFocus
-            ToolTip.text: rail.collapsed ? "Expand navigation" : "Collapse navigation"
-            Accessible.name: ToolTip.text
+            collapsed: rail.collapsed
+            expandGlyph: rail.expandGlyphs[rail.toggleVariant]
+            collapseGlyph: rail.collapseGlyphs[rail.toggleVariant]
+            hint: rail.collapsed ? "Expand navigation" : "Collapse navigation"
             onClicked: rail.toggleRequested()
-            contentItem: Item {
-                Icon {
-                    anchors.centerIn: parent
-                    width: 26
-                    height: 26
-                    kind: rail.collapsed ? rail.expandGlyphs[rail.toggleVariant] : rail.collapseGlyphs[rail.toggleVariant]
-                    stroke: toggle.hovered || toggle.activeFocus ? Theme.ink : Theme.inkMuted
-                }
-            }
-            background: Rectangle {
-                radius: 7
-                color: toggle.hovered || toggle.down ? Theme.accentSoft : Theme.transparent
-                border.width: toggle.activeFocus ? 2 : 0
-                border.color: Theme.accent
-            }
         }
     }
 
