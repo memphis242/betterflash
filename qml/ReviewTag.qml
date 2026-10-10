@@ -8,8 +8,8 @@ Rectangle {
     width: Math.min(maximumWidth, caption.implicitWidth + 16)
     height: 24
     radius: height / 2
-    color: Theme.transparent
-    border.color: Theme.rule
+    color: Theme.tagFill(label)
+    border.color: Theme.tagFill(label)
     Accessible.name: "Tag: " + label
     ToolTip.visible: hover.hovered
     ToolTip.text: "Tag: " + label
@@ -24,7 +24,7 @@ Rectangle {
         verticalAlignment: Text.AlignVCenter
         textFormat: Text.PlainText
         text: badge.label
-        color: Theme.inkMuted
+        color: Theme.tagInk(badge.label)
         font.family: Theme.monoFont
         font.pixelSize: 11
         elide: Text.ElideRight

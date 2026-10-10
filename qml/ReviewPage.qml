@@ -85,6 +85,9 @@ Item {
             return Theme.rule;
         }
     }
+    function gradeHoverColor(grade) {
+        return Theme.recallHoverFill(grade)
+    }
     function gradeMark(grade) {
         switch (grade) {
         case 0:
@@ -343,16 +346,17 @@ Item {
             RowLayout {
                 objectName: "reviewHeader"
                 Layout.fillWidth: true
-                spacing: 10
+                Layout.bottomMargin: 8
+                spacing: 14
                 ColumnLayout {
                     id: reviewHeaderInfo
                     readonly property real titleMaxWidth: Math.max(120, reviewWorkspace.width * 0.42)
                     Layout.minimumWidth: 0
-                    Layout.preferredWidth: titleLabel.width + reviewPause.width + 10
-                    spacing: 3
+                    Layout.preferredWidth: titleLabel.width + reviewPause.width + 22
+                    spacing: 7
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 10
+                        spacing: 14
                         Label {
                             id: titleLabel
                             objectName: "reviewDeckTitle"
@@ -366,12 +370,14 @@ Item {
                             Layout.preferredWidth: Math.min(reviewHeaderInfo.titleMaxWidth, implicitWidth)
                             Layout.maximumWidth: reviewHeaderInfo.titleMaxWidth
                         }
-                        AppButton {
+                        ReviewUtilityButton {
                             id: reviewPause
                             objectName: "reviewPause"
-                            text: app.paused ? "Resume" : "Pause"
-                            hint: shortcuts.bindings.pause
-                            primary: false
+                            hint: (app.paused ? "Resume review" : "Pause review") + " (" + shortcuts.bindings.pause + ")"
+                            Layout.preferredWidth: 44
+                            Layout.preferredHeight: 44
+                            Layout.rightMargin: 8
+                            glyph: app.paused ? "play" : "pause"
                             enabled: !app.busy
                             onClicked: app.paused ? app.resumeReview() : app.pauseReview()
                         }
@@ -381,7 +387,7 @@ Item {
                         text: app.reviewedCount + " of " + app.sessionTotal + " reviewed" + (app.paused ? " - paused" : "")
                         color: app.paused ? Theme.warning : Theme.inkMuted
                         font.family: Theme.monoFont
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                     }
@@ -699,14 +705,14 @@ Item {
                                                 width: Math.min(120, tagLabel.implicitWidth + 12)
                                                 height: 18
                                                 radius: 9
-                                                color: Theme.transparent
-                                                border.color: Theme.ledgerRule
+                                                color: Theme.tagFill(modelData)
+                                                border.color: Theme.tagFill(modelData)
                                                 Label {
                                                     id: tagLabel
                                                     anchors.centerIn: parent
                                                     text: modelData
                                                     width: parent.width - 10
-                                                    color: Theme.inkMuted
+                                                    color: Theme.tagInk(modelData)
                                                     font.family: Theme.monoFont
                                                     font.pixelSize: 9
                                                     elide: Text.ElideRight
@@ -902,7 +908,7 @@ Item {
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 10
-                    spacing: 8
+                    spacing: page.ui.width < 600 ? 12 : 20
                     ReviewNavigationBar {
                         objectName: "reviewPreviousCardBar"
                         Layout.preferredWidth: page.ui.width < 600 ? 28 : 38
@@ -953,7 +959,7 @@ Item {
                                     text: "Question"
                                     color: Theme.inkMuted
                                     font.family: Theme.monoFont
-                                    font.pixelSize: 11
+                                    font.pixelSize: 15
                                 }
                                 MarkdownPane {
                                     objectName: "reviewQuestion"
@@ -997,7 +1003,7 @@ Item {
                                     text: "Answer"
                                     color: Theme.inkMuted
                                     font.family: Theme.monoFont
-                                    font.pixelSize: 11
+                                    font.pixelSize: 15
                                 }
                                 MarkdownPane {
                                     objectName: "reviewAnswer"
@@ -1030,7 +1036,7 @@ Item {
                                 text: page.formatElapsed(app.responseSeconds)
                                 color: app.paused ? Theme.warning : Theme.inkMuted
                                 font.family: Theme.monoFont
-                                font.pixelSize: 13
+                                font.pixelSize: 18
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.fillWidth: true
                             }
@@ -1067,6 +1073,7 @@ Item {
                                         }
                                     ]
                                     delegate: AppButton {
+                                        id: gradeButton
                                         required property var modelData
                                         readonly property bool selectedGrade: page.cardGrade(app.currentCard) === modelData.grade
                                         Accessible.checkable: true
@@ -1074,7 +1081,7 @@ Item {
                                         Accessible.name: modelData.label + (selectedGrade ? ", selected" : "")
                                         objectName: "grade" + modelData.grade
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: 51
+                                        Layout.preferredHeight: page.ui.width < 600 ? 60 : 68
                                         padding: 5
                                         enabled: !app.paused && !app.busy
                                         hint: modelData.label + " recall (" + shortcuts.bindings[modelData.action] + ")"
@@ -1087,7 +1094,7 @@ Item {
                                                 horizontalAlignment: Text.AlignHCenter
                                                 elide: Text.ElideRight
                                                 font.family: Theme.monoFont
-                                                font.pixelSize: 10
+                                                font.pixelSize: 12
                                                 color: Theme.inkMuted
                                             }
                                             Label {
@@ -1095,15 +1102,15 @@ Item {
                                                 width: parent.width
                                                 text: modelData.label
                                                 horizontalAlignment: Text.AlignHCenter
-                                                font.pixelSize: page.ui.width < 600 ? 12 : 14
+                                                font.pixelSize: page.ui.width < 600 ? 15 : 17
                                                 color: Theme.ink
                                             }
                                         }
                                         background: Rectangle {
                                             radius: 8
-                                            color: parent.hovered || parent.down ? Theme.accentSoft : Theme.transparent
-                                            border.width: selectedGrade ? 3 : parent.activeFocus ? 2 : 1
-                                            border.color: selectedGrade ? page.gradeColor(modelData.grade) : parent.activeFocus ? Theme.accent : Theme.rule
+                                            color: gradeButton.hovered || gradeButton.down ? page.gradeHoverColor(modelData.grade) : Theme.transparent
+                                            border.width: gradeButton.selectedGrade ? 3 : gradeButton.activeFocus ? 2 : 1
+                                            border.color: gradeButton.selectedGrade ? page.gradeColor(modelData.grade) : gradeButton.activeFocus ? Theme.accent : Theme.rule
                                         }
                                         onClicked: modelData.grade === 1 ? ui.openPartial() : app.grade(modelData.grade)
                                     }
