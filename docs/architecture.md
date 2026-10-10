@@ -76,8 +76,8 @@ when the card is outside the viewport; a persistent scrollbar maps the extent.
 
 A previous/next arrow bar spans each side of the main card. One tag capsule
 appears in each preview and all tags appear above the prompt. The queue can be
-collapsed without hiding progress or navigation. A 22 px progress bar has a
-square left edge and an arrow tip. Reviewed slots
+collapsed without hiding progress or navigation. The 26 px Cut ribbon progress
+bar has a square left edge, a broad arrow tip, and a subdued neutral track. Reviewed slots
 use the same outcome colors as the queue and grades, separated by transparent
 slanted cuts. Ungraded slots form a continuous neutral track. Leaving Review
 pauses the timer and retains the queue. A timer sits above the controls, and a

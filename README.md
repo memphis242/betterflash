@@ -75,7 +75,7 @@ The gallery uses sample outcomes and its own settings, without opening a collect
   navigate or grade cards, preserving queue order. The persistent queue scrollbar
   and Return to active card
   control let you explore and return without changing the active card.
-- A thick, arrow-ended bar above the queue reveals each reviewed card's recall
+- The Cut ribbon progress bar above the queue reveals each reviewed card's recall
   outcome with transparent slanted separators. Ungraded slots share a continuous
   neutral track. Reduce motion in Appearance disables queue animation. Previous
   and next arrow bars span the sides of the main card. Choosing a grade saves it
