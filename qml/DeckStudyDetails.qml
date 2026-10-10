@@ -18,6 +18,7 @@ Rectangle {
     property bool summaryRetryVisible: false
     property bool summaryBusy: false
     property bool saveExternally: false
+    property var descriptionDrafts: ({})
     signal collapseRequested()
     signal descriptionSaved(string deckId, string description)
     signal reviewRequested(string deckId)
@@ -27,8 +28,7 @@ Rectangle {
     readonly property string deckName: String(deck && deck.name !== undefined ? deck.name : "Untitled deck")
     readonly property string parentPath: String(deck && deck.parentPath !== undefined ? deck.parentPath : "")
     readonly property string description: String(deck && deck.description !== undefined ? deck.description : "")
-    readonly property bool descriptionDialogVisible: descriptionDialog.visible
-    readonly property string descriptionTargetDeckId: String(descriptionDialog.targetDeckId)
+    readonly property bool descriptionEditing: pane.deckId.length > 0 && Object.prototype.hasOwnProperty.call(pane.descriptionDrafts, pane.deckId)
     readonly property var safeDeck: deck || ({})
     readonly property color panelRule: Theme.ledgerRule
 
@@ -69,11 +69,53 @@ Rectangle {
     function openDescriptionEditor() {
         if (pane.busy || pane.deckId.length === 0)
             return
-        descriptionDialog.open()
+        if (!pane.descriptionEditing) {
+            const drafts = Object.assign({}, pane.descriptionDrafts)
+            drafts[pane.deckId] = pane.description
+            pane.descriptionDrafts = drafts
+        }
+        descriptionEditor.forceActiveFocus()
     }
-    function descriptionSaveSucceeded() {
-        if (saveExternally)
-            descriptionDialog.close()
+    function draftForCurrentDeck() {
+        return pane.descriptionEditing ? String(pane.descriptionDrafts[pane.deckId]) : pane.description
+    }
+    function updateDescriptionDraft(text) {
+        if (!pane.descriptionEditing || pane.deckId.length === 0)
+            return
+        if (String(pane.descriptionDrafts[pane.deckId]) === String(text))
+            return
+        const drafts = Object.assign({}, pane.descriptionDrafts)
+        drafts[pane.deckId] = String(text)
+        pane.descriptionDrafts = drafts
+    }
+    function discardDescriptionDraft(deckId) {
+        const id = String(deckId || "")
+        if (id.length === 0 || !Object.prototype.hasOwnProperty.call(pane.descriptionDrafts, id))
+            return
+        const drafts = Object.assign({}, pane.descriptionDrafts)
+        delete drafts[id]
+        pane.descriptionDrafts = drafts
+    }
+    function cancelDescriptionEdit() {
+        if (!pane.busy)
+            pane.discardDescriptionDraft(pane.deckId)
+    }
+    function saveDescription() {
+        if (!pane.descriptionEditing || pane.busy || pane.deckId.length === 0)
+            return
+        const id = pane.deckId
+        const text = String(pane.descriptionDrafts[id])
+        pane.descriptionSaved(id, text)
+        if (!pane.saveExternally)
+            pane.descriptionSaveSucceeded(id, text)
+    }
+    function descriptionSaveSucceeded(savedDeckId, savedDescription) {
+        const id = String(savedDeckId || "")
+        if (id.length === 0 || !Object.prototype.hasOwnProperty.call(pane.descriptionDrafts, id))
+            return
+        if (String(pane.descriptionDrafts[id]) !== String(savedDescription))
+            return
+        pane.discardDescriptionDraft(id)
     }
     readonly property int visibleOutcomes: [0, 1, 2, 3, 4].filter(index => outcomeCount(index) > 0).length
 
@@ -344,13 +386,13 @@ Rectangle {
                         Layout.minimumHeight: 90
                         activeFocusOnTab: true
                         implicitHeight: Math.max(90, descriptionContent.implicitHeight)
-                        Accessible.role: Accessible.Button
-                        Accessible.name: pane.description.length > 0 ? "Edit deck description" : "Add deck description"
+                        Accessible.role: Accessible.EditableText
+                        Accessible.name: pane.description.length > 0 ? "Deck description" : "Empty deck description"
                         Accessible.description: "Double-click or press Enter to edit the deck description"
                         Accessible.onPressAction: pane.openDescriptionEditor()
-                        ToolTip.visible: descriptionAreaHover.hovered || descriptionArea.activeFocus
-                        ToolTip.text: pane.description.length > 0 ? "Double-click to edit this deck description" : "Double-click to describe this deck"
-                        HoverHandler { id: descriptionAreaHover }
+                        HoverHandler {
+                            cursorShape: Qt.IBeamCursor
+                        }
                         Rectangle {
                             anchors.fill: parent
                             radius: 4
@@ -359,6 +401,7 @@ Rectangle {
                             border.color: Theme.accent
                         }
                         TapHandler {
+                            enabled: !pane.descriptionEditing
                             acceptedButtons: Qt.LeftButton
                             onTapped: descriptionArea.forceActiveFocus()
                             onDoubleTapped: pane.openDescriptionEditor()
@@ -396,15 +439,81 @@ Rectangle {
                                 font.pixelSize: 14
                                 font.weight: Font.DemiBold
                             }
-                            Label {
+                            ScrollView {
+                                id: descriptionScroll
                                 Layout.fillWidth: true
-                                textFormat: Text.PlainText
-                                text: pane.description.length > 0 ? pane.description : "Double-click to describe this deck."
-                                color: Theme.inkMuted
-                                font.family: Theme.contentFont
-                                font.pixelSize: 12
-                                lineHeight: 1.35
-                                wrapMode: Text.Wrap
+                                Layout.preferredHeight: Math.max(64, Math.min(200, descriptionEditor.implicitHeight))
+                                contentWidth: availableWidth
+                                clip: true
+                                TextArea {
+                                    id: descriptionEditor
+                                    width: descriptionScroll.availableWidth
+                                    text: pane.draftForCurrentDeck()
+                                    textFormat: TextEdit.PlainText
+                                    readOnly: !pane.descriptionEditing || pane.busy
+                                    color: pane.descriptionEditing ? Theme.ink : Theme.inkMuted
+                                    font.family: Theme.contentFont
+                                    font.pixelSize: 12
+                                    wrapMode: TextEdit.Wrap
+                                    padding: 0
+                                    placeholderText: "Double-click to describe this deck."
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        color: Theme.transparent
+                                        border.width: pane.descriptionEditing && descriptionEditor.activeFocus ? 1 : 0
+                                        border.color: Theme.accent
+                                        radius: 4
+                                    }
+                                    onTextChanged: pane.updateDescriptionDraft(text)
+                                    Keys.onShortcutOverride: event => {
+                                        const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                        if (pane.descriptionEditing && (enter && (event.modifiers & Qt.ControlModifier) || event.key === Qt.Key_Escape))
+                                            event.accepted = true
+                                    }
+                                    Keys.onPressed: event => {
+                                        switch (event.key) {
+                                        case Qt.Key_Return:
+                                        case Qt.Key_Enter:
+                                            if (!pane.descriptionEditing) {
+                                                pane.openDescriptionEditor()
+                                                event.accepted = true
+                                            } else if (event.modifiers & Qt.ControlModifier) {
+                                                pane.saveDescription()
+                                                event.accepted = true
+                                            }
+                                            break
+                                        case Qt.Key_F2:
+                                            pane.openDescriptionEditor()
+                                            event.accepted = true
+                                            break
+                                        case Qt.Key_Escape:
+                                            if (pane.descriptionEditing) {
+                                                pane.cancelDescriptionEdit()
+                                                event.accepted = true
+                                            }
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                visible: pane.descriptionEditing
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Item { Layout.fillWidth: true }
+                                AppButton {
+                                    text: "Cancel"
+                                    enabled: !pane.busy
+                                    hint: "Discard description changes"
+                                    onClicked: pane.cancelDescriptionEdit()
+                                }
+                                AppButton {
+                                    text: "Save"
+                                    enabled: !pane.busy
+                                    primary: true
+                                    hint: "Save description changes"
+                                    onClicked: pane.saveDescription()
+                                }
                             }
                         }
                     }
@@ -429,71 +538,4 @@ Rectangle {
         }
     }
 
-    Dialog {
-        id: descriptionDialog
-        property string targetDeckId: ""
-        parent: Overlay.overlay
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(560, Math.max(320, (Overlay.overlay ? Overlay.overlay.width : 560) - 40))
-        padding: 20
-        title: pane.description.length > 0 ? "Edit deck description" : "Add deck description"
-        closePolicy: pane.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
-        background: Rectangle {
-            color: Theme.surface
-            radius: 7
-            border.color: Theme.rule
-        }
-        Overlay.modal: Rectangle { color: Theme.scrim }
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                Layout.fillWidth: true
-                text: "A short note helps explain this deck's focus."
-                color: Theme.inkMuted
-                font.family: Theme.uiFont
-                font.pixelSize: 12
-                wrapMode: Text.Wrap
-            }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 150
-                contentWidth: availableWidth
-                clip: true
-                TextArea {
-                    id: descriptionEditor
-                    width: parent.width
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    color: Theme.ink
-                    placeholderText: "Describe this deck"
-                    background: Rectangle {
-                        color: Theme.ledgerSurface
-                        border.color: descriptionEditor.activeFocus ? Theme.accent : Theme.rule
-                        radius: 4
-                    }
-                }
-            }
-        }
-        footer: RowLayout {
-            spacing: 10
-            Item { Layout.fillWidth: true }
-            AppButton { text: "Cancel"; enabled: !pane.busy; onClicked: descriptionDialog.close() }
-            AppButton {
-                text: "Save description"
-                primary: true
-                enabled: !pane.busy
-                onClicked: {
-                    pane.descriptionSaved(descriptionDialog.targetDeckId, descriptionEditor.text)
-                    if (!pane.saveExternally)
-                        descriptionDialog.close()
-                }
-            }
-        }
-        onOpened: {
-            targetDeckId = pane.deckId
-            descriptionEditor.text = pane.description
-            descriptionEditor.forceActiveFocus()
-        }
-    }
 }
