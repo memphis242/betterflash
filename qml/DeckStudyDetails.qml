@@ -9,14 +9,26 @@ Rectangle {
 
     required property var deck
     property int variant: 0
+    property bool busy: false
+    property string actionText: "Start review"
+    property bool actionEnabled: true
+    property string summaryText: String(deck && deck.summary !== undefined ? deck.summary : "")
+    property string summaryCaption: "Automatic summary"
+    property string summaryError: ""
+    property bool summaryRetryVisible: false
+    property bool summaryBusy: false
+    property bool saveExternally: false
     signal collapseRequested()
     signal descriptionSaved(string deckId, string description)
     signal reviewRequested(string deckId)
+    signal summaryRetryRequested()
 
     readonly property string deckId: String(deck && deck.id !== undefined ? deck.id : "")
     readonly property string deckName: String(deck && deck.name !== undefined ? deck.name : "Untitled deck")
     readonly property string parentPath: String(deck && deck.parentPath !== undefined ? deck.parentPath : "")
     readonly property string description: String(deck && deck.description !== undefined ? deck.description : "")
+    readonly property bool descriptionDialogVisible: descriptionDialog.visible
+    readonly property string descriptionTargetDeckId: String(descriptionDialog.targetDeckId)
     readonly property var safeDeck: deck || ({})
     readonly property color panelRule: Theme.ledgerRule
 
@@ -53,6 +65,15 @@ Rectangle {
         for (let index = 0; index < 5; ++index)
             total += outcomeCount(index)
         return total
+    }
+    function openDescriptionEditor() {
+        if (pane.busy || pane.deckId.length === 0)
+            return
+        descriptionDialog.open()
+    }
+    function descriptionSaveSucceeded() {
+        if (saveExternally)
+            descriptionDialog.close()
     }
     readonly property int visibleOutcomes: [0, 1, 2, 3, 4].filter(index => outcomeCount(index) > 0).length
 
@@ -271,7 +292,7 @@ Rectangle {
                     Label {
                         visible: pane.integer("due") > 0
                         Layout.fillWidth: true
-                        text: "Automatic summary"
+                        text: pane.summaryCaption
                         textFormat: Text.PlainText
                         color: Theme.inkMuted
                         font.family: Theme.monoFont
@@ -280,44 +301,112 @@ Rectangle {
                     Label {
                         Layout.fillWidth: true
                         textFormat: Text.PlainText
-                        text: pane.integer("due") > 0 ? String(pane.safeDeck.summary || "No summary is available yet.") : "Nothing is due in this deck."
+                        text: pane.integer("due") > 0 ? (pane.summaryText.length > 0 ? pane.summaryText : "No summary is available yet.") : "Nothing is due in this deck."
                         color: Theme.inkMuted
                         font.family: Theme.contentFont
                         font.pixelSize: 12
                         lineHeight: 1.35
                         wrapMode: Text.Wrap
+                    }
+                    Label {
+                        visible: pane.summaryBusy
+                        Layout.fillWidth: true
+                        text: "Generating summary..."
+                        color: Theme.inkMuted
+                        font.family: Theme.monoFont
+                        font.pixelSize: 10
+                    }
+                    Label {
+                        visible: pane.summaryError.length > 0
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        text: pane.summaryError
+                        color: Theme.error
+                        font.family: Theme.monoFont
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
+                    }
+                    AppButton {
+                        visible: pane.summaryRetryVisible && pane.summaryError.length > 0
+                        text: "Retry summary"
+                        enabled: !pane.summaryBusy && !pane.busy
+                        hint: "Request a new summary"
+                        onClicked: pane.summaryRetryRequested()
                     }
                 }
 
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    RowLayout {
+                    FocusScope {
+                        id: descriptionArea
                         Layout.fillWidth: true
-                        Label {
-                            Layout.fillWidth: true
-                            text: "Deck description"
-                            color: Theme.ink
-                            font.family: Theme.uiFont
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
+                        Layout.minimumHeight: 90
+                        activeFocusOnTab: true
+                        implicitHeight: Math.max(90, descriptionContent.implicitHeight)
+                        Accessible.role: Accessible.Button
+                        Accessible.name: pane.description.length > 0 ? "Edit deck description" : "Add deck description"
+                        Accessible.description: "Double-click or press Enter to edit the deck description"
+                        Accessible.onPressAction: pane.openDescriptionEditor()
+                        ToolTip.visible: descriptionAreaHover.hovered || descriptionArea.activeFocus
+                        ToolTip.text: pane.description.length > 0 ? "Double-click to edit this deck description" : "Double-click to describe this deck"
+                        HoverHandler { id: descriptionAreaHover }
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 4
+                            color: Theme.transparent
+                            border.width: descriptionArea.activeFocus ? 1 : 0
+                            border.color: Theme.accent
                         }
-                        GlyphButton {
-                            glyph: pane.description.length > 0 ? "edit" : "plus"
-                            glyphSize: 16
-                            hint: pane.description.length > 0 ? "Edit deck description" : "Add deck description"
-                            onClicked: descriptionDialog.open()
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: descriptionArea.forceActiveFocus()
+                            onDoubleTapped: pane.openDescriptionEditor()
+                            onLongPressed: pane.openDescriptionEditor()
                         }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        textFormat: Text.PlainText
-                        text: pane.description.length > 0 ? pane.description : "Add a short note about what this deck covers."
-                        color: Theme.inkMuted
-                        font.family: Theme.contentFont
-                        font.pixelSize: 12
-                        lineHeight: 1.35
-                        wrapMode: Text.Wrap
+                        Keys.onReturnPressed: function(event) {
+                            pane.openDescriptionEditor()
+                            event.accepted = true
+                        }
+                        Keys.onEnterPressed: function(event) {
+                            pane.openDescriptionEditor()
+                            event.accepted = true
+                        }
+                        Keys.onSpacePressed: function(event) {
+                            pane.openDescriptionEditor()
+                            event.accepted = true
+                        }
+                        Keys.onPressed: function(event) {
+                            if (event.key === Qt.Key_F2) {
+                                pane.openDescriptionEditor()
+                                event.accepted = true
+                            }
+                        }
+                        ColumnLayout {
+                            id: descriptionContent
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            spacing: 8
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Deck description"
+                                color: Theme.ink
+                                font.family: Theme.uiFont
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                textFormat: Text.PlainText
+                                text: pane.description.length > 0 ? pane.description : "Double-click to describe this deck."
+                                color: Theme.inkMuted
+                                font.family: Theme.contentFont
+                                font.pixelSize: 12
+                                lineHeight: 1.35
+                                wrapMode: Text.Wrap
+                            }
+                        }
                     }
                 }
             }
@@ -332,9 +421,10 @@ Rectangle {
         }
         AppButton {
             Layout.fillWidth: true
-            text: "Start review"
+            text: pane.actionText
+            enabled: pane.actionEnabled && !pane.busy
             primary: true
-            hint: "Review this deck"
+            hint: pane.actionText
             onClicked: pane.reviewRequested(pane.deckId)
         }
     }
@@ -348,7 +438,7 @@ Rectangle {
         width: Math.min(560, Math.max(320, (Overlay.overlay ? Overlay.overlay.width : 560) - 40))
         padding: 20
         title: pane.description.length > 0 ? "Edit deck description" : "Add deck description"
-        closePolicy: Popup.CloseOnEscape
+        closePolicy: pane.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
         background: Rectangle {
             color: Theme.surface
             radius: 7
@@ -388,13 +478,15 @@ Rectangle {
         footer: RowLayout {
             spacing: 10
             Item { Layout.fillWidth: true }
-            AppButton { text: "Cancel"; onClicked: descriptionDialog.close() }
+            AppButton { text: "Cancel"; enabled: !pane.busy; onClicked: descriptionDialog.close() }
             AppButton {
                 text: "Save description"
                 primary: true
+                enabled: !pane.busy
                 onClicked: {
                     pane.descriptionSaved(descriptionDialog.targetDeckId, descriptionEditor.text)
-                    descriptionDialog.close()
+                    if (!pane.saveExternally)
+                        descriptionDialog.close()
                 }
             }
         }
