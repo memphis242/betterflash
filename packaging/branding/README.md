@@ -4,6 +4,16 @@ The colored sole walnut is the primary app identity. The blueberry and spinach
 pairings are bundled for selective future use. Keep their original colors in both
 themes; these are brand illustrations, not state indicators or action glyphs.
 
+## Reserved tea studies
+
+The ceramic, glass, and porcelain teacup variants are retained design candidates
+under `tea-studies/`, together with their generation prompts. Their current use
+is limited to the isolated logo comparison gallery. Incorporating them into app
+branding or content awaits an explicit user choice. The walnut is the selected
+primary logo.
+
+## App assets
+
 | Asset | Purpose | QML variant |
 | --- | --- | --- |
 | `walnut.png` | Primary header, window and launcher mark | `walnut` (default) |

@@ -2,6 +2,9 @@
   "created": "2026-10-10",
   "generator": "Built-in image_gen tool",
   "purpose": "Steaming-teacup candidates and the original blueberry for in-app comparison",
+  "status": "Retained design candidates; comparison gallery only",
+  "usage": "Future incorporation into app branding or content awaits an explicit user choice",
+  "primary_app_logo": "walnut",
   "concepts": [
     {
       "file": "tea-01-ceramic.png",
