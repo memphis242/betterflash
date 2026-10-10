@@ -66,10 +66,10 @@ Rectangle {
         spacing: rail.distributed ? 0 : 8
         Repeater {
             model: [
-                {name: "Review", glyph: rail.reviewGlyph, action: "reviewPage"},
-                {name: "Library", glyph: "bookshelf", action: "libraryPage"},
-                {name: "History", glyph: "clock", action: "historyPage"},
-                {name: "Settings", glyph: "gear-toothed", action: "settingsPage"}
+                {name: "Review", description: "Practice the cards due now.", glyph: rail.reviewGlyph, action: "reviewPage"},
+                {name: "Library", description: "Create and organize your cards.", glyph: "bookshelf", action: "libraryPage"},
+                {name: "History", description: "Look back on your reviews.", glyph: "clock", action: "historyPage"},
+                {name: "Settings", description: "Adjust your study setup.", glyph: "gear-toothed", action: "settingsPage"}
             ]
             delegate: Button {
                 id: navButton
@@ -79,35 +79,46 @@ Rectangle {
                 objectName: "nav" + modelData.name
                 Layout.fillWidth: true
                 Layout.fillHeight: rail.distributed
-                Layout.preferredHeight: 56
-                Layout.minimumHeight: 52
+                Layout.preferredHeight: rail.collapsed ? 56 : 104
+                Layout.minimumHeight: rail.collapsed ? 52 : 88
                 padding: 0
                 ToolTip.visible: hovered || activeFocus
                 ToolTip.text: modelData.name + (rail.bindings[modelData.action] ? " (" + rail.bindings[modelData.action] + ")" : "")
                 Accessible.name: ToolTip.text
+                Accessible.description: modelData.description
                 onClicked: rail.pageRequested(index)
                 contentItem: Item {
-                    Icon {
-                        id: navIcon
-                        x: rail.collapsed ? (parent.width - width) / 2 : 16
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 26
-                        height: 26
-                        kind: navButton.modelData.glyph
-                        stroke: navButton.selected ? Theme.accent : Theme.inkMuted
-                        lineWidth: 1.35
-                    }
-                    Label {
-                        anchors.left: navIcon.right
-                        anchors.leftMargin: 14
-                        anchors.right: parent.right
-                        anchors.rightMargin: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: !rail.collapsed
-                        text: navButton.modelData.name
-                        color: navButton.selected ? Theme.accent : Theme.inkMuted
-                        font.pixelSize: 15
-                        elide: Text.ElideRight
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        width: parent.width - 32
+                        spacing: 10
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            spacing: 10
+                            Icon {
+                                Layout.preferredWidth: 26
+                                Layout.preferredHeight: 26
+                                kind: navButton.modelData.glyph
+                                stroke: navButton.selected ? Theme.accent : Theme.inkMuted
+                                lineWidth: 1.35
+                            }
+                            Label {
+                                visible: !rail.collapsed
+                                text: navButton.modelData.name
+                                color: navButton.selected ? Theme.accent : Theme.inkMuted
+                                font.pixelSize: 15
+                            }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !rail.collapsed
+                            text: navButton.modelData.description
+                            color: Theme.inkMuted
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            lineHeight: 1.2
+                        }
                     }
                 }
                 background: Rectangle {

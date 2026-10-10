@@ -8,6 +8,8 @@ dark theme, a separate paper light theme, IBM Plex Mono typography, and a
 collapsible left navigation pane whose icons remain available when collapsed.
 Its four navigation buttons fill the pane in equal-height sections. Review uses
 the Turn the card glyph; menu bars expand the pane and the dock arrow collapses it.
+Expanded items center their icon and label above a short description, with the
+whole group vertically centered in its section.
 
 ## Run on Fedora
 
