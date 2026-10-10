@@ -51,6 +51,26 @@ The gallery uses sample outcomes and its own settings, without opening a collect
 Compare three steaming-teacup logo candidates alongside the original blueberry
 using `./scripts/run-desktop.sh --logo-studies`. Each appears in a header bar
 and at a larger size in the same themed window.
+Compare three Review icons, five expand/collapse controls, and grouped versus
+full-height navigation with `./scripts/run-desktop.sh --sidebar-designs`.
+The two live sidebar previews expand independently and share the selected glyphs.
+
+### Development reset controls
+
+Desktop builds made with `scripts/build-desktop.sh` include **Reset deck** on the
+Review page after selecting a deck, and **Reset card** in the Library's selected
+card details. Both are also available in the review actions menu. Deck resets
+include all subdecks; card resets include every reverse and cloze variant.
+A confirmation explains the scope. Resetting returns schedules to new and due
+now, restores initial difficulty and stability, clears review counts, and ends
+the active session after saving. Content, images, tags and past history remain.
+Schedule changes use the normal sync outbox.
+
+These controls are excluded by default in direct CMake builds. Disable them in
+scripted builds with `./scripts/build-desktop.sh -DBETTERFLASH_DEVELOPMENT_TOOLS=OFF`.
+Development builds exclude test targets unless `-DBUILD_TESTING=ON` is provided.
+
+### Review behavior
 
 - Edit Markdown, fenced code, inline `$...$` or display `$$...$$` math, and images
   on either side. Attached images are copied into the collection by content hash.
@@ -162,8 +182,10 @@ kit, Android SDK/NDK, and JDK are required to build an APK. See
 
 ## Development
 
-Work in an isolated git worktree. Each build checks that its CMake cache belongs
-to its own checkout. For focused verification:
+Sequential UI refinement currently uses the primary checkout on `main`, as
+requested. Use isolated worktrees when parallel work or backend development
+resumes. Each build checks that its CMake cache belongs to its own checkout.
+Local tests are paused during visual refinement. When verification is requested:
 
 ```sh
 ./scripts/verify-desktop.sh

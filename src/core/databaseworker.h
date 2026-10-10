@@ -25,6 +25,7 @@ public:
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
                   const QString &front, const QString &back, const QString &tags, int points);
     void deleteCard(const QString &id);
+    void resetReviewState(const QString &id, bool deckScope);
     void replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
     void beginReview(const QString &deckId);
     void selectReviewCard(const QString &variantId);

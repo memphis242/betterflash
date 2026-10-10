@@ -69,6 +69,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("control-designs"), QStringLiteral("Open the isolated review control design gallery.")});
     parser.addOption({QStringLiteral("progress-designs"), QStringLiteral("Open three review progress bar studies on one page.")});
     parser.addOption({QStringLiteral("logo-studies"), QStringLiteral("Compare three steaming teacups with the original blueberry logo.")});
+    parser.addOption({QStringLiteral("sidebar-designs"), QStringLiteral("Compare review icons, navigation toggles and sidebar layouts.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -93,13 +94,14 @@ int main(int argc, char **argv) {
         {queueDesigns, "BetterFlash Queue Designs", "QueueDesignGallery", "queueDesignWarnings"},
         {controlDesigns, "BetterFlash Control Designs", "ReviewControlGallery", "controlDesignWarnings"},
         {progressDesigns, "BetterFlash Progress Designs", "ProgressDesignGallery", "progressDesignWarnings"},
-        {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"}
+        {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"},
+        {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {
         if (!mode.enabled) continue;
         if (selectedGallery) {
-            qCritical().noquote() << QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, --progress-designs, or --logo-studies.");
+            qCritical().noquote() << QStringLiteral("DESIGN_MODE: Choose one gallery: --queue-designs, --control-designs, --progress-designs, --logo-studies, or --sidebar-designs.");
             return 1;
         }
         selectedGallery = &mode;

@@ -9,6 +9,7 @@ Canvas {
     implicitHeight: 18
     onKindChanged: requestPaint()
     onStrokeChanged: requestPaint()
+    onLineWidthChanged: requestPaint()
     onWidthChanged: requestPaint()
     onHeightChanged: requestPaint()
     onPaint: {
@@ -19,7 +20,139 @@ Canvas {
         c.lineWidth = lineWidth
         c.lineCap = "round"
         c.lineJoin = "round"
+        function roundedRect(x, y, w, h, r) {
+            c.moveTo(x + r, y)
+            c.lineTo(x + w - r, y)
+            c.quadraticCurveTo(x + w, y, x + w, y + r)
+            c.lineTo(x + w, y + h - r)
+            c.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+            c.lineTo(x + r, y + h)
+            c.quadraticCurveTo(x, y + h, x, y + h - r)
+            c.lineTo(x, y + r)
+            c.quadraticCurveTo(x, y, x + r, y)
+            c.closePath()
+        }
         switch (kind) {
+        case "review-flip":
+            roundedRect(3, 6, 12, 10, 1.5)
+            c.moveTo(6, 10)
+            c.lineTo(12, 10)
+            c.moveTo(6, 13)
+            c.lineTo(10, 13)
+            c.moveTo(3, 4)
+            c.bezierCurveTo(5, 0.5, 11, 0.5, 14, 4)
+            c.moveTo(14, 1)
+            c.lineTo(14, 4)
+            c.lineTo(11, 4)
+            break
+        case "review-stack":
+            roundedRect(5, 5, 11, 11, 1.5)
+            c.moveTo(12, 2)
+            c.lineTo(3, 2)
+            c.quadraticCurveTo(2, 2, 2, 3)
+            c.lineTo(2, 12)
+            c.moveTo(8, 10)
+            c.lineTo(10, 12)
+            c.lineTo(13, 8)
+            break
+        case "review-ledger":
+            roundedRect(3, 2, 12, 14, 1.5)
+            c.moveTo(6, 5)
+            c.lineTo(12, 5)
+            c.moveTo(6, 8)
+            c.lineTo(10, 8)
+            c.moveTo(6, 12)
+            c.lineTo(8, 14)
+            c.lineTo(12, 10)
+            break
+        case "bookshelf":
+            c.moveTo(1, 2)
+            c.lineTo(1, 16)
+            c.lineTo(17, 16)
+            c.moveTo(2.8, 4)
+            c.lineTo(5.3, 3.3)
+            c.lineTo(8.2, 13.8)
+            c.lineTo(5.7, 14.5)
+            c.closePath()
+            c.moveTo(6.8, 3.3)
+            c.lineTo(9.3, 2.6)
+            c.lineTo(12.3, 13.7)
+            c.lineTo(9.8, 14.4)
+            c.closePath()
+            c.rect(14, 5, 3, 9.5)
+            break
+        case "gear-toothed":
+            c.lineJoin = "miter"
+            for (let i = 0; i < 8; ++i) {
+                for (const point of [[-22.5, 5.7], [-12, 5.7], [-12, 7.7], [12, 7.7], [12, 5.7], [22.5, 5.7]]) {
+                    const a = (i * 45 + point[0]) * Math.PI / 180
+                    const x = 9 + point[1] * Math.cos(a)
+                    const y = 9 + point[1] * Math.sin(a)
+                    if (i === 0 && point[0] === -22.5) c.moveTo(x, y)
+                    else c.lineTo(x, y)
+                }
+            }
+            c.closePath()
+            c.moveTo(11.5, 9)
+            c.arc(9, 9, 2.5, 0, Math.PI * 2)
+            break
+        case "menu-bars":
+            for (const y of [4, 9, 14]) {
+                c.moveTo(3, y)
+                c.lineTo(15, y)
+            }
+            break
+        case "dock-left":
+            c.moveTo(3, 3)
+            c.lineTo(3, 15)
+            c.moveTo(10, 5)
+            c.lineTo(6, 9)
+            c.lineTo(10, 13)
+            c.moveTo(6, 9)
+            c.lineTo(16, 9)
+            break
+        case "chevron-left-bold":
+        case "chevron-right-bold": {
+            c.lineWidth = 2.5
+            const left = kind === "chevron-left-bold"
+            c.moveTo(left ? 11 : 7, 4)
+            c.lineTo(left ? 6 : 12, 9)
+            c.lineTo(left ? 11 : 7, 14)
+            break
+        }
+        case "panel-open":
+        case "panel-close": {
+            roundedRect(1.5, 2.5, 15, 13, 1.2)
+            c.moveTo(6, 3)
+            c.lineTo(6, 15)
+            const opening = kind === "panel-open"
+            c.moveTo(opening ? 9 : 13, 6)
+            c.lineTo(opening ? 12 : 10, 9)
+            c.lineTo(opening ? 9 : 13, 12)
+            break
+        }
+        case "double-right":
+        case "double-left": {
+            const left = kind === "double-left"
+            for (const x of [3, 9]) {
+                c.moveTo(left ? x + 4 : x, 4)
+                c.lineTo(left ? x : x + 4, 9)
+                c.lineTo(left ? x + 4 : x, 14)
+            }
+            break
+        }
+        case "rail-unfold":
+        case "rail-fold": {
+            const opening = kind === "rail-unfold"
+            c.moveTo(3, 3)
+            c.lineTo(3, 15)
+            c.moveTo(6, 3)
+            c.lineTo(6, 15)
+            c.moveTo(opening ? 10 : 15, 5)
+            c.lineTo(opening ? 14 : 11, 9)
+            c.lineTo(opening ? 10 : 15, 13)
+            break
+        }
         case "moon":
             c.moveTo(11, 2)
             c.bezierCurveTo(2, 1, 0, 13, 8, 16)

@@ -69,7 +69,7 @@ ApplicationWindow {
     property string summarizedQueue: ""
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -511,6 +511,18 @@ ApplicationWindow {
         deleteDescendantCount = target === "deck" ? app.decks.filter(d => d.id !== id && deckIsDescendant(d.id, id)).length : 0
         deleteDialog.open()
     }
+    function confirmReset(target, id, name) {
+        if (!app.developmentToolsEnabled || app.busy || !id)
+            return
+        resetDialog.target = target
+        resetDialog.targetId = id
+        resetDialog.targetName = name
+        resetDialog.submitted = false
+        resetDialog.resumeOnCancel = app.reviewing && !app.paused
+        if (resetDialog.resumeOnCancel)
+            app.pauseReview()
+        resetDialog.open()
+    }
     function openCredentials(target) {
         credentialTarget = target
         credentialDialog.open()
@@ -754,77 +766,17 @@ ApplicationWindow {
         objectName: "mainContent"
         anchors.fill: parent
         spacing: 0
-        ToolBar {
+        SidebarNavigation {
             id: navigation
             objectName: "sideNavigation"
             Layout.fillHeight: true
-            Layout.preferredWidth: window.effectiveNavCollapsed ? 58 : Math.min(220, Math.max(176, window.width * 0.18))
-            background: Rectangle {
-                color: Theme.surface
-                Rectangle { width: 1; height: parent.height; anchors.right: parent.right; color: Theme.rule }
-            }
-            ToolButton {
-                objectName: "navToggle"
-                anchors.top: parent.top
-                anchors.right: parent.right
-                width: 42
-                height: 42
-                visible: window.width >= 700
-                ToolTip.visible: visible && hovered
-                ToolTip.text: window.effectiveNavCollapsed ? "Expand navigation" : "Collapse navigation"
-                Accessible.name: ToolTip.text
-                contentItem: Icon {
-                    kind: window.effectiveNavCollapsed ? "arrow-right" : "arrow-left"
-                    stroke: Theme.inkMuted
-                }
-                onClicked: window.navCollapsed = !window.navCollapsed
-                background: Rectangle { color: parent.hovered ? Theme.accentSoft : Theme.transparent }
-            }
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.topMargin: 52
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                anchors.bottomMargin: 8
-                spacing: 6
-                Repeater {
-                    model: [
-                        { name: "Review", icon: "play", action: "reviewPage" },
-                        { name: "Library", icon: "book", action: "libraryPage" },
-                        { name: "History", icon: "clock", action: "historyPage" },
-                        { name: "Settings", icon: "gear", action: "settingsPage" }
-                    ]
-                    delegate: Button {
-                        required property var modelData
-                        required property int index
-                        objectName: "nav" + modelData.name
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 48
-                        ToolTip.visible: hovered
-                        ToolTip.text: modelData.name + " (" + shortcuts.bindings[modelData.action] + ")"
-                        Accessible.name: ToolTip.text
-                        onClicked: window.page = index
-                        contentItem: RowLayout {
-                            spacing: 10
-                            Icon { kind: modelData.icon; stroke: window.page === index ? Theme.accent : Theme.inkMuted }
-                            Label {
-                                visible: !window.effectiveNavCollapsed
-                                textFormat: Text.PlainText
-                                text: modelData.name
-                                color: window.page === index ? Theme.accent : Theme.inkMuted
-                                Layout.fillWidth: true
-                            }
-                        }
-                        background: Rectangle {
-                            radius: 4
-                            color: parent.hovered ? Theme.accentSoft : Theme.transparent
-                            border.width: window.page === index || parent.activeFocus ? 2 : 0
-                            border.color: Theme.accent
-                        }
-                    }
-                }
-                Item { Layout.fillHeight: true }
-            }
+            Layout.preferredWidth: window.effectiveNavCollapsed ? 76 : 218
+            collapsed: window.effectiveNavCollapsed
+            toggleVisible: window.width >= 700
+            currentIndex: window.page
+            bindings: shortcuts.bindings
+            onToggleRequested: window.navCollapsed = !window.navCollapsed
+            onPageRequested: index => window.page = index
         }
         StackLayout {
             id: pageStack
@@ -1940,6 +1892,52 @@ ApplicationWindow {
     AtomicizeDialog {
         id: atomicDialog
         ui: window
+    }
+    Sheet {
+        id: resetDialog
+        objectName: "resetReviewDialog"
+        property string target: "deck"
+        property string targetId: ""
+        property string targetName: ""
+        property bool submitted: false
+        property bool resumeOnCancel: false
+        title: "Reset " + target
+        implicitHeight: 300
+        onClosed: if (!submitted && resumeOnCancel && app.reviewing && app.paused)
+            app.resumeReview()
+        contentItem: ScrollView {
+            clip: true
+            contentWidth: availableWidth
+            Label {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: "Return \"" + resetDialog.targetName + "\" to new and due now? "
+                    + (resetDialog.target === "deck" ? "This includes every card in its subdecks. " : "This includes all reverse and cloze variants. ")
+                    + "Difficulty, intervals and review counts will be reset. Card content and past history remain. Any active review will end."
+                color: Theme.ink
+                wrapMode: Text.Wrap
+            }
+        }
+        footer: RowLayout {
+            Item { Layout.fillWidth: true }
+            AppButton {
+                text: "Cancel"
+                onClicked: resetDialog.close()
+            }
+            AppButton {
+                text: "Reset " + resetDialog.target
+                primary: true
+                enabled: !app.busy
+                onClicked: {
+                    resetDialog.submitted = true
+                    if (resetDialog.target === "deck")
+                        app.resetDeck(resetDialog.targetId)
+                    else
+                        app.resetCard(resetDialog.targetId)
+                    resetDialog.close()
+                }
+            }
+        }
     }
     Sheet {
         id: deleteDialog

@@ -610,6 +610,53 @@ void DatabaseWorker::deleteCard(const QString &id)
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
 }
+void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
+{
+    if (!ready()) return;
+#ifndef BETTERFLASH_DEVELOPMENT_TOOLS
+    Q_UNUSED(id);
+    Q_UNUSED(deckScope);
+    fail("DEVELOPMENT_TOOLS_DISABLED","Review resets are available only in development builds.");
+#else
+    if (!model::validUuid(id)) {fail("RESET_TARGET_INVALID","Select a saved deck or card to reset.");return;}
+    const bool exists=deckScope?deck(id).has_value():card(id).has_value();
+    if (!exists) {fail("RESET_TARGET_MISSING","This deck or card is unavailable. Refresh the collection and try again.",m_sqlDetail);return;}
+    int count=0;
+    const bool committed=mutate([&] {
+        QSqlQuery query(m_db);
+        query.prepare(deckScope
+            ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
+            : "SELECT id,deck_id,kind,front,back,tags,point_count FROM notes WHERE id=?");
+        query.addBindValue(id);
+        if (!query.exec()) {m_sqlDetail=query.lastError().text();return false;}
+        QList<struct model::Card> cards;
+        while (query.next()) cards.append(readCard(query));
+        if (query.lastError().isValid()) {m_sqlDetail=query.lastError().text();return false;}
+        query.finish();
+        const QString due=model::nowUtc();
+        for (const struct model::Card &note:cards) {
+            const auto keys=model::variantKeys(note);
+            if (!keys) {m_sqlDetail=keys.error();return false;}
+            assert(!keys->isEmpty());
+            for (const QString &key:*keys) {
+                const struct model::Variant schedule{model::variantId(note.id,key),note.id,key,due};
+                if (!upsertVariant(schedule)) return false;
+                // A reset detaches the schedule from any previous grade correction.
+                if (!execute("DELETE FROM metadata WHERE key=?",{QStringLiteral("review_owner:")+schedule.id})) return false;
+            }
+            if (!enqueue("card.upsert",cardPayload(note))) return false;
+        }
+        count=cards.size();
+        return m_sqlDetail.isEmpty();
+    });
+    if (!committed) {fail("REVIEW_RESET_FAILED","Could not reset review state. Check storage and try again.",m_sqlDetail);return;}
+    m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
+    m_selectedVariant.clear();m_sessionTotal=0;m_sessionActive=false;m_queueDirty=true;
+    // End the session only after the reset is durable, even if refreshing later fails.
+    emit reviewQueueReady({},0,true,{},false,{});
+    if (publishSnapshot()) done(QStringLiteral("Reset %1 source card(s). All variants are new and due now.").arg(count));
+#endif
+}
 void DatabaseWorker::beginReview(const QString &deckId)
 {
     if (!ready()) return;

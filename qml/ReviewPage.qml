@@ -199,6 +199,13 @@ Item {
                     color: app.paused ? Theme.warning : Theme.inkMuted
                 }
             }
+            AppButton {
+                text: "Reset deck"
+                visible: app.developmentToolsEnabled && !!page.ui.selectedDeck.id
+                enabled: !app.busy
+                hint: "Development: reset this deck and its subdecks to new and due now"
+                onClicked: page.ui.confirmReset("deck", app.selectedDeckId, page.ui.selectedDeck.name)
+            }
         }
         Item {
             id: idle
@@ -418,6 +425,20 @@ Item {
                             text: "Summarize remaining cards"
                             enabled: app.queueCount > 0
                             onTriggered: ui.openSummary()
+                        }
+                        MenuItem {
+                            text: "Reset card"
+                            visible: app.developmentToolsEnabled
+                            height: visible ? implicitHeight : 0
+                            enabled: !app.busy && page.hasCard
+                            onTriggered: ui.confirmReset("card", app.currentCard.cardId || app.currentCard.id, page.reviewSnippet(app.currentCard).slice(0, 80))
+                        }
+                        MenuItem {
+                            text: "Reset deck"
+                            visible: app.developmentToolsEnabled
+                            height: visible ? implicitHeight : 0
+                            enabled: !app.busy && !!app.currentCard.deckId
+                            onTriggered: ui.confirmReset("deck", app.currentCard.deckId, app.currentCard.deckName)
                         }
                         MenuItem {
                             text: app.reviewedCount >= app.sessionTotal ? "Finish review" : "End review"

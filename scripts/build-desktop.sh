@@ -19,7 +19,7 @@ if [[ -f "${build_dir}/CMakeCache.txt" ]]; then
     fi
 fi
 cmake -S "$project_dir" -B "$build_dir" -G Ninja \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON "$@"
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=OFF -DBETTERFLASH_DEVELOPMENT_TOOLS=ON "$@"
 cmake --build "$build_dir" --parallel "${BETTERFLASH_JOBS:-24}"
 printf 'Desktop executable: %s/betterflash\n' "$build_dir"
 

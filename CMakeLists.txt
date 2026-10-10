@@ -11,6 +11,10 @@ include(cmake/MicroTeX.cmake)
 
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/core/*.h)
 add_library(betterflash_core STATIC ${CORE_SOURCES})
+option(BETTERFLASH_DEVELOPMENT_TOOLS "Enable development-only review reset controls" OFF)
+if(BETTERFLASH_DEVELOPMENT_TOOLS)
+    target_compile_definitions(betterflash_core PUBLIC BETTERFLASH_DEVELOPMENT_TOOLS)
+endif()
 target_include_directories(betterflash_core PUBLIC src)
 target_link_libraries(betterflash_core PUBLIC Qt6::Core Qt6::Gui Qt6::Sql)
 

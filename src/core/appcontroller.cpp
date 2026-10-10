@@ -67,6 +67,24 @@ bool AppController::saveCard(const QString &id,const QString &deckId,const QStri
 }
 void AppController::deleteCard(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteCard(id);}); }
+bool AppController::developmentToolsEnabled() const
+{
+#ifdef BETTERFLASH_DEVELOPMENT_TOOLS
+    return true;
+#else
+    return false;
+#endif
+}
+void AppController::resetDeck(const QString &id)
+{
+    if (m_busy) return;
+    invoke([=](DatabaseWorker *worker){worker->resetReviewState(id,true);});
+}
+void AppController::resetCard(const QString &id)
+{
+    if (m_busy) return;
+    invoke([=](DatabaseWorker *worker){worker->resetReviewState(id,false);});
+}
 bool AppController::replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals)
 {
     const auto source=betterflash::model::cardFromMap(expectedSource);

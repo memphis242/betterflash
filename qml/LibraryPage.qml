@@ -96,6 +96,13 @@ Item {
                                 app.startReview(app.selectedDeckId)
                         }
                     }
+                    MenuItem {
+                        text: "Reset deck"
+                        visible: app.developmentToolsEnabled
+                        height: visible ? implicitHeight : 0
+                        enabled: !app.busy && !!library.ui.selectedDeck.id
+                        onTriggered: library.ui.confirmReset("deck", app.selectedDeckId, library.ui.selectedDeck.name)
+                    }
                     MenuSeparator {
                         visible: !!library.ui.selectedDeck.id
                     }
@@ -424,6 +431,13 @@ Item {
                         text: "Atomicize"
                         hint: "Ask the language model whether this saved card contains independent learning objectives"
                         onClicked: library.ui.openAtomicize(library.ui.selectedCardId)
+                    }
+                    AppButton {
+                        text: "Reset card"
+                        visible: app.developmentToolsEnabled
+                        enabled: !app.busy && !!library.ui.selectedCard.id
+                        hint: "Development: reset all variants of this card to new and due now"
+                        onClicked: library.ui.confirmReset("card", library.ui.selectedCardId, library.ui.compactText(library.ui.selectedCard.front).slice(0, 80))
                     }
                     AppButton {
                         text: "Reset pane width"

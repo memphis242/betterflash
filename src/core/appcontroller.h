@@ -24,6 +24,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantMap currentCard READ currentCard NOTIFY currentCardChanged)
     Q_PROPERTY(QVariantMap lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(bool developmentToolsEnabled READ developmentToolsEnabled CONSTANT)
     Q_PROPERTY(bool reviewing READ reviewing NOTIFY reviewingChanged)
     Q_PROPERTY(bool reviewingCompletedCard READ reviewingCompletedCard NOTIFY reviewStateChanged)
     Q_PROPERTY(QString reviewCursorVariantId READ reviewCursorVariantId NOTIFY reviewStateChanged)
@@ -51,6 +52,7 @@ public:
     QVariantMap currentCard() const { return m_currentCard; }
     QVariantMap lastError() const { return m_lastError; }
     bool busy() const { return m_busy; }
+    bool developmentToolsEnabled() const;
     bool reviewing() const { return m_reviewing; }
     bool reviewingCompletedCard() const { return m_reviewingCompletedCard; }
     QString reviewCursorVariantId() const { return m_reviewCursorVariantId; }
@@ -73,6 +75,8 @@ public:
                               const QString &front, const QString &back, const QString &tags,
                               int pointCount = 1);
     Q_INVOKABLE void deleteCard(const QString &id);
+    Q_INVOKABLE void resetDeck(const QString &id);
+    Q_INVOKABLE void resetCard(const QString &id);
     Q_INVOKABLE bool replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
     Q_INVOKABLE void startReview(const QString &deckId = {});
     Q_INVOKABLE void selectReviewCard(const QString &variantId);
