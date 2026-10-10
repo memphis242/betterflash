@@ -6,6 +6,8 @@ The desktop prototype keeps its collection in SQLite on the device. Markdown is
 the source of truth for both sides of a card. The interface uses a warm aubergine
 dark theme, a separate paper light theme, IBM Plex Mono typography, and a
 collapsible left navigation pane whose icons remain available when collapsed.
+Its four navigation buttons fill the pane in equal-height sections. Review uses
+the Turn the card glyph; menu bars expand the pane and the dock arrow collapses it.
 
 ## Run on Fedora
 

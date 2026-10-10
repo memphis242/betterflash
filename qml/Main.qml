@@ -772,6 +772,9 @@ ApplicationWindow {
             Layout.fillHeight: true
             Layout.preferredWidth: window.effectiveNavCollapsed ? 76 : 218
             collapsed: window.effectiveNavCollapsed
+            distributed: true
+            reviewGlyph: "review-flip"
+            toggleVariant: 0
             toggleVisible: window.width >= 700
             currentIndex: window.page
             bindings: shortcuts.bindings
