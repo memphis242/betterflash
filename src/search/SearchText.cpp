@@ -32,8 +32,9 @@ QString markdownText(QString value) {
     static const QRegularExpression image(R"(!\[([^\]]*)\]\([^)]*\))");
     static const QRegularExpression link(R"(\[([^\]]+)\]\([^)]*\))");
     static const QRegularExpression url(R"((?:https?://|media:)[^\s)]+)", QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression html(R"(<\/?(?:p|br|div|span|em|strong|code|pre|h[1-6]|ul|ol|li|blockquote)(?:\s[^>]*)?>))",
+    static const QRegularExpression html(R"(<\/?(?:p|br|div|span|em|strong|code|pre|h[1-6]|ul|ol|li|blockquote)(?:\s[^>]*)?>)",
                                           QRegularExpression::CaseInsensitiveOption);
+    Q_ASSERT(html.isValid());
     value.replace(image, QStringLiteral("\\1"));
     value.replace(link, QStringLiteral("\\1"));
     value.replace(url, QStringLiteral(" "));
