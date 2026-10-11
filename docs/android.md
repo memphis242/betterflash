@@ -40,3 +40,18 @@ An Android APK has not been built or tested yet because the Android kit, SDK, ND
 Image import currently accepts local file URLs. Android document-provider
 `content:` URLs still need a read adapter before phone attachment import is
 complete.
+
+## Semantic search draft
+
+Automatic model selection uses BGE small English v1.5 on Android, with a
+roughly 34 MB quantized model download, rather than the desktop's roughly
+110 MB BGE base model. Both choices remain available in Search settings.
+The CMake configuration fetches the pinned ONNX Runtime Android 1.20.0 AAR,
+extracts its native headers and matching ABI library, and appends that library
+to the package alongside OpenSSL. CPU inference uses two threads for the
+compact profile. No Python service is required on the phone.
+
+These Android additions have not been built or exercised on a device. Model
+download, lifecycle cancellation, memory use and retrieval latency need device
+verification once the Android kit is available. Desktop builds and runtime
+launches do not establish Android readiness.

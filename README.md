@@ -89,6 +89,13 @@ overview on the right, then double-click a card (or press Enter) for its front,
 back, review statistics and a scrollable history timeline. The plus icon in the
 card pane creates a card. Both panes can collapse and their divider is resizable.
 
+Find a card now presents exact, prefix and substring matches first, followed by
+typo-tolerant matches and related meanings. Semantic retrieval is enabled by
+default and runs locally with a downloadable BGE model. Settings > Search can
+disable it, select the desktop or compact model, rebuild its cache, or configure
+a compatible BYOK embedding service. See [Library search](docs/search.md) for
+model downloads, provider setup and ranking details.
+
 The Recall trace plots events at their actual timestamps. Pan through retained
 history and choose day, 3-day, week, month, year or full-history scales. Average
 recall uses the card's typical rating color; Best time counts only Hard, Good

@@ -1,0 +1,345 @@
+#include "SearchController.h"
+#include "SearchWorker.h"
+#include "core/appcontroller.h"
+#include "integrations/SecretStore.h"
+#include "integrations/Summarizer.h"
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkReply>
+#include <QSet>
+#include <QStandardPaths>
+#include <QUrl>
+#include <utility>
+
+namespace {
+QString digest(const QString &value) {
+    return QString::fromLatin1(QCryptographicHash::hash(value.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+bool sameOrigin(const QUrl &a, const QUrl &b) {
+    return a.scheme() == b.scheme() && a.host() == b.host()
+        && a.port(a.scheme() == QStringLiteral("https") ? 443 : 80)
+            == b.port(b.scheme() == QStringLiteral("https") ? 443 : 80);
+}
+bool validEndpoint(const QUrl &url) {
+    const bool loopback = url.host() == QStringLiteral("localhost") || url.host() == QStringLiteral("127.0.0.1") || url.host() == QStringLiteral("::1");
+    return url.isValid() && !url.host().isEmpty() && url.userInfo().isEmpty() && !url.hasFragment() && !url.hasQuery()
+        && (url.scheme() == QStringLiteral("https") || (loopback && url.scheme() == QStringLiteral("http")));
+}
+}
+
+SearchController::SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent)
+    : QObject(parent), m_app(app), m_ai(ai),
+      m_modelRoot(qEnvironmentVariable("BETTERFLASH_MODEL_DIR", QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/BetterFlash/models"))),
+      m_epoch(std::make_shared<std::atomic<quint64>>(0)) {
+    Q_ASSERT(m_app && m_ai);
+    m_enabled = m_settings.value(QStringLiteral("search/semanticEnabled"), true).toBool();
+    m_provider = m_settings.value(QStringLiteral("search/provider"), QStringLiteral("local")).toString();
+    if (m_provider != QStringLiteral("remote")) m_provider = QStringLiteral("local");
+    m_profile = m_settings.value(QStringLiteral("search/localProfile"), QStringLiteral("automatic")).toString();
+    if (m_profile != QStringLiteral("desktop") && m_profile != QStringLiteral("compact")) m_profile = QStringLiteral("automatic");
+    m_endpoint = m_settings.value(QStringLiteral("search/endpoint")).toString();
+    m_model = m_settings.value(QStringLiteral("search/model")).toString();
+    m_reuseKey = m_settings.value(QStringLiteral("search/reuseLlmKey"), false).toBool();
+    configureCredentials();
+    m_worker = new SearchWorker(dataDirectory + QStringLiteral("/search/embeddings.sqlite"), m_epoch);
+    m_worker->moveToThread(&m_thread);
+    connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
+    connect(m_worker, &SearchWorker::literalReady, this, [this](quint64 epoch, const QVariantList &hits) {
+        if (epoch != m_epoch->load()) return;
+        m_literal = hits; publish();
+    });
+    connect(m_worker, &SearchWorker::fuzzyReady, this, [this](quint64 epoch, const QVariantList &hits) {
+        if (epoch != m_epoch->load()) return;
+        m_fuzzy = hits; m_lexicalComplete = true; publish();
+        if (m_enabled && !m_cards.isEmpty()) {
+            m_status = QStringLiteral("Finding related cards"); m_semanticDelay.start();
+        } else { m_busy = false; m_status.clear(); }
+        emit changed();
+    });
+    connect(m_worker, &SearchWorker::semanticReady, this, [this](quint64 epoch, const QVariantList &hits) {
+        if (epoch != m_epoch->load()) return;
+        m_semantic = hits; publish(); m_busy = false; m_status.clear(); emit changed();
+    });
+    connect(m_worker, &SearchWorker::progress, this, [this](quint64 epoch, int complete, int total) {
+        if (epoch != m_epoch->load()) return;
+        m_status = total ? QStringLiteral("Preparing semantic search: %1 of %2 passages").arg(complete).arg(total)
+                         : QStringLiteral("Finding related cards");
+        emit changed();
+    });
+    connect(m_worker, &SearchWorker::failed, this, [this](quint64 epoch, const QString &error) {
+        if (epoch == m_epoch->load()) setFailure(error);
+    });
+    connect(m_worker, &SearchWorker::remoteNeeded, this, &SearchController::requestRemote);
+    m_thread.setObjectName(QStringLiteral("card-search")); m_thread.start();
+    m_debounce.setSingleShot(true); m_debounce.setInterval(25);
+    m_semanticDelay.setSingleShot(true); m_semanticDelay.setInterval(180);
+    connect(&m_debounce, &QTimer::timeout, this, &SearchController::runSearch);
+    connect(&m_semanticDelay, &QTimer::timeout, this, &SearchController::runSemantic);
+    connect(m_app, &AppController::cardsChanged, this, [this] { restart(true); });
+    connect(m_app, &AppController::decksChanged, this, [this] { restart(true); });
+    connect(m_ai, &Summarizer::keyChanged, this, [this] { emit changed(); if (m_reuseKey && m_provider == QStringLiteral("remote")) restart(); });
+    connect(m_ai, &Summarizer::configurationChanged, this, [this] { if (m_reuseKey && m_provider == QStringLiteral("remote")) restart(); });
+}
+SearchController::~SearchController() {
+    ++*m_epoch; abortRemote(); stopDownload();
+    m_thread.quit(); m_thread.wait();
+}
+QString SearchController::resolvedProfile() const {
+    if (m_profile != QStringLiteral("automatic")) return m_profile;
+#ifdef Q_OS_ANDROID
+    return QStringLiteral("compact");
+#else
+    return QStringLiteral("desktop");
+#endif
+}
+QString SearchController::modelLabel() const { return LocalEmbedder::spec(resolvedProfile()).label; }
+QString SearchController::modelDirectory() const { return m_modelRoot + QLatin1Char('/') + LocalEmbedder::spec(resolvedProfile()).id; }
+bool SearchController::modelReady() const {
+    const struct LocalModelSpec spec = LocalEmbedder::spec(resolvedProfile());
+    for (const struct ModelAsset &asset : spec.assets) {
+        const QFileInfo file(modelDirectory() + QLatin1Char('/') + asset.filename);
+        if (!file.isFile() || file.size() != asset.bytes) return false;
+    }
+    return !spec.assets.isEmpty();
+}
+bool SearchController::hasApiKey() const { return m_reuseKey ? m_ai->hasApiKey() : m_credentials && m_credentials->hasKey(); }
+QString SearchController::keyStorageStatus() const { return m_reuseKey ? m_ai->keyStorageStatus() : m_credentials ? m_credentials->status() : QString(); }
+void SearchController::configureCredentials() {
+    if (m_credentials) { m_credentials->disconnect(this); m_credentials->deleteLater(); }
+    const QUrl url(m_endpoint);
+    const QString scope = url.scheme() + QStringLiteral("://") + url.host() + QLatin1Char(':') + QString::number(url.port(url.scheme() == QStringLiteral("https") ? 443 : 80));
+    m_credentials = new SecretStore(QStringLiteral("embeddings-") + digest(scope).left(24), {}, this);
+    connect(m_credentials, &SecretStore::changed, this, [this] { emit changed(); if (m_provider == QStringLiteral("remote")) restart(); });
+}
+void SearchController::setSemanticEnabled(bool enabled) {
+    if (m_enabled == enabled) return;
+    m_enabled = enabled; m_settings.setValue(QStringLiteral("search/semanticEnabled"), enabled);
+    if (!enabled) stopDownload();
+    restart(); emit changed();
+}
+void SearchController::setProvider(const QString &provider) {
+    if (provider == m_provider || (provider != QStringLiteral("local") && provider != QStringLiteral("remote"))) return;
+    m_provider = provider; m_settings.setValue(QStringLiteral("search/provider"), provider);
+    stopDownload(); restart(); emit changed();
+}
+void SearchController::setLocalProfile(const QString &profile) {
+    if (profile == m_profile || (profile != QStringLiteral("automatic") && profile != QStringLiteral("desktop") && profile != QStringLiteral("compact"))) return;
+    stopDownload(); m_profile = profile; m_downloadCanceled = false;
+    m_settings.setValue(QStringLiteral("search/localProfile"), profile); restart(); emit changed();
+}
+bool SearchController::setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key) {
+    const QString cleanEndpoint = endpoint.trimmed(); const QString cleanModel = model.trimmed();
+    const QUrl url(cleanEndpoint);
+    if (!validEndpoint(url)) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Enter an HTTPS embeddings endpoint, or HTTP on localhost, without credentials or query parameters.")); return false; }
+    if (cleanModel.isEmpty() || cleanModel.size() > 256) { setFailure(QStringLiteral("SEARCH_MODEL: Enter the provider's embedding model identifier.")); return false; }
+    if (reuseKey && !sameOrigin(url, QUrl(m_ai->endpoint()))) { setFailure(QStringLiteral("SEARCH_KEY_ORIGIN: Reusing the language model key requires the same scheme, host and port. Enter a separate embedding key for this service.")); return false; }
+    if (key.size() > 4096 || key.contains(QLatin1Char('\n')) || key.contains(QLatin1Char('\r'))) { setFailure(QStringLiteral("SEARCH_KEY: Enter a single API key without line breaks.")); return false; }
+    const bool changedOrigin = !sameOrigin(url, QUrl(m_endpoint));
+    m_endpoint = cleanEndpoint; m_model = cleanModel; m_reuseKey = reuseKey;
+    m_settings.setValue(QStringLiteral("search/endpoint"), m_endpoint);
+    m_settings.setValue(QStringLiteral("search/model"), m_model);
+    m_settings.setValue(QStringLiteral("search/reuseLlmKey"), m_reuseKey);
+    if (changedOrigin) configureCredentials();
+    if (!reuseKey && !key.trimmed().isEmpty()) m_credentials->setKey(key);
+    restart(); emit changed();
+    return true;
+}
+void SearchController::clearApiKey() { m_credentials->clear(); }
+void SearchController::rebuildIndex() {
+    restart(true);
+    m_debounce.stop();
+    const quint64 epoch = m_epoch->load();
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch] { worker->clearCache(epoch); }, Qt::QueuedConnection);
+    if (m_active && !m_query.trimmed().isEmpty()) m_debounce.start();
+    m_status = QStringLiteral("Rebuilding the search cache"); emit changed();
+}
+void SearchController::setActive(bool active) { if (m_active == active) return; m_active = active; restart(); }
+void SearchController::setSearch(const QString &deckId, const QString &query) {
+    if (m_deck == deckId && m_query == query) return;
+    m_deck = deckId; m_query = query; restart(true);
+}
+void SearchController::restart(bool clearResults) {
+    ++*m_epoch; m_debounce.stop(); m_semanticDelay.stop(); abortRemote();
+    m_busy = false; m_lexicalComplete = false; m_semanticStarted = false; m_error.clear(); m_status.clear();
+    m_literal.clear(); m_fuzzy.clear(); m_semantic.clear();
+    if (clearResults) { emit resultsAboutToChange(); m_results.clear(); emit resultsChanged(); }
+    if (m_query.size() > 256) { setFailure(QStringLiteral("SEARCH_QUERY_LENGTH: Keep the search query to 256 characters or fewer.")); return; }
+    if (m_active && !m_deck.isEmpty() && !m_query.trimmed().isEmpty()) {
+        m_busy = true; m_status = QStringLiteral("Finding text matches"); m_debounce.start();
+    }
+    emit changed();
+}
+void SearchController::runSearch() {
+    const quint64 epoch = m_epoch->load();
+    const QVariantList cards = m_app->cards(); const QVariantList decks = m_app->decks();
+    m_cards.clear();
+    for (const QVariant &entry : cards) {
+        const QVariantMap card = entry.toMap();
+        if (card.value(QStringLiteral("deckId")).toString() == m_deck) m_cards.insert(card.value(QStringLiteral("id")).toString(), card);
+    }
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, cards, decks, deck = m_deck, query = m_query] {
+        worker->search(epoch, cards, decks, deck, query);
+    }, Qt::QueuedConnection);
+}
+void SearchController::publish() {
+    static const QStringList tiers{QStringLiteral("exact"), QStringLiteral("prefix"), QStringLiteral("contains"), QStringLiteral("fuzzy"), QStringLiteral("semantic")};
+    static const QStringList groups{QStringLiteral("Exact matches"), QStringLiteral("Prefix matches"), QStringLiteral("Contains your query"), QStringLiteral("Similar spelling"), QStringLiteral("Related meaning")};
+    QVariantList next; QSet<QString> seen; int previousTier = -1;
+    const QVariantList all = m_literal + m_fuzzy + m_semantic;
+    for (const QVariant &entry : all) {
+        const QVariantMap hit = entry.toMap(); const QString id = hit.value(QStringLiteral("id")).toString();
+        const int tier = hit.value(QStringLiteral("tier")).toInt();
+        if (seen.contains(id) || !m_cards.contains(id) || tier < 0 || tier >= tiers.size()) continue;
+        seen.insert(id); QVariantMap card = m_cards.value(id);
+        card.insert(QStringLiteral("searchTier"), tiers[tier]); card.insert(QStringLiteral("searchGroup"), groups[tier]);
+        card.insert(QStringLiteral("searchScore"), hit.value(QStringLiteral("score")));
+        card.insert(QStringLiteral("groupStart"), tier != previousTier); previousTier = tier;
+        next.append(card);
+    }
+    emit resultsAboutToChange(); m_results = next; emit resultsChanged();
+}
+void SearchController::runSemantic() {
+    if (!m_active || !m_enabled || !m_lexicalComplete || m_semanticStarted || m_query.trimmed().isEmpty() || m_cards.isEmpty()) return;
+    const bool remote = m_provider == QStringLiteral("remote");
+    if (!remote && !modelReady()) {
+        if (m_downloading) { m_status = QStringLiteral("Downloading semantic model: %1%").arg(qRound(m_downloadProgress * 100)); emit changed(); return; }
+        if (m_downloadCanceled) { m_busy = false; m_status = QStringLiteral("Text matches only. Resume the model download in Search settings."); emit changed(); return; }
+        prepareModel(); return;
+    }
+    m_busy = true; m_semanticStarted = true;
+    const quint64 epoch = m_epoch->load();
+    const QString profile = resolvedProfile(); const QString directory = modelDirectory();
+    QString scope;
+    if (remote) scope = QStringLiteral("remote-v1:") + digest(m_endpoint + QLatin1Char('\n') + m_model);
+    else {
+        const struct LocalModelSpec spec = LocalEmbedder::spec(profile);
+        QString identity = spec.id;
+        for (const struct ModelAsset &asset : spec.assets) identity += QString::fromLatin1(asset.sha256);
+        scope = QStringLiteral("local-cls-v1:") + digest(identity);
+    }
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, profile, directory, scope, remote] {
+        worker->semantic(epoch, profile, directory, scope, remote);
+    }, Qt::QueuedConnection);
+}
+void SearchController::setFailure(const QString &message) {
+    m_error = message; m_busy = false; m_status = QStringLiteral("Text matches remain available"); emit changed();
+}
+void SearchController::abortRemote() {
+    if (m_remoteReply) { m_remoteReply->disconnect(this); m_remoteReply->abort(); m_remoteReply->deleteLater(); m_remoteReply = nullptr; }
+    m_remoteBody.clear();
+}
+void SearchController::requestRemote(quint64 epoch, const QStringList &texts) {
+    if (epoch != m_epoch->load() || m_provider != QStringLiteral("remote") || !m_enabled) return;
+    const QUrl endpoint(m_endpoint);
+    if (!validEndpoint(endpoint) || m_model.isEmpty()) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Configure an embedding endpoint and model in Search settings.")); return; }
+    QByteArray authorization;
+    if (m_reuseKey) {
+        if (!sameOrigin(endpoint, QUrl(m_ai->endpoint()))) { setFailure(QStringLiteral("SEARCH_KEY_ORIGIN: The language model service changed. Configure a key for this embedding service in Search settings.")); return; }
+        const auto request = m_ai->configuredRequest();
+        if (!request) { setFailure(QStringLiteral("SEARCH_KEY: Configure the existing language model connection or provide a separate embedding key.")); return; }
+        authorization = request->rawHeader("Authorization");
+    } else if (m_credentials->hasKey()) authorization = "Bearer " + m_credentials->key().toUtf8();
+    if (authorization.isEmpty() && endpoint.scheme() != QStringLiteral("http")) { setFailure(QStringLiteral("SEARCH_KEY: Add a key for the embedding service in Search settings.")); return; }
+    QNetworkRequest request(endpoint);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(45000);
+    if (!authorization.isEmpty()) request.setRawHeader("Authorization", authorization);
+    QJsonArray input; for (const QString &text : texts) input.append(text);
+    const QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("input"), input}, {QStringLiteral("encoding_format"), QStringLiteral("float")}};
+    m_remoteBody.clear(); m_remoteReply = m_network.post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    QNetworkReply *const reply = m_remoteReply;
+    reply->setReadBufferSize(1024 * 1024);
+    connect(reply, &QIODevice::readyRead, this, [this, reply] {
+        if (m_remoteReply != reply) return;
+        m_remoteBody.append(reply->readAll());
+        if (m_remoteBody.size() > 8 * 1024 * 1024) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch, count = texts.size()] {
+        if (m_remoteReply != reply) return;
+        m_remoteBody.append(reply->readAll());
+        const QByteArray body = std::exchange(m_remoteBody, {});
+        m_remoteReply = nullptr; reply->deleteLater();
+        if (epoch != m_epoch->load()) return;
+        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300 || body.size() > 8 * 1024 * 1024) {
+            setFailure(QStringLiteral("SEARCH_HTTP_%1: %2").arg(code).arg(code == 401 || code == 403
+                ? QStringLiteral("Check the embedding provider key and model access.") : code == 429
+                ? QStringLiteral("Provider rate limit reached. Wait and retry.") : QStringLiteral("Check the embedding endpoint, model and connection, then retry."))); return;
+        }
+        QJsonParseError parse;
+        const QJsonDocument document = QJsonDocument::fromJson(body, &parse);
+        const QJsonArray data = document.object().value(QStringLiteral("data")).toArray();
+        if (parse.error != QJsonParseError::NoError || data.size() != count) { setFailure(QStringLiteral("SEARCH_RESPONSE: The provider did not return the expected embedding list. Use a compatible embeddings endpoint.")); return; }
+        QVariantList vectors; vectors.resize(count); QSet<int> indices;
+        for (const QJsonValue &entry : data) {
+            const QJsonObject item = entry.toObject();
+            const QJsonValue position = item.value(QStringLiteral("index"));
+            const int index = position.toInt(-1); const QJsonArray values = item.value(QStringLiteral("embedding")).toArray();
+            if (!position.isDouble() || position.toDouble() != index || index < 0 || index >= count || indices.contains(index) || values.isEmpty() || values.size() > 16384) { setFailure(QStringLiteral("SEARCH_RESPONSE: The provider returned malformed embeddings. Check model compatibility.")); return; }
+            for (const QJsonValue &value : values) if (!value.isDouble()) { setFailure(QStringLiteral("SEARCH_RESPONSE: The provider returned nonnumeric embeddings.")); return; }
+            indices.insert(index); vectors[index] = values.toVariantList();
+        }
+        QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, vectors] { worker->acceptRemote(epoch, vectors); }, Qt::QueuedConnection);
+    });
+}
+void SearchController::prepareModel() {
+    if (m_downloading) return;
+    restart();
+    m_downloadCanceled = false; m_error.clear();
+    m_downloadDirectory = modelDirectory();
+    if (!QDir().mkpath(m_downloadDirectory)) { setFailure(QStringLiteral("SEARCH_MODEL_DIRECTORY: Cannot create the model directory. Check storage permissions.")); return; }
+    m_downloadAssets = LocalEmbedder::spec(resolvedProfile()).assets;
+    m_assetIndex = 0; m_downloadBytes = 0; m_downloadProgress = 0; m_downloading = true;
+    downloadNext();
+}
+void SearchController::downloadNext() {
+    if (m_assetIndex >= m_downloadAssets.size()) {
+        m_downloading = false; m_downloadProgress = 1; m_status = QStringLiteral("Local model ready"); emit changed(); runSemantic(); return;
+    }
+    const struct ModelAsset asset = m_downloadAssets[m_assetIndex];
+    const QString path = m_downloadDirectory + QLatin1Char('/') + asset.filename;
+    m_downloadFile = std::make_unique<QSaveFile>(path);
+    if (!m_downloadFile->open(QIODevice::WriteOnly)) { downloadFailure(QStringLiteral("SEARCH_MODEL_WRITE: Cannot save the model. Check free space and retry.")); return; }
+    m_downloadHash = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
+    m_assetBytes = 0;
+    QNetworkRequest request(asset.url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    request.setTransferTimeout(60000);
+    m_downloadReply = m_network.get(request);
+    QNetworkReply *const reply = m_downloadReply;
+    reply->setReadBufferSize(1024 * 1024);
+    m_status = QStringLiteral("Downloading %1").arg(modelLabel()); emit changed();
+    connect(reply, &QIODevice::readyRead, this, [this, reply, asset] {
+        if (m_downloadReply != reply) return;
+        const QByteArray bytes = reply->readAll();
+        m_assetBytes += bytes.size();
+        if (m_assetBytes > asset.bytes || m_downloadFile->write(bytes) != bytes.size()) { reply->abort(); return; }
+        m_downloadHash->addData(bytes);
+        qint64 total = 0; for (const struct ModelAsset &part : m_downloadAssets) total += part.bytes;
+        m_downloadProgress = total ? double(m_downloadBytes + m_assetBytes) / total : 0;
+        m_status = QStringLiteral("Downloading semantic model: %1%").arg(qRound(m_downloadProgress * 100)); emit changed();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, asset] {
+        if (m_downloadReply != reply) return;
+        m_downloadReply = nullptr; reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) { downloadFailure(QStringLiteral("SEARCH_MODEL_DOWNLOAD: Model download failed. Check the connection and free space, then retry.")); return; }
+        if (m_assetBytes != asset.bytes || m_downloadHash->result().toHex() != asset.sha256.toLower()) { downloadFailure(QStringLiteral("SEARCH_MODEL_CHECKSUM: Downloaded model did not match its pinned checksum. Retry the download.")); return; }
+        if (!m_downloadFile->commit()) { downloadFailure(QStringLiteral("SEARCH_MODEL_WRITE: Cannot finish saving the model. Check free space and retry.")); return; }
+        m_downloadFile.reset(); m_downloadHash.reset();
+        m_downloadBytes += m_assetBytes; ++m_assetIndex; downloadNext();
+    });
+}
+void SearchController::stopDownload() {
+    if (m_downloadReply) { m_downloadReply->disconnect(this); m_downloadReply->abort(); m_downloadReply->deleteLater(); m_downloadReply = nullptr; }
+    m_downloadFile.reset(); m_downloadHash.reset(); m_downloading = false;
+}
+void SearchController::downloadFailure(const QString &message) { stopDownload(); m_downloadCanceled = true; setFailure(message); }
+void SearchController::cancelDownload() {
+    stopDownload(); m_downloadCanceled = true; m_busy = false; m_status = QStringLiteral("Download canceled. Text search is available."); emit changed();
+}
+void SearchController::retry() { m_downloadCanceled = false; restart(); if (!m_active || m_query.trimmed().isEmpty()) prepareModel(); }

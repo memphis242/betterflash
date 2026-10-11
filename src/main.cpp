@@ -4,6 +4,7 @@
 #include "integrations/Atomicizer.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/Summarizer.h"
+#include "search/SearchController.h"
 #include "integrations/SyncController.h"
 #include "render/MarkdownView.h"
 #include "voice/VoiceController.h"
@@ -177,6 +178,7 @@ int main(int argc, char **argv) {
     MediaStore media(dataDirectory);
     ShortcutManager shortcuts;
     Summarizer ai(&app);
+    SearchController librarySearch(&app, &ai, dataDirectory);
     Atomicizer atomic(&app, &ai);
     SyncController sync(&app, media.rootPath());
     VoiceController voice;
@@ -191,6 +193,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("app"), &app);
     engine.rootContext()->setContextProperty(QStringLiteral("voice"), &voice);
     engine.rootContext()->setContextProperty(QStringLiteral("ai"), &ai);
+    engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
     engine.rootContext()->setContextProperty(QStringLiteral("sync"), &sync);
     engine.rootContext()->setContextProperty(QStringLiteral("media"), &media);

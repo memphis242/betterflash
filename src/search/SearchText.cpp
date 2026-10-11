@@ -84,12 +84,16 @@ QString deckPath(const QString &id, const QHash<QString, QVariantMap> &byId) {
 }
 
 QString semanticHints(const QString &text) {
-    const QString lower = text.toCaseFolded();
+    QString lower = text.toCaseFolded();
+    lower.replace(QStringLiteral("\\div"), QStringLiteral("÷"));
+    lower.replace(QStringLiteral("\\times"), QStringLiteral("×"));
+    lower.replace(QStringLiteral("\\cdot"), QStringLiteral("×"));
     QStringList hints;
     const bool percentage = lower.contains(QLatin1Char('%'));
     if (percentage) hints << QStringLiteral("percentage proportion percent calculation");
     if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\b)")))
-        || lower.contains(QStringLiteral("÷"))) hints << QStringLiteral("division quotient ratio");
+        || lower.contains(QStringLiteral("÷")) || lower.contains(QStringLiteral("\\frac{")))
+        hints << QStringLiteral("division quotient ratio inverse of multiplication");
     if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*[×*]\s*\d+(?:\.\d+)?\b)")))
         || lower.contains(QStringLiteral("×"))
         || lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+\s*[a-zA-Z]\s*=)")))) {
@@ -97,7 +101,9 @@ QString semanticHints(const QString &text) {
     }
     if (percentage && lower.contains(QRegularExpression(QStringLiteral(R"(\b(?:of|times)\b)"))))
         hints << QStringLiteral("multiplication product times");
-    if (lower.contains(QStringLiteral("∫")) || lower.contains(QStringLiteral("integral"))) hints << QStringLiteral("integral calculus antiderivative");
+    if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+\s*[a-zA-Z]\s*=)"))))
+        hints << QStringLiteral("algebra equation solving division");
+    if (lower.contains(QStringLiteral("∫")) || lower.contains(QStringLiteral("\\int")) || lower.contains(QStringLiteral("integral"))) hints << QStringLiteral("integral calculus antiderivative");
     if (lower.contains(QStringLiteral("∂")) || lower.contains(QStringLiteral("derivative"))) hints << QStringLiteral("derivative calculus rate of change");
     return hints.join(QLatin1Char(' '));
 }

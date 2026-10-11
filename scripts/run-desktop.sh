@@ -4,6 +4,9 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 task_id="$(printf '%s' "$project_dir" | sha256sum | cut -c1-12)"
 build_dir="${BETTERFLASH_BUILD_DIR:-/workspace/betterflash-build/${task_id}}"
+if [[ -z "${BETTERFLASH_MODEL_DIR:-}" && -d /workspace && -w /workspace ]]; then
+    export BETTERFLASH_MODEL_DIR=/workspace/betterflash-models
+fi
 if [[ -f "${build_dir}/CMakeCache.txt" ]]; then
     configured_source="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${build_dir}/CMakeCache.txt")"
     if [[ "$configured_source" != "$project_dir" ]]; then

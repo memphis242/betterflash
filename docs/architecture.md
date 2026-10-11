@@ -10,6 +10,9 @@ flowchart TB
     Voice --> Audio[Audio conversion and recognition worker]
     Voice --> Speech[System speech engine]
     UI --> Summary[Optional provider summary]
+    UI --> Search[Staged card search worker]
+    Search --> Embeddings[Native ONNX embeddings and local cache]
+    Search --> Encoding[Optional BYOK encoding endpoint]
     UI --> Atomicize[Optional saved-card split proposals]
     Atomicize --> Database
     UI --> Sync[Sync controller]
@@ -34,9 +37,18 @@ Formula painting remains on the graphics thread. The prototype uses snapshot
 lists rather than a paged database model, so very large collections still need
 profiling and a paged model before making performance claims.
 
-No browser engine, Electron runtime, local machine learning model, or Python
-runtime is required by the desktop application. The independent sync server uses
-Python's standard library.
+The desktop application uses native ONNX Runtime for local semantic retrieval.
+The selected embedding model downloads on first semantic search; text matching
+continues while it downloads or if semantic search is disabled. No browser
+engine, Electron or Python runtime is required. The independent sync server
+uses Python's standard library.
+
+Card search has its own worker thread and SQLite embedding cache, separate from
+the collection database. Queries publish literal results, then fuzzy results,
+then cosine-ranked semantic matches. Epochs discard obsolete work and replies.
+Model inference uses a bounded CPU pool. Remote embeddings are optional and
+reuse provider credentials only after an explicit choice and origin check.
+See [search](search.md) for model identity, cache bounds and provider limits.
 
 ## Collection and credentials
 

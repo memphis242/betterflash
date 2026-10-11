@@ -26,7 +26,7 @@ ColumnLayout {
         font.pixelSize: 27
     }
     Label {
-        text: "Search starts with exact, prefix, contains, and fuzzy matches. Semantic retrieval adds cards with similar meaning when the local model is ready."
+        text: "Text matches appear first. Semantic search then adds cards with related meaning. Local models run on this device and download on first use."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -72,7 +72,7 @@ ColumnLayout {
         AppButton {
             visible: settings.search.semanticEnabled && settings.search.provider === "local"
             enabled: visible
-            text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Prepare again" : "Prepare local model"
+            text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Download again" : "Download local model"
             onClicked: settings.search.downloading ? settings.search.cancelDownload() : settings.search.prepareModel()
         }
         AppButton {
@@ -83,6 +83,12 @@ ColumnLayout {
                 MenuItem { text: "Local model"; onTriggered: settings.search.provider = "local" }
                 MenuItem { text: "Remote encoding service"; onTriggered: settings.search.provider = "remote" }
             }
+        }
+        AppButton {
+            text: "Rebuild search index"
+            enabled: !settings.search.downloading
+            hint: "Clear cached embeddings. The next search encodes the selected deck again."
+            onClicked: settings.search.rebuildIndex()
         }
     }
     ValueRow {
@@ -107,10 +113,10 @@ ColumnLayout {
         id: connectionDialog
         modal: true
         title: "Search connection"
-        standardButtons: Dialog.Cancel | Dialog.Save
         parent: Overlay.overlay
         anchors.centerIn: parent
         width: Math.min(560, settings.width - 24)
+        height: Math.min(560, parent ? parent.height - 40 : 560)
         property alias endpointText: endpoint.text
         property alias modelText: model.text
         onOpened: {
@@ -119,20 +125,29 @@ ColumnLayout {
             reuseKey.checked = settings.search.useLanguageModelKey
             serviceKey.text = ""
         }
-        onAccepted: {
-            settings.search.provider = "remote"
-            settings.search.setRemoteConfiguration(endpoint.text, model.text, reuseKey.checked, serviceKey.text)
+        footer: RowLayout {
+            spacing: 12
+            Item { Layout.fillWidth: true }
+            AppButton { text: "Cancel"; onClicked: connectionDialog.close() }
+            AppButton {
+                text: "Save connection"; primary: true
+                onClicked: {
+                    if (settings.search.setRemoteConfiguration(endpoint.text, model.text, reuseKey.checked, serviceKey.text)) {
+                        settings.search.provider = "remote"
+                        connectionDialog.close()
+                    }
+                }
+            }
         }
         background: Rectangle { color: Theme.surface; border.color: Theme.rule; radius: 8 }
         contentItem: ScrollView {
-            implicitHeight: Math.min(440, availableHeight)
             contentWidth: availableWidth
             clip: true
             ColumnLayout {
                 width: connectionDialog.contentItem.availableWidth
                 spacing: 12
                 Label {
-                text: "Semantic search can send the query and both card faces to this configured service. Use only a provider you trust."
+                text: "Provider mode sends your query and all cards in the selected deck for encoding, including both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -155,7 +170,9 @@ ColumnLayout {
                     visible: settings.search.hasApiKey && !reuseKey.checked
                     onClicked: settings.search.clearApiKey()
                 }
+                ErrorBlock { message: settings.search.error; Layout.fillWidth: true }
             }
         }
+        onClosed: serviceKey.text = ""
     }
 }

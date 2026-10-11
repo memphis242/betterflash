@@ -31,11 +31,12 @@ own service terms; no provider credentials are included in this repository.
 Local semantic search can use quantized ONNX exports of the BGE sentence
 transformers. Desktop defaults to `Xenova/bge-base-en-v1.5` (768 dimensions);
 compact targets use `Xenova/bge-small-en-v1.5` (384 dimensions). The model
-assets are fetched only when selected by the user, are pinned to revisions in
+assets download on first semantic search or through Search settings, are pinned to revisions in
 `src/search/LocalEmbedder.cpp`, and are verified by SHA-256 before use. Their
 model cards provide the MIT terms in
-`packaging/licenses/BGE-CC-BY-SA-4.0.txt`.
+`packaging/licenses/BGE-MIT.txt`.
 
-The native inference runtime is ONNX Runtime 1.20.1, fetched from its official
-release archive with a pinned SHA-256 checksum. It is distributed under the
+The native inference runtime is ONNX Runtime 1.20.1 for Linux x86_64 and the
+1.20.0 Android AAR, fetched from official release/Maven archives with pinned
+SHA-256 checksums. It is distributed under the
 MIT License; see `packaging/licenses/ONNX-Runtime-MIT.txt`.

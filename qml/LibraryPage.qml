@@ -42,6 +42,7 @@ Item {
 
     Component.onCompleted: {
         library.initializeExpansion()
+        library.updateCardSearch()
         Qt.callLater(function () {
             if (library.treeRows.length > 0)
                 treeList.forceActiveFocus()
@@ -170,19 +171,13 @@ Item {
     }
 
     function updateCardSearch() {
-        library.searchSelectionId = ui.selectedCardId
-        library.searchSelectionScrollY = cardList.contentY
         library.searchEngine.setActive(ui.page === 1)
         library.searchEngine.setSearch(ui.selectedDeck.id || "", ui.cardSearchText)
     }
 
     function selectCardAfterSearch() {
-        if (cardList.count === 0)
-            return
         const selectedIndex = library.visibleCards.findIndex(card => card.id === library.searchSelectionId)
-        if (selectedIndex >= 0)
-            cardList.currentIndex = selectedIndex
-        library.restoringSearchSelection = true
+        cardList.currentIndex = selectedIndex
         cardList.contentY = Math.max(0, Math.min(library.searchSelectionScrollY, Math.max(0, cardList.contentHeight - cardList.height)))
         library.restoringSearchSelection = false
     }
@@ -199,15 +194,20 @@ Item {
 
     Connections {
         target: library.searchEngine
+        function onResultsAboutToChange() {
+            if (!library.restoringSearchSelection) {
+                library.searchSelectionId = ui.selectedCardId
+                library.searchSelectionScrollY = cardList.contentY
+            }
+            library.restoringSearchSelection = true
+        }
         function onResultsChanged() { Qt.callLater(library.selectCardAfterSearch) }
-        function onChanged() { Qt.callLater(library.selectCardAfterSearch) }
     }
 
     onVisibleChanged: updateCardSearch()
-    Component.onCompleted: updateCardSearch()
     Connections {
         target: ui
-        function onSelectedDeckIdChanged() { library.updateCardSearch() }
+        function onSelectedDeckChanged() { library.updateCardSearch() }
         function onPageChanged() { library.updateCardSearch() }
         function onCardSearchTextChanged() { library.updateCardSearch() }
     }
@@ -377,7 +377,7 @@ Item {
                 }
                 TextField {
                     id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible || ui.cardSearchText.length > 0
-                    placeholderText: "Find a card by content or tag"; text: ui.cardSearchText; onTextEdited: { ui.cardSearchText = text; library.updateCardSearch() }
+                    placeholderText: "Find a card by content, tag, or meaning"; maximumLength: 256; text: ui.cardSearchText; onTextEdited: ui.cardSearchText = text
                     Keys.onEscapePressed: { ui.cardSearchText = ""; library.updateCardSearch(); library.cardSearchVisible = false; library.focusCards() }
                 }
                 RowLayout {
@@ -404,18 +404,8 @@ Item {
                 ListView {
                     id: cardList; objectName: "libraryCardList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: library.visibleCards; currentIndex: -1; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
-                    onContentYChanged: if (ui.page === 1 && !ui.restoringDeck) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
+                    onContentYChanged: if (ui.page === 1 && !ui.restoringDeck && !library.restoringSearchSelection) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
                     Component.onCompleted: Qt.callLater(function() { library.restoreScroll(ui.libraryScrollY) })
-                    section.property: "searchGroup"
-                    section.criteria: ViewSection.FullString
-                    section.delegate: Rectangle {
-                        width: cardList.width
-                        height: visible ? 30 : 0
-                        color: Theme.transparent
-                        visible: section !== ""
-                        Label { anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; text: section; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11; font.weight: Font.DemiBold }
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.rule }
-                    }
                     delegate: ItemDelegate {
                         id: cardRow; required property var modelData; required property int index; width: cardList.width; height: cardRow.modelData.groupStart ? 112 : 82
                         highlighted: ui.selectedCardId === cardRow.modelData.id || cardList.activeFocus && cardList.currentIndex === cardRow.index
@@ -432,7 +422,7 @@ Item {
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 Layout.fillWidth: true
-                                ToolTip.visible: groupHover.containsMouse
+                                ToolTip.visible: groupHover.hovered
                                 ToolTip.text: "Search layer: results are ordered from exact matches through semantic matches."
                                 HoverHandler { id: groupHover }
                             }
