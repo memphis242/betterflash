@@ -1181,7 +1181,8 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
     const auto makeError = [&](const QString &code, const QString &message, const QString &details = QString()) {
         return QVariantMap{{"requestId", requestId}, {"offset", offset}, {"events", QVariantList{}}, {"totalEvents", 0}, {"hasMore", false}, {"nextOffset", 0},
                            {"reviewCount", 0}, {"successfulCount", 0}, {"averageRecall", 0.0},
-                           {"averageSeconds", 0.0}, {"firstRecordedAt", QString()}, {"firstSavedAt", QString()},
+                           {"averageSeconds", 0.0}, {"averageGrade", QVariant()}, {"bestSuccessfulSeconds", QVariant()},
+                           {"hasSuccessfulReview", false}, {"firstRecordedAt", QString()}, {"firstSavedAt", QString()},
                            {"error", QVariantMap{{"code", code}, {"message", message}, {"details", details}}}};
     };
     m_sqlDetail.clear();
@@ -1281,7 +1282,7 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
     const int pageSize = 100;
     const int lifecycleCount = events.size();
     QSqlQuery reviewStats(m_db);
-    reviewStats.prepare("SELECT COUNT(*),COALESCE(SUM(CASE WHEN grade>=2 THEN 1 ELSE 0 END),0),COALESCE(AVG(recall_fraction),0),COALESCE(AVG(response_seconds),0),COALESCE(MIN(reviewed_at),'') FROM reviews WHERE card_id=?");
+    reviewStats.prepare("SELECT COUNT(*),COALESCE(SUM(CASE WHEN grade>=2 THEN 1 ELSE 0 END),0),COALESCE(AVG(recall_fraction),0),COALESCE(AVG(response_seconds),0),COALESCE(MIN(reviewed_at),''),AVG(grade),MIN(CASE WHEN grade>=2 THEN response_seconds END) FROM reviews WHERE card_id=?");
     reviewStats.addBindValue(cardId);
     if (!reviewStats.exec() || !reviewStats.next()) {
         emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_READ"), QStringLiteral("Could not load the card timeline. Refresh and try again."), reviewStats.lastError().text()));
@@ -1291,6 +1292,9 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
     const int successfulCount = reviewStats.value(1).toInt();
     const double averageRecall = reviewStats.value(2).toDouble();
     const double averageSeconds = reviewStats.value(3).toDouble();
+    const QVariant averageGrade = reviewCount > 0 ? reviewStats.value(5) : QVariant{};
+    const QVariant bestSuccessfulSeconds = successfulCount > 0 ? reviewStats.value(6) : QVariant{};
+    assert(successfulCount == 0 || !bestSuccessfulSeconds.isNull());
     const QString earliestReviewAt = reviewStats.value(4).toString();
     if (!earliestReviewAt.isEmpty() && !model::utcInstant(earliestReviewAt)) {
         emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid review timestamp."), earliestReviewAt));
@@ -1339,7 +1343,8 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
     const QVariantMap result{{"requestId", requestId}, {"offset", offset}, {"events", page}, {"totalEvents", totalEvents}, {"hasMore", nextOffset < totalEvents},
                              {"nextOffset", nextOffset}, {"reviewCount", reviewCount},
                              {"successfulCount", successfulCount}, {"averageRecall", averageRecall},
-                             {"averageSeconds", averageSeconds},
+                             {"averageSeconds", averageSeconds}, {"averageGrade", averageGrade},
+                             {"bestSuccessfulSeconds", bestSuccessfulSeconds}, {"hasSuccessfulReview", successfulCount > 0},
                              {"firstRecordedAt", firstRecordedAt}, {"firstSavedAt", firstSavedAt}, {"error", QVariantMap{}}};
     emit cardTimelineReady(cardId, result);
 }
