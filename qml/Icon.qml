@@ -211,6 +211,11 @@ Canvas {
             c.lineTo(9, 12)
             c.lineTo(14, 7)
             break
+        case "chevron-right":
+            c.moveTo(7, 4)
+            c.lineTo(12, 9)
+            c.lineTo(7, 14)
+            break
         case "book":
             c.moveTo(9, 4)
             c.bezierCurveTo(6, 2, 3, 3, 2, 3)

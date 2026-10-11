@@ -82,6 +82,22 @@ Omit `--data-dir` for the populated sample collection. The gallery uses sample
 LLM summary text and keeps description edits in its own window. It does not
 call a model or start a real review. See [the deck graph studies](docs/deck-graph-studies.md).
 
+### Library and card history
+
+The Library starts with a folder tree of decks. Select a deck to open its card
+overview on the right, then double-click a card (or press Enter) for its front,
+back, review statistics and a scrollable history timeline. The plus icon in the
+card pane creates a card. Both panes can collapse and their divider is resizable.
+
+Compare three timeline treatments in the card modal, or open the sample gallery:
+
+```bash
+./scripts/run-desktop.sh --card-timeline-designs
+```
+
+See [card timeline studies](docs/card-timeline-studies.md) for keyboard controls
+and the limits of creation/edit history in existing collections.
+
 ### Development reset controls
 
 Desktop builds made with `scripts/build-desktop.sh` include **Reset deck** on the

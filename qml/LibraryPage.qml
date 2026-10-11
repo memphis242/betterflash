@@ -10,8 +10,10 @@ Item {
     required property var ui
     property string deckSearchText: ""
     property bool leftOpen: librarySettings.leftOpen
-    property bool rightOpen: librarySettings.rightOpen && !!ui.selectedDeck.id
-    readonly property bool effectiveLeftOpen: leftOpen && (!rightOpen || width >= 720)
+    property bool rightOpen: librarySettings.rightOpen
+    readonly property bool cardsVisible: rightOpen && !!ui.selectedDeck.id
+    property bool restoringTree: true
+    readonly property bool effectiveLeftOpen: leftOpen && (!cardsVisible || width >= 720)
     property real splitRatio: librarySettings.splitRatio
     property var expandedDecks: ({})
     property bool expansionInitialized: false
@@ -37,13 +39,14 @@ Item {
         Qt.callLater(function () {
             if (library.treeRows.length > 0)
                 treeList.forceActiveFocus()
-            treeList.contentY = librarySettings.treeScrollY
-            cardList.contentY = librarySettings.cardScrollY
+            library.restoreScroll(ui.libraryScrollY)
         })
     }
     onExpandedDecksChanged: {
-        const ids = Object.keys(expandedDecks).filter(id => expandedDecks[id])
-        librarySettings.expanded = JSON.stringify(ids)
+        if (expansionInitialized) {
+            const ids = Object.keys(expandedDecks).filter(id => expandedDecks[id])
+            librarySettings.expanded = JSON.stringify(ids)
+        }
     }
     onLeftOpenChanged: librarySettings.leftOpen = leftOpen
     onRightOpenChanged: librarySettings.rightOpen = rightOpen
@@ -69,6 +72,12 @@ Item {
                 state[root.id] = true
         expandedDecks = state
         expansionInitialized = true
+        librarySettings.expanded = JSON.stringify(Object.keys(state))
+        const scrollY = librarySettings.treeScrollY
+        Qt.callLater(function () {
+            treeList.contentY = Math.max(0, Math.min(scrollY, treeList.contentHeight - treeList.height))
+            library.restoringTree = false
+        })
     }
     function hasMatchingDescendant(id, query) {
         return childrenOf(id).some(child => String(child.name).toLowerCase().indexOf(query) >= 0 || hasMatchingDescendant(child.id, query))
@@ -110,6 +119,7 @@ Item {
         if (!id)
             return
         ui.setDeck(id, true)
+        revealDeck(id)
         rightOpen = true
         if (focusCardsAfter)
             Qt.callLater(function () { if (cardList.count > 0) cardList.forceActiveFocus() })
@@ -146,8 +156,8 @@ Item {
             cardList.currentIndex = Math.max(0, visibleCards.findIndex(card => card.id === ui.selectedCardId))
     }
     function focusDeckSearch() {
-        if (!effectiveLeftOpen)
-            leftOpen = true
+        leftOpen = true
+        if (width < 720) rightOpen = false
         deckSearchVisible = true
         deckSearch.forceActiveFocus()
         deckSearch.selectAll()
@@ -172,9 +182,10 @@ Item {
             id: deckPane
             objectName: "libraryDeckPane"
             Layout.fillHeight: true
-            Layout.fillWidth: !library.rightOpen || !library.effectiveLeftOpen
-            Layout.preferredWidth: library.effectiveLeftOpen ? (library.rightOpen ? libraryRow.width * library.splitRatio : 0) : 48
-            Layout.minimumWidth: library.effectiveLeftOpen ? (library.rightOpen ? 300 : 260) : 48
+            Layout.fillWidth: library.effectiveLeftOpen && !library.cardsVisible
+            Layout.preferredWidth: library.effectiveLeftOpen ? (library.cardsVisible ? (libraryRow.width - 12) * library.splitRatio : libraryRow.width - reopenCards.width) : 56
+            Layout.minimumWidth: library.effectiveLeftOpen && library.cardsVisible ? 280 : 0
+            Layout.maximumWidth: !library.effectiveLeftOpen ? 56 : library.cardsVisible ? Math.max(280, libraryRow.width - 312) : Infinity
             color: Theme.surface
             border.color: Theme.rule
             ColumnLayout {
@@ -185,7 +196,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 42
-                    Label { text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                    Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold; Layout.fillWidth: true }
                     GlyphButton { glyph: "search"; hint: "Find a deck (" + shortcuts.bindings.deckSearch + ")"; onClicked: library.focusDeckSearch() }
                     GlyphButton {
                         glyph: "more"; hint: "Deck actions"; onClicked: deckMenu.open()
@@ -212,7 +223,7 @@ Item {
                     id: treeList; objectName: "libraryDeckTree"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                     model: library.treeRows; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
-                    onContentYChanged: librarySettings.treeScrollY = contentY
+                    onContentYChanged: if (!library.restoringTree && library.visible && library.effectiveLeftOpen) librarySettings.treeScrollY = Math.max(0, contentY)
                     delegate: Item {
                         id: treeRow; required property var modelData; required property int index
                         width: treeList.width; height: 50
@@ -225,7 +236,7 @@ Item {
                         RowLayout {
                             anchors.fill: parent; anchors.leftMargin: 10 + treeRow.modelData.depth * 20; anchors.rightMargin: 12; spacing: 9
                             GlyphButton {
-                                visible: treeRow.modelData.hasChildren; glyph: treeRow.modelData.expanded ? "down" : "chevron"; glyphSize: 15; implicitWidth: 26; implicitHeight: 30
+                                visible: treeRow.modelData.hasChildren; glyph: treeRow.modelData.expanded ? "down" : "chevron-right"; glyphSize: 15; implicitWidth: 26; implicitHeight: 30
                                 hint: treeRow.modelData.expanded ? "Collapse deck" : "Expand deck"; onClicked: library.toggleDeck(treeRow.modelData.id)
                             }
                             Item { visible: !treeRow.modelData.hasChildren; implicitWidth: 26; implicitHeight: 30 }
@@ -238,6 +249,7 @@ Item {
                             anchors.top: parent.top
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
+                            anchors.left: parent.left
                             anchors.leftMargin: 42 + treeRow.modelData.depth * 20
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton
@@ -286,15 +298,20 @@ Item {
                     }
                 }
             }
-            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 4; collapsed: true; hint: "Expand deck pane"; onClicked: library.leftOpen = true }
+            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 4; collapsed: true; hint: "Expand deck pane"; onClicked: { library.leftOpen = true; if (library.width < 720) library.rightOpen = false } }
         }
         Item {
-            id: splitHandle; visible: library.effectiveLeftOpen && library.rightOpen; Layout.preferredWidth: visible ? 12 : 0; Layout.fillHeight: true; activeFocusOnTab: true
+            id: splitHandle; visible: library.effectiveLeftOpen && library.cardsVisible; Layout.preferredWidth: visible ? 12 : 0; Layout.fillHeight: true; activeFocusOnTab: true
             Rectangle { width: splitHandle.activeFocus ? 3 : 1; height: 56; anchors.centerIn: parent; color: splitHandle.activeFocus ? Theme.accent : Theme.rule }
             Accessible.name: "Resize library panes. Left and right arrows adjust width; Home restores equal halves."
             Keys.onLeftPressed: library.splitRatio = Math.max(0.3, library.splitRatio - 0.03)
             Keys.onRightPressed: library.splitRatio = Math.min(0.7, library.splitRatio + 0.03)
-            Keys.onHomePressed: library.splitRatio = 0.5
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Home) {
+                    library.splitRatio = 0.5
+                    event.accepted = true
+                }
+            }
             MouseArea {
                 anchors.fill: parent; cursorShape: Qt.SizeHorCursor; property real startX: 0; property real startRatio: 0.5
                 onPressed: function(mouse) { splitHandle.forceActiveFocus(); startX = mapToItem(libraryRow, mouse.x, mouse.y).x; startRatio = library.splitRatio }
@@ -305,22 +322,22 @@ Item {
             }
         }
         Rectangle {
-            id: cardPane; objectName: "libraryCardPane"; visible: library.rightOpen; Layout.fillWidth: true; Layout.fillHeight: true; color: Theme.surface; border.color: Theme.rule
+            id: cardPane; objectName: "libraryCardPane"; visible: library.cardsVisible; Layout.fillWidth: true; Layout.fillHeight: true; color: Theme.surface; border.color: Theme.rule
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 16; spacing: 12
                 RowLayout {
                     Layout.fillWidth: true; Layout.preferredHeight: 42
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: 2
-                        Label { text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold }
-                        Label { text: ui.selectedDeck.name + " · " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold }
+                        Label { textFormat: Text.PlainText; text: ui.selectedDeck.name + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
                     GlyphButton { glyph: "plus"; hint: "Add card"; onClicked: ui.openCardEditor("") }
                     GlyphButton { glyph: "search"; hint: "Find a card"; onClicked: { library.cardSearchVisible = true; cardSearch.forceActiveFocus() } }
                     PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
                 }
                 TextField {
-                    id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible
+                    id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible || ui.cardSearchText.length > 0
                     placeholderText: "Find a card by content or tag"; text: ui.cardSearchText; onTextEdited: ui.cardSearchText = text
                     Keys.onEscapePressed: { ui.cardSearchText = ""; library.cardSearchVisible = false; library.focusCards() }
                 }
@@ -367,7 +384,12 @@ Item {
             }
         }
         PaneToggleButton {
-            visible: !library.rightOpen && !!ui.selectedDeck.id; Layout.preferredWidth: visible ? 48 : 0; Layout.fillHeight: true; collapsed: true; rightSide: true
+            id: reopenCards
+            visible: !library.cardsVisible && !!ui.selectedDeck.id
+            Layout.preferredWidth: 52
+            Layout.alignment: Qt.AlignTop
+            collapsed: true
+            rightSide: true
             hint: "Open card pane"; onClicked: library.rightOpen = true
         }
     }

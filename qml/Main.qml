@@ -325,8 +325,10 @@ ApplicationWindow {
     }
     function setDeck(id, stayOnPage) {
         if (id === app.selectedDeckId) {
-            if (!stayOnPage)
+            if (!stayOnPage) {
                 page = 1
+                library.showDeck(id)
+            }
             return
         }
         let contexts = ({})
@@ -353,14 +355,14 @@ ApplicationWindow {
             library.restoreScroll(window.libraryScrollY)
             window.restoringDeck = false
         })
-        if (!stayOnPage)
+        if (!stayOnPage) {
             page = 1
+            library.showDeck(id)
+        }
     }
     function pickCard(id) {
         selectedCardId = id
-        detailOpen = true
-        if (width < 800)
-            detailDialog.open()
+        library.showDeck(app.selectedDeckId)
     }
     function deckIsDescendant(id, ancestorId) {
         let current = deckById(id)
@@ -575,7 +577,7 @@ ApplicationWindow {
             break
         case "deckSearch":
             page = 1
-            deckPicker.open()
+            library.focusDeckSearch()
             break
         case "newCard":
             openCardEditor("")
@@ -1984,74 +1986,10 @@ ApplicationWindow {
             }
         }
     }
-    Sheet {
+    CardDetailDialog {
         id: detailDialog
         objectName: "cardDetailDialog"
-        title: "Card"
-        height: Math.min(700, window.height - 40)
-        onClosed: window.detailOpen = false
-        contentItem: ScrollView {
-            clip: true
-            contentWidth: availableWidth
-            ColumnLayout {
-                width: parent.width
-                spacing: 16
-                Label {
-                    textFormat: Text.PlainText
-                    text: "Front"
-                    color: Theme.inkMuted
-                }
-                MarkdownPane {
-                    markdown: window.selectedCard.front || ""
-                    mediaRoot: media.rootPath
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: implicitHeight
-                    baseFontSize: 18
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: Theme.rule
-                }
-                Label {
-                    textFormat: Text.PlainText
-                    text: "Back"
-                    visible: !!window.selectedCard.back
-                    color: Theme.inkMuted
-                }
-                MarkdownPane {
-                    markdown: window.selectedCard.back || ""
-                    visible: !!window.selectedCard.back
-                    mediaRoot: media.rootPath
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: implicitHeight
-                    baseFontSize: 18
-                }
-            }
-        }
-        footer: RowLayout {
-            AppButton {
-                objectName: "atomicizeDetailModal"
-                text: "Atomicize"
-                hint: "Ask the language model whether this saved card contains independent learning objectives"
-                onClicked: window.openAtomicize(selectedCardId)
-            }
-            Item {
-                Layout.fillWidth: true
-            }
-            AppButton {
-                text: "Close"
-                onClicked: detailDialog.close()
-            }
-            AppButton {
-                text: "Edit card"
-                primary: true
-                onClicked: {
-                    detailDialog.close()
-                    openCardEditor(selectedCardId)
-                }
-            }
-        }
+        ui: window
     }
     Sheet {
         id: allHistoryDialog
@@ -2229,8 +2167,7 @@ ApplicationWindow {
     function openSelectedDetail() {
         if (selectedCardId) {
             detailOpen = true
-            if (width < 800)
-                detailDialog.open()
+            detailDialog.openFor(selectedCardId)
         }
     }
 }

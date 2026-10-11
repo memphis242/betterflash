@@ -73,6 +73,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("sidebar-designs"), QStringLiteral("Compare review icons, navigation toggles and sidebar layouts.")});
     parser.addOption({QStringLiteral("deck-graph-designs"), QStringLiteral("Compare Canopy and Branch ledger deck layouts. Add --data-dir to preview a working collection.")});
     parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1 or 2."), QStringLiteral("number"), QStringLiteral("2")});
+    parser.addOption({QStringLiteral("card-timeline-designs"), QStringLiteral("Compare three card history timelines with illustrative data.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -99,7 +100,8 @@ int main(int argc, char **argv) {
         {progressDesigns, "BetterFlash Progress Designs", "ProgressDesignGallery", "progressDesignWarnings"},
         {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"},
         {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"},
-        {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"}
+        {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"},
+        {parser.isSet(QStringLiteral("card-timeline-designs")), "BetterFlash Card Timeline Studies", "CardTimelineGallery", "cardTimelineWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {

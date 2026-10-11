@@ -149,6 +149,8 @@ Item {
         id: heading
         x: 18
         y: 12
+        width: Math.max(0, loadEarlier.visible ? loadEarlier.x - x - 12 : timeline.width - 36)
+        elide: Text.ElideRight
         text: variant === 0 ? "01  Review ledger" : variant === 1 ? "02  Recall trace" : "03  Chapter ribbon"
         color: Theme.inkMuted
         font.family: Theme.monoFont
@@ -160,6 +162,8 @@ Item {
     Label {
         x: heading.x
         y: heading.y + 17
+        width: heading.width
+        elide: Text.ElideRight
         text: "Events in order - gaps not to scale"
         color: Theme.inkMuted
         font.family: Theme.monoFont
@@ -185,8 +189,8 @@ Item {
         objectName: "cardTimelineEvents"
         x: 14
         y: 52
-        width: parent.width - x - 14
-        height: parent.height - y - 32
+        width: Math.max(0, parent.width - x - 14)
+        height: Math.max(0, parent.height - y - 32)
         model: timeline.events
         orientation: ListView.Horizontal
         spacing: timeline.ticketGap
@@ -280,7 +284,7 @@ Item {
                 visible: timeline.variant === 0 && timeline.eventIsReview(modelData)
                 x: 28
                 y: 94
-                text: Number(modelData.responseSeconds || 0).toFixed(1) + " s  /  " + Number(modelData.recallFraction || 0).toFixed(2)
+                text: Math.round(Number(modelData.recallFraction || 0) * 100) + "% recall / " + Number(modelData.responseSeconds || 0).toFixed(1) + " s"
                 color: Theme.inkMuted
                 font.family: Theme.monoFont
                 font.pixelSize: 12
@@ -442,7 +446,7 @@ Item {
     Label {
         visible: timeline.events.length === 0
         anchors.centerIn: reviewEvents
-        text: "No recorded activity"
+        text: timeline.loading ? "Loading history..." : "No recorded activity"
         color: Theme.inkMuted
         font.family: Theme.monoFont
         font.pixelSize: 11
