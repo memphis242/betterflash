@@ -7,7 +7,7 @@ Item {
     required property var ui
     property int section: ui.settingsSection()
     onSectionChanged: ui.setSettingsSection(section)
-    readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search"]
     component ValueRow: ColumnLayout {
         property string label: ""
         property string value: ""
@@ -53,7 +53,7 @@ Item {
             AppButton {
                 objectName: "settingsPrimary"
                 visible: settingsPage.section >= 2
-                text: settingsPage.section === 5 ? "Export" : settingsPage.ui.width < 600 ? "Edit" : "Edit connection"
+                text: settingsPage.section === 5 ? "Export" : settingsPage.section === 6 ? "Edit connection" : settingsPage.ui.width < 600 ? "Edit" : "Edit connection"
                 primary: true
                 onClicked: {
                     switch (settingsPage.section) {
@@ -68,6 +68,9 @@ Item {
                         break
                     case 5:
                         settingsPage.ui.exportData()
+                        break
+                    case 6:
+                        searchSettings.openConnection()
                         break
                     }
                 }
@@ -395,6 +398,11 @@ Item {
                         text: "Add example deck"
                         onClicked: app.loadExampleDeck()
                     }
+                }
+                SearchSettings {
+                    id: searchSettings
+                    visible: settingsPage.section === 6
+                    Layout.fillWidth: true
                 }
             }
         }
