@@ -19,8 +19,14 @@ Item {
     property bool expansionInitialized: false
     property bool deckSearchVisible: false
     property bool cardSearchVisible: false
-    readonly property var visibleCards: app.cards.filter(card => card.deckId === ui.selectedDeck.id
-        && (!ui.cardSearchText || (String(card.front) + " " + String(card.back) + " " + String(card.tags)).toLowerCase().indexOf(ui.cardSearchText.toLowerCase()) >= 0))
+    property bool restoringSearchSelection: false
+    property string searchSelectionId: ""
+    property real searchSelectionScrollY: 0
+    readonly property var searchEngine: librarySearch
+    readonly property bool searchingCards: ui.cardSearchText.trim().length > 0
+    readonly property var visibleCards: library.searchingCards
+        ? (library.searchEngine.results || [])
+        : app.cards.filter(card => card.deckId === ui.selectedDeck.id)
     readonly property var treeRows: flattenTree()
 
     Settings {
@@ -163,6 +169,24 @@ Item {
         deckSearch.selectAll()
     }
 
+    function updateCardSearch() {
+        library.searchSelectionId = ui.selectedCardId
+        library.searchSelectionScrollY = cardList.contentY
+        library.searchEngine.setActive(ui.page === 1)
+        library.searchEngine.setSearch(ui.selectedDeck.id || "", ui.cardSearchText)
+    }
+
+    function selectCardAfterSearch() {
+        if (cardList.count === 0)
+            return
+        const selectedIndex = library.visibleCards.findIndex(card => card.id === library.searchSelectionId)
+        if (selectedIndex >= 0)
+            cardList.currentIndex = selectedIndex
+        library.restoringSearchSelection = true
+        cardList.contentY = Math.max(0, Math.min(library.searchSelectionScrollY, Math.max(0, cardList.contentHeight - cardList.height)))
+        library.restoringSearchSelection = false
+    }
+
     Connections {
         target: app
         function onDecksChanged() {
@@ -171,6 +195,21 @@ Item {
                 library.revealDeck(ui.selectedDeck.id)
         }
         function onSelectedDeckIdChanged() { if (ui.selectedDeck.id) library.revealDeck(ui.selectedDeck.id) }
+    }
+
+    Connections {
+        target: library.searchEngine
+        function onResultsChanged() { Qt.callLater(library.selectCardAfterSearch) }
+        function onChanged() { Qt.callLater(library.selectCardAfterSearch) }
+    }
+
+    onVisibleChanged: updateCardSearch()
+    Component.onCompleted: updateCardSearch()
+    Connections {
+        target: ui
+        function onSelectedDeckIdChanged() { library.updateCardSearch() }
+        function onPageChanged() { library.updateCardSearch() }
+        function onCardSearchTextChanged() { library.updateCardSearch() }
     }
 
     RowLayout {
@@ -338,21 +377,65 @@ Item {
                 }
                 TextField {
                     id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible || ui.cardSearchText.length > 0
-                    placeholderText: "Find a card by content or tag"; text: ui.cardSearchText; onTextEdited: ui.cardSearchText = text
-                    Keys.onEscapePressed: { ui.cardSearchText = ""; library.cardSearchVisible = false; library.focusCards() }
+                    placeholderText: "Find a card by content or tag"; text: ui.cardSearchText; onTextEdited: { ui.cardSearchText = text; library.updateCardSearch() }
+                    Keys.onEscapePressed: { ui.cardSearchText = ""; library.updateCardSearch(); library.cardSearchVisible = false; library.focusCards() }
+                }
+                RowLayout {
+                    visible: library.searchingCards && (library.searchEngine.busy || library.searchEngine.status.length > 0)
+                    Layout.fillWidth: true
+                    spacing: 8
+                    BusyIndicator { running: library.searchEngine.busy; visible: running; implicitWidth: 18; implicitHeight: 18 }
+                    Label {
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        text: library.searchEngine.status
+                        color: Theme.inkMuted
+                        font.family: Theme.monoFont
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                }
+                ErrorBlock {
+                    visible: library.searchingCards && library.searchEngine.error.length > 0
+                    message: library.searchEngine.error
+                    Layout.fillWidth: true
+                    AppButton { text: "Retry search"; onClicked: library.searchEngine.retry() }
                 }
                 ListView {
                     id: cardList; objectName: "libraryCardList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: library.visibleCards; currentIndex: -1; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     onContentYChanged: if (ui.page === 1 && !ui.restoringDeck) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
                     Component.onCompleted: Qt.callLater(function() { library.restoreScroll(ui.libraryScrollY) })
+                    section.property: "searchGroup"
+                    section.criteria: ViewSection.FullString
+                    section.delegate: Rectangle {
+                        width: cardList.width
+                        height: visible ? 30 : 0
+                        color: Theme.transparent
+                        visible: section !== ""
+                        Label { anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; text: section; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.rule }
+                    }
                     delegate: ItemDelegate {
-                        id: cardRow; required property var modelData; required property int index; width: cardList.width; height: 82
+                        id: cardRow; required property var modelData; required property int index; width: cardList.width; height: cardRow.modelData.groupStart ? 112 : 82
                         highlighted: ui.selectedCardId === cardRow.modelData.id || cardList.activeFocus && cardList.currentIndex === cardRow.index
                         onClicked: library.chooseCard(cardRow.index)
                         onDoubleClicked: library.openCard(cardRow.modelData)
                         contentItem: ColumnLayout {
                             spacing: 5
+                            Label {
+                                visible: !!cardRow.modelData.groupStart
+                                textFormat: Text.PlainText
+                                text: cardRow.modelData.searchGroup || ""
+                                color: Theme.inkMuted
+                                font.family: Theme.monoFont
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                Layout.fillWidth: true
+                                ToolTip.visible: groupHover.containsMouse
+                                ToolTip.text: "Search layer: results are ordered from exact matches through semantic matches."
+                                HoverHandler { id: groupHover }
+                            }
                             Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -378,8 +461,8 @@ Item {
                     }
                     Keys.onReturnPressed: library.openCard(visibleCards[currentIndex])
                     Keys.onEnterPressed: library.openCard(visibleCards[currentIndex])
-                    onCurrentIndexChanged: if (activeFocus && visibleCards[currentIndex]) ui.selectedCardId = visibleCards[currentIndex].id
-                    Label { visible: cardList.count === 0; anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : "This deck has no cards yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
+                    onCurrentIndexChanged: if (!library.restoringSearchSelection && activeFocus && visibleCards[currentIndex]) ui.selectedCardId = visibleCards[currentIndex].id
+                    Label { visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : "This deck has no cards yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
                 }
             }
         }
