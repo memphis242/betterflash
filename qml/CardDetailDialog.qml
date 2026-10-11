@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtCore
 
 Dialog {
     id: detail
@@ -35,7 +34,14 @@ Dialog {
         const hours = Math.floor(minutes % 1440 / 60)
         return "In " + (days ? days + "d " : "") + (hours ? hours + "h " : "") + minutes % 60 + "m"
     }
-    Settings { id: preferences; category: "cardDetail"; property int timelineVariant: 0 }
+    readonly property color averageRatingColor: {
+        const grade = Number(summary.averageGrade)
+        if (!summary.reviewCount || !Number.isFinite(grade)) return Theme.inkMuted
+        return [Theme.recallMissed, Theme.recallPartial, Theme.recallHard,
+            Theme.recallGood, Theme.recallEasy][Math.max(0, Math.min(4, Math.round(grade)))]
+    }
+    readonly property int recordedDays: summary.firstRecordedAt
+        ? Math.max(0, Math.floor((now - new Date(summary.firstRecordedAt).getTime()) / 86400000)) : 0
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(1120, ui.width - 2 * ui.gutter)
@@ -48,7 +54,7 @@ Dialog {
 
     function openFor(id) { cardId = id; open() }
     function load(older) {
-        if (loading || !cardId) return
+        if (loading || !cardId || !visible) return
         loadError = ({})
         loading = true
         requestId = String(++serial)
@@ -77,8 +83,11 @@ Dialog {
         }
         function onCardTimelineReady(id, result) {
             if (!detail.visible || id !== detail.cardId || result.requestId !== detail.requestId) return
-            detail.loading = false
-            if (result.error && result.error.code) { detail.loadError = result.error; return }
+            if (result.error && result.error.code) {
+                detail.loadError = result.error
+                detail.loading = false
+                return
+            }
             const merged = result.offset > 0 ? result.events.concat(detail.recordedEvents) : result.events
             const seen = new Set()
             detail.recordedEvents = merged.filter(event => {
@@ -89,6 +98,7 @@ Dialog {
             detail.summary = result
             detail.hasMore = result.hasMore
             detail.nextOffset = result.nextOffset
+            detail.loading = false
         }
     }
 
@@ -144,7 +154,7 @@ Dialog {
             clip: true
             ColumnLayout {
                 width: detailBody.availableWidth
-                height: Math.max(640, detailBody.availableHeight)
+                height: Math.max(640, implicitHeight, detailBody.availableHeight)
                 spacing: 14
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
                 ScrollView {
@@ -152,6 +162,7 @@ Dialog {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 80
+                    Layout.preferredHeight: 180
                     clip: true
                     contentWidth: availableWidth
                     GridLayout {
@@ -189,39 +200,18 @@ Dialog {
                         model: [
                             {label: "Next review", value: detail.countdown, hint: detail.card.due ? "Earliest scheduled variant: " + detail.ui.dateTime(detail.card.due) : "This card has no scheduled review."},
                             {label: "Successful reviews", value: detail.summary.reviewCount ? detail.summary.successfulCount + " of " + detail.summary.reviewCount : "No reviews", hint: "Hard, Good and Easy count as successful. Partial recall is tracked separately."},
-                            {label: "Average recall", value: detail.summary.reviewCount ? Math.round(detail.summary.averageRecall * 100) + "%" : "Not yet reviewed", hint: "Average recalled fraction across all recorded reviews, including partial recall."},
-                            {label: "Recorded history", value: detail.summary.firstRecordedAt ? Math.max(0, Math.floor((detail.now - new Date(detail.summary.firstRecordedAt).getTime()) / 86400000)) + " days" : "Unknown", hint: "Time since the earliest retained save or review. Original creation may be earlier."}
+                            {label: "Average recall", value: detail.summary.reviewCount ? Math.round(detail.summary.averageRecall * 100) + "%" : "Not yet reviewed", color: detail.averageRatingColor, hint: "Average recalled fraction, including partial recall. Color follows the average review rating rounded to Missed, Partial, Hard, Good or Easy."},
+                            {label: "Best time", value: detail.summary.hasSuccessfulReview ? Number(detail.summary.bestSuccessfulSeconds).toFixed(1) + " s" : "No qualifying review", hint: "Your time to beat: fastest recorded response graded Hard, Good or Easy, across this card's review variants. Missed and Partial reviews do not qualify."},
+                            {label: "Recorded history", value: detail.summary.firstRecordedAt ? detail.recordedDays + " days" : "Unknown", hint: "Time since the earliest retained save or review. Original creation may be earlier."}
                         ]
                         delegate: Column {
                             required property var modelData
                             spacing: 6
                             Label { text: modelData.label; color: Theme.inkMuted; font.pixelSize: 11 }
-                            Label { text: modelData.value; color: Theme.ink; font.pixelSize: 14; font.bold: true }
+                            Label { text: modelData.value; color: modelData.color || Theme.ink; font.pixelSize: 14; font.bold: true }
                             HoverHandler { id: statHover }
                             ToolTip.visible: statHover.hovered
                             ToolTip.text: modelData.hint
-                        }
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "Timeline"; color: Theme.ink; font.pixelSize: 15; font.bold: true; Layout.fillWidth: true }
-                    Repeater {
-                        model: ["01 Ledger", "02 Trace", "03 Ribbon"]
-                        delegate: AppButton {
-                            required property string modelData
-                            required property int index
-                            text: detail.width < 620 ? String(index + 1) : modelData
-                            checkable: true
-                            checked: preferences.timelineVariant === index
-                            hint: ["Review ledger", "Recall trace", "Chapter ribbon"][index]
-                            onClicked: preferences.timelineVariant = index
-                            background: Rectangle {
-                                radius: 6
-                                color: parent.hovered ? Theme.accentSoft : Theme.transparent
-                                border.width: parent.checked ? 2 : 1
-                                border.color: parent.checked ? Theme.accent : Theme.rule
-                            }
                         }
                     }
                 }
@@ -234,13 +224,15 @@ Dialog {
                     }
                     AppButton { text: "Retry"; onClicked: detail.load(detail.nextOffset > 0) }
                 }
-                CardTimeline {
+                CalendarTrace {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 242
-                    variant: preferences.timelineVariant
+                    Layout.preferredHeight: 340
+                    historyKey: detail.cardId
+                    historyStart: detail.summary.firstRecordedAt || ""
                     events: detail.timelineEvents
                     loading: detail.loading
                     hasMore: detail.hasMore
+                    canLoadEarlier: !detail.loadError.code
                     onLoadOlderRequested: detail.load(true)
                 }
             }

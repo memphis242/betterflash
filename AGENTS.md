@@ -43,3 +43,9 @@ automatic agent co-author attribution, or a remote session label.
 - Retain drafts when navigating between records. Bind each draft and pending
   save to its record ID. Discard drafts on explicit Cancel or after their
   matching save succeeds.
+- Make returning to the active or previous context easy after exploration.
+  Preserve selection, scroll, zoom and pane state where appropriate; provide
+  explicit return controls such as the timeline's Today button.
+- Treat undo for card edits and review-session actions as a planned interaction
+  requirement. Its behavior remains to be designed; do not imply that a
+  general undo system exists because individual rating corrections do.

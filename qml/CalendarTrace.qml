@@ -216,7 +216,7 @@ Item {
 
     function maybeRequestOlder() {
         const earliest = earliestLoadedMs()
-        if (!visible || !canLoadEarlier || !hasMore || loading || requestOutstanding || earliest <= 0 || viewStartMs >= earliest)
+        if (!visible || !canLoadEarlier || !hasMore || loading || requestOutstanding || earliest <= 0 || viewStartMs > earliest)
             return
         requestOutstanding = true
         loadOlderRequested()
@@ -254,6 +254,15 @@ Item {
             while (next > 0 && zoomSpans[next] >= span) --next
         }
         setZoom(next, anchorX)
+    }
+
+    function showRecent(index) {
+        setZoom(index)
+        setViewStart(nowMs() - visibleSpanMs() * 0.9)
+    }
+
+    function showToday() {
+        setViewStart(nowMs() - visibleSpanMs() / 2)
     }
 
     function recallY(fraction) {
@@ -305,6 +314,16 @@ Item {
         if (mode === "year") return Qt.formatDate(date, "yyyy")
         if (mode === "month") return Qt.formatDate(date, "yyyy-MM")
         return Qt.formatDate(date, "yyyy-MM-dd")
+    }
+
+    function tickOrdinal(date, mode) {
+        switch (mode) {
+        case "hour": return Math.floor(date.getTime() / 3600000)
+        case "month": return date.getFullYear() * 12 + date.getMonth()
+        case "year": return date.getFullYear()
+        case "week": return Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs - 3) / 7)
+        default: return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs)
+        }
     }
 
     function pointAt(index) {
@@ -425,6 +444,12 @@ Item {
         y: 9
         spacing: 4
         AppButton {
+            text: "Today"
+            hint: "Return to today without changing zoom (T when the timeline is focused)"
+            font.pixelSize: 11
+            onClicked: trace.showToday()
+        }
+        AppButton {
             text: "−"
             hint: "Zoom out"
             font.pixelSize: 16
@@ -439,7 +464,7 @@ Item {
             currentIndex: trace.zoomIndex
             font.family: Theme.monoFont
             font.pixelSize: 11
-            onActivated: function(index) { trace.setZoom(index, trace.plotLeft + trace.plotWidth() / 2) }
+            onActivated: function(index) { trace.showRecent(index) }
             Accessible.name: "Visible time span"
             ToolTip.visible: hovered
             ToolTip.text: "Choose the time span shown by the calendar"
@@ -501,10 +526,9 @@ Item {
             let guard = 0
             const tickStepMs = mode === "hour" ? 3600000 : mode === "day" ? trace.dayMs : mode === "week" ? trace.dayMs * 7 : mode === "month" ? trace.dayMs * 30 : trace.dayMs * 365
             const tickStride = Math.max(1, Math.ceil((trace.visibleSpanMs() / tickStepMs) / Math.max(1, trace.plotWidth() / 90)))
-            let tickNumber = 0
             while (tick.getTime() <= trace.viewStartMs + trace.visibleSpanMs() && guard++ < 1000) {
                 const x = trace.timeToX(tick.toISOString())
-                if (tickNumber % tickStride === 0 && x >= trace.plotLeft - 1 && x <= trace.width - trace.plotRight + 1) {
+                if (trace.tickOrdinal(tick, mode) % tickStride === 0 && x >= trace.plotLeft - 1 && x <= trace.width - trace.plotRight + 1) {
                     ctx.strokeStyle = Theme.ledgerRule
                     ctx.globalAlpha = 0.45
                     ctx.lineWidth = 1
@@ -517,7 +541,6 @@ Item {
                     ctx.fillText(trace.tickLabel(tick, mode), x, axisY + 26)
                 }
                 tick = trace.nextTick(tick, mode)
-                ++tickNumber
             }
 
             ctx.strokeStyle = Theme.ledgerRule
@@ -742,7 +765,10 @@ Item {
     }
 
     Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Home) {
+        if (event.key === Qt.Key_T && event.modifiers === Qt.NoModifier) {
+            trace.showToday()
+            event.accepted = true
+        } else if (event.key === Qt.Key_Home) {
             trace.setViewStart(trace.domainStartMs)
             event.accepted = true
         } else if (event.key === Qt.Key_End) {

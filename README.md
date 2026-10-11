@@ -89,7 +89,10 @@ overview on the right, then double-click a card (or press Enter) for its front,
 back, review statistics and a scrollable history timeline. The plus icon in the
 card pane creates a card. Both panes can collapse and their divider is resizable.
 
-Compare three timeline treatments in the card modal, or open the sample gallery:
+The Recall trace plots events at their actual timestamps. Pan through retained
+history and choose day, 3-day, week, month, year or full-history scales. Average
+recall uses the card's typical rating color; Best time counts only Hard, Good
+and Easy reviews. Open an illustrative calendar preview with:
 
 ```bash
 ./scripts/run-desktop.sh --card-timeline-designs
@@ -97,6 +100,8 @@ Compare three timeline treatments in the card modal, or open the sample gallery:
 
 See [card timeline studies](docs/card-timeline-studies.md) for keyboard controls
 and the limits of creation/edit history in existing collections.
+Deferred ideas for weakness ranking and optional language-model study support
+are recorded in [study support ideas](docs/study-support-ideas.md).
 
 ### Development reset controls
 
