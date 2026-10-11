@@ -227,6 +227,23 @@ Canvas {
             c.lineTo(3, 16)
             c.lineTo(13, 16)
             break
+        case "folder":
+        case "folder-open": {
+            const open = kind === "folder-open"
+            c.moveTo(2, 5)
+            c.lineTo(7, 5)
+            c.lineTo(9, 7)
+            c.lineTo(16, 7)
+            c.lineTo(15, open ? 15 : 14)
+            c.lineTo(3, open ? 15 : 14)
+            c.closePath()
+            if (open) {
+                c.moveTo(2, 5)
+                c.lineTo(3, 15)
+                c.lineTo(15, 15)
+            }
+            break
+        }
         case "queue-tail":
             c.rect(2, 2, 6, 9)
             c.moveTo(11, 3)
