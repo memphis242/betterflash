@@ -21,6 +21,8 @@ days, weeks, months or years. Unequal intervals remain unequal on screen.
 The vertical axis shows recalled fraction, with review markers using the
 recorded rating colors. Lines connect consecutive compatible review variants;
 creation/save and edit markers appear along the calendar baseline.
+Today and the next review are vertical lines, with warm accent and violet
+colors respectively. Hover or select either line to inspect its timestamp.
 
 Choose 1 day, 3 days, 1 week, 1 month, 1 year or All from the span selector.
 Presets show recent history; a preset larger than the known extent uses All.

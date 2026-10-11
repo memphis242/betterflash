@@ -20,6 +20,7 @@ QtObject {
     readonly property color accent: dark ? "#e7a17d" : "#a34b34"
     readonly property color onAccent: dark ? "#211722" : "#fffaf1"
     readonly property color accentSoft: dark ? "#563b3f" : "#f1d9cd"
+    readonly property color timelineDue: dark ? "#c6b2e3" : "#74528c"
     readonly property color success: dark ? "#a9c79b" : "#38704a"
     readonly property color warning: dark ? "#e6c17a" : "#815714"
     readonly property color error: dark ? "#ee9a9a" : "#a13939"

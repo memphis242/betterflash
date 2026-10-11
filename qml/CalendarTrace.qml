@@ -342,7 +342,10 @@ Item {
         for (let i = 0; i < events.length; ++i) {
             const point = pointAt(i)
             if (point.x < plotLeft - 2 || point.x > width - plotRight + 2) continue
-            const current = Math.hypot(point.x - x, point.y - y)
+            const kind = String(events[i].kind || "")
+            const isDateLine = kind === "due" || kind === "now"
+            const current = isDateLine && y >= plotTop && y <= plotBottom - 11
+                ? Math.abs(point.x - x) : Math.hypot(point.x - x, point.y - y)
             if (current <= distance) { distance = current; result = i }
         }
         return result
@@ -623,15 +626,9 @@ Item {
                     ctx.arc(point.x, point.y, focused ? 6 : 5, 0, Math.PI * 2)
                     ctx.fill()
                     if (focused) { ctx.strokeStyle = Theme.ink; ctx.stroke() }
-                } else if (kind === "due") {
-                    ctx.strokeStyle = Theme.inkMuted
+                } else if (kind === "due" || kind === "now") {
+                    ctx.strokeStyle = kind === "due" ? Theme.timelineDue : Theme.accent
                     ctx.lineWidth = focused ? 3 : 2
-                    ctx.beginPath()
-                    ctx.arc(point.x, point.y, focused ? 6 : 5, 0, Math.PI * 2)
-                    ctx.stroke()
-                } else if (kind === "now") {
-                    ctx.strokeStyle = Theme.accent
-                    ctx.lineWidth = 2
                     ctx.beginPath()
                     ctx.moveTo(point.x, trace.plotTop - 5)
                     ctx.lineTo(point.x, axisY + 2)
@@ -647,7 +644,8 @@ Item {
             }
 
             const active = trace.selectedIndex >= 0 ? trace.selectedIndex : trace.hoveredIndex
-            if (active >= 0 && active < trace.events.length) {
+            if (active >= 0 && active < trace.events.length
+                    && trace.events[active].kind !== "due" && trace.events[active].kind !== "now") {
                 const activePoint = trace.pointAt(active)
                 ctx.strokeStyle = Theme.accent
                 ctx.globalAlpha = 0.7
@@ -667,8 +665,10 @@ Item {
         width: Math.max(0, parent.width - 36)
         text: trace.readoutText()
         color: trace.selectedIndex >= 0 && trace.selectedIndex < trace.events.length
-            && trace.events[trace.selectedIndex].kind === "review"
-            ? trace.gradeColor(trace.events[trace.selectedIndex].grade) : Theme.inkMuted
+            ? (trace.events[trace.selectedIndex].kind === "review"
+                ? trace.gradeColor(trace.events[trace.selectedIndex].grade)
+                : trace.events[trace.selectedIndex].kind === "due" ? Theme.timelineDue : Theme.inkMuted)
+            : Theme.inkMuted
         font.family: Theme.monoFont
         font.pixelSize: 11
         elide: Text.ElideRight

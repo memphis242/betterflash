@@ -40,7 +40,7 @@ ApplicationWindow {
             {id: "r7", kind: "review", at: at(-2), grade: 4, recallFraction: 1, responseSeconds: 6.7, variantKey: "forward"},
             {id: "r8", kind: "review", at: at(-0.8), grade: 4, recallFraction: 1, responseSeconds: 5.4, variantKey: "forward"},
             {id: "now", kind: "now", at: at(0)},
-            {id: "due", kind: "due", at: at(3.25)}
+            {id: "due", kind: "due", at: at(1.25)}
         ]
     }
     ColumnLayout {

@@ -52,3 +52,15 @@ Revisit how response time and difficulty should contribute to study guidance.
 The Library's best-time statistic is the fastest recorded review graded Hard,
 Good or Easy. It can provide a personal time to beat, but its introduction does
 not decide a weakness formula or change the spaced-repetition algorithm.
+
+## Generate like this
+
+Deferred BYOK language-model idea: start from an existing problem card and
+generate a similar practice card targeting the same concept. Examples include
+derivatives, integrals and applications of a topic, varying the numbers,
+expressions or combinations so the user can practice beyond a single example.
+
+Working action name: **Generate like this**. The generated card should include
+the new problem and its corresponding answer. Quantity, difficulty controls,
+answer verification and how the user reviews and saves suggestions remain to
+be designed. No generation action is implemented in this Library iteration.
