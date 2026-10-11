@@ -27,3 +27,15 @@ The optional local recognition helper uses Vosk only when explicitly selected.
 No Vosk library or model is bundled. Its setup script records the source and
 license information for downloaded test assets. Remote providers retain their
 own service terms; no provider credentials are included in this repository.
+
+Local semantic search can use quantized ONNX exports of the BGE sentence
+transformers. Desktop defaults to `Xenova/bge-base-en-v1.5` (768 dimensions);
+compact targets use `Xenova/bge-small-en-v1.5` (384 dimensions). The model
+assets are fetched only when selected by the user, are pinned to revisions in
+`src/search/LocalEmbedder.cpp`, and are verified by SHA-256 before use. Their
+model cards provide the MIT terms in
+`packaging/licenses/BGE-CC-BY-SA-4.0.txt`.
+
+The native inference runtime is ONNX Runtime 1.20.1, fetched from its official
+release archive with a pinned SHA-256 checksum. It is distributed under the
+MIT License; see `packaging/licenses/ONNX-Runtime-MIT.txt`.
