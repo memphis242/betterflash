@@ -110,17 +110,17 @@ QList<QString> splitIntoWords(const QString& input)
     };
     for (qsizetype index = 0; index < input.size(); ++index) {
         const QChar character = input.at(index);
-        const uint codepoint = character.isHighSurrogate() && index + 1 < input.size()
+        const char32_t codepoint = character.isHighSurrogate() && index + 1 < input.size()
             && input.at(index + 1).isLowSurrogate()
-            ? QChar::surrogateToUcs4(character, input.at(++index))
-            : character.unicode();
+            ? static_cast<char32_t>(QChar::surrogateToUcs4(character, input.at(index + 1)))
+            : static_cast<char32_t>(character.unicode());
         if (isWhitespace(character)) {
             flush();
         } else if (isPunctuation(character) || isCjk(codepoint)) {
             flush();
             if (character.isHighSurrogate() && index + 1 < input.size()
                 && input.at(index + 1).isLowSurrogate()) {
-                words.append(input.mid(index, 2));
+                words.append(QString::fromUcs4(&codepoint, 1));
                 ++index;
             } else {
                 words.append(QString(character));
@@ -209,7 +209,7 @@ LocalModelSpec LocalEmbedder::spec(const QString& profile)
         return {QStringLiteral("Xenova/bge-small-en-v1.5"), QStringLiteral("BGE small English v1.5"), 384,
             {{QStringLiteral("model.onnx"),
               QUrl(QStringLiteral("https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/onnx/model_quantized.onnx")),
-              QByteArrayLiteral("43197c0772cd3622c3ff70f3b42c948d4e32cc3fec11f2022a705f1b8ca80152"), 34014426},
+              QByteArrayLiteral("6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4"), 34014426},
              {QStringLiteral("vocab.txt"),
               QUrl(QStringLiteral("https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/vocab.txt")),
               QByteArrayLiteral("07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"), 231508}}};
@@ -217,7 +217,7 @@ LocalModelSpec LocalEmbedder::spec(const QString& profile)
     return {QStringLiteral("Xenova/bge-base-en-v1.5"), QStringLiteral("BGE base English v1.5"), 768,
         {{QStringLiteral("model.onnx"),
           QUrl(QStringLiteral("https://huggingface.co/Xenova/bge-base-en-v1.5/resolve/4d6cd88e18e51a5e020c2c305726d76ada9c03cf/onnx/model_quantized.onnx")),
-          QByteArrayLiteral("0405fb735849b186fb41f8d433b0079dafc9f84d3da709593565d49568a0926"), 110083337},
+          QByteArrayLiteral("c9729cc84cbd0e9fecc759505d2be65916c9fe05222d7ea26c65fcb3382af38d"), 110083337},
          {QStringLiteral("vocab.txt"),
           QUrl(QStringLiteral("https://huggingface.co/Xenova/bge-base-en-v1.5/resolve/4d6cd88e18e51a5e020c2c305726d76ada9c03cf/vocab.txt")),
           QByteArrayLiteral("07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"), 231508}}};
@@ -291,13 +291,8 @@ std::expected<QVector<float>, QString> LocalEmbedder::encode(const QString& text
     std::vector<int64_t> ids(sequenceLength), mask(sequenceLength, 1), types(sequenceLength, 0);
     for (int index = 0; index < sequenceLength; ++index)
         ids[index] = tokens.at(index);
-    for (int index = sequenceLength; index < maxTokens; ++index) {
-        ids.push_back(0);
-        mask.push_back(0);
-        types.push_back(0);
-    }
     try {
-        const std::array<int64_t, 2> shape{1, maxTokens};
+        const std::array<int64_t, 2> shape{1, sequenceLength};
         const auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         const auto makeTensor = [&memoryInfo, &shape](std::vector<int64_t>& values) {
             return Ort::Value::CreateTensor<int64_t>(memoryInfo, values.data(), values.size(), shape.data(), shape.size());
@@ -310,16 +305,20 @@ std::expected<QVector<float>, QString> LocalEmbedder::encode(const QString& text
             return std::unexpected(QStringLiteral("SEARCH_MODEL_INFERENCE: local embedding model returned no tensor output"));
         const auto typeInfo = output.front().GetTensorTypeAndShapeInfo();
         const auto dimensions = typeInfo.GetShape();
-        if (dimensions.size() != 3 || dimensions[0] != 1 || dimensions[1] != maxTokens || dimensions[2] != m_state->dimensions)
+        if (typeInfo.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
+            return std::unexpected(QStringLiteral("SEARCH_MODEL_INFERENCE: local embedding model returned a non-float tensor"));
+        if (dimensions.size() != 3 || dimensions[0] != 1 || dimensions[1] != sequenceLength || dimensions[2] != m_state->dimensions)
             return std::unexpected(QStringLiteral("SEARCH_MODEL_INFERENCE: local embedding model returned an unexpected tensor shape"));
         const float* values = output.front().GetTensorData<float>();
         QVector<float> embedding(m_state->dimensions);
         double norm = 0.0;
         for (int index = 0; index < m_state->dimensions; ++index) {
             embedding[index] = values[index];
+            if (!std::isfinite(embedding[index]))
+                return std::unexpected(QStringLiteral("SEARCH_MODEL_INFERENCE: local embedding model returned a non-finite vector"));
             norm += static_cast<double>(embedding[index]) * embedding[index];
         }
-        if (!(norm > std::numeric_limits<double>::epsilon()))
+        if (!std::isfinite(norm) || !(norm > std::numeric_limits<double>::epsilon()))
             return std::unexpected(QStringLiteral("SEARCH_MODEL_INFERENCE: local embedding model returned a zero vector"));
         const float inverseNorm = static_cast<float>(1.0 / std::sqrt(norm));
         for (float& value : embedding)
