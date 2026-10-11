@@ -24,14 +24,14 @@ QStringList chunks(const QString &text) {
     QStringList result;
     // Overlap keeps a phrase that crosses a chunk boundary searchable.
     for (qsizetype start = 0; start < text.size();) {
-        qsizetype end = std::min(start + 1000, text.size());
+        qsizetype end = std::min(start + 384, text.size());
         if (end < text.size()) {
             const qsizetype space = text.lastIndexOf(QLatin1Char(' '), end);
-            if (space > start + 700) end = space;
+            if (space > start + 280) end = space;
         }
         result.append(text.mid(start, end - start));
         if (end == text.size()) break;
-        start = end - 100;
+        start = end - 48;
     }
     if (result.isEmpty()) result.append(QStringLiteral("Empty flashcard"));
     return result;
@@ -58,6 +58,8 @@ void SearchWorker::search(quint64 epoch, const QVariantList &cards, const QVaria
     m_jobs.clear(); m_inFlight.clear(); m_vectors.clear(); m_documentKeys.clear();
     if (!current(epoch)) return;
     const auto literal = betterflash::search::literalMatches(m_documents, m_query);
+    m_textMatchIds.clear();
+    for (const struct betterflash::search::SearchHit &hit : literal) m_textMatchIds.insert(hit.id);
     emit literalReady(epoch, hitMaps(literal));
     QList<struct betterflash::search::SearchHit> fuzzy;
     for (const struct betterflash::search::SearchDocument &doc : m_documents) {
@@ -67,6 +69,7 @@ void SearchWorker::search(quint64 epoch, const QVariantList &cards, const QVaria
     std::stable_sort(fuzzy.begin(), fuzzy.end(), [](const auto &a, const auto &b) {
         return a.score != b.score ? a.score > b.score : a.id < b.id;
     });
+    for (const struct betterflash::search::SearchHit &hit : fuzzy) m_textMatchIds.insert(hit.id);
     if (current(epoch)) emit fuzzyReady(epoch, hitMaps(fuzzy));
 }
 
@@ -232,6 +235,7 @@ void SearchWorker::finish() {
     QList<struct betterflash::search::SearchHit> hits;
     for (const struct betterflash::search::SearchDocument &doc : m_documents) {
         if (!current(m_epoch)) return;
+        if (m_textMatchIds.contains(doc.id)) continue;
         double best = -1;
         for (const QString &key : m_documentKeys.value(doc.id)) {
             const auto vector = m_vectors.value(key);

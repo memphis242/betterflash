@@ -69,8 +69,8 @@ This helps bridge terse expressions such as `3x=21` and natural-language
 queries. It does not solve a problem or guarantee that every related card will
 be retrieved.
 
-Semantic retrieval considers up to twelve top candidates with cosine scores
-at least 0.35. Duplicates already present in a text layer are omitted. The
+Semantic retrieval adds up to twelve candidates with cosine scores at least
+0.35, after excluding cards already present in a text layer. The
 threshold is an initial retrieval heuristic, not a probability or accuracy
 claim, and needs refinement with actual deck use. Spelling tolerance comes
 primarily from the fuzzy layer; embeddings add meaning-based recall.

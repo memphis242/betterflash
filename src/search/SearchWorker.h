@@ -4,6 +4,7 @@
 #include "SearchText.h"
 #include <QObject>
 #include <QSqlDatabase>
+#include <QSet>
 #include <atomic>
 #include <memory>
 
@@ -44,6 +45,7 @@ private:
     QString m_loadedDirectory;
     QSqlDatabase m_cache;
     QList<struct betterflash::search::SearchDocument> m_documents;
+    QSet<QString> m_textMatchIds;
     QList<struct Job> m_jobs;
     QList<struct Job> m_inFlight;
     QHash<QString, QStringList> m_documentKeys;
