@@ -8,6 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Network Multimedia TextToSpeech Concurrent)
 qt_standard_project_setup(REQUIRES 6.6)
 include(cmake/MicroTeX.cmake)
+include(cmake/OnnxRuntime.cmake)
+include(GNUInstallDirs)
 
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/core/*.h)
 add_library(betterflash_core STATIC ${CORE_SOURCES})
@@ -34,6 +36,13 @@ add_library(betterflash_integrations STATIC ${INTEGRATION_SOURCES})
 target_include_directories(betterflash_integrations PUBLIC src)
 target_link_libraries(betterflash_integrations PUBLIC betterflash_core Qt6::Network Qt6::Gui Qt6::Concurrent)
 target_link_libraries(betterflash_voice PRIVATE betterflash_integrations)
+
+file(GLOB SEARCH_SOURCES CONFIGURE_DEPENDS src/search/*.cpp src/search/*.h)
+add_library(betterflash_search STATIC ${SEARCH_SOURCES})
+target_include_directories(betterflash_search PUBLIC src)
+target_link_libraries(betterflash_search PUBLIC betterflash_core betterflash_integrations Qt6::Network Qt6::Concurrent
+    betterflash_onnxruntime)
+target_compile_options(betterflash_search PRIVATE -Wall -Wextra -Wpedantic)
 
 qt_add_executable(betterflash src/main.cpp)
 set(BETTERFLASH_ICON_SIZES 16 24 32 48 64 128 256 512)
@@ -65,9 +74,12 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(betterflash URI BetterFlash VERSION 1.0 QML_FILES ${QML_SOURCES}
     NO_CACHEGEN)
 target_link_libraries(betterflash PRIVATE betterflash_core betterflash_voice betterflash_render
-    betterflash_integrations Qt6::QuickControls2)
+    betterflash_integrations betterflash_search Qt6::QuickControls2)
+set_target_properties(betterflash PROPERTIES
+    BUILD_RPATH "${BETTERFLASH_ONNXRUNTIME_ROOT}/lib"
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 target_compile_options(betterflash PRIVATE -Wall -Wextra -Wpedantic)
-foreach(target betterflash_core betterflash_voice betterflash_render betterflash_integrations)
+foreach(target betterflash_core betterflash_voice betterflash_render betterflash_integrations betterflash_search)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
 endforeach()
 
@@ -78,9 +90,10 @@ if(ANDROID)
             message(FATAL_ERROR "Android HTTPS requires ${library}. Set BETTERFLASH_ANDROID_OPENSSL_LIB_DIR to the matching arm64 OpenSSL 3 directory; see docs/android.md.")
         endif()
     endforeach()
-    set_property(TARGET betterflash PROPERTY QT_ANDROID_EXTRA_LIBS
+    set_property(TARGET betterflash APPEND PROPERTY QT_ANDROID_EXTRA_LIBS
         "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/libcrypto_3.so"
-        "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/libssl_3.so")
+        "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/libssl_3.so"
+        "${BETTERFLASH_ONNXRUNTIME_LIBRARY}")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_NAME "org.betterflash.app")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}")
@@ -89,8 +102,14 @@ if(ANDROID)
     set_property(TARGET betterflash PROPERTY QT_ANDROID_TARGET_SDK_VERSION 36)
 endif()
 
-include(GNUInstallDirs)
 install(TARGETS betterflash RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(ANDROID)
+    install(FILES "${BETTERFLASH_ONNXRUNTIME_LIBRARY}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
+else()
+    install(DIRECTORY "${BETTERFLASH_ONNXRUNTIME_ROOT}/lib/"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        FILES_MATCHING PATTERN "libonnxruntime.so*")
+endif()
 install(FILES packaging/org.betterflash.BetterFlash.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 foreach(icon_size IN LISTS BETTERFLASH_ICON_SIZES)
     install(FILES "packaging/icons/${icon_size}x${icon_size}/betterflash.png"
