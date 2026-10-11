@@ -406,48 +406,83 @@ Item {
                     ScrollBar.vertical: ScrollBar {}
                     onContentYChanged: if (ui.page === 1 && !ui.restoringDeck && !library.restoringSearchSelection) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
                     Component.onCompleted: Qt.callLater(function() { library.restoreScroll(ui.libraryScrollY) })
-                    delegate: ItemDelegate {
-                        id: cardRow; required property var modelData; required property int index; width: cardList.width; height: cardRow.modelData.groupStart ? 112 : 82
-                        highlighted: ui.selectedCardId === cardRow.modelData.id || cardList.activeFocus && cardList.currentIndex === cardRow.index
-                        onClicked: library.chooseCard(cardRow.index)
-                        onDoubleClicked: library.openCard(cardRow.modelData)
-                        contentItem: ColumnLayout {
-                            spacing: 5
+                    delegate: Item {
+                        id: cardRow
+                        required property var modelData
+                        required property int index
+                        readonly property int headingHeight: modelData.groupStart ? 44 : 0
+                        width: cardList.width
+                        height: headingHeight + 82
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            height: cardRow.headingHeight
+                            visible: cardRow.headingHeight > 0
+                            spacing: 12
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 16
+                                height: 1
+                                color: Theme.ledgerRule
+                            }
                             Label {
-                                visible: !!cardRow.modelData.groupStart
                                 textFormat: Text.PlainText
                                 text: cardRow.modelData.searchGroup || ""
-                                color: Theme.inkMuted
+                                color: Theme.ink
                                 font.family: Theme.monoFont
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.weight: Font.DemiBold
-                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: Math.max(0, cardRow.width - 72)
                                 ToolTip.visible: groupHover.hovered
                                 ToolTip.text: "Search layer: results are ordered from exact matches through semantic matches."
                                 HoverHandler { id: groupHover }
                             }
-                            Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
-                            RowLayout {
+                            Rectangle {
                                 Layout.fillWidth: true
-                                Label {
-                                    text: cardRow.modelData.kind === "reverse" ? "Both directions" : cardRow.modelData.kind === "cloze" ? "Cloze" : "Basic"
-                                    color: Theme.inkMuted
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 10
-                                }
-                                Item { Layout.fillWidth: true }
-                                Label {
-                                    textFormat: Text.PlainText
-                                    text: cardRow.modelData.tags || ""
-                                    color: Theme.inkMuted
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 10
-                                    elide: Text.ElideRight
-                                    Layout.maximumWidth: cardRow.width * 0.45
-                                }
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 16
+                                height: 1
+                                color: Theme.ledgerRule
                             }
                         }
-                        background: Rectangle { color: cardRow.highlighted || cardRow.hovered ? Theme.accentSoft : Theme.transparent; border.width: cardRow.highlighted ? 2 : 0; border.color: Theme.accent; Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.rule } }
+                        ItemDelegate {
+                            id: cardButton
+                            y: cardRow.headingHeight
+                            width: cardRow.width
+                            height: 82
+                            highlighted: ui.selectedCardId === cardRow.modelData.id || cardList.activeFocus && cardList.currentIndex === cardRow.index
+                            onClicked: library.chooseCard(cardRow.index)
+                            onDoubleClicked: library.openCard(cardRow.modelData)
+                            contentItem: ColumnLayout {
+                                spacing: 5
+                                Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: cardRow.modelData.kind === "reverse" ? "Both directions" : cardRow.modelData.kind === "cloze" ? "Cloze" : "Basic"
+                                        color: Theme.inkMuted
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 10
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Label {
+                                        textFormat: Text.PlainText
+                                        text: cardRow.modelData.tags || ""
+                                        color: Theme.inkMuted
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                        Layout.maximumWidth: cardRow.width * 0.45
+                                    }
+                                }
+                            }
+                            background: Rectangle { color: cardButton.highlighted || cardButton.hovered ? Theme.accentSoft : Theme.transparent; border.width: cardButton.highlighted ? 2 : 0; border.color: Theme.accent; Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.rule } }
+                        }
                     }
                     Keys.onReturnPressed: library.openCard(visibleCards[currentIndex])
                     Keys.onEnterPressed: library.openCard(visibleCards[currentIndex])
