@@ -96,6 +96,7 @@ public:
     Q_INVOKABLE void exportCollection(const QString &path);
     Q_INVOKABLE void importCollection(const QString &path);
     Q_INVOKABLE void loadExampleDeck();
+    Q_INVOKABLE void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
     Q_INVOKABLE void requestSyncBatch(const QString &requestId = {});
     Q_INVOKABLE void applySyncResponse(const QVariantMap &response);
 
@@ -112,6 +113,7 @@ signals:
     void syncBatchFailedForRequest(const QString &requestId,const QString &code,const QString &message);
     void syncResponseApplied(const QString &requestId,bool success,bool hasMore);
     void syncApplied(bool success, bool hasMore);
+    void cardTimelineReady(const QString &cardId, const QVariantMap &result);
 
 private:
     void invoke(const std::function<void(DatabaseWorker *)> &call);

@@ -128,11 +128,13 @@ bool DatabaseWorker::migrate()
             "CREATE INDEX IF NOT EXISTS variants_due ON review_variants(due)",
             "CREATE TABLE IF NOT EXISTS reviews(id TEXT PRIMARY KEY,card_id TEXT NOT NULL,variant_id TEXT NOT NULL,deck_name TEXT NOT NULL,grade INTEGER NOT NULL CHECK(grade BETWEEN 0 AND 4),recall_fraction REAL NOT NULL CHECK(recall_fraction BETWEEN 0 AND 1),response_seconds REAL NOT NULL CHECK(response_seconds BETWEEN 0 AND 86400),reviewed_at TEXT NOT NULL,due TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS reviews_time ON reviews(reviewed_at)",
+            "CREATE INDEX IF NOT EXISTS reviews_card_time ON reviews(card_id,reviewed_at)",
             "CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS sync_outbox(position INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,device_id TEXT NOT NULL,event_type TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,target_type TEXT NOT NULL,target_id TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS outbox_target ON sync_outbox(target_type,target_id)",
             "CREATE TABLE IF NOT EXISTS seen_events(id TEXT PRIMARY KEY,seq INTEGER NOT NULL DEFAULT 0)",
             "CREATE TABLE IF NOT EXISTS local_events(id TEXT PRIMARY KEY,target_type TEXT NOT NULL,target_id TEXT NOT NULL,event TEXT NOT NULL,echoed INTEGER NOT NULL DEFAULT 0)",
+            "CREATE INDEX IF NOT EXISTS local_events_target ON local_events(target_type,target_id)",
             "CREATE TABLE IF NOT EXISTS remote_pending(seq INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,event TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS entity_sequences(entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(entity_type,entity_id))",
             "CREATE TABLE IF NOT EXISTS tombstones(entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(entity_type,entity_id))"
@@ -1173,6 +1175,175 @@ void DatabaseWorker::importCollection(const QString &path)
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Collection imported; identical existing records preserved");
 }
+void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const QString &requestId)
+{
+    assertThread();
+    const auto makeError = [&](const QString &code, const QString &message, const QString &details = QString()) {
+        return QVariantMap{{"requestId", requestId}, {"offset", offset}, {"events", QVariantList{}}, {"totalEvents", 0}, {"hasMore", false}, {"nextOffset", 0},
+                           {"reviewCount", 0}, {"successfulCount", 0}, {"averageRecall", 0.0},
+                           {"averageSeconds", 0.0}, {"firstRecordedAt", QString()}, {"firstSavedAt", QString()},
+                           {"error", QVariantMap{{"code", code}, {"message", message}, {"details", details}}}};
+    };
+    m_sqlDetail.clear();
+    if (!m_db.isValid() || !m_db.isOpen()) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("STORAGE_UNAVAILABLE"), QStringLiteral("Could not load card history. Storage is unavailable.")));
+        return;
+    }
+    if (!model::validUuid(cardId)) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("CARD_ID_INVALID"), QStringLiteral("Choose a saved card to view its history.")));
+        return;
+    }
+    const auto timelineCard = card(cardId);
+    if (!timelineCard) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("CARD_NOT_FOUND"), QStringLiteral("This card is unavailable. Refresh the collection."), m_sqlDetail));
+        return;
+    }
+    QStringList timelineVariantKeys;
+    const auto keys = model::variantKeys(*timelineCard);
+    if (keys) timelineVariantKeys = *keys;
+    if (offset < 0 || offset > 1000000) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_OFFSET_INVALID"), QStringLiteral("The requested history page is invalid.")));
+        return;
+    }
+
+    struct TimelineEvent {
+        QString at;
+        QVariantMap value;
+    };
+    QList<struct TimelineEvent> events;
+    struct CardSnapshotEvent { qint64 rowId = 0; QString at; QString id; QVariantMap snapshot; };
+    QList<struct CardSnapshotEvent> snapshots;
+    QString firstSavedAt;
+    QString firstRecordedAt;
+    auto considerRecorded = [&](const QString &at) {
+        if (at.isEmpty()) return;
+        if (firstRecordedAt.isEmpty() || at < firstRecordedAt) firstRecordedAt = at;
+    };
+
+    QSqlQuery local(m_db);
+    local.prepare("SELECT rowid,id,event FROM local_events WHERE target_type='card' AND target_id=? ORDER BY rowid");
+    local.addBindValue(cardId);
+    if (!local.exec()) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_READ"), QStringLiteral("Could not load the card timeline. Refresh and try again."), local.lastError().text()));
+        return;
+    }
+    QVariantMap previousCard;
+    bool hasPreviousCard = false;
+    while (local.next()) {
+        const QJsonDocument document = QJsonDocument::fromJson(local.value(2).toString().toUtf8());
+        if (!document.isObject()) {
+            emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid saved event."), QStringLiteral("local_events row %1 is not a JSON object.").arg(local.value(0).toLongLong())));
+            return;
+        }
+        const QVariantMap envelope = document.object().toVariantMap();
+        const QString eventType = envelope.value("type").toString();
+        if (eventType == QStringLiteral("card.delete")) continue;
+        if (eventType != QStringLiteral("card.upsert")) {
+            emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an unsupported saved event."), eventType));
+            return;
+        }
+        const QVariantMap payload = envelope.value("payload").toMap();
+        const QVariantMap snapshot = payload.value("card").toMap();
+        const auto validSnapshot = model::cardFromMap(snapshot);
+        if (!validSnapshot || snapshot.value("id").toString() != cardId) {
+            emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid saved card snapshot."), validSnapshot ? QStringLiteral("The event targets a different card.") : validSnapshot.error()));
+            return;
+        }
+        const QString at = envelope.value("createdAt").toString();
+        if (!model::utcInstant(at)) {
+            emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid event timestamp."), at));
+            return;
+        }
+        snapshots.append({local.value(0).toLongLong(), at, local.value(1).toString(), snapshot});
+    }
+    std::sort(snapshots.begin(), snapshots.end(), [](const struct CardSnapshotEvent &left, const struct CardSnapshotEvent &right) {
+        if (left.at != right.at) return left.at < right.at;
+        return left.rowId < right.rowId;
+    });
+    for (const struct CardSnapshotEvent &saved : snapshots) {
+        const QVariantMap &snapshot = saved.snapshot;
+        considerRecorded(saved.at);
+        const bool contentChanged = !hasPreviousCard
+            || snapshot.value("kind") != previousCard.value("kind")
+            || snapshot.value("front") != previousCard.value("front")
+            || snapshot.value("back") != previousCard.value("back")
+            || snapshot.value("tags") != previousCard.value("tags")
+            || snapshot.value("pointCount") != previousCard.value("pointCount");
+        if (contentChanged) {
+            const QString kind = hasPreviousCard ? QStringLiteral("modified") : QStringLiteral("saved");
+            if (firstSavedAt.isEmpty()) firstSavedAt = saved.at;
+            events.append({saved.at, {{"id", saved.id}, {"kind", kind}, {"at", saved.at}, {"variantId", QString()}}});
+        }
+        previousCard = snapshot;
+        hasPreviousCard = true;
+    }
+
+    const int pageSize = 100;
+    const int lifecycleCount = events.size();
+    QSqlQuery reviewStats(m_db);
+    reviewStats.prepare("SELECT COUNT(*),COALESCE(SUM(CASE WHEN grade>=2 THEN 1 ELSE 0 END),0),COALESCE(AVG(recall_fraction),0),COALESCE(AVG(response_seconds),0),COALESCE(MIN(reviewed_at),'') FROM reviews WHERE card_id=?");
+    reviewStats.addBindValue(cardId);
+    if (!reviewStats.exec() || !reviewStats.next()) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_READ"), QStringLiteral("Could not load the card timeline. Refresh and try again."), reviewStats.lastError().text()));
+        return;
+    }
+    const int reviewCount = reviewStats.value(0).toInt();
+    const int successfulCount = reviewStats.value(1).toInt();
+    const double averageRecall = reviewStats.value(2).toDouble();
+    const double averageSeconds = reviewStats.value(3).toDouble();
+    const QString earliestReviewAt = reviewStats.value(4).toString();
+    if (!earliestReviewAt.isEmpty() && !model::utcInstant(earliestReviewAt)) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid review timestamp."), earliestReviewAt));
+        return;
+    }
+    considerRecorded(earliestReviewAt);
+    QSqlQuery reviews(m_db);
+    reviews.prepare("SELECT id,variant_id,grade,recall_fraction,response_seconds,reviewed_at FROM reviews WHERE card_id=? ORDER BY reviewed_at DESC,id DESC LIMIT ?");
+    reviews.addBindValue(cardId);
+    reviews.addBindValue(offset + pageSize);
+    if (!reviews.exec()) {
+        emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_READ"), QStringLiteral("Could not load the card timeline. Refresh and try again."), reviews.lastError().text()));
+        return;
+    }
+    while (reviews.next()) {
+        const QString at = reviews.value(5).toString();
+        if (!model::utcInstant(at)) {
+            emit cardTimelineReady(cardId, makeError(QStringLiteral("TIMELINE_DATA"), QStringLiteral("Card history contains an invalid review timestamp."), at));
+            return;
+        }
+        const int grade = reviews.value(2).toInt();
+        const double recall = reviews.value(3).toDouble();
+        const double seconds = reviews.value(4).toDouble();
+        considerRecorded(at);
+        const QString variantId = reviews.value(1).toString();
+        QString variantKey;
+        for (const QString &key : timelineVariantKeys) if (model::variantId(cardId, key) == variantId) { variantKey = key; break; }
+        events.append({at, {{"id", reviews.value(0).toString()}, {"kind", QStringLiteral("review")}, {"at", at},
+                            {"grade", grade}, {"recallFraction", recall}, {"responseSeconds", seconds},
+                            {"variantId", variantId}, {"variantKey", variantKey}}});
+    }
+
+    std::sort(events.begin(), events.end(), [](const struct TimelineEvent &left, const struct TimelineEvent &right) {
+        if (left.at != right.at) return left.at > right.at;
+        return left.value.value("id").toString() > right.value.value("id").toString();
+    });
+    const int totalEvents = lifecycleCount + reviewCount;
+    const int pageStart = std::min(offset, totalEvents);
+    const int pageEnd = std::min(pageStart + pageSize, totalEvents);
+    QVariantList page;
+    if (pageStart < events.size()) {
+        const int safePageEnd = std::min(pageEnd, static_cast<int>(events.size()));
+        for (int index = safePageEnd - 1; index >= pageStart; --index) page.append(events.at(index).value);
+    }
+    const int nextOffset = std::min(offset + static_cast<int>(page.size()), totalEvents);
+    const QVariantMap result{{"requestId", requestId}, {"offset", offset}, {"events", page}, {"totalEvents", totalEvents}, {"hasMore", nextOffset < totalEvents},
+                             {"nextOffset", nextOffset}, {"reviewCount", reviewCount},
+                             {"successfulCount", successfulCount}, {"averageRecall", averageRecall},
+                             {"averageSeconds", averageSeconds},
+                             {"firstRecordedAt", firstRecordedAt}, {"firstSavedAt", firstSavedAt}, {"error", QVariantMap{}}};
+    emit cardTimelineReady(cardId, result);
+}
+
 void DatabaseWorker::loadExample()
 {
     if (!ready()) return;

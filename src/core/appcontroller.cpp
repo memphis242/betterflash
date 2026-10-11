@@ -26,6 +26,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::syncBatchFailedForRequest,this,&AppController::syncBatchFailedForRequest);
     connect(m_worker,&DatabaseWorker::syncResponseApplied,this,&AppController::syncResponseApplied);
     connect(m_worker,&DatabaseWorker::syncApplied,this,&AppController::syncApplied);
+    connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
     connect(&m_elapsedTick,&QTimer::timeout,this,&AppController::updateElapsed);
@@ -235,6 +236,16 @@ void AppController::exportCollection(const QString &path)
 void AppController::importCollection(const QString &path)
 {invoke([=](DatabaseWorker *worker){worker->importCollection(path);});}
 void AppController::loadExampleDeck() {invoke([](DatabaseWorker *worker){worker->loadExample();});}
+void AppController::loadCardTimeline(const QString &cardId, int offset, const QString &requestId)
+{
+    const QString requestedId=cardId;
+    const int requestedOffset=offset;
+    const QString requestedRequestId=requestId;
+    const bool queued=QMetaObject::invokeMethod(m_worker,[worker=m_worker,requestedId,requestedOffset,requestedRequestId]{
+        worker->loadCardTimeline(requestedId,requestedOffset,requestedRequestId);
+    },Qt::QueuedConnection);
+    if (!queued) emit cardTimelineReady(requestedId,{{"requestId",requestedRequestId},{"offset",requestedOffset},{"events",QVariantList{}},{"totalEvents",0},{"hasMore",false},{"nextOffset",0},{"reviewCount",0},{"successfulCount",0},{"averageRecall",0.0},{"averageSeconds",0.0},{"firstRecordedAt",QString()},{"firstSavedAt",QString()},{"error",QVariantMap{{"code","WORKER_UNAVAILABLE"},{"message","Could not load card history. Restart the application."},{"details",QString()}}}});
+}
 void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history)
 {
     m_decks=decks;m_cards=cards;m_history=history;
