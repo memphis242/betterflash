@@ -33,6 +33,23 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "expand-tree":
+        case "collapse-tree": {
+            const expand = kind === "expand-tree"
+            c.moveTo(3, 3); c.lineTo(3, 15); c.lineTo(7, 15)
+            c.moveTo(3, 6); c.lineTo(7, 6)
+            for (const y of [5, 13]) {
+                c.moveTo(10, y); c.lineTo(16, y)
+                if (expand) { c.moveTo(13, y - 3); c.lineTo(13, y + 3) }
+            }
+            break
+        }
+        case "subdeck-add":
+            c.moveTo(2, 2); c.lineTo(2, 10); c.lineTo(6, 10)
+            roundedRect(7, 6, 9, 10, 1.2)
+            c.moveTo(9, 11); c.lineTo(14, 11)
+            c.moveTo(11.5, 8.5); c.lineTo(11.5, 13.5)
+            break
         case "review-flip":
             roundedRect(3, 6, 12, 10, 1.5)
             c.moveTo(6, 10)
