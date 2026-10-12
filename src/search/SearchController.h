@@ -6,9 +6,11 @@
 #include <QPointer>
 #include <QSaveFile>
 #include <QSettings>
+#include <QSet>
 #include <QThread>
 #include <QTimer>
 #include <QVariantList>
+#include <array>
 #include <atomic>
 #include <memory>
 
@@ -21,6 +23,10 @@ class QNetworkReply;
 class SearchController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList results READ results NOTIFY resultsChanged)
+    Q_PROPERTY(QVariantList deckResults READ deckResults NOTIFY deckResultsChanged)
+    Q_PROPERTY(bool deckBusy READ deckBusy NOTIFY deckChanged)
+    Q_PROPERTY(QString deckStatus READ deckStatus NOTIFY deckChanged)
+    Q_PROPERTY(QString deckError READ deckError NOTIFY deckChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
@@ -40,10 +46,14 @@ class SearchController final : public QObject {
 public:
     explicit SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent = nullptr);
     ~SearchController() override;
-    QVariantList results() const { return m_results; }
-    bool busy() const { return m_busy; }
-    QString status() const { return m_status; }
-    QString error() const { return m_error; }
+    QVariantList results() const { return m_channels[0].results; }
+    bool busy() const { return m_channels[0].busy; }
+    QString status() const { return m_channels[0].status; }
+    QString error() const { return m_channels[0].error; }
+    QVariantList deckResults() const { return m_channels[1].results; }
+    bool deckBusy() const { return m_channels[1].busy; }
+    QString deckStatus() const { return m_channels[1].status; }
+    QString deckError() const { return m_channels[1].error; }
     bool semanticEnabled() const { return m_enabled; }
     QString provider() const { return m_provider; }
     QString localProfile() const { return m_profile; }
@@ -62,6 +72,10 @@ public:
     void setLocalProfile(const QString &profile);
     Q_INVOKABLE void setSearch(const QString &deckId, const QString &query);
     Q_INVOKABLE void setActive(bool active);
+    Q_INVOKABLE void setCardFilter(const QVariantList &cardIds, bool enabled);
+    Q_INVOKABLE void setDeckSearch(const QString &query);
+    Q_INVOKABLE void setDeckSearchActive(bool active);
+    Q_INVOKABLE void retryDeckSearch();
     Q_INVOKABLE void prepareModel();
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void retry();
@@ -72,14 +86,41 @@ signals:
     void resultsAboutToChange();
     void resultsChanged();
     void changed();
+    void deckResultsChanged();
+    void deckChanged();
 private:
-    void restart(bool clearResults = false);
-    void runSearch();
-    void runSemantic();
-    void publish();
-    void setFailure(const QString &message);
-    void abortRemote();
-    void requestRemote(quint64 epoch, const QStringList &texts);
+    struct QueryState {
+        const std::shared_ptr<std::atomic<quint64>> epoch = std::make_shared<std::atomic<quint64>>(0);
+        QTimer debounce;
+        QTimer semanticDelay;
+        QPointer<QNetworkReply> remoteReply;
+        QByteArray remoteBody;
+        QString deck;
+        QString query;
+        QHash<QString, QVariantMap> cards;
+        QVariantList literal;
+        QVariantList fuzzy;
+        QVariantList semantic;
+        QVariantList results;
+        bool active = false;
+        bool busy = false;
+        bool lexicalComplete = false;
+        bool semanticStarted = false;
+        QString status;
+        QString error;
+    };
+    struct QueryState &state(int channel);
+    void notify(int channel);
+    void restart(int channel, bool clearResults = false);
+    void restartAll(bool clearResults = false);
+    void runSearch(int channel);
+    void runSemantic(int channel);
+    void publish(int channel);
+    void setFailure(const QString &message, int channel = 0);
+    void setSharedFailure(const QString &message);
+    void setDownloadStatus(const QString &message);
+    void abortRemote(int channel);
+    void requestRemote(int channel, quint64 epoch, const QStringList &texts);
     void configureCredentials();
     QString modelDirectory() const;
     void downloadNext();
@@ -90,31 +131,16 @@ private:
     SecretStore *m_credentials = nullptr;
     QSettings m_settings;
     const QString m_modelRoot;
-    const std::shared_ptr<std::atomic<quint64>> m_epoch;
+    std::array<struct QueryState, 2> m_channels;
     QThread m_thread;
     SearchWorker *m_worker = nullptr;
-    QTimer m_debounce;
-    QTimer m_semanticDelay;
     QNetworkAccessManager m_network;
-    QPointer<QNetworkReply> m_remoteReply;
     QPointer<QNetworkReply> m_downloadReply;
-    QByteArray m_remoteBody;
-    QString m_deck;
-    QString m_query;
-    QHash<QString, QVariantMap> m_cards;
-    QVariantList m_literal;
-    QVariantList m_fuzzy;
-    QVariantList m_semantic;
-    QVariantList m_results;
-    bool m_active = false;
-    bool m_busy = false;
+    QSet<QString> m_cardFilter;
+    bool m_cardFilterEnabled = false;
     bool m_enabled = true;
     bool m_downloading = false;
     bool m_downloadCanceled = false;
-    bool m_lexicalComplete = false;
-    bool m_semanticStarted = false;
-    QString m_status;
-    QString m_error;
     QString m_provider;
     QString m_profile;
     QString m_endpoint;

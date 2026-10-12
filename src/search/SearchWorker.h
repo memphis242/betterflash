@@ -2,57 +2,68 @@
 
 #include "LocalEmbedder.h"
 #include "SearchText.h"
+#include <QCache>
 #include <QObject>
 #include <QSqlDatabase>
 #include <QSet>
+#include <array>
 #include <atomic>
 #include <memory>
 
 class SearchWorker final : public QObject {
     Q_OBJECT
 public:
-    explicit SearchWorker(QString cachePath, std::shared_ptr<std::atomic<quint64>> epoch);
+    static constexpr int channelCount = 2;
+    using Epochs = std::array<std::shared_ptr<std::atomic<quint64>>, channelCount>;
+    explicit SearchWorker(QString cachePath, Epochs epochs);
     ~SearchWorker() override;
-    void search(quint64 epoch, const QVariantList &cards, const QVariantList &decks,
+    void search(int channel, quint64 epoch, const QVariantList &cards, const QVariantList &decks,
                 const QString &deck, const QString &query);
-    void semantic(quint64 epoch, const QString &profile, const QString &directory,
+    void semantic(int channel, quint64 epoch, const QString &profile, const QString &directory,
                   const QString &scope, bool remote);
-    void acceptRemote(quint64 epoch, const QVariantList &vectors);
-    void clearCache(quint64 epoch);
+    void acceptRemote(int channel, quint64 epoch, const QVariantList &vectors);
+    void clearCache();
 signals:
-    void literalReady(quint64 epoch, const QVariantList &hits);
-    void fuzzyReady(quint64 epoch, const QVariantList &hits);
-    void semanticReady(quint64 epoch, const QVariantList &hits);
-    void progress(quint64 epoch, int completed, int total);
-    void remoteNeeded(quint64 epoch, const QStringList &texts);
-    void failed(quint64 epoch, const QString &error);
+    void literalReady(int channel, quint64 epoch, const QVariantList &hits);
+    void fuzzyReady(int channel, quint64 epoch, const QVariantList &hits);
+    void semanticReady(int channel, quint64 epoch, const QVariantList &hits);
+    void progress(int channel, quint64 epoch, int completed, int total);
+    void remoteNeeded(int channel, quint64 epoch, const QStringList &texts);
+    void failed(int channel, quint64 epoch, const QString &error);
 private:
     struct Job { QString key; QString text; bool query = false; };
-    bool current(quint64 epoch) const;
+    struct QueryState {
+        quint64 epoch = 0;
+        QString query;
+        QString scope;
+        QString queryKey;
+        QString profile;
+        QString directory;
+        QList<struct betterflash::search::SearchDocument> documents;
+        QSet<QString> textMatchIds;
+        QList<struct Job> jobs;
+        QList<struct Job> inFlight;
+        QHash<QString, QStringList> documentKeys;
+        QHash<QString, QVector<float>> vectors;
+        int completed = 0;
+        int total = 0;
+    };
+    struct QueryState &state(int channel);
+    bool current(int channel, quint64 epoch) const;
     bool openCache();
-    QVector<float> cached(const QString &key);
-    bool save(const QString &key, const QVector<float> &vector);
+    QVector<float> cached(const QString &scope, const QString &key, QString &error);
+    bool save(const QString &scope, const QString &key, const QVector<float> &vector);
     bool pruneCache();
-    void nextRemote();
-    void finish();
+    void localStep(int channel, quint64 epoch);
+    void nextRemote(int channel, quint64 epoch);
+    void finish(int channel, quint64 epoch);
     const QString m_cachePath;
-    const std::shared_ptr<std::atomic<quint64>> m_currentEpoch;
-    quint64 m_epoch = 0;
-    QString m_query;
-    QString m_scope;
-    QString m_queryKey;
+    const Epochs m_currentEpochs;
+    std::array<struct QueryState, channelCount> m_states;
     QString m_loadedProfile;
     QString m_loadedDirectory;
     QSqlDatabase m_cache;
-    QList<struct betterflash::search::SearchDocument> m_documents;
-    QSet<QString> m_textMatchIds;
-    QList<struct Job> m_jobs;
-    QList<struct Job> m_inFlight;
-    QHash<QString, QStringList> m_documentKeys;
-    QHash<QString, QVector<float>> m_vectors;
+    QCache<QString, QVector<float>> m_memoryCache{32 * 1024 * 1024};
     std::unique_ptr<LocalEmbedder> m_embedder;
-    int m_completed = 0;
-    int m_total = 0;
-    QString m_cacheError;
     int m_cacheWrites = 0;
 };

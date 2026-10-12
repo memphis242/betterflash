@@ -38,39 +38,48 @@ QStringList chunks(const QString &text) {
 }
 }
 
-SearchWorker::SearchWorker(QString cachePath, std::shared_ptr<std::atomic<quint64>> epoch)
-    : m_cachePath(std::move(cachePath)), m_currentEpoch(std::move(epoch)) {}
+SearchWorker::SearchWorker(QString cachePath, Epochs epochs)
+    : m_cachePath(std::move(cachePath)), m_currentEpochs(std::move(epochs)) {
+    for (const auto &epoch : m_currentEpochs) Q_ASSERT(epoch);
+}
 SearchWorker::~SearchWorker() {
     const QString name = m_cache.connectionName();
     if (m_cache.isValid()) m_cache.close();
     m_cache = QSqlDatabase();
     if (!name.isEmpty()) QSqlDatabase::removeDatabase(name);
 }
-bool SearchWorker::current(quint64 epoch) const { return m_currentEpoch->load() == epoch; }
-
-void SearchWorker::search(quint64 epoch, const QVariantList &cards, const QVariantList &decks,
-                          const QString &deck, const QString &query) {
+struct SearchWorker::QueryState &SearchWorker::state(int channel) {
+    Q_ASSERT(channel >= 0 && channel < channelCount);
     Q_ASSERT(QThread::currentThread() == thread());
-    if (!current(epoch)) return;
-    m_epoch = epoch;
-    m_query = betterflash::search::normalizedQuery(query);
-    m_documents = betterflash::search::documents(cards, decks, deck);
-    m_jobs.clear(); m_inFlight.clear(); m_vectors.clear(); m_documentKeys.clear();
-    if (!current(epoch)) return;
-    const auto literal = betterflash::search::literalMatches(m_documents, m_query);
-    m_textMatchIds.clear();
-    for (const struct betterflash::search::SearchHit &hit : literal) m_textMatchIds.insert(hit.id);
-    emit literalReady(epoch, hitMaps(literal));
+    return m_states[channel];
+}
+bool SearchWorker::current(int channel, quint64 epoch) const {
+    Q_ASSERT(channel >= 0 && channel < channelCount);
+    return m_currentEpochs[channel]->load() == epoch;
+}
+
+void SearchWorker::search(int channel, quint64 epoch, const QVariantList &cards, const QVariantList &decks,
+                          const QString &deck, const QString &query) {
+    if (!current(channel, epoch)) return;
+    struct QueryState &work = state(channel);
+    work = QueryState{};
+    work.epoch = epoch;
+    work.query = betterflash::search::normalizedQuery(query);
+    work.documents = betterflash::search::documents(cards, decks, deck);
+    if (!current(channel, epoch)) return;
+    const auto literal = betterflash::search::literalMatches(work.documents, work.query);
+    for (const struct betterflash::search::SearchHit &hit : literal) work.textMatchIds.insert(hit.id);
+    emit literalReady(channel, epoch, hitMaps(literal));
     QList<struct betterflash::search::SearchHit> fuzzy;
-    for (const struct betterflash::search::SearchDocument &doc : m_documents) {
-        if (!current(epoch)) return;
-        fuzzy.append(betterflash::search::fuzzyMatches({doc}, m_query));
+    for (const struct betterflash::search::SearchDocument &doc : work.documents) {
+        if (!current(channel, epoch)) return;
+        fuzzy.append(betterflash::search::fuzzyMatches({doc}, work.query));
     }
     std::stable_sort(fuzzy.begin(), fuzzy.end(), [](const auto &a, const auto &b) {
         return a.score != b.score ? a.score > b.score : a.id < b.id;
     });
-    for (const struct betterflash::search::SearchHit &hit : fuzzy) m_textMatchIds.insert(hit.id);
-    if (current(epoch)) emit fuzzyReady(epoch, hitMaps(fuzzy));
+    for (const struct betterflash::search::SearchHit &hit : fuzzy) work.textMatchIds.insert(hit.id);
+    if (current(channel, epoch)) emit fuzzyReady(channel, epoch, hitMaps(fuzzy));
 }
 
 bool SearchWorker::openCache() {
@@ -100,20 +109,29 @@ bool SearchWorker::pruneCache() {
     }
     return true;
 }
-void SearchWorker::clearCache(quint64 epoch) {
-    if (!current(epoch)) return;
-    if (!openCache()) { emit failed(epoch, QStringLiteral("SEARCH_CACHE_OPEN: Cannot rebuild the search cache. Check storage access.")); return; }
-    QSqlQuery query(m_cache);
-    if (!query.exec(QStringLiteral("DELETE FROM embeddings")) || !query.exec(QStringLiteral("VACUUM"))) {
-        emit failed(epoch, QStringLiteral("SEARCH_CACHE_CLEAR: Cannot clear the search cache. Close other BetterFlash windows and retry.")); return;
+void SearchWorker::clearCache() {
+    Q_ASSERT(QThread::currentThread() == thread());
+    m_memoryCache.clear();
+    for (struct QueryState &work : m_states) work = QueryState{};
+    QString error;
+    if (!openCache()) error = QStringLiteral("SEARCH_CACHE_OPEN: Cannot rebuild the search cache. Check storage access.");
+    else {
+        QSqlQuery query(m_cache);
+        if (!query.exec(QStringLiteral("DELETE FROM embeddings")) || !query.exec(QStringLiteral("VACUUM")))
+            error = QStringLiteral("SEARCH_CACHE_CLEAR: Cannot clear the search cache. Close other BetterFlash windows and retry.");
     }
-    m_vectors.clear(); m_jobs.clear(); m_inFlight.clear();
+    if (!error.isEmpty()) {
+        for (int channel = 0; channel < channelCount; ++channel)
+            emit failed(channel, m_currentEpochs[channel]->load(), error);
+    }
 }
-QVector<float> SearchWorker::cached(const QString &key) {
+QVector<float> SearchWorker::cached(const QString &scope, const QString &key, QString &error) {
+    const QString memoryKey = scope + QLatin1Char('\n') + key;
+    if (const auto *vector = m_memoryCache.object(memoryKey)) return *vector;
     QSqlQuery query(m_cache);
     query.prepare(QStringLiteral("SELECT vector FROM embeddings WHERE scope=? AND key=?"));
-    query.addBindValue(m_scope); query.addBindValue(key);
-    if (!query.exec()) { m_cacheError = QStringLiteral("SEARCH_CACHE_READ: Cannot read the embedding cache. Check storage access and retry."); return {}; }
+    query.addBindValue(scope); query.addBindValue(key);
+    if (!query.exec()) { error = QStringLiteral("SEARCH_CACHE_READ: Cannot read the embedding cache. Check storage access and retry."); return {}; }
     if (!query.next()) return {};
     const QByteArray bytes = query.value(0).toByteArray();
     if (bytes.size() < 8 || bytes.size() > 65540) return {};
@@ -126,9 +144,10 @@ QVector<float> SearchWorker::cached(const QString &key) {
     double norm = 0;
     for (float &value : result) { input >> value; if (!std::isfinite(value)) return {}; norm += double(value) * value; }
     if (input.status() != QDataStream::Ok || std::abs(norm - 1) > 0.01) return {};
+    m_memoryCache.insert(memoryKey, new QVector<float>(result), int(result.size() * sizeof(float)));
     return result;
 }
-bool SearchWorker::save(const QString &key, const QVector<float> &vector) {
+bool SearchWorker::save(const QString &scope, const QString &key, const QVector<float> &vector) {
     QByteArray bytes;
     QDataStream output(&bytes, QIODevice::WriteOnly);
     output.setByteOrder(QDataStream::LittleEndian);
@@ -137,109 +156,137 @@ bool SearchWorker::save(const QString &key, const QVector<float> &vector) {
     for (const float value : vector) output << value;
     QSqlQuery query(m_cache);
     query.prepare(QStringLiteral("INSERT OR REPLACE INTO embeddings(scope,key,vector) VALUES(?,?,?)"));
-    query.addBindValue(m_scope); query.addBindValue(key); query.addBindValue(bytes);
+    query.addBindValue(scope); query.addBindValue(key); query.addBindValue(bytes);
     if (!query.exec()) return false;
+    m_memoryCache.insert(scope + QLatin1Char('\n') + key, new QVector<float>(vector), int(vector.size() * sizeof(float)));
     return ++m_cacheWrites % 128 != 0 || pruneCache();
 }
 
-void SearchWorker::semantic(quint64 epoch, const QString &profile, const QString &directory,
+void SearchWorker::semantic(int channel, quint64 epoch, const QString &profile, const QString &directory,
                             const QString &scope, bool remote) {
-    if (!current(epoch) || m_epoch != epoch || m_documents.isEmpty()) {
-        if (current(epoch)) emit semanticReady(epoch, {});
+    if (!current(channel, epoch)) return;
+    struct QueryState &work = state(channel);
+    if (work.epoch != epoch || work.documents.isEmpty()) {
+        emit semanticReady(channel, epoch, {});
         return;
     }
-    m_scope = scope;
-    m_jobs.clear(); m_inFlight.clear(); m_vectors.clear(); m_documentKeys.clear(); m_cacheError.clear();
-    if (!openCache()) { emit failed(epoch, QStringLiteral("SEARCH_CACHE_OPEN: Cannot open the embedding cache. Check free space and storage permissions, then retry.")); return; }
-    const auto enqueue = [this](const QString &text, bool query) {
+    work.scope = scope; work.profile = profile; work.directory = directory;
+    work.jobs.clear(); work.inFlight.clear(); work.vectors.clear(); work.documentKeys.clear();
+    if (!openCache()) { emit failed(channel, epoch, QStringLiteral("SEARCH_CACHE_OPEN: Cannot open the embedding cache. Check free space and storage permissions, then retry.")); return; }
+    QString cacheError;
+    const auto enqueue = [this, &work, &cacheError](const QString &text, bool query) {
         const QString key = hash((query ? QStringLiteral("query-v1:") : QStringLiteral("document-v1:")) + text);
-        if (!m_vectors.contains(key)) {
-            const auto vector = cached(key);
-            m_vectors.insert(key, vector);
-            if (vector.isEmpty()) m_jobs.append(Job{key, text, query});
+        if (!work.vectors.contains(key)) {
+            const auto vector = cached(work.scope, key, cacheError);
+            work.vectors.insert(key, vector);
+            if (vector.isEmpty()) work.jobs.append(Job{key, text, query});
         }
         return key;
     };
-    m_queryKey = enqueue(m_query, true);
-    for (const struct betterflash::search::SearchDocument &doc : m_documents) {
-        if (!current(epoch)) return;
+    work.queryKey = enqueue(work.query, true);
+    for (const struct betterflash::search::SearchDocument &doc : work.documents) {
+        if (!current(channel, epoch)) return;
         QStringList keys;
         for (const QString &text : chunks(doc.embeddingText)) keys.append(enqueue(text, false));
-        m_documentKeys.insert(doc.id, keys);
+        work.documentKeys.insert(doc.id, keys);
     }
-    if (!m_cacheError.isEmpty()) { emit failed(epoch, m_cacheError); return; }
-    m_total = m_jobs.size(); m_completed = 0;
-    emit progress(epoch, 0, m_total);
-    if (remote) { nextRemote(); return; }
-    if (!m_jobs.isEmpty()) {
-        if (!m_embedder || m_loadedProfile != profile || m_loadedDirectory != directory) {
-            m_embedder = std::make_unique<LocalEmbedder>();
-            const auto loaded = m_embedder->load(directory, profile);
-            if (!loaded) { m_embedder.reset(); emit failed(epoch, loaded.error()); return; }
-            m_loadedProfile = profile; m_loadedDirectory = directory;
-        }
-        for (const struct Job &job : std::as_const(m_jobs)) {
-            if (!current(epoch)) return;
-            const auto encoded = m_embedder->encode(job.text, job.query);
-            if (!encoded) { emit failed(epoch, encoded.error()); return; }
-            if (!save(job.key, *encoded)) { emit failed(epoch, QStringLiteral("SEARCH_CACHE_WRITE: Cannot save embeddings. Check free space and retry.")); return; }
-            m_vectors.insert(job.key, *encoded);
-            emit progress(epoch, ++m_completed, m_total);
-        }
-    }
-    if (current(epoch)) finish();
+    if (!cacheError.isEmpty()) { emit failed(channel, epoch, cacheError); return; }
+    work.total = work.jobs.size(); work.completed = 0;
+    emit progress(channel, epoch, 0, work.total);
+    if (remote) nextRemote(channel, epoch);
+    else localStep(channel, epoch);
 }
 
-void SearchWorker::nextRemote() {
-    if (!current(m_epoch)) return;
-    if (m_jobs.isEmpty()) { finish(); return; }
-    m_inFlight.clear();
-    QStringList texts;
-    while (!m_jobs.isEmpty() && m_inFlight.size() < 8) {
-        const struct Job job = m_jobs.takeFirst();
-        m_inFlight.append(job); texts.append(job.text);
+void SearchWorker::localStep(int channel, quint64 epoch) {
+    if (!current(channel, epoch)) return;
+    struct QueryState &work = state(channel);
+    if (work.epoch != epoch) return;
+    if (work.jobs.isEmpty()) { finish(channel, epoch); return; }
+    const struct Job job = work.jobs.takeFirst();
+    QString cacheError;
+    auto vector = cached(work.scope, job.key, cacheError);
+    if (!cacheError.isEmpty()) { emit failed(channel, epoch, cacheError); return; }
+    if (vector.isEmpty()) {
+        if (!m_embedder || m_loadedProfile != work.profile || m_loadedDirectory != work.directory) {
+            m_embedder = std::make_unique<LocalEmbedder>();
+            const auto loaded = m_embedder->load(work.directory, work.profile);
+            if (!loaded) { m_embedder.reset(); emit failed(channel, epoch, loaded.error()); return; }
+            m_loadedProfile = work.profile; m_loadedDirectory = work.directory;
+        }
+        if (!current(channel, epoch)) return;
+        const auto encoded = m_embedder->encode(job.text, job.query);
+        if (!encoded) { emit failed(channel, epoch, encoded.error()); return; }
+        vector = *encoded;
+        if (!save(work.scope, job.key, vector)) { emit failed(channel, epoch, QStringLiteral("SEARCH_CACHE_WRITE: Cannot save embeddings. Check free space and retry.")); return; }
     }
-    emit remoteNeeded(m_epoch, texts);
+    work.vectors.insert(job.key, vector);
+    emit progress(channel, epoch, ++work.completed, work.total);
+    // One passage per event-loop turn keeps both search channels responsive.
+    QMetaObject::invokeMethod(this, [this, channel, epoch] { localStep(channel, epoch); }, Qt::QueuedConnection);
 }
-void SearchWorker::acceptRemote(quint64 epoch, const QVariantList &vectors) {
-    if (!current(epoch) || m_epoch != epoch) return;
-    if (vectors.size() != m_inFlight.size()) { emit failed(epoch, QStringLiteral("SEARCH_RESPONSE: The provider returned an unexpected number of embeddings. Check model compatibility.")); return; }
-    int dimensions = m_vectors.value(m_queryKey).size();
+
+void SearchWorker::nextRemote(int channel, quint64 epoch) {
+    if (!current(channel, epoch)) return;
+    struct QueryState &work = state(channel);
+    if (work.epoch != epoch) return;
+    work.inFlight.clear();
+    QStringList texts;
+    QString cacheError;
+    while (!work.jobs.isEmpty() && work.inFlight.size() < 8) {
+        const struct Job job = work.jobs.takeFirst();
+        const auto vector = cached(work.scope, job.key, cacheError);
+        if (!cacheError.isEmpty()) { emit failed(channel, epoch, cacheError); return; }
+        if (!vector.isEmpty()) { work.vectors.insert(job.key, vector); ++work.completed; continue; }
+        work.inFlight.append(job); texts.append(job.text);
+    }
+    emit progress(channel, epoch, work.completed, work.total);
+    if (texts.isEmpty()) { finish(channel, epoch); return; }
+    emit remoteNeeded(channel, epoch, texts);
+}
+void SearchWorker::acceptRemote(int channel, quint64 epoch, const QVariantList &vectors) {
+    if (!current(channel, epoch)) return;
+    struct QueryState &work = state(channel);
+    if (work.epoch != epoch) return;
+    if (vectors.size() != work.inFlight.size()) { emit failed(channel, epoch, QStringLiteral("SEARCH_RESPONSE: The provider returned an unexpected number of embeddings. Check model compatibility.")); return; }
+    int dimensions = work.vectors.value(work.queryKey).size();
     for (qsizetype i = 0; i < vectors.size(); ++i) {
         const QVariantList values = vectors[i].toList();
         if (values.isEmpty() || values.size() > 16384 || (dimensions && values.size() != dimensions)) {
-            emit failed(epoch, QStringLiteral("SEARCH_DIMENSIONS: Embedding dimensions do not match. Use one compatible embedding model and retry.")); return;
+            emit failed(channel, epoch, QStringLiteral("SEARCH_DIMENSIONS: Embedding dimensions do not match. Use one compatible embedding model and retry.")); return;
         }
         dimensions = values.size();
         QVector<float> vector; vector.reserve(dimensions);
         double norm = 0;
         for (const QVariant &value : values) {
             bool ok = false; const double number = value.toDouble(&ok);
-            if (!ok || !std::isfinite(number) || std::abs(number) > 1e10) { emit failed(epoch, QStringLiteral("SEARCH_VECTOR: Provider returned an invalid embedding.")); return; }
+            if (!ok || !std::isfinite(number) || std::abs(number) > 1e10) { emit failed(channel, epoch, QStringLiteral("SEARCH_VECTOR: Provider returned an invalid embedding.")); return; }
             vector.append(float(number)); norm += number * number;
         }
-        if (norm <= 1e-20) { emit failed(epoch, QStringLiteral("SEARCH_VECTOR: Provider returned an empty embedding.")); return; }
+        if (norm <= 1e-20) { emit failed(channel, epoch, QStringLiteral("SEARCH_VECTOR: Provider returned an empty embedding.")); return; }
         const double scale = std::sqrt(norm);
         for (float &value : vector) value = float(value / scale);
-        const QString key = m_inFlight[i].key;
-        if (!save(key, vector)) { emit failed(epoch, QStringLiteral("SEARCH_CACHE_WRITE: Cannot save embeddings. Check free space and retry.")); return; }
-        m_vectors.insert(key, vector);
+        const QString key = work.inFlight[i].key;
+        if (!save(work.scope, key, vector)) { emit failed(channel, epoch, QStringLiteral("SEARCH_CACHE_WRITE: Cannot save embeddings. Check free space and retry.")); return; }
+        work.vectors.insert(key, vector);
     }
-    m_completed += vectors.size();
-    emit progress(epoch, m_completed, m_total);
-    nextRemote();
+    work.completed += vectors.size();
+    emit progress(channel, epoch, work.completed, work.total);
+    nextRemote(channel, epoch);
 }
-void SearchWorker::finish() {
-    const auto query = m_vectors.value(m_queryKey);
-    if (query.isEmpty()) { emit semanticReady(m_epoch, {}); return; }
+void SearchWorker::finish(int channel, quint64 epoch) {
+    if (!current(channel, epoch)) return;
+    const struct QueryState &work = state(channel);
+    if (work.epoch != epoch) return;
+    const auto query = work.vectors.value(work.queryKey);
+    if (query.isEmpty()) { emit semanticReady(channel, epoch, {}); return; }
     QList<struct betterflash::search::SearchHit> hits;
-    for (const struct betterflash::search::SearchDocument &doc : m_documents) {
-        if (!current(m_epoch)) return;
-        if (m_textMatchIds.contains(doc.id)) continue;
+    for (const struct betterflash::search::SearchDocument &doc : work.documents) {
+        if (!current(channel, epoch)) return;
+        if (work.textMatchIds.contains(doc.id)) continue;
         double best = -1;
-        for (const QString &key : m_documentKeys.value(doc.id)) {
-            const auto vector = m_vectors.value(key);
-            if (vector.size() != query.size()) { emit failed(m_epoch, QStringLiteral("SEARCH_DIMENSIONS: Cached embeddings have incompatible dimensions. Change the embedding model identifier or rebuild its cache.")); return; }
+        for (const QString &key : work.documentKeys.value(doc.id)) {
+            const auto vector = work.vectors.value(key);
+            if (vector.size() != query.size()) { emit failed(channel, epoch, QStringLiteral("SEARCH_DIMENSIONS: Cached embeddings have incompatible dimensions. Change the embedding model identifier or rebuild its cache.")); return; }
             double score = 0;
             for (qsizetype i = 0; i < query.size(); ++i) score += double(query[i]) * vector[i];
             best = std::max(best, score);
@@ -250,6 +297,7 @@ void SearchWorker::finish() {
     std::stable_sort(hits.begin(), hits.end(), [](const auto &a, const auto &b) {
         return a.score != b.score ? a.score > b.score : a.id < b.id;
     });
-    if (hits.size() > 12) hits.resize(12);
-    emit semanticReady(m_epoch, hitMaps(hits));
+    // Deck membership includes every relevant card instead of a global top-card cutoff.
+    if (channel == 0 && hits.size() > 12) hits.resize(12);
+    emit semanticReady(channel, epoch, hitMaps(hits));
 }
