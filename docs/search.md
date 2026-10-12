@@ -79,11 +79,12 @@ download error.
 Search settings provide **Test model** for the selected embedding provider. A
 local test runs three fixed, non-card sentences through the installed model and
 checks that every vector is finite, normalized, and has a stable dimension. A
-remote test sends only those same three sentences to the configured endpoint;
+remote test sends only those same three sentences to the configured endpoint,
+normalizes the returned vectors locally, and compares their cosine similarities;
 it never reads cards, writes the search cache, or includes an API key in its
 result. Errors retain a stable `SEARCH_TEST_*` code and an actionable message.
 Missing local assets are reported as a failed test and must be downloaded
-explicitly with **Prepare model** first. An in-progress test can be canceled;
+explicitly with **Download local model** first. An in-progress test can be canceled;
 late worker or network responses are discarded by a generation token.
 
 The current desktop and Android builds use ONNX Runtime's CPU execution

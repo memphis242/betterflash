@@ -40,8 +40,8 @@ ColumnLayout {
     function clearSecretDraft() { apiKeyDraft = "" }
     readonly property bool localStt: voice.sttProvider !== "groq"
     readonly property bool localTts: voice.ttsProvider !== "system"
-    readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError && !voice.lastError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
-    readonly property string ttsState: voice.ttsModelDownloading ? "busy" : !localTts ? "disabled" : voice.ttsReady && !voice.ttsTestError && !voice.lastError ? "ready" : voice.ttsReady ? "degraded" : "missing"
+    readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
+    readonly property string ttsState: voice.ttsModelDownloading ? "busy" : !localTts ? "disabled" : voice.ttsReady && !voice.ttsTestError ? "ready" : voice.ttsReady ? "degraded" : "missing"
 
     SettingsSwitch {
         Layout.fillWidth: true
@@ -71,8 +71,8 @@ ColumnLayout {
                     anchors.centerIn: parent
                     Icon {
                         kind: index === 0 ? "ear" : "mouth-sound"
-                        width: 19
-                        height: 19
+                        width: 24
+                        height: 24
                         stroke: root.tabIndex === index ? Theme.accent : Theme.inkMuted
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -142,9 +142,9 @@ ColumnLayout {
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
-                model: ["Automatic compact", "Small English"]
-                currentIndex: voice.sttProfile === "small-en" ? 1 : 0
-                onActivated: voice.sttProfile = currentIndex === 1 ? "small-en" : "automatic"
+                model: ["Vosk small English (41 MB download)"]
+                currentIndex: 0
+                onActivated: voice.sttProfile = "small-en"
                 ToolTip.visible: hovered
                 ToolTip.text: "Choose the local speech recognition profile"
             }
@@ -278,13 +278,14 @@ ColumnLayout {
     }
 
     ValueRow {
+        visible: voice.sttProvider === "groq"
         label: "Credential storage"
         value: voice.keyStorageStatus
         Layout.fillWidth: true
     }
-    ValueRow {
-        label: "Status"
-        value: voice.status
+    ModelStatus {
+        state: !voice.enabled ? "disabled" : voice.lastError ? "degraded" : voice.ready ? "ready" : "busy"
+        text: voice.status
         Layout.fillWidth: true
     }
     SettingsError { message: voice.lastError; Layout.fillWidth: true }

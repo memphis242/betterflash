@@ -13,7 +13,7 @@ Rectangle {
     readonly property string outcome: busy ? "running" : report.outcome || (error ? "failed" : "")
     readonly property color resultColor: outcome === "passed" ? Theme.success
         : outcome === "failed" ? Theme.error : outcome === "running" ? Theme.warning : Theme.rule
-    visible: busy || !!status || !!error || !!report.outcome
+    visible: busy || !!error || !!report.outcome
     implicitHeight: content.implicitHeight + 36
     color: Theme.surface
     radius: 8
@@ -110,7 +110,8 @@ Rectangle {
                             wrapMode: Text.Wrap
                         }
                         Label {
-                            text: Number(comparison.modelData.similarity).toFixed(4)
+                            text: Number.isFinite(Number(comparison.modelData.similarity))
+                                ? Number(comparison.modelData.similarity).toFixed(4) : "Not computed"
                             color: Theme.ink
                             font.pixelSize: 17
                             font.bold: true

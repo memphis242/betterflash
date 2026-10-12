@@ -271,7 +271,7 @@ void SearchController::testModel() {
                               {QStringLiteral("encoding_format"), QStringLiteral("float")}};
     m_testBody.clear();
     m_testReport.insert(QStringLiteral("input"), input.at(0).toString());
-    m_testReport.insert(QStringLiteral("expected"), QStringLiteral("The related sentence should be more similar than the unrelated sentence; vectors should be normalized."));
+    m_testReport.insert(QStringLiteral("expected"), QStringLiteral("The related sentence should be more similar than the unrelated sentence. Usable vectors are normalized locally for cosine comparison."));
     m_testReply = m_network.post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
     QNetworkReply *const reply = m_testReply;
     reply->setReadBufferSize(1024 * 1024);
@@ -323,11 +323,6 @@ void SearchController::testModel() {
             const float scale = float(1.0 / std::sqrt(norm)); for (float &value : vector) value *= scale;
             vectors[static_cast<size_t>(index)] = std::move(vector);
         }
-        m_testReport.insert(QStringLiteral("comparisons"), QVariantList{
-            QVariantMap{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), input.at(0).toString()},
-                        {QStringLiteral("text"), input.at(1).toString()}},
-            QVariantMap{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
-                        {QStringLiteral("text"), input.at(2).toString()}}});
         if (vectors[1].size() != vectors[0].size() || vectors[2].size() != vectors[0].size()) {
             fail(QStringLiteral("SEARCH_TEST_DIMENSIONS: The endpoint returned inconsistent vector dimensions.")); return;
         }
@@ -342,19 +337,14 @@ void SearchController::testModel() {
         QVariantMap unrelatedReport{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
             {QStringLiteral("text"), input.at(2).toString()}, {QStringLiteral("similarity"), unrelated}};
         m_testReport.insert(QStringLiteral("comparisons"), QVariantList{relatedReport, unrelatedReport});
+        m_testReport.insert(QStringLiteral("output"), QStringLiteral("%1-dimensional vectors; normalized locally for cosine comparison").arg(vectors[0].size()));
         if (indices.size() != 3 || !std::isfinite(self) || std::abs(self - 1.0) > 0.01
             || !std::isfinite(related) || !std::isfinite(unrelated) || related <= unrelated) {
             fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint did not preserve related-text similarity.")); return;
         }
         m_testBusy = false;
-        m_testReport.insert(QStringLiteral("output"), QStringLiteral("%1-dimensional normalized vectors").arg(vectors[0].size()));
-        m_testReport.insert(QStringLiteral("comparisons"), QVariantList{
-            QVariantMap{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), input.at(0).toString()},
-                        {QStringLiteral("text"), input.at(1).toString()}, {QStringLiteral("similarity"), related}},
-            QVariantMap{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
-                        {QStringLiteral("text"), input.at(2).toString()}, {QStringLiteral("similarity"), unrelated}}});
         m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("passed"));
-        m_testStatus = QStringLiteral("Endpoint returned %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
+        m_testStatus = QStringLiteral("Endpoint returned %1-dimensional vectors. Normalized locally; related-text similarity: %2; unrelated-text similarity: %3.")
             .arg(vectors[0].size()).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3);
         m_testError.clear(); emit testChanged();
     });

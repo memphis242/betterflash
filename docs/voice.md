@@ -61,6 +61,8 @@ for exact revisions, source links, and the separate voice conditions.
 
 ## Real model validation
 
+Download the selected local model separately before testing.
+
 **Test model** for recognition downloads a pinned recording from the official
 Vosk examples and submits it to the selected recognizer. A local test runs on
 an isolated worker without microphone capture. A Groq test makes an actual
