@@ -167,7 +167,7 @@ void SearchController::restart(bool clearResults) {
     m_literal.clear(); m_fuzzy.clear(); m_semantic.clear();
     if (clearResults) { emit resultsAboutToChange(); m_results.clear(); emit resultsChanged(); }
     if (m_query.size() > 256) { setFailure(QStringLiteral("SEARCH_QUERY_LENGTH: Keep the search query to 256 characters or fewer.")); return; }
-    if (m_active && !m_deck.isEmpty() && !m_query.trimmed().isEmpty()) {
+    if (m_active && !m_query.trimmed().isEmpty()) {
         m_busy = true; m_status = QStringLiteral("Finding text matches"); m_debounce.start();
     }
     emit changed();
@@ -178,7 +178,8 @@ void SearchController::runSearch() {
     m_cards.clear();
     for (const QVariant &entry : cards) {
         const QVariantMap card = entry.toMap();
-        if (card.value(QStringLiteral("deckId")).toString() == m_deck) m_cards.insert(card.value(QStringLiteral("id")).toString(), card);
+        if (m_deck.isEmpty() || card.value(QStringLiteral("deckId")).toString() == m_deck)
+            m_cards.insert(card.value(QStringLiteral("id")).toString(), card);
     }
     QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, cards, decks, deck = m_deck, query = m_query] {
         worker->search(epoch, cards, decks, deck, query);

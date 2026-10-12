@@ -1,7 +1,8 @@
 # Library card search
 
 Search is scoped to cards directly in the selected deck. It does not silently
-include descendant decks. Blank queries show that deck's ordinary card list.
+include descendant decks. When no deck is selected, search covers every card in
+the library and each result retains its owning deck in the card snapshot.
 
 ## Result layers
 
@@ -81,7 +82,7 @@ Token matching, inference and cosine ranking run on a dedicated worker. Its
 SQLite cache lives at `<collection directory>/search/embeddings.sqlite`, with
 its own connection and schema. It never modifies the collection's card or
 scheduling tables. No vector database or approximate-nearest-neighbor server
-is required for a selected-deck search.
+is required for a selected-deck or library-wide search.
 
 Cache identity includes model/provider configuration, query/document role and
 the encoded text. Changed content, tags or deck names therefore produces new
@@ -90,11 +91,13 @@ data and hashes, not plaintext queries, card contents or API keys. Entries are
 evicted in insertion order above 8,192 vectors or 64 MiB of vector payload;
 checks occur at open and every 128 writes, so short bounded overshoot and
 SQLite/WAL overhead are possible. Settings > Search > Rebuild search index
-clears embeddings; the next query encodes the selected deck again.
+clears embeddings; the next query encodes the selected deck, or the whole
+library when no deck is selected, again.
 
 This iteration uses the existing in-memory card snapshot and exhaustive cosine
-ranking within one deck. Very large collections still need profiling and a
-paged card model; no large-collection performance claim is made here.
+ranking within the selected deck or, when no deck is selected, across the
+library. Very large collections still need profiling and a paged card model;
+no large-collection performance claim is made here.
 
 ## Optional provider embeddings
 
@@ -105,7 +108,8 @@ Requests are limited to eight passages per batch with timeouts and response
 limits. Redirects are rejected for credential-bearing embedding calls.
 
 Provider mode sends the query and uncached passages for all cards in the
-selected deck, including both faces, tags, deck names and derived math terms.
+selected deck, or all cards in the library when no deck is selected, including
+both faces, tags, deck names and derived math terms.
 The connection dialog explains this before saving. Provider charges may apply.
 Cached vectors avoid repeatedly transmitting unchanged text.
 

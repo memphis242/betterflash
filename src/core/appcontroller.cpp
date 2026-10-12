@@ -27,6 +27,8 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::syncResponseApplied,this,&AppController::syncResponseApplied);
     connect(m_worker,&DatabaseWorker::syncApplied,this,&AppController::syncApplied);
     connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
+    connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
+    connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
     connect(&m_elapsedTick,&QTimer::timeout,this,&AppController::updateElapsed);
@@ -40,12 +42,16 @@ AppController::~AppController()
     m_thread->quit();m_thread->wait();
 }
 QString AppController::mediaPath() const { return QDir(QFileInfo(m_storagePath).absolutePath()).filePath(QStringLiteral("media")); }
-void AppController::invoke(const std::function<void(DatabaseWorker *)> &call)
+bool AppController::invoke(const std::function<void(DatabaseWorker *)> &call)
 {
     assert(thread()==QThread::currentThread());
     ++m_pendingOperations;setBusy(true);
     const bool queued=QMetaObject::invokeMethod(m_worker,[worker=m_worker,call]{call(worker);},Qt::QueuedConnection);
-    if (!queued) handleOperation(false,"Could not queue the operation. Restart the application.",{{"code","WORKER_UNAVAILABLE"},{"message","Could not queue the operation. Restart the application."},{"detail",QString()}});
+    if (!queued) {
+        handleOperation(false,"Could not queue the operation. Restart the application.",{{"code","WORKER_UNAVAILABLE"},{"message","Could not queue the operation. Restart the application."},{"detail",QString()}});
+        return false;
+    }
+    return true;
 }
 void AppController::setBusy(bool value) { if (m_busy!=value) {m_busy=value;emit busyChanged();} }
 void AppController::setError(const QVariantMap &error) {m_lastError=error;emit lastErrorChanged();}
@@ -55,6 +61,22 @@ void AppController::createDeck(const QString &name,const QString &description,co
 { invoke([=](DatabaseWorker *worker){worker->createDeck(name,description,parentId);}); }
 void AppController::updateDeck(const QString &id,const QString &name,const QString &description,const QString &parentId)
 { invoke([=](DatabaseWorker *worker){worker->updateDeck(id,name,description,parentId);}); }
+bool AppController::moveDeck(const QString &id, const QString &parentId)
+{
+    if (m_busy) {
+        setError({{"code", "OPERATION_BUSY"}, {"message", "Finish the current operation before moving a deck."}, {"detail", QString()}});
+        emit moveDeckFinished(false, id, parentId);
+        return false;
+    }
+    if (!betterflash::model::validUuid(id) || (!parentId.isEmpty() && !betterflash::model::validUuid(parentId))) {
+        setError({{"code", "INVALID_DECK_MOVE"}, {"message", "Choose a valid deck and destination."}, {"detail", QString()}});
+        emit moveDeckFinished(false, id, parentId);
+        return false;
+    }
+    const bool queued = invoke([=](DatabaseWorker *worker) { worker->moveDeck(id, parentId); });
+    if (!queued) emit moveDeckFinished(false, id, parentId);
+    return queued;
+}
 void AppController::deleteDeck(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteDeck(id);}); }
 bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points)
@@ -68,6 +90,23 @@ bool AppController::saveCard(const QString &id,const QString &deckId,const QStri
 }
 void AppController::deleteCard(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteCard(id);}); }
+bool AppController::moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId)
+{
+    if (m_busy) {
+        setError({{"code", "OPERATION_BUSY"}, {"message", "Finish the current operation before moving cards."}, {"detail", QString()}});
+        emit moveCardsFinished(false, destinationDeckId, requestId);
+        return false;
+    }
+    if (cardIds.isEmpty() || cardIds.size() > betterflash::model::maxCollectionRecords
+        || !betterflash::model::validUuid(destinationDeckId)) {
+        setError({{"code", "INVALID_CARD_MOVE"}, {"message", "Choose one or more cards and a valid destination deck."}, {"detail", QString()}});
+        emit moveCardsFinished(false, destinationDeckId, requestId);
+        return false;
+    }
+    const bool queued = invoke([=](DatabaseWorker *worker) { worker->moveCards(cardIds, destinationDeckId, requestId); });
+    if (!queued) emit moveCardsFinished(false, destinationDeckId, requestId);
+    return queued;
+}
 bool AppController::developmentToolsEnabled() const
 {
 #ifdef BETTERFLASH_DEVELOPMENT_TOOLS

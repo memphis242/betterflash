@@ -523,6 +523,23 @@ void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QS
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck updated");
 }
+void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
+{
+    if (!ready()) { emit moveDeckFinished(false, id, parentId); return; }
+    const auto existing = deck(id);
+    if (!existing) { fail("DECK_NOT_FOUND", "This deck no longer exists. Refresh the collection.", m_sqlDetail); emit moveDeckFinished(false, id, parentId); return; }
+    if (!validDeckParent(id, parentId)) { fail("INVALID_DECK_PARENT", "Choose an existing destination that is not this deck or one of its descendants."); emit moveDeckFinished(false, id, parentId); return; }
+    if (existing->parentId == parentId) { done("Deck is already in that location"); emit moveDeckFinished(true, id, parentId); return; }
+    const struct model::Deck record{id, existing->name, existing->description, existing->createdAt, parentId};
+    if (!mutate([&] { return upsertDeck(record) && enqueue("deck.upsert", {{"deck", model::toMap(record)}}); })) {
+        fail("DECK_MOVE", "Could not move the deck. Check storage and try again.", m_sqlDetail); emit moveDeckFinished(false, id, parentId); return;
+    }
+    m_queueDirty = true;
+    if (!publishSnapshot()) { emit moveDeckFinished(true, id, parentId); return; }
+    if (!publishQueue(false)) { emit moveDeckFinished(true, id, parentId); return; }
+    done("Deck moved");
+    emit moveDeckFinished(true, id, parentId);
+}
 void DatabaseWorker::deleteDeck(const QString &id)
 {
     if (!ready()) return;
@@ -611,6 +628,57 @@ void DatabaseWorker::deleteCard(const QString &id)
     if (!mutate([&]{return eraseCard(id)&&enqueue("card.delete",{{"id",id}});})) {fail("CARD_DELETE","Could not delete the card. Check storage and try again.",m_sqlDetail);return;}
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
+}
+void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId)
+{
+    if (!ready()) { emit moveCardsFinished(false, destinationDeckId, requestId); return; }
+    const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code, message, detail);
+        emit moveCardsFinished(false, destinationDeckId, requestId);
+    };
+    if (!model::validUuid(destinationDeckId)) { reject("INVALID_CARD_MOVE", "Choose a valid destination deck."); return; }
+    if (!deck(destinationDeckId)) { reject("DECK_NOT_FOUND", "The destination deck no longer exists. Refresh the collection.", m_sqlDetail); return; }
+    if (cardIds.isEmpty() || cardIds.size() > model::maxCollectionRecords) { reject("CARD_MOVE_LIMIT", "Choose between one card and the collection limit."); return; }
+    QSet<QString> ids;
+    for (const QVariant &value : cardIds) {
+        const QString id = value.toString();
+        if (!model::validUuid(id)) { reject("INVALID_CARD_ID", "One or more selected cards are invalid."); return; }
+        if (ids.contains(id)) { reject("DUPLICATE_CARD_ID", "A card was selected more than once."); return; }
+        ids.insert(id);
+    }
+    QList<struct model::Card> cards;
+    for (const QString &id : ids) {
+        const auto existing = card(id);
+        if (!existing) { reject("CARD_NOT_FOUND", "One or more selected cards no longer exists. Refresh the collection.", m_sqlDetail); return; }
+        cards.append(*existing);
+    }
+    if (std::all_of(cards.cbegin(), cards.cend(), [&](const struct model::Card &record) { return record.deckId == destinationDeckId; })) {
+        done("Cards are already in that deck");
+        emit moveCardsFinished(true, destinationDeckId, requestId);
+        return;
+    }
+    const bool committed = mutate([&] {
+        for (const struct model::Card &existing : cards) {
+            if (existing.deckId == destinationDeckId) continue;
+            if (!execute("UPDATE notes SET deck_id=? WHERE id=?", {destinationDeckId, existing.id})) return false;
+            const struct model::Card moved{existing.id, destinationDeckId, existing.kind, existing.front, existing.back, existing.tags, existing.pointCount};
+            const QVariantMap payload = cardPayload(moved);
+            if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert", payload)) return false;
+        }
+        return true;
+    });
+    if (!committed) { reject("CARD_MOVE", "Could not move the selected cards. No changes were saved. Check storage and try again.", m_sqlDetail); return; }
+    m_queueDirty = true;
+    if (!publishSnapshot()) {
+        emit moveCardsFinished(true, destinationDeckId, requestId);
+        return;
+    }
+    if (!publishQueue(false)) {
+        emit moveCardsFinished(true, destinationDeckId, requestId);
+        return;
+    }
+    done(QStringLiteral("Moved %1 card(s)").arg(cards.size()));
+    emit moveCardsFinished(true, destinationDeckId, requestId);
 }
 void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
 {
