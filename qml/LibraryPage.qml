@@ -9,7 +9,19 @@ import "DeckSearch.js" as DeckSearch
 Item {
     id: library
     required property var ui
-    property string deckSearchText: ""
+    property string deckSearchText: librarySettings.deckQuery
+    property string deckContentSearchText: librarySettings.deckContentQuery
+    property bool searchReady: false
+    property var searchCollapsedDecks: ({})
+    readonly property bool searchingDeckContent: deckContentSearchText.trim().length > 0
+    readonly property bool searchingDecks: DeckSearch.normalize(deckSearchText).length > 0 || searchingDeckContent
+    readonly property var deckContentMatches: DeckSearch.aggregateContent(app.decks, searchingDeckContent ? searchEngine.deckResults : [])
+    property var filterTags: readStoredTags(librarySettings.cardFilterTags)
+    property string filterKind: librarySettings.cardFilterKind
+    property string filterState: librarySettings.cardFilterState
+    readonly property int activeFilterCount: filterTags.length + (filterKind ? 1 : 0) + (filterState ? 1 : 0)
+    readonly property var scopedCards: app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id)
+    readonly property var availableTags: collectTags()
     property bool leftOpen: librarySettings.leftOpen
     property bool rightOpen: librarySettings.rightOpen
     readonly property bool cardsVisible: rightOpen
@@ -18,8 +30,9 @@ Item {
     property real splitRatio: librarySettings.splitRatio
     property var expandedDecks: ({})
     property bool expansionInitialized: false
-    property bool deckSearchVisible: false
-    property bool cardSearchVisible: false
+    property bool deckSearchVisible: librarySettings.deckSearchVisible
+    property bool deckContentSearchVisible: librarySettings.deckContentSearchVisible
+    property bool cardSearchVisible: librarySettings.cardSearchVisible
     property bool restoringSearchSelection: false
     property string searchPageAnchorId: ""
     property bool resetSearchPage: false
@@ -48,9 +61,8 @@ Item {
     property string cardSelectionAnchorId: ""
     readonly property var searchEngine: librarySearch
     readonly property bool searchingCards: ui.cardSearchText.trim().length > 0
-    readonly property var visibleCards: library.searchingCards
-        ? (library.searchEngine.results || [])
-        : app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id)
+    readonly property var sourceCards: searchingCards ? (searchEngine.results || []) : scopedCards
+    readonly property var visibleCards: filteredCards()
     readonly property var treeRows: flattenTree()
     ListModel { id: treeModel; dynamicRoles: true }
     onTreeRowsChanged: synchronizeTreeModel()
@@ -64,12 +76,22 @@ Item {
         property string expanded: ""
         property real treeScrollY: 0
         property real cardScrollY: 0
+        property string deckQuery: ""
+        property string deckContentQuery: ""
+        property bool deckSearchVisible: false
+        property bool deckContentSearchVisible: false
+        property bool cardSearchVisible: false
+        property string cardFilterTags: "[]"
+        property string cardFilterKind: ""
+        property string cardFilterState: ""
     }
 
     Component.onCompleted: {
         library.initializeExpansion()
         library.synchronizeTreeModel()
+        library.searchReady = true
         library.updateCardSearch()
+        library.updateDeckSearch()
         Qt.callLater(function () {
             if (library.treeRows.length > 0)
                 treeList.forceActiveFocus()
@@ -83,8 +105,96 @@ Item {
         }
     }
     onLeftOpenChanged: librarySettings.leftOpen = leftOpen
-    onRightOpenChanged: librarySettings.rightOpen = rightOpen
+    onRightOpenChanged: {
+        librarySettings.rightOpen = rightOpen
+        if (!rightOpen && cardFilters && cardFilters.opened) cardFilters.close()
+    }
     onSplitRatioChanged: librarySettings.splitRatio = splitRatio
+    onDeckSearchVisibleChanged: librarySettings.deckSearchVisible = deckSearchVisible
+    onDeckContentSearchVisibleChanged: librarySettings.deckContentSearchVisible = deckContentSearchVisible
+    onCardSearchVisibleChanged: librarySettings.cardSearchVisible = cardSearchVisible
+    onDeckSearchTextChanged: {
+        librarySettings.deckQuery = deckSearchText
+        searchCollapsedDecks = ({})
+    }
+    onDeckContentSearchTextChanged: {
+        librarySettings.deckContentQuery = deckContentSearchText
+        searchCollapsedDecks = ({})
+        updateDeckSearch()
+    }
+    onFilterTagsChanged: { librarySettings.cardFilterTags = JSON.stringify(filterTags); filtersChanged() }
+    onFilterKindChanged: { librarySettings.cardFilterKind = filterKind; filtersChanged() }
+    onFilterStateChanged: { librarySettings.cardFilterState = filterState; filtersChanged() }
+
+    function readStoredTags(value) {
+        try {
+            const tags = JSON.parse(value)
+            return Array.isArray(tags) ? tags.filter(tag => typeof tag === "string" && tag.length > 0) : []
+        } catch (error) { return [] }
+    }
+    function cardTags(card) {
+        return String(card.tags || "").split(",").map(tag => tag.trim()).filter(tag => tag.length > 0)
+    }
+    function collectTags() {
+        const counts = new Map()
+        for (const card of scopedCards)
+            for (const tag of new Set(cardTags(card))) counts.set(tag, (counts.get(tag) || 0) + 1)
+        for (const tag of filterTags)
+            if (!counts.has(tag)) counts.set(tag, 0)
+        return Array.from(counts.keys()).sort((a, b) => a.localeCompare(b)).map(tag => ({ tag: tag, count: counts.get(tag) }))
+    }
+    function matchesCardFilter(card) {
+        if (filterTags.length > 0 && !cardTags(card).some(tag => filterTags.indexOf(tag) >= 0)) return false
+        if (filterKind && card.kind !== filterKind) return false
+        const reviews = Number(card.reviewCount || 0)
+        const due = Number(card.dueCount || 0)
+        switch (filterState) {
+        case "new": return reviews === 0
+        case "reviewed": return reviews > 0
+        case "due": return due > 0
+        case "later": return due === 0
+        default: return true
+        }
+    }
+    function filteredCards() {
+        const result = []
+        let previousGroup = ""
+        for (const card of sourceCards) {
+            if (!matchesCardFilter(card)) continue
+            const group = card.searchGroup || ""
+            result.push(Object.assign({}, card, { groupStart: !!group && group !== previousGroup }))
+            previousGroup = group
+        }
+        return result
+    }
+    function filtersChanged() {
+        if (!searchReady) return
+        resetSearchPage = true
+        searchPageAnchorId = ""
+        resetPage()
+        updateCardSearch()
+        Qt.callLater(function () {
+            const visibleIds = new Set(library.visibleCards.map(card => card.id))
+            library.selectedCardIds = library.selectedCardIds.filter(id => visibleIds.has(id))
+            if (!visibleIds.has(library.cardSelectionAnchorId)) library.cardSelectionAnchorId = ""
+        })
+    }
+    function clearFilters() { filterTags = []; filterKind = ""; filterState = "" }
+    function deckMatchLabel(row) {
+        if (!row.actualMatch) return ""
+        if (searchingDeckContent && row.contentMatch)
+            return row.contentMatch.label + " / " + row.contentMatch.count
+        return row.match ? row.match.label : ""
+    }
+    function deckMatchHint(row) {
+        if (!row.actualMatch) return "Ancestor shown to preserve deck hierarchy"
+        const nameHint = row.match ? "Deck name: " + row.match.label.toLowerCase() + ". " : ""
+        if (!searchingDeckContent || !row.contentMatch) return nameHint
+        const hit = row.contentMatch
+        return nameHint + "Best card match: " + hit.label.toLowerCase() + ". " + hit.count
+            + (hit.count === 1 ? " matching card" : " matching cards") + ": " + hit.ownCount
+            + " in this deck, " + (hit.count - hit.ownCount) + " in subdecks."
+    }
 
     function childrenOf(id) {
         return app.decks.filter(deck => (deck.parentId || "") === id).sort((a, b) => String(a.name).localeCompare(String(b.name)))
@@ -116,19 +226,26 @@ Item {
     function flattenTree() {
         const rows = []
         const query = DeckSearch.normalize(deckSearchText)
+        const active = searchingDecks
+        const content = deckContentMatches
         const children = ({})
         const matches = ({})
+        const actual = ({})
         const best = ({})
         for (const deck of app.decks) {
             const parentId = deck.parentId || ""
             if (!children[parentId]) children[parentId] = []
             children[parentId].push(deck)
             matches[deck.id] = query ? DeckSearch.match(deck.name, query) : null
+            actual[deck.id] = (!query || !!matches[deck.id]) && (!searchingDeckContent || !!content[deck.id])
         }
         function rank(deck, ancestors) {
-            if (ancestors.indexOf(deck.id) >= 0) return 9999
+            if (ancestors.indexOf(deck.id) >= 0) return Infinity
             const match = matches[deck.id]
-            let result = match ? match.tier * 100 + match.distance : 9999
+            const hit = content[deck.id]
+            const scoreRank = hit ? (1 - Math.max(-1, Math.min(1, hit.score))) / 4 : 0
+            let result = actual[deck.id] ? (hit ? hit.tier * 10000 : 0)
+                + (match ? match.tier * 100 + match.distance : 0) + scoreRank : Infinity
             for (const child of children[deck.id] || [])
                 result = Math.min(result, rank(child, ancestors.concat([deck.id])))
             best[deck.id] = result
@@ -136,16 +253,18 @@ Item {
         }
         for (const root of children[""] || []) rank(root, [])
         function ordered(id) {
-            return (children[id] || []).slice().sort((a, b) =>
-                (query ? (best[a.id] || 0) - (best[b.id] || 0) : 0)
-                || String(a.name).localeCompare(String(b.name)))
+            return (children[id] || []).slice().sort((a, b) => {
+                if (active && best[a.id] !== best[b.id]) return best[a.id] < best[b.id] ? -1 : 1
+                return String(a.name).localeCompare(String(b.name))
+            })
         }
         function append(deck, depth, ancestors) {
-            if (ancestors.indexOf(deck.id) >= 0 || query && best[deck.id] === 9999) return
-            const descendants = ordered(deck.id)
-            const expanded = !!query || !!library.expandedDecks[deck.id]
+            if (ancestors.indexOf(deck.id) >= 0 || active && best[deck.id] === Infinity) return
+            const descendants = ordered(deck.id).filter(child => !active || best[child.id] !== Infinity)
+            const expanded = active ? !library.searchCollapsedDecks[deck.id] : !!library.expandedDecks[deck.id]
             rows.push({ deck: deck, id: deck.id, depth: depth, expanded: expanded,
-                hasChildren: descendants.length > 0, match: matches[deck.id] })
+                hasChildren: descendants.length > 0, match: matches[deck.id],
+                actualMatch: actual[deck.id], contentMatch: content[deck.id] || null })
             if (expanded)
                 for (const child of descendants) append(child, depth + 1, ancestors.concat([deck.id]))
         }
@@ -170,6 +289,12 @@ Item {
         treeList.currentIndex = treeRows.findIndex(row => row.id === focusedId)
     }
     function expandAllDecks(expanded) {
+        if (searchingDecks) {
+            const collapsed = ({})
+            if (!expanded) for (const deck of app.decks) collapsed[deck.id] = true
+            searchCollapsedDecks = collapsed
+            return
+        }
         const state = ({})
         if (expanded)
             for (const deck of app.decks) state[deck.id] = true
@@ -246,6 +371,12 @@ Item {
     }
     onCardPagesChanged: preservePage()
     function toggleDeck(id) {
+        if (searchingDecks) {
+            const collapsed = Object.assign({}, searchCollapsedDecks)
+            collapsed[id] = !collapsed[id]
+            searchCollapsedDecks = collapsed
+            return
+        }
         const state = Object.assign({}, expandedDecks)
         state[id] = !state[id]
         expandedDecks = state
@@ -349,9 +480,26 @@ Item {
         deckSearch.selectAll()
     }
 
+    function toggleDeckSearch() {
+        if (!deckSearchVisible) focusDeckSearch()
+        else { deckSearchVisible = false; treeList.forceActiveFocus() }
+    }
+    function toggleCardSearch() {
+        cardSearchVisible = !cardSearchVisible
+        if (cardSearchVisible) cardSearch.forceActiveFocus()
+        else focusCards()
+    }
+    function updateDeckSearch() {
+        if (!searchReady) return
+        searchEngine.setDeckSearchActive(ui.page === 1)
+        searchEngine.setDeckSearch(deckContentSearchText)
+    }
     function updateCardSearch() {
-        library.searchEngine.setActive(ui.page === 1)
-        library.searchEngine.setSearch(ui.selectedDeck.id || "", ui.cardSearchText)
+        if (!searchReady) return
+        searchEngine.setActive(ui.page === 1)
+        const ids = activeFilterCount > 0 ? app.cards.filter(card => matchesCardFilter(card)).map(card => card.id) : []
+        searchEngine.setCardFilter(ids, activeFilterCount > 0)
+        searchEngine.setSearch(ui.selectedDeck.id || "", ui.cardSearchText)
     }
 
     function selectCardAfterSearch() {
@@ -484,7 +632,8 @@ Item {
         id: hoverTimer
         interval: 650
         onTriggered: {
-            if (library.dragging && library.hoverExpandId && !library.expandedDecks[library.hoverExpandId]) library.toggleDeck(library.hoverExpandId)
+            const row = library.treeRows.find(item => item.id === library.hoverExpandId)
+            if (library.dragging && row && !row.expanded) library.toggleDeck(row.id)
             if (library.dragging) library.updateDrag(library.dragPosition)
         }
     }
@@ -521,6 +670,7 @@ Item {
             }
         }
         function onCardsChanged() {
+            library.updateCardSearch()
             const valid = new Set(app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id).map(card => card.id))
             library.selectedCardIds = library.selectedCardIds.filter(id => valid.has(id))
             if (library.cardSelectionAnchorId && !valid.has(library.cardSelectionAnchorId))
@@ -539,11 +689,15 @@ Item {
         function onResultsChanged() { Qt.callLater(library.selectCardAfterSearch) }
     }
 
-    onVisibleChanged: updateCardSearch()
+    onVisibleChanged: {
+        updateCardSearch()
+        updateDeckSearch()
+        if (!visible && cardFilters && cardFilters.opened) cardFilters.close()
+    }
     Connections {
         target: ui
         function onSelectedDeckChanged() { library.updateCardSearch() }
-        function onPageChanged() { library.updateCardSearch() }
+        function onPageChanged() { library.updateCardSearch(); library.updateDeckSearch() }
         function onCardSearchTextChanged() { library.resetSearchPage = true; library.searchPageAnchorId = ""; library.resetPage(); library.updateCardSearch() }
     }
 
@@ -572,8 +726,8 @@ Item {
                     Layout.preferredHeight: 42
                     spacing: 8
                     Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
-                    GlyphButton { glyph: "expand-tree"; hint: "Expand all decks"; enabled: app.decks.length > 0 && !library.deckSearchText; onClicked: library.expandAllDecks(true) }
-                    GlyphButton { glyph: "collapse-tree"; hint: "Collapse all decks"; enabled: app.decks.length > 0 && !library.deckSearchText; onClicked: library.expandAllDecks(false) }
+                    GlyphButton { glyph: "expand-tree"; hint: "Expand all decks"; enabled: app.decks.length > 0; onClicked: library.expandAllDecks(true) }
+                    GlyphButton { glyph: "collapse-tree"; hint: "Collapse all decks"; enabled: app.decks.length > 0; onClicked: library.expandAllDecks(false) }
                     Item { Layout.fillWidth: true }
                     PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
                 }
@@ -593,17 +747,79 @@ Item {
                     }
                     GlyphButton { glyph: "subdeck-add"; hint: "Add a subdeck to the selected deck"; enabled: !!ui.selectedDeck.id && !app.busy; onClicked: ui.openDeckEditor("", ui.selectedDeck.id) }
                     Item { Layout.fillWidth: true }
-                    GlyphButton { glyph: "search"; hint: "Find a deck (" + shortcuts.bindings.deckSearch + ")"; onClicked: library.focusDeckSearch() }
+                    GlyphButton {
+                        glyph: "search"; selected: library.searchingDecks || library.deckSearchVisible
+                        hint: (library.deckSearchVisible ? "Hide deck search" : "Show deck search") + " (" + shortcuts.bindings.deckSearch + ")"
+                        onClicked: library.toggleDeckSearch()
+                    }
                     GlyphButton {
                         glyph: "more"; hint: "Deck actions"; onClicked: deckMenu.open()
                         DeckActionsMenu { id: deckMenu; ui: library.ui; deckId: library.ui.selectedDeck.id || ""; headerMode: true }
                     }
                 }
-                TextField {
-                    id: deckSearch; objectName: "deckSearchField"; visible: library.deckSearchVisible
-                    Layout.fillWidth: true; placeholderText: "Find a deck"; maximumLength: 128; text: library.deckSearchText
-                    onTextEdited: library.deckSearchText = text
-                    Keys.onEscapePressed: { library.deckSearchText = ""; library.deckSearchVisible = false; treeList.forceActiveFocus() }
+                ColumnLayout {
+                    visible: library.deckSearchVisible
+                    Layout.fillWidth: true
+                    spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        TextField {
+                            id: deckSearch; objectName: "deckSearchField"
+                            Layout.fillWidth: true; Layout.minimumWidth: 0
+                            placeholderText: "Find a deck"; maximumLength: 128; text: library.deckSearchText
+                            Accessible.name: "Find a deck by name"
+                            onTextEdited: library.deckSearchText = text
+                            Keys.onEscapePressed: { library.deckSearchVisible = false; treeList.forceActiveFocus() }
+                            Keys.onReturnPressed: treeList.forceActiveFocus()
+                        }
+                        GlyphButton { glyph: "close"; hint: "Clear deck name search"; visible: library.deckSearchText.length > 0; onClicked: { library.deckSearchText = ""; deckSearch.forceActiveFocus() } }
+                        GlyphButton {
+                            glyph: library.deckContentSearchVisible ? "up" : "down"
+                            selected: library.searchingDeckContent || library.deckContentSearchVisible
+                            hint: library.deckContentSearchVisible ? "Hide search within decks" : "Search within decks"
+                            onClicked: {
+                                library.deckContentSearchVisible = !library.deckContentSearchVisible
+                                if (library.deckContentSearchVisible) deckContentSearch.forceActiveFocus()
+                                else deckSearch.forceActiveFocus()
+                            }
+                        }
+                    }
+                    RowLayout {
+                        visible: library.deckContentSearchVisible
+                        Layout.fillWidth: true
+                        spacing: 6
+                        TextField {
+                            id: deckContentSearch; objectName: "deckContentSearchField"
+                            Layout.fillWidth: true; Layout.minimumWidth: 0
+                            placeholderText: "Search within decks"; maximumLength: 256; text: library.deckContentSearchText
+                            Accessible.name: "Find decks by card content, tag, or meaning"
+                            onTextEdited: library.deckContentSearchText = text
+                            Keys.onEscapePressed: { library.deckContentSearchVisible = false; deckSearch.forceActiveFocus() }
+                            Keys.onReturnPressed: treeList.forceActiveFocus()
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Find cards by content, tag, or meaning within decks and subdecks. Combined with the deck name search."
+                        }
+                        GlyphButton { glyph: "close"; hint: "Clear search within decks"; visible: library.deckContentSearchText.length > 0; onClicked: { library.deckContentSearchText = ""; deckContentSearch.forceActiveFocus() } }
+                    }
+                }
+                RowLayout {
+                    visible: library.searchingDeckContent && (library.searchEngine.deckBusy || library.searchEngine.deckStatus.length > 0)
+                    Layout.fillWidth: true; spacing: 8
+                    BusyIndicator { running: library.searchEngine.deckBusy; visible: running; implicitWidth: 18; implicitHeight: 18 }
+                    Label {
+                        Layout.fillWidth: true; textFormat: Text.PlainText
+                        text: library.searchEngine.deckStatus; color: Theme.inkMuted
+                        font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight
+                        ToolTip.visible: deckStatusHover.hovered; ToolTip.text: text
+                        HoverHandler { id: deckStatusHover }
+                    }
+                }
+                ErrorBlock {
+                    visible: library.searchingDeckContent && library.searchEngine.deckError.length > 0
+                    message: library.searchEngine.deckError
+                    Layout.fillWidth: true
+                    AppButton { text: "Retry search"; onClicked: library.searchEngine.retryDeckSearch() }
                 }
                 Label {
                     Layout.fillWidth: true
@@ -664,16 +880,18 @@ Item {
                             }
                             Item { visible: !treeRow.modelData.hasChildren; implicitWidth: 26; implicitHeight: 30 }
                             Icon { kind: treeRow.modelData.expanded ? "folder-open" : "folder"; width: 22; height: 22; stroke: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accent : Theme.inkMuted }
-                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: library.deckSearchText && !treeRow.modelData.match ? Theme.inkMuted : Theme.ink; font.family: Theme.contentFont; font.pixelSize: 17; elide: Text.ElideRight }
+                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: library.searchingDecks && !treeRow.modelData.actualMatch ? Theme.inkMuted : Theme.ink; font.family: Theme.contentFont; font.pixelSize: 17; elide: Text.ElideRight }
                             Label {
-                                visible: !!treeRow.modelData.match
-                                text: treeRow.modelData.match ? treeRow.modelData.match.label : ""
-                                color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10
+                                visible: library.searchingDecks && treeRow.modelData.actualMatch
+                                text: library.deckMatchLabel(treeRow.modelData)
+                                Layout.maximumWidth: Math.max(70, treeList.width * 0.45)
+                                elide: Text.ElideRight
+                                color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11
                                 ToolTip.visible: matchHover.hovered
-                                ToolTip.text: "Deck search match: " + text.toLowerCase()
+                                ToolTip.text: library.deckMatchHint(treeRow.modelData)
                                 HoverHandler { id: matchHover }
                             }
-                            Label { visible: !library.deckSearchText && Number(treeRow.modelData.deck.ownCardCount || 0) > 0; text: String(treeRow.modelData.deck.ownCardCount || 0); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
+                            Label { visible: !library.searchingDecks && Number(treeRow.modelData.deck.ownCardCount || 0) > 0; text: String(treeRow.modelData.deck.ownCardCount || 0); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                         }
                         MouseArea {
                             id: treeMouse
@@ -721,12 +939,12 @@ Item {
                         visible: treeList.count === 0
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
-                        text: library.deckSearchText ? "No decks match this search." : "No decks yet"
+                        text: library.searchingDeckContent && library.searchEngine.deckBusy ? "Searching cards in decks..." : library.searchingDecks ? "No decks match this search." : "No decks yet"
                         color: Theme.inkMuted
                     }
                     AppButton {
                         parent: treeList
-                        visible: treeList.count === 0 && !library.deckSearchText
+                        visible: treeList.count === 0 && !library.searchingDecks
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.verticalCenter
                         anchors.topMargin: 22
@@ -828,7 +1046,13 @@ Item {
                         }
                         onClicked: ui.openCardEditor("")
                     }
-                    GlyphButton { glyph: "search"; hint: "Find a card"; onClicked: { library.cardSearchVisible = true; cardSearch.forceActiveFocus() } }
+                    GlyphButton { glyph: "search"; selected: library.searchingCards || library.cardSearchVisible; hint: library.cardSearchVisible ? "Hide card search" : "Show card search"; onClicked: library.toggleCardSearch() }
+                    GlyphButton {
+                        id: cardFilterButton
+                        glyph: "filter"; selected: library.activeFilterCount > 0 || cardFilters.opened
+                        hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
+                        onClicked: cardFilters.opened ? cardFilters.close() : cardFilters.open()
+                    }
                     Item { Layout.fillWidth: true }
                     GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
                     Label {
@@ -840,10 +1064,27 @@ Item {
                     }
                     GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
                 }
-                TextField {
-                    id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible || ui.cardSearchText.length > 0
-                    placeholderText: "Find a card by content, tag, or meaning"; maximumLength: 256; text: ui.cardSearchText; onTextEdited: ui.cardSearchText = text
-                    Keys.onEscapePressed: { ui.cardSearchText = ""; library.updateCardSearch(); library.cardSearchVisible = false; library.focusCards() }
+                RowLayout {
+                    Layout.fillWidth: true; visible: library.cardSearchVisible; spacing: 6
+                    TextField {
+                        id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; Layout.minimumWidth: 0
+                        placeholderText: "Find a card by content, tag, or meaning"; maximumLength: 256; text: ui.cardSearchText; onTextEdited: ui.cardSearchText = text
+                        Accessible.name: "Find a card by content, tag, or meaning"
+                        Keys.onEscapePressed: { library.cardSearchVisible = false; library.focusCards() }
+                        Keys.onReturnPressed: library.focusCards()
+                    }
+                    GlyphButton { glyph: "close"; hint: "Clear card search"; visible: ui.cardSearchText.length > 0; onClicked: { ui.cardSearchText = ""; cardSearch.forceActiveFocus() } }
+                }
+                RowLayout {
+                    visible: library.activeFilterCount > 0
+                    Layout.fillWidth: true; spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: library.searchingCards ? library.visibleCards.length + " search results match filters"
+                            : library.visibleCards.length + " of " + library.sourceCards.length + " cards match filters"
+                        color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight
+                    }
+                    GlyphButton { glyph: "close"; hint: "Clear all card filters"; implicitWidth: 28; implicitHeight: 28; glyphSize: 13; onClicked: library.clearFilters() }
                 }
                 RowLayout {
                     visible: library.searchingCards && (library.searchEngine.busy || library.searchEngine.status.length > 0)
@@ -1044,7 +1285,7 @@ Item {
                             event.accepted = true
                         }
                     }
-                    Label { parent: cardList; visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : ui.selectedDeck.id ? "This deck has no cards yet." : "No cards in the library yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
+                    Label { parent: cardList; visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: library.activeFilterCount > 0 ? "No cards match these filters." : ui.cardSearchText ? "No cards match this search." : ui.selectedDeck.id ? "This deck has no cards yet." : "No cards in the library yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
                 }
             }
         }
@@ -1071,6 +1312,24 @@ Item {
                 onClicked: library.rightOpen = true
             }
         }
+    }
+    CardFilterPopup {
+        id: cardFilters
+        parent: library
+        width: Math.min(380, library.width - 24)
+        height: Math.min(520, library.height - 24)
+        x: Math.max(12, Math.min(library.width - width - 12, cardFilterButton.mapToItem(library, 0, 0).x))
+        y: Math.max(12, Math.min(library.height - height - 12, cardFilterButton.mapToItem(library, 0, cardFilterButton.height + 8).y))
+        tags: library.availableTags
+        selectedTags: library.filterTags
+        selectedKind: library.filterKind
+        selectedState: library.filterState
+        scopeLabel: ui.selectedDeck.id ? ui.selectedDeck.name : "All decks"
+        onTagsChosen: function(tags) { library.filterTags = tags }
+        onKindChosen: function(kind) { library.filterKind = kind }
+        onStateChosen: function(state) { library.filterState = state }
+        onResetRequested: library.clearFilters()
+        onClosed: if (library.visible && library.cardsVisible) cardFilterButton.forceActiveFocus()
     }
     Rectangle {
         visible: library.dragging
