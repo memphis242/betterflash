@@ -7,6 +7,7 @@
 #include "search/SearchController.h"
 #include "integrations/SyncController.h"
 #include "render/MarkdownView.h"
+#include "render/CodeRendering.h"
 #include "voice/VoiceController.h"
 
 #include <QCommandLineParser>
@@ -75,6 +76,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("deck-graph-designs"), QStringLiteral("Compare Canopy and Branch ledger deck layouts. Add --data-dir to preview a working collection.")});
     parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1 or 2."), QStringLiteral("number"), QStringLiteral("2")});
     parser.addOption({QStringLiteral("card-timeline-designs"), QStringLiteral("Preview calendar-scaled card history with illustrative data.")});
+    parser.addOption({QStringLiteral("menu-designs"), QStringLiteral("Compare three shared menu designs without changing the collection.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -102,7 +104,8 @@ int main(int argc, char **argv) {
         {logoStudies, "BetterFlash Logo Studies", "TeaLogoGallery", "logoStudyWarnings"},
         {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"},
         {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"},
-        {parser.isSet(QStringLiteral("card-timeline-designs")), "BetterFlash Card Timeline Studies", "CardTimelineGallery", "cardTimelineWarnings"}
+        {parser.isSet(QStringLiteral("card-timeline-designs")), "BetterFlash Card Timeline Studies", "CardTimelineGallery", "cardTimelineWarnings"},
+        {parser.isSet(QStringLiteral("menu-designs")), "BetterFlash Menu Studies", "MenuDesignGallery", "menuDesignWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {
@@ -136,6 +139,7 @@ int main(int argc, char **argv) {
         if (deckGraphs && parser.isSet(QStringLiteral("data-dir")))
             deckStudyApp = std::make_unique<AppController>(dataDirectory);
         QQmlApplicationEngine galleryEngine;
+        galleryEngine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
         if (deckGraphs) {
             galleryEngine.rootContext()->setContextProperty(QStringLiteral("deckStudyApp"), deckStudyApp.get());
             galleryEngine.rootContext()->setContextProperty(QStringLiteral("deckStudyStartVariant"), deckVariant - 1);
@@ -194,6 +198,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("voice"), &voice);
     engine.rootContext()->setContextProperty(QStringLiteral("ai"), &ai);
     engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
+    engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
     engine.rootContext()->setContextProperty(QStringLiteral("sync"), &sync);
     engine.rootContext()->setContextProperty(QStringLiteral("media"), &media);

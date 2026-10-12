@@ -7,7 +7,7 @@ Item {
     required property var ui
     property int section: ui.settingsSection()
     onSectionChanged: ui.setSettingsSection(section)
-    readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search", "Code rendering"]
     component ValueRow: ColumnLayout {
         property string label: ""
         property string value: ""
@@ -52,7 +52,7 @@ Item {
             }
             AppButton {
                 objectName: "settingsPrimary"
-                visible: settingsPage.section >= 2
+                visible: settingsPage.section >= 2 && settingsPage.section <= 6
                 text: settingsPage.section === 5 ? "Export" : settingsPage.section === 6 ? "Edit connection" : settingsPage.ui.width < 600 ? "Edit" : "Edit connection"
                 primary: true
                 onClicked: {
@@ -402,6 +402,10 @@ Item {
                 SearchSettings {
                     id: searchSettings
                     visible: settingsPage.section === 6
+                    Layout.fillWidth: true
+                }
+                CodeRenderingSettings {
+                    visible: settingsPage.section === 7
                     Layout.fillWidth: true
                 }
             }
