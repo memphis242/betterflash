@@ -1,32 +1,72 @@
 #include "VoiceController.h"
 
 #include "VoiceWorker.h"
+#include "LocalTtsWorker.h"
 #include "integrations/SecretStore.h"
+#include "models/ModelDownload.h"
 
+#include <QAudioDevice>
+#include <QAudioSink>
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QDeadlineTimer>
 #include <QDir>
+#include <QFileInfo>
+#include <QFile>
+#include <QLibrary>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QMediaDevices>
 #include <QTextToSpeech>
 #include <QThread>
 #include <QTimer>
 #include <utility>
+#include <algorithm>
 #ifdef Q_OS_ANDROID
 #include <QMicrophonePermission>
 #endif
 
 VoiceController::VoiceController(QObject *parent)
     : QObject(parent), m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)) {
+    m_localDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("models/voice"));
+    m_sttDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("stt")), this);
+    m_ttsDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("tts")), this);
+    m_fixtureDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("validation")), this);
+#ifdef Q_OS_ANDROID
+    m_ttsProfile = QStringLiteral("amy-low");
+#endif
     QSettings settings;
     settings.beginGroup(QStringLiteral("voice"));
     m_modelPath = settings.value(QStringLiteral("modelPath")).toString();
-    if (m_modelPath.isEmpty()) m_modelPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("voice/model"));
-    const QString provider = settings.value(QStringLiteral("provider"), QStringLiteral("groq")).toString();
-    if (provider == QStringLiteral("local")) m_sttProvider = provider;
+    if (m_modelPath.isEmpty()) m_modelPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
+    const QString provider = settings.value(QStringLiteral("provider"), QStringLiteral("local")).toString().trimmed().toLower();
+    if (provider == QStringLiteral("local") || provider == QStringLiteral("groq")) m_sttProvider = provider;
     const QString model = settings.value(QStringLiteral("sttModel"), m_sttModel).toString().trimmed();
     static const QRegularExpression validModel(QStringLiteral(R"(^[A-Za-z0-9._:-]{1,128}$)"));
     if (validModel.match(model).hasMatch()) m_sttModel = model;
+    const QString profile = settings.value(QStringLiteral("sttProfile"), m_sttProfile).toString().trimmed();
+    if (profile == QStringLiteral("small-en")) m_sttProfile = profile;
+    const QString ttsProvider = settings.value(QStringLiteral("ttsProvider"), m_ttsProvider).toString().trimmed().toLower();
+    if (ttsProvider == QStringLiteral("local") || ttsProvider == QStringLiteral("system")) m_ttsProvider = ttsProvider;
+    const QString ttsProfile = settings.value(QStringLiteral("ttsProfile"), m_ttsProfile).toString().trimmed();
+    if (ttsProfile == QStringLiteral("amy-low") || ttsProfile == QStringLiteral("ljspeech-medium")) m_ttsProfile = ttsProfile;
+    configureDownloads();
+    for (ModelDownload *const download : {m_sttDownload, m_ttsDownload, m_fixtureDownload}) {
+        connect(download, &ModelDownload::changed, this, [this] { emit modelReadinessChanged(); });
+        connect(download, &ModelDownload::finished, this, [this, download](const bool success) {
+            if (success) { continuePendingOperations(); return; }
+            const QString message = download->error().isEmpty() ? QStringLiteral("The model download was canceled. Start it again when ready.") : download->error();
+            if (download == m_sttDownload || download == m_fixtureDownload) {
+                if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Speech recognition validation failed"), message);
+                if (download == m_sttDownload && m_enabled) { setEnabled(false); setError(QStringLiteral("VOICE_MODEL_DOWNLOAD"), message); }
+            }
+            if (download == m_ttsDownload) {
+                if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Speech output validation failed"), message);
+                if (m_speaking) speechError(message);
+            }
+        });
+    }
     m_lastKey = m_secret->key();
     connect(m_secret, &SecretStore::changed, this, [this] {
         emit hasApiKeyChanged();
@@ -42,8 +82,18 @@ VoiceController::VoiceController(QObject *parent)
 
 VoiceController::~VoiceController() {
     m_enabled = false;
+    ++m_testGeneration;
+    if (m_testThread) m_testThread->requestInterruption();
+    if (m_testWorker && m_testThread) {
+        const QPointer<VoiceWorker> worker = m_testWorker;
+        const QPointer<QThread> thread = m_testThread;
+        QMetaObject::invokeMethod(worker, [worker, thread] { if (worker) worker->shutdown(); if (thread) thread->quit(); }, Qt::QueuedConnection);
+    }
+    m_synthesisCancelled->store(true);
+    retireTtsWorker();
     retireWorker();
     if (m_speech) m_speech->stop(QTextToSpeech::BoundaryHint::Immediate);
+    if (m_audioSink) m_audioSink->stop();
     // A worker owns all decoding and audio resources until its event loop exits.
     const QDeadlineTimer deadline(250);
     for (const QPointer<QThread> &thread : std::as_const(m_threads))
@@ -59,6 +109,9 @@ void VoiceController::persistConfiguration() const {
     settings.setValue(QStringLiteral("modelPath"), m_modelPath);
     settings.setValue(QStringLiteral("provider"), m_sttProvider);
     settings.setValue(QStringLiteral("sttModel"), m_sttModel);
+    settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
+    settings.setValue(QStringLiteral("ttsProvider"), m_ttsProvider);
+    settings.setValue(QStringLiteral("ttsProfile"), m_ttsProfile);
 }
 
 void VoiceController::setModelPath(const QString &path) {
@@ -67,6 +120,7 @@ void VoiceController::setModelPath(const QString &path) {
     m_modelPath = value;
     persistConfiguration();
     emit modelPathChanged();
+    emit modelReadinessChanged();
     if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }
 
@@ -74,13 +128,15 @@ void VoiceController::setSttProvider(const QString &provider) {
     QString value = provider.trimmed().toLower();
     if (value == QStringLiteral("local test")) value = QStringLiteral("local");
     if (value != QStringLiteral("groq") && value != QStringLiteral("local")) {
-        setError(QStringLiteral("VOICE_PROVIDER_INVALID"), QStringLiteral("Select Groq or the optional local test provider."));
+        setError(QStringLiteral("VOICE_PROVIDER_INVALID"), QStringLiteral("Choose local speech recognition or Groq."));
         return;
     }
     if (m_sttProvider == value) return;
     m_sttProvider = value;
     persistConfiguration();
     emit sttProviderChanged();
+    emit modelReadinessChanged();
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider changed."));
     if (m_enabled) restartWorker();
 }
 
@@ -95,7 +151,300 @@ void VoiceController::setSttModel(const QString &model) {
     m_sttModel = value;
     persistConfiguration();
     emit sttModelChanged();
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech model changed."));
     if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
+}
+
+void VoiceController::setSttProfile(const QString &profile) {
+    const QString value = profile.trimmed();
+    if (value != QStringLiteral("small-en")) {
+        setError(QStringLiteral("VOICE_PROFILE_INVALID"), QStringLiteral("Choose the small English recognition profile."));
+        return;
+    }
+    if (m_sttProfile == value) return;
+    m_sttProfile = value;
+    persistConfiguration();
+    emit sttProfileChanged();
+}
+
+void VoiceController::setTtsProvider(const QString &provider) {
+    const QString value = provider.trimmed().toLower();
+    if (value != QStringLiteral("local") && value != QStringLiteral("system")) {
+        setError(QStringLiteral("VOICE_TTS_PROVIDER_INVALID"), QStringLiteral("Choose the managed local voice or the operating system speech engine."));
+        return;
+    }
+    if (m_ttsProvider == value) return;
+    stopSpeaking();
+    retireTtsWorker();
+    if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech output provider changed."));
+    m_ttsProvider = value;
+    persistConfiguration();
+    emit ttsProviderChanged();
+    emit modelReadinessChanged();
+}
+
+void VoiceController::setTtsProfile(const QString &profile) {
+    const QString value = profile.trimmed();
+    if (value != QStringLiteral("amy-low") && value != QStringLiteral("ljspeech-medium")) {
+        setError(QStringLiteral("VOICE_PROFILE_INVALID"), QStringLiteral("Choose Amy low or LJSpeech medium for the local voice."));
+        return;
+    }
+    if (m_ttsProfile == value) return;
+    stopSpeaking();
+    retireTtsWorker();
+    if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech output voice changed."));
+    m_ttsProfile = value;
+    configureDownloads(true);
+    persistConfiguration();
+    emit ttsProfileChanged();
+    emit modelReadinessChanged();
+}
+
+void VoiceController::configureDownloads(const bool onlyTts) {
+    if (!onlyTts) {
+        m_fixtureDownload->configure({{QUrl(QStringLiteral("https://raw.githubusercontent.com/alphacep/vosk-api/v0.3.45/python/example/test.wav")),
+            QStringLiteral("test.wav"), 265914, QByteArrayLiteral("dcfea5712c43a43ba7ae8083afb39d36993e5a69c46e88b68aaa72b65cb615bb"), {}, {}}});
+    }
+#if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+    if (!onlyTts) {
+        m_sttDownload->configure({
+            {QUrl(QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")),
+                QStringLiteral("vosk-model-small-en-us-0.15.zip"), 41205931,
+                QByteArrayLiteral("30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"),
+                QStringLiteral("vosk-model-small-en-us-0.15/"), QStringLiteral("model")},
+            {QUrl(QStringLiteral("https://files.pythonhosted.org/packages/fc/ca/83398cfcd557360a3d7b2d732aee1c5f6999f68618d1645f38d53e14c9ff/vosk-0.3.45-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl")),
+                QStringLiteral("vosk-0.3.45-linux-x64.whl"), 7173758,
+                QByteArrayLiteral("25e025093c4399d7278f543568ed8cc5460ac3a4bf48c23673ace1e25d26619f"),
+                QStringLiteral("vosk/"), QStringLiteral("runtime")},
+            {QUrl(QStringLiteral("https://raw.githubusercontent.com/alphacep/vosk-api/v0.3.45/COPYING")),
+                QStringLiteral("licenses/Vosk-Apache-2.0.txt"), 10173,
+                QByteArrayLiteral("bb618af833c817ab01c1564bd3ec75ba4b4f9cf30910a4a2168e30a674ee8cc6"), {}, {}}});
+    }
+    const struct ModelDownloadAsset runtime{QUrl(QStringLiteral("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.10.46/sherpa-onnx-v1.10.46-linux-x64-shared.tar.bz2")),
+        QStringLiteral("sherpa-onnx-v1.10.46-linux-x64-shared.tar.bz2"), 20540943,
+        QByteArrayLiteral("120dbddd6a97bc901ae007c7621fe1b48904dea444718fac5470972d95f80d2d"),
+        QStringLiteral("sherpa-onnx-v1.10.46-linux-x64-shared/"), QStringLiteral("runtime")};
+    const bool compact = m_ttsProfile == QStringLiteral("amy-low");
+    const QString modelName = compact ? QStringLiteral("vits-piper-en_US-amy-low") : QStringLiteral("vits-piper-en_US-ljspeech-medium");
+    const struct ModelDownloadAsset model{QUrl(QStringLiteral("https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/%1.tar.bz2").arg(modelName)),
+        modelName + QStringLiteral(".tar.bz2"), compact ? 67095344 : 67169893,
+        compact ? QByteArrayLiteral("c70f5284a09a7fd4ed203b39b2ff51cac1432b422b852eb647b481dade3cf639")
+                : QByteArrayLiteral("3dfb4b759d8be032a4903a9538d128b0fda2a06ab1de6cbc2d93a97e2dd83dba"),
+        modelName + QLatin1Char('/'), QStringLiteral("models/") + m_ttsProfile};
+    m_ttsDownload->configure({runtime, model,
+        {QUrl(QStringLiteral("https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.10.46/LICENSE")),
+            QStringLiteral("licenses/Sherpa-ONNX-Apache-2.0.txt"), 11358,
+            QByteArrayLiteral("cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"), {}, {}},
+        {QUrl(QStringLiteral("https://raw.githubusercontent.com/csukuangfj/espeak-ng/f6fed6c58b5e0998b8e68c6610125e2d07d595a7/COPYING")),
+            QStringLiteral("licenses/espeak-ng-GPL-3.0.txt"), 35147,
+            QByteArrayLiteral("8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"), {}, {}},
+        {QUrl(QStringLiteral("https://raw.githubusercontent.com/microsoft/onnxruntime/v1.17.1/LICENSE")),
+            QStringLiteral("licenses/ONNX-Runtime-1.17.1-MIT.txt"), 1073,
+            QByteArrayLiteral("2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"), {}, {}}});
+#else
+    if (!onlyTts) m_sttDownload->configure({});
+    m_ttsDownload->configure({});
+#endif
+}
+
+bool VoiceController::sttModelReady() const {
+    if (m_sttProvider == QStringLiteral("groq")) return m_secret->hasKey();
+    if (m_modelPath == QDir(m_sttDownload->directory()).filePath(QStringLiteral("model")) && !m_sttDownload->ready()) return false;
+    const QDir modelDirectory(m_modelPath);
+    if (!modelDirectory.exists()) return false;
+    const QStringList libraryCandidates = {qEnvironmentVariable("BETTERFLASH_VOSK_LIBRARY"),
+        QDir(m_sttDownload->directory()).filePath(QStringLiteral("runtime/libvosk.so")),
+        modelDirectory.filePath(QStringLiteral("libvosk.so")),
+        modelDirectory.filePath(QStringLiteral("libvosk.dll")),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("lib/libvosk.so")),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("lib/libvosk.dll"))};
+    const bool libraryPresent = std::any_of(libraryCandidates.cbegin(), libraryCandidates.cend(), [](const QString &candidate) {
+        return !candidate.isEmpty() && QFileInfo(candidate).isFile();
+    });
+    return modelDirectory.exists(QStringLiteral("am/final.mdl")) && modelDirectory.exists(QStringLiteral("conf/model.conf")) && libraryPresent;
+}
+
+QString VoiceController::sttModelStatus() const {
+    if (m_sttProvider == QStringLiteral("groq")) return m_secret->hasKey() ? QStringLiteral("Groq key is available") : QStringLiteral("Add a Groq API key");
+    if (sttModelReady()) return QStringLiteral("Small English recognition is ready for offline use");
+#if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+    return m_sttDownload->error().isEmpty() ? m_sttDownload->status() : m_sttDownload->error();
+#else
+    return QStringLiteral("Local recognition for this platform is a draft; use Groq until a native kit is verified");
+#endif
+}
+
+bool VoiceController::sttModelDownloading() const { return m_sttDownload->downloading() || m_fixtureDownload->downloading(); }
+double VoiceController::sttModelProgress() const { return m_sttDownload->downloading() ? m_sttDownload->progress() : m_fixtureDownload->progress(); }
+
+bool VoiceController::ttsReady() const {
+    return m_ttsProvider == QStringLiteral("local") ? m_ttsDownload->ready() : !QTextToSpeech::availableEngines().isEmpty();
+}
+
+QString VoiceController::ttsStatus() const {
+    if (m_ttsProvider == QStringLiteral("system")) return ttsReady() ? QStringLiteral("System speech engine is ready") : QStringLiteral("No system speech engine is available; choose the managed local voice");
+#if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+    return m_ttsDownload->error().isEmpty() ? m_ttsDownload->status() : m_ttsDownload->error();
+#else
+    return QStringLiteral("Local synthesis for this platform is a draft; choose system speech until a native kit is verified");
+#endif
+}
+
+bool VoiceController::ttsModelDownloading() const { return m_ttsDownload->downloading(); }
+double VoiceController::ttsModelProgress() const { return m_ttsDownload->progress(); }
+
+void VoiceController::downloadSttModel() {
+    if (m_sttProvider != QStringLiteral("local")) return;
+    const QString managedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
+    if (m_modelPath != managedPath) { m_modelPath = managedPath; persistConfiguration(); emit modelPathChanged(); }
+    m_sttDownload->start();
+}
+void VoiceController::downloadTtsModel() { if (m_ttsProvider == QStringLiteral("local")) m_ttsDownload->start(); }
+void VoiceController::cancelSttDownload() { m_sttDownload->cancel(); m_fixtureDownload->cancel(); }
+void VoiceController::cancelTtsDownload() { m_ttsDownload->cancel(); }
+
+void VoiceController::setModelTestState(const bool busy, const QString &status, const QString &error) {
+    m_modelTestBusy = busy;
+    m_modelTestStatus = status;
+    m_modelTestError = error;
+    emit modelTestChanged();
+}
+
+void VoiceController::testSttModel() {
+    if (m_modelTestBusy) return;
+    m_sttTestBusy = true;
+    m_pendingSttTest = true;
+    m_sttTestError.clear();
+    m_sttTestStatus = QStringLiteral("Preparing a known spoken phrase");
+    m_testSavedWantsListening = m_wantsListening;
+    stopListening();
+    stopSpeaking();
+    setModelTestState(true, m_sttTestStatus);
+    if (m_sttProvider == QStringLiteral("groq") && !hasApiKey()) {
+        finishSttTest(false, QStringLiteral("Speech recognition validation failed"), QStringLiteral("Add a Groq API key or choose local recognition."));
+        return;
+    }
+    if (m_sttProvider == QStringLiteral("local") && !sttModelReady()) downloadSttModel();
+    if (!m_sttTestBusy) return;
+    if (!m_fixtureDownload->ready()) m_fixtureDownload->start();
+    continuePendingOperations();
+}
+
+void VoiceController::testTtsModel() {
+    if (m_modelTestBusy) return;
+    m_ttsTestBusy = true;
+    m_pendingTtsTest = true;
+    m_ttsTestError.clear();
+    m_ttsTestStatus = QStringLiteral("Preparing a spoken sample");
+    m_testSavedWantsListening = m_wantsListening;
+    stopListening();
+    stopSpeaking();
+    setModelTestState(true, m_ttsTestStatus);
+    if (m_ttsProvider == QStringLiteral("system") && !ttsReady()) {
+        finishTtsTest(false, QStringLiteral("Speech output validation failed"), QStringLiteral("No operating system speech engine is available. Choose the managed local voice."));
+        return;
+    }
+    if (m_ttsProvider == QStringLiteral("local") && !ttsReady()) downloadTtsModel();
+    if (!m_ttsTestBusy) return;
+    continuePendingOperations();
+}
+
+void VoiceController::continuePendingOperations() {
+    if (m_pendingSttTest && sttModelReady() && m_fixtureDownload->ready()) beginSttTest();
+    if (m_pendingTtsTest && ttsReady()) beginTtsTest();
+    if (m_enabled && !m_worker && !m_sttTestBusy && sttModelReady()) beginWorker();
+    if (m_speaking && !m_ttsIssued && ttsReady()) beginSpeech();
+}
+
+void VoiceController::beginSttTest() {
+    if (!m_sttTestBusy || !m_pendingSttTest) return;
+    m_pendingSttTest = false;
+    QFile fixture(QDir(m_fixtureDownload->directory()).filePath(QStringLiteral("test.wav")));
+    if (!fixture.open(QIODevice::ReadOnly) || fixture.size() != 265914) {
+        finishSttTest(false, QStringLiteral("Speech recognition validation failed"), QStringLiteral("The spoken validation sample is unavailable. Download it again."));
+        return;
+    }
+    const QByteArray wav = fixture.readAll();
+    const quint64 generation = ++m_testGeneration;
+    auto *const worker = new VoiceWorker(m_modelPath);
+    auto *const thread = new QThread;
+    worker->setProvider(m_sttProvider);
+    worker->setSttModel(m_sttModel);
+    worker->setRuntimePath(QDir(m_sttDownload->directory()).filePath(QStringLiteral("runtime")));
+    worker->setApiKey(m_secret->key());
+    worker->moveToThread(thread);
+    m_testWorker = worker;
+    m_testThread = thread;
+    m_threads.append(thread);
+    connect(thread, &QThread::started, worker, &VoiceWorker::initializeForTest);
+    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    connect(worker, &VoiceWorker::ready, this, [this, worker, wav, generation] {
+        if (generation != m_testGeneration || !m_sttTestBusy) return;
+        m_sttTestStatus = QStringLiteral("Recognizing a known spoken phrase");
+        setModelTestState(true, m_sttTestStatus);
+        QMetaObject::invokeMethod(worker, [worker, wav] { worker->testAudio(wav); }, Qt::QueuedConnection);
+    });
+    connect(worker, &VoiceWorker::testFinished, this, [this, generation](const QString &transcript, const bool passed, const QString &error) {
+        if (generation != m_testGeneration || !m_sttTestBusy) return;
+        finishSttTest(passed, passed ? QStringLiteral("Passed: known spoken digits matched") : QStringLiteral("Speech recognition validation failed"),
+            passed ? QString() : error + (transcript.isEmpty() ? QString() : QStringLiteral(" Heard: %1").arg(transcript)));
+    });
+    connect(worker, &VoiceWorker::errorOccurred, this, [this, generation](const QString &code, const QString &message, const bool) {
+        if (generation == m_testGeneration && m_sttTestBusy) finishSttTest(false, QStringLiteral("Speech recognition validation failed"), code + QStringLiteral(": ") + message);
+    });
+    thread->start();
+    QTimer::singleShot(45000, this, [this, generation] {
+        if (generation == m_testGeneration && m_sttTestBusy) finishSttTest(false, QStringLiteral("Speech recognition validation timed out"), QStringLiteral("Check the selected model or network connection, then try again."));
+    });
+}
+
+void VoiceController::finishSttTest(const bool passed, const QString &message, const QString &error) {
+    Q_UNUSED(passed);
+    ++m_testGeneration;
+    m_sttTestBusy = false;
+    m_pendingSttTest = false;
+    m_sttTestStatus = message;
+    m_sttTestError = error;
+    const QPointer<VoiceWorker> worker = m_testWorker;
+    const QPointer<QThread> thread = m_testThread;
+    m_testWorker = nullptr; m_testThread = nullptr;
+    if (thread) thread->requestInterruption();
+    if (worker && thread) QMetaObject::invokeMethod(worker, [worker, thread] { if (worker) worker->shutdown(); if (thread) thread->quit(); }, Qt::QueuedConnection);
+    setModelTestState(m_ttsTestBusy, message, error);
+    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); continuePendingOperations(); }
+}
+
+void VoiceController::beginTtsTest() {
+    if (!m_ttsTestBusy || !m_pendingTtsTest) return;
+    m_pendingTtsTest = false;
+    m_ttsTestStatus = QStringLiteral("Synthesizing and playing a spoken sample");
+    setModelTestState(true, m_ttsTestStatus);
+    m_pendingSpeech = QStringLiteral("BetterFlash speech test. Your next card is ready.");
+    m_ttsStarted = false;
+    m_ttsIssued = false;
+    m_captureSuspended = !m_worker || !m_ready;
+    setSpeakingState(true);
+    const quint64 generation = ++m_testGeneration;
+    updateCapture();
+    if (m_captureSuspended) beginSpeech();
+    QTimer::singleShot(45000, this, [this, generation] {
+        if (m_ttsTestBusy && generation == m_testGeneration) {
+            stopSpeaking();
+            finishTtsTest(false, QStringLiteral("Speech output validation timed out"), QStringLiteral("The voice did not finish synthesis and playback. Check the audio output and selected voice."));
+        }
+    });
+}
+
+void VoiceController::finishTtsTest(const bool passed, const QString &message, const QString &error) {
+    Q_UNUSED(passed);
+    ++m_testGeneration;
+    m_ttsTestBusy = false;
+    m_pendingTtsTest = false;
+    m_ttsTestStatus = message;
+    m_ttsTestError = error;
+    setModelTestState(m_sttTestBusy, message, error);
+    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); }
 }
 
 void VoiceController::setApiKey(const QString &key) { m_secret->setKey(key); }
@@ -114,6 +463,8 @@ void VoiceController::setEnabled(const bool enabled) {
         m_wantsListening = false;
         stopSpeaking();
         retireWorker();
+        retireTtsWorker();
+        if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech output was stopped."));
         setStatus(QStringLiteral("Voice disabled"));
         return;
     }
@@ -142,12 +493,18 @@ void VoiceController::setEnabled(const bool enabled) {
 }
 
 void VoiceController::beginWorker() {
-    if (!m_enabled || m_worker) return;
+    if (!m_enabled || m_worker || m_modelTestBusy) return;
+    if (m_sttProvider == QStringLiteral("local") && !sttModelReady()) {
+        setStatus(QStringLiteral("Preparing local speech recognition"));
+        downloadSttModel();
+        return;
+    }
     const quint64 generation = ++m_workerGeneration;
     auto *const thread = new QThread;
     auto *const worker = new VoiceWorker(m_modelPath);
     worker->setProvider(m_sttProvider);
     worker->setSttModel(m_sttModel);
+    worker->setRuntimePath(QDir(m_sttDownload->directory()).filePath(QStringLiteral("runtime")));
     worker->setApiKey(m_secret->key());
     worker->moveToThread(thread);
     m_worker = worker;
@@ -185,7 +542,7 @@ void VoiceController::beginWorker() {
         if (fatal) setEnabled(false);
         setError(code, message);
     });
-    setStatus(m_sttProvider == QStringLiteral("groq") ? QStringLiteral("Preparing microphone") : QStringLiteral("Loading local test model"));
+    setStatus(m_sttProvider == QStringLiteral("groq") ? QStringLiteral("Preparing microphone") : QStringLiteral("Loading local speech recognition"));
     thread->start();
 }
 
@@ -250,6 +607,7 @@ void VoiceController::stopListening() {
 }
 
 void VoiceController::processTranscript(const QString &transcript) {
+    if (m_modelTestBusy) return;
     const QString text = transcript.trimmed();
     if (text.isEmpty()) return;
     if (text.size() > 16384) {
@@ -264,7 +622,7 @@ void VoiceController::processTranscript(const QString &transcript) {
 }
 
 void VoiceController::speak(const QString &text) {
-    if (!m_enabled || text.trimmed().isEmpty()) return;
+    if (!m_enabled || m_modelTestBusy || text.trimmed().isEmpty()) return;
     stopSpeaking();
     m_echoTail = false;
     m_pendingSpeech = text.trimmed();
@@ -278,6 +636,7 @@ void VoiceController::speak(const QString &text) {
     m_captureSuspended = !m_worker || !m_ready;
     updateCapture();
     if (m_captureSuspended) beginSpeech();
+    if (m_ttsProvider == QStringLiteral("local")) return;
     const quint64 generation = m_speechGeneration;
     QTimer::singleShot(5000, this, [this, generation] {
         if (generation == m_speechGeneration && m_speaking && !m_ttsStarted)
@@ -286,7 +645,8 @@ void VoiceController::speak(const QString &text) {
 }
 
 void VoiceController::beginSpeech() {
-    if (!m_enabled || !m_speaking || !m_captureSuspended || m_ttsIssued || m_pendingSpeech.isEmpty()) return;
+    if ((!m_enabled && !m_ttsTestBusy) || !m_speaking || !m_captureSuspended || m_ttsIssued || m_pendingSpeech.isEmpty()) return;
+    if (m_ttsProvider == QStringLiteral("local")) { beginLocalSpeech(); return; }
     if (!m_speech) {
         m_speech = new QTextToSpeech(this);
         connect(m_speech, &QTextToSpeech::stateChanged, this, [this](const auto) { onSpeechStateChanged(); });
@@ -306,6 +666,122 @@ void VoiceController::beginSpeech() {
         if (generation == m_speechGeneration && m_speaking && !m_ttsStarted)
             speechError(QStringLiteral("The system speech engine did not start playback."));
     });
+}
+
+void VoiceController::beginLocalSpeech() {
+    if (m_retiringTtsThread && m_retiringTtsThread->isRunning()) {
+        setStatus(QStringLiteral("Finishing the previous speech request"));
+        return;
+    }
+    if (!ttsReady()) {
+        setStatus(QStringLiteral("Preparing the local reading voice"));
+        downloadTtsModel();
+        return;
+    }
+    const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+    if (device.isNull()) { speechError(QStringLiteral("Connect an audio output and select it in system sound settings.")); return; }
+    m_playbackFormat = device.preferredFormat();
+    if (!m_playbackFormat.isValid() || !device.isFormatSupported(m_playbackFormat)) {
+        speechError(QStringLiteral("The default audio output has no supported PCM format. Select another output in system sound settings."));
+        return;
+    }
+    if (m_pendingSpeech.size() > 8192) {
+        speechError(QStringLiteral("This prompt exceeds the local voice limit of 8192 characters. Shorten the card or read it in parts."));
+        return;
+    }
+    if (!m_ttsWorker) {
+        auto *const thread = new QThread;
+        const QString modelFile = m_ttsProfile == QStringLiteral("amy-low") ? QStringLiteral("en_US-amy-low.onnx") : QStringLiteral("en_US-ljspeech-medium.onnx");
+        auto *const worker = new LocalTtsWorker(QDir(m_ttsDownload->directory()).filePath(QStringLiteral("runtime")),
+            QDir(m_ttsDownload->directory()).filePath(QStringLiteral("models/") + m_ttsProfile), modelFile);
+        worker->moveToThread(thread);
+        m_ttsWorker = worker; m_ttsThread = thread;
+        m_threads.append(thread);
+        connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+        connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+        connect(worker, &LocalTtsWorker::pcmReady, this, &VoiceController::startLocalPlayback);
+        connect(worker, &LocalTtsWorker::failed, this, [this](const QString &message, const quint64 request) {
+            if (request == m_speechGeneration && m_speaking) speechError(message);
+        });
+        thread->start();
+    }
+    m_ttsIssued = true;
+    const quint64 request = ++m_speechGeneration;
+    m_synthesisCancelled = std::make_shared<std::atomic_bool>(false);
+    const auto cancelled = m_synthesisCancelled;
+    const QPointer<LocalTtsWorker> worker = m_ttsWorker;
+    const QString text = m_pendingSpeech;
+    const QAudioFormat format = m_playbackFormat;
+    setStatus(QStringLiteral("Preparing speech"));
+    QMetaObject::invokeMethod(worker, [worker, text, format, request, cancelled] {
+        if (worker) worker->synthesize(text, format, request, cancelled);
+    }, Qt::QueuedConnection);
+    QTimer::singleShot(45000, this, [this, request] {
+        if (request == m_speechGeneration && m_speaking && !m_ttsStarted)
+            speechError(QStringLiteral("The local voice took too long to synthesize this prompt. Shorten it or choose Amy low."));
+    });
+}
+
+void VoiceController::startLocalPlayback(const QByteArray &pcm, const quint64 request, const double seconds) {
+    if (request != m_speechGeneration || !m_speaking || (!m_enabled && !m_ttsTestBusy)) return;
+    if (pcm.isEmpty() || pcm.size() % m_playbackFormat.bytesPerFrame() != 0) {
+        speechError(QStringLiteral("The local voice returned malformed audio. Try another voice.")); return;
+    }
+    if (m_audioSink) { m_audioSink->disconnect(this); m_audioSink->stop(); m_audioSink->deleteLater(); }
+    if (m_playbackBuffer) m_playbackBuffer->deleteLater();
+    m_playbackBuffer = new QBuffer(this);
+    m_playbackBuffer->setData(pcm);
+    if (!m_playbackBuffer->open(QIODevice::ReadOnly)) { speechError(QStringLiteral("The generated speech buffer could not open.")); return; }
+    m_audioSink = new QAudioSink(QMediaDevices::defaultAudioOutput(), m_playbackFormat, this);
+    const QPointer<QAudioSink> sink = m_audioSink;
+    connect(m_audioSink, &QAudioSink::stateChanged, this, [this, request, sink](const QAudio::State state) {
+        if (request != m_speechGeneration || !m_speaking || !sink || m_audioSink != sink) return;
+        if (sink->error() != QAudio::NoError && !(state == QAudio::IdleState && sink->error() == QAudio::UnderrunError)) {
+            speechError(QStringLiteral("Audio playback failed. Check the selected sound output and try again.")); return;
+        }
+        switch (state) {
+        case QAudio::ActiveState:
+            m_ttsStarted = true;
+            setStatus(QStringLiteral("Speaking"));
+            break;
+        case QAudio::IdleState:
+            if (m_ttsStarted && m_playbackBuffer && m_playbackBuffer->atEnd()) {
+                sink->disconnect(this); sink->stop(); sink->deleteLater(); m_audioSink = nullptr;
+                m_playbackBuffer->deleteLater(); m_playbackBuffer = nullptr;
+                finishSpeech();
+            }
+            break;
+        case QAudio::StoppedState:
+            speechError(QStringLiteral("Audio playback stopped before the sample finished. Check the sound output."));
+            break;
+        case QAudio::SuspendedState:
+            break;
+        }
+    });
+    m_audioSink->start(m_playbackBuffer);
+    QTimer::singleShot(static_cast<int>(seconds * 1000.0) + 10000, this, [this, request] {
+        if (request == m_speechGeneration && m_speaking)
+            speechError(QStringLiteral("Audio playback did not finish. Check the sound output and retry."));
+    });
+}
+
+void VoiceController::retireTtsWorker() {
+    m_synthesisCancelled->store(true);
+    const QPointer<LocalTtsWorker> worker = m_ttsWorker;
+    const QPointer<QThread> thread = m_ttsThread;
+    m_ttsWorker = nullptr; m_ttsThread = nullptr;
+    if (thread) {
+        m_retiringTtsThread = thread;
+        connect(thread, &QThread::finished, this, [this, thread] {
+            if (m_retiringTtsThread == thread) m_retiringTtsThread = nullptr;
+            continuePendingOperations();
+        });
+    }
+    if (thread) thread->requestInterruption();
+    if (worker && thread) QMetaObject::invokeMethod(worker, [worker, thread] {
+        if (worker) worker->shutdown();
+        if (thread) thread->quit();
+    }, Qt::QueuedConnection);
 }
 
 void VoiceController::onSpeechStateChanged() {
@@ -334,6 +810,7 @@ void VoiceController::finishSpeech() {
     m_ttsIssued = false;
     setSpeakingState(false);
     m_echoTail = true;
+    if (m_ttsTestBusy) finishTtsTest(true, QStringLiteral("Passed: synthesized audio played successfully"));
     const quint64 generation = ++m_speechGeneration;
     QTimer::singleShot(350, this, [this, generation] {
         if (generation != m_speechGeneration) return;
@@ -346,6 +823,9 @@ void VoiceController::finishSpeech() {
 
 void VoiceController::stopSpeaking() {
     ++m_speechGeneration;
+    m_synthesisCancelled->store(true);
+    if (m_audioSink) { m_audioSink->disconnect(this); m_audioSink->stop(); m_audioSink->deleteLater(); m_audioSink = nullptr; }
+    if (m_playbackBuffer) { m_playbackBuffer->deleteLater(); m_playbackBuffer = nullptr; }
     m_stoppingSpeech = true;
     if (m_speech) m_speech->stop(QTextToSpeech::BoundaryHint::Immediate);
     m_stoppingSpeech = false;
@@ -368,10 +848,11 @@ void VoiceController::stopSpeaking() {
 
 void VoiceController::speechError(const QString &message) {
     stopSpeaking();
+    if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Speech output validation failed"), message);
     const QString detail = message.trimmed();
     setError(QStringLiteral("VOICE_TTS_UNAVAILABLE"), detail.isEmpty()
-        ? QStringLiteral("System speech is unavailable. Install and start Speech Dispatcher on Fedora, or enable a text to speech engine in Android settings.")
-        : QStringLiteral("System speech failed: %1 Check the system text to speech engine and audio output.").arg(detail));
+        ? QStringLiteral("Speech output is unavailable. Choose a local voice in Settings > Voice and check the audio output.")
+        : QStringLiteral("Speech output failed: %1 Check the selected voice and audio output.").arg(detail));
 }
 
 void VoiceController::setReady(const bool value) {

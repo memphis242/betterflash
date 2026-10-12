@@ -38,9 +38,55 @@ QStringList chunks(const QString &text) {
 }
 }
 
-SearchWorker::SearchWorker(QString cachePath, Epochs epochs)
-    : m_cachePath(std::move(cachePath)), m_currentEpochs(std::move(epochs)) {
+SearchWorker::SearchWorker(QString cachePath, Epochs epochs,
+                           std::shared_ptr<std::atomic<quint64>> testEpoch)
+    : m_cachePath(std::move(cachePath)), m_currentEpochs(std::move(epochs)),
+      m_testEpoch(std::move(testEpoch)) {
     for (const auto &epoch : m_currentEpochs) Q_ASSERT(epoch);
+    Q_ASSERT(m_testEpoch);
+}
+
+void SearchWorker::testLocal(quint64 epoch, const QString &profile, const QString &directory) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (m_testEpoch->load() != epoch) return;
+    const auto fail = [this, epoch](const QString &message) {
+        if (m_testEpoch->load() == epoch) emit testFinished(epoch, false, message);
+    };
+    auto embedder = std::make_unique<LocalEmbedder>();
+    const auto loaded = embedder->load(directory, profile);
+    if (!loaded) { fail(loaded.error()); return; }
+    static const QStringList samples{
+        QStringLiteral("Multiplication combines equal groups of quantities."),
+        QStringLiteral("Multiplying numbers finds the total in repeated groups."),
+        QStringLiteral("A recipe uses flour, water, yeast, and a warm oven.")};
+    QVector<QVector<float>> vectors;
+    vectors.reserve(samples.size());
+    for (const QString &sample : samples) {
+        if (m_testEpoch->load() != epoch) return;
+        const auto encoded = embedder->encode(sample, false);
+        if (!encoded) { fail(encoded.error()); return; }
+        if (encoded->isEmpty()) { fail(QStringLiteral("SEARCH_TEST: The model returned an empty embedding.")); return; }
+        vectors.append(*encoded);
+    }
+    const int dimensions = vectors.front().size();
+    if (dimensions <= 0 || vectors[1].size() != dimensions || vectors[2].size() != dimensions) {
+        fail(QStringLiteral("SEARCH_TEST: The model returned inconsistent vector dimensions.")); return;
+    }
+    const auto cosine = [dimensions](const QVector<float> &left, const QVector<float> &right) {
+        double result = 0.0;
+        for (int index = 0; index < dimensions; ++index) result += double(left.at(index)) * right.at(index);
+        return result;
+    };
+    const double self = cosine(vectors.front(), vectors.front());
+    const double related = cosine(vectors.front(), vectors.at(1));
+    const double unrelated = cosine(vectors.front(), vectors.at(2));
+    if (!std::isfinite(self) || !std::isfinite(related) || !std::isfinite(unrelated)
+        || std::abs(self - 1.0) > 0.02) {
+        fail(QStringLiteral("SEARCH_TEST: The model returned invalid or unnormalized vectors.")); return;
+    }
+    if (m_testEpoch->load() == epoch)
+        emit testFinished(epoch, true, QStringLiteral("Model responded with %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
+            .arg(dimensions).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3));
 }
 SearchWorker::~SearchWorker() {
     const QString name = m_cache.connectionName();

@@ -20,12 +20,13 @@ Item {
         return ids;
     }
     readonly property string summaryKey: Qt.md5(JSON.stringify([
-        app.selectedDeckId, ai.endpoint, ai.model,
+        app.selectedDeckId, ai.provider, ai.resolvedProfile, ai.endpoint, ai.model,
         app.decks.filter(d => scopeIds.indexOf(d.id) >= 0).map(d => [d.id, d.name]),
         app.cards.filter(c => scopeIds.indexOf(c.deckId) >= 0)
     ]))
     readonly property bool canSummarize: visible && paneOpen && !app.reviewing && !app.busy
-        && !ui.modalOpen && !descriptionEditing && (selectedDeck.due || 0) > 0 && ai.hasApiKey
+        && !ui.modalOpen && !descriptionEditing && (selectedDeck.due || 0) > 0
+        && (ai.provider === "local" ? ai.localModelReady : ai.hasApiKey)
     property var summaryCache: ({})
     property string pendingSummaryKey: ""
     property string pendingSummaryDeck: ""
@@ -61,6 +62,7 @@ Item {
         const cache = Object.assign({}, summaryCache);
         delete cache[summaryKey];
         summaryCache = cache;
+        if (ai.provider === "local" && !ai.localModelReady) ai.prepareLocalModel();
         scheduleSummary();
     }
     function saveDescription(id, text) {
@@ -282,13 +284,17 @@ Item {
             actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
             actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)
             saveExternally: true
-            summaryText: overview.summaryResult.text || (!ai.hasApiKey
+            summaryText: overview.summaryResult.text || (ai.provider === "local" && !ai.localModelReady
+                ? "Prepare the local language model to summarize the due cards."
+                : ai.provider === "remote" && !ai.hasApiKey
                 ? "Add your provider key in Settings / Language model to summarize the due cards."
                 : overview.summaryResult.error ? "" : "A summary of the due cards will appear here.")
             summaryCaption: "Automatic summary"
-            summaryBusy: ai.busy && overview.pendingSummaryKey === overview.summaryKey
-            summaryError: overview.summaryResult.error || ""
-            summaryRetryVisible: ai.hasApiKey
+            summaryBusy: ai.busy && overview.pendingSummaryKey === overview.summaryKey || ai.provider === "local" && ai.localDownloading
+            summaryError: overview.summaryResult.error || (ai.provider === "local" ? ai.localError : "")
+            summaryRetryVisible: (overview.selectedDeck.due || 0) > 0
+                && (ai.provider === "local" ? !ai.localModelReady || !!overview.summaryResult.error : ai.hasApiKey && !!overview.summaryResult.error)
+            summaryRetryText: ai.provider === "local" && !ai.localModelReady ? "Download and summarize" : "Retry summary"
             onSummaryRetryRequested: overview.retrySummary()
             onDescriptionSaved: (id, text) => overview.saveDescription(id, text)
             onCollapseRequested: overview.preferences.detailsOpen = false

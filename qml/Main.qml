@@ -1927,7 +1927,8 @@ ApplicationWindow {
             spacing: 14
             Label {
                 textFormat: Text.PlainText
-                text: "Generate a summary of the cards still in this queue. Their question prompts will be sent to " + ai.endpoint + " using " + ai.model + "."
+                text: ai.provider === "local" ? "Summarize the cards remaining in this queue on this device using " + ai.localModelLabel + "."
+                    : "Generate a summary of the cards still in this queue. Their question prompts will be sent to " + ai.endpoint + " using " + ai.model + "."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -2246,16 +2247,23 @@ ApplicationWindow {
         rebindDialog.open()
     }
     function openVoiceConfig() {
-        voiceConfigDialog.open()
+        page = 3
+        settings.section = 2
     }
     function openAiConfig() {
-        aiConfigDialog.open()
+        openLanguageModelSettings()
     }
     function openSyncConfig() {
-        syncConfigDialog.open()
+        page = 3
+        settings.section = 4
     }
-    function exportData() {
-        exportDialog.open()
+    function exportData(destination) {
+        const path = typeof destination === "string" ? destination.trim() : ""
+        if (path.length) {
+            app.exportCollection(path)
+        } else {
+            exportDialog.open()
+        }
     }
     function importData() {
         importDialog.open()

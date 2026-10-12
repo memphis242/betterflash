@@ -36,6 +36,16 @@ owned by another checkout.
 PNG, JPEG, and GIF use Qt's built-in readers. Install `qt6-qtimageformats` for
 WebP images, or export them to PNG before attaching.
 
+### Local models
+
+The application is local-first. Language-model settings default to Automatic:
+desktop systems with at least 12 GiB RAM select Gemma 4 E2B Q4_K_M (about
+3.1 GB), while smaller systems select LFM 2.5 350M Q4_K_M (about 229 MB).
+Android targets the compact LFM profile. Native llama.cpp uses CPU execution or
+an available GPU when automatic acceleration can safely fit the model; CPU can
+be selected explicitly. Speech and embedding assets are also downloaded on
+demand, verified, and tested with fixed known inputs. See [local model support](docs/local-models.md).
+
 The first run is empty. Create a deck or explicitly load the example collection.
 For an isolated demonstration:
 
@@ -275,21 +285,20 @@ The timeline can also be scrolled horizontally without recentering the current c
 
 ## Voice and language models
 
-Voice recognition uses bring-your-own-key Groq by default. Add the key in Voice
-settings. Desktop keys are saved through the desktop Secret Service; when the
-keyring is unavailable, they remain in memory for the session. Card content and
-API keys never go to the sync server together.
+Voice recognition, speech synthesis, and language-model features are local by
+default. Voice downloads its managed Vosk and Piper/Sherpa assets on first use;
+the Settings page exposes progress, cancellation, and known-input validation.
+Groq recognition and other remote providers remain explicit BYOK choices. Keys
+are saved through the desktop Secret Service when available and never enter
+collection data, backups, sync events, or logs. See [voice setup](docs/voice.md)
+and [local model support](docs/local-models.md).
 
-Speech synthesis initially uses the system Qt speech engine. A remote TTS
-provider can be added once selected. The optional local recognition setup is a
-test facility, not a required app dependency. See [voice setup](docs/voice.md).
-
-With a configured key, the Review landing page automatically summarizes a
-selected deck's due question prompts, including descendants. It waits briefly
-after selection and caches unchanged results for the session. During a review,
-the remaining-queue summary is generated on request. Neither summary grades
-answers nor alters scheduling. Groq is the initial default; the endpoint and
-model can be changed in Settings. See [deck summaries](docs/deck-graph-studies.md#main-app-integration).
+The Review landing page summarizes a selected deck's due prompts, including
+descendants, using the configured local language model when its assets are
+ready. Remote providers remain available after explicit configuration. The
+summary waits briefly after selection and caches unchanged results for the
+session; during a review, the remaining-queue summary is generated on request.
+Neither summary grades answers nor alters scheduling. See [deck summaries](docs/deck-graph-studies.md#main-app-integration).
 
 Atomicize proposes two through five focused cards from one saved note, or
 recommends keeping a related list or procedure together. Review and edit the

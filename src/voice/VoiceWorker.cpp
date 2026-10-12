@@ -16,7 +16,9 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
+#include <QtEndian>
 #include <optional>
+#include <algorithm>
 
 namespace {
 QString normalize(const QString &value) { return value.trimmed().toCaseFolded().simplified(); }
@@ -144,25 +146,9 @@ void VoiceWorker::initialize() {
             resumeCapture(epoch);
         });
     } else if (m_provider == QStringLiteral("local")) {
-        if (!QDir(m_modelPath).exists() || !loadLibrary()) {
-            if (!QDir(m_modelPath).exists())
-                reportError(QStringLiteral("VOICE_MODEL_MISSING"), QStringLiteral("Choose an installed Vosk model directory in Voice settings, or select Groq."), true);
-            return;
-        }
-        const QByteArray modelPath = QFile::encodeName(QDir::cleanPath(m_modelPath));
-        m_model = m_modelNew(modelPath.constData());
-        if (!m_model) {
-            reportError(QStringLiteral("VOICE_MODEL_INVALID"), QStringLiteral("Vosk could not open that model. Choose a complete Vosk model directory."), true);
-            return;
-        }
-        if (QThread::currentThread()->isInterruptionRequested()) { shutdown(); return; }
-        m_recognizer = m_recognizerNew(m_model, VoiceUtteranceBuffer::SampleRate);
-        if (!m_recognizer) {
-            reportError(QStringLiteral("VOICE_RECOGNIZER_FAILED"), QStringLiteral("Vosk could not initialize recognition. Check the model and library versions."), true);
-            return;
-        }
+        if (!loadLocalModel()) return;
     } else {
-        reportError(QStringLiteral("VOICE_PROVIDER_INVALID"), QStringLiteral("Select Groq or the optional local test provider."), true);
+        reportError(QStringLiteral("VOICE_PROVIDER_INVALID"), QStringLiteral("Choose local speech recognition or Groq."), true);
         return;
     }
     if (QThread::currentThread()->isInterruptionRequested()) { shutdown(); return; }
@@ -171,10 +157,107 @@ void VoiceWorker::initialize() {
     emit ready();
 }
 
+bool VoiceWorker::loadLocalModel() {
+    if (!QDir(m_modelPath).exists() || !loadLibrary()) {
+        if (!QDir(m_modelPath).exists())
+            reportError(QStringLiteral("VOICE_MODEL_MISSING"), QStringLiteral("The local speech model directory is missing."), true);
+        return false;
+    }
+    const QByteArray modelPath = QFile::encodeName(QDir::cleanPath(m_modelPath));
+    m_model = m_modelNew(modelPath.constData());
+    if (!m_model) {
+        reportError(QStringLiteral("VOICE_MODEL_INVALID"), QStringLiteral("Vosk could not open the local speech model."), true);
+        return false;
+    }
+    if (QThread::currentThread()->isInterruptionRequested()) { shutdown(); return false; }
+    m_recognizer = m_recognizerNew(m_model, VoiceUtteranceBuffer::SampleRate);
+    if (!m_recognizer) {
+        reportError(QStringLiteral("VOICE_RECOGNIZER_FAILED"), QStringLiteral("Vosk could not initialize recognition."), true);
+        return false;
+    }
+    return true;
+}
+
+void VoiceWorker::initializeForTest() {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (m_initialized || m_shuttingDown) return;
+    m_testMode = true;
+    if (m_provider == QStringLiteral("local")) {
+        if (!loadLocalModel()) return;
+    } else if (m_provider == QStringLiteral("groq")) {
+        if (m_apiKey.isEmpty()) { emit testFinished({}, false, QStringLiteral("Add a Groq API key before testing cloud speech recognition.")); return; }
+        m_transcriber = new VoiceTranscriber(m_apiKey, m_sttModel, this);
+        connect(m_transcriber, &VoiceTranscriber::transcriptReady, this, [this](const QString &text, const quint64) {
+            if (!m_testMode || m_shuttingDown || m_testAnswered) return;
+            m_testAnswered = true;
+            QString digits = text.toCaseFolded();
+            static const QStringList words = {QStringLiteral("zero"), QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("three"),
+                QStringLiteral("four"), QStringLiteral("five"), QStringLiteral("six"), QStringLiteral("seven"), QStringLiteral("eight"), QStringLiteral("nine")};
+            for (int i = 0; i < words.size(); ++i)
+                digits.replace(QRegularExpression(QStringLiteral("\\b%1\\b").arg(words[i])), QString::number(i));
+            digits.replace(QRegularExpression(QStringLiteral("\\boh\\b")), QStringLiteral("0"));
+            digits.remove(QRegularExpression(QStringLiteral("[^0-9]")));
+            const bool passed = digits == QStringLiteral("100019021001803");
+            emit testFinished(text, passed, passed ? QString() : QStringLiteral("The response did not match the known spoken digits. Try another transcription model."));
+        });
+        connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool, const quint64) {
+            if (m_shuttingDown || m_testAnswered) return;
+            m_testAnswered = true;
+            emit testFinished({}, false, code + QStringLiteral(": ") + message);
+        });
+        connect(m_transcriber, &VoiceTranscriber::finished, this, [this](const quint64) {
+            if (!m_shuttingDown && !m_testAnswered) { m_testAnswered = true; emit testFinished({}, false, QStringLiteral("The transcription provider returned no speech.")); }
+        });
+    } else { emit testFinished({}, false, QStringLiteral("Choose local recognition or Groq.")); return; }
+    m_initialized = true;
+    emit ready();
+}
+
+bool VoiceWorker::decodeWav(const QByteArray &wav, QByteArray *pcm, int *sampleRate) const {
+    if (!pcm || !sampleRate || wav.size() < 44 || wav.mid(0, 4) != QByteArrayLiteral("RIFF") || wav.mid(8, 4) != QByteArrayLiteral("WAVE")) return false;
+    int offset = 12; quint16 channels = 0; quint16 bits = 0; quint16 format = 0; quint32 rate = 0; int dataOffset = -1; quint32 dataSize = 0;
+    while (offset + 8 <= wav.size()) {
+        const QByteArray id = wav.mid(offset, 4); const quint32 size = qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(wav.constData() + offset + 4)); offset += 8;
+        if (size > static_cast<quint32>(wav.size() - offset)) return false;
+        if (id == QByteArrayLiteral("fmt ") && size >= 16) { format = qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(wav.constData() + offset)); channels = qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(wav.constData() + offset + 2)); rate = qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(wav.constData() + offset + 4)); bits = qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(wav.constData() + offset + 14)); }
+        if (id == QByteArrayLiteral("data")) { dataOffset = offset; dataSize = size; break; }
+        offset += static_cast<int>(size) + (size & 1U);
+    }
+    if (format != 1 || channels != 1 || bits != 16 || rate == 0 || rate > 192000 || dataOffset < 0
+        || dataSize % 2 != 0 || dataSize > VoiceUtteranceBuffer::MaxBytes) return false;
+    *pcm = wav.mid(dataOffset, static_cast<qsizetype>(dataSize)); *sampleRate = static_cast<int>(rate); return !pcm->isEmpty();
+}
+
+void VoiceWorker::testAudio(const QByteArray &wav) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (!m_testMode || m_testSubmitted) return;
+    m_testSubmitted = true;
+    QByteArray pcm; int sampleRate = 0;
+    if (!m_initialized || !decodeWav(wav, &pcm, &sampleRate) || sampleRate != VoiceUtteranceBuffer::SampleRate) { emit testFinished({}, false, QStringLiteral("The validation audio must be mono 16-bit PCM at 16000 Hz.")); return; }
+    if (m_provider == QStringLiteral("groq")) { m_transcriber->submit(pcm, 0); return; }
+    if (!m_recognizer || !m_acceptWaveform || !m_result || !m_finalResult) { emit testFinished({}, false, QStringLiteral("The local speech recognizer is unavailable.")); return; }
+    m_recognizerReset(m_recognizer);
+    QStringList parts;
+    constexpr qsizetype ChunkBytes = 6400;
+    for (qsizetype offset = 0; offset < pcm.size(); offset += ChunkBytes) {
+        if (QThread::currentThread()->isInterruptionRequested()) return;
+        if (m_acceptWaveform(m_recognizer, pcm.constData() + offset, static_cast<int>(std::min(ChunkBytes, pcm.size() - offset))))
+            parts.append(QJsonDocument::fromJson(QByteArray(m_result(m_recognizer))).object().value(QStringLiteral("text")).toString());
+    }
+    parts.append(QJsonDocument::fromJson(QByteArray(m_finalResult(m_recognizer))).object().value(QStringLiteral("text")).toString());
+    const QString transcript = parts.join(QLatin1Char(' ')).simplified();
+    const QString expected = QStringLiteral("one zero zero zero one nine oh two one oh zero one eight zero three");
+    const bool passed = transcript == expected;
+    emit testFinished(transcript, passed, passed ? QString() : QStringLiteral("Expected the bundled Vosk validation phrase."));
+}
+
 bool VoiceWorker::loadLibrary() {
     const QStringList candidates = {qEnvironmentVariable("BETTERFLASH_VOSK_LIBRARY"),
+        QDir(m_runtimePath).filePath(QStringLiteral("libvosk.so")),
         QDir(m_modelPath).filePath(QStringLiteral("libvosk.so")),
+        QDir(m_modelPath).filePath(QStringLiteral("libvosk.dll")),
         QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("lib/libvosk.so")),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("lib/libvosk.dll")),
         QStringLiteral("libvosk.so")};
     for (const QString &candidate : candidates) {
         if (candidate.isEmpty()) continue;
@@ -187,8 +270,9 @@ bool VoiceWorker::loadLibrary() {
             m_recognizerReset = reinterpret_cast<RecognizerReset>(library->resolve("vosk_recognizer_reset"));
             m_acceptWaveform = reinterpret_cast<AcceptWaveform>(library->resolve("vosk_recognizer_accept_waveform"));
             m_result = reinterpret_cast<Result>(library->resolve("vosk_recognizer_result"));
+            m_finalResult = reinterpret_cast<Result>(library->resolve("vosk_recognizer_final_result"));
             if (m_modelNew && m_modelFree && m_recognizerNew && m_recognizerFree
-                && m_recognizerReset && m_acceptWaveform && m_result) {
+                && m_recognizerReset && m_acceptWaveform && m_result && m_finalResult) {
                 m_library = library;
                 return true;
             }
@@ -196,7 +280,7 @@ bool VoiceWorker::loadLibrary() {
         }
         delete library;
     }
-    reportError(QStringLiteral("VOICE_LIBRARY_MISSING"), QStringLiteral("Install the optional Vosk library with scripts/setup-voice.py --vosk, or select Groq."), true);
+    reportError(QStringLiteral("VOICE_LIBRARY_MISSING"), QStringLiteral("The local recognition runtime is missing. Download the speech recognition files in Settings > Voice."), true);
     return false;
 }
 

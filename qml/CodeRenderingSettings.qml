@@ -5,6 +5,11 @@ import QtQuick.Layouts
 ColumnLayout {
     id: settings
     spacing: 18
+    component SettingsButton: AppButton { font.pixelSize: 16 }
+    component SettingsCombo: ComboBox { font.pixelSize: 17 }
+    component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
+    component SettingsError: ErrorBlock { textSize: 16 }
+
     property string pathError: ""
 
     Label {
@@ -12,12 +17,14 @@ ColumnLayout {
         text: "Fenced Markdown blocks use the language after the opening backticks. Choose separate code colors for each app appearance."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
+        font.pixelSize: 16
     }
     Label {
         text: "Dark appearance"
         color: Theme.inkMuted
+        font.pixelSize: 15
     }
-    ComboBox {
+    SettingsCombo {
         Layout.fillWidth: true
         Layout.maximumWidth: 400
         model: codeRendering.darkThemes
@@ -29,8 +36,9 @@ ColumnLayout {
     Label {
         text: "Light appearance"
         color: Theme.inkMuted
+        font.pixelSize: 15
     }
-    ComboBox {
+    SettingsCombo {
         Layout.fillWidth: true
         Layout.maximumWidth: 400
         model: codeRendering.lightThemes
@@ -44,7 +52,7 @@ ColumnLayout {
         baseFontSize: 17
         markdown: "```cpp\n#include <expected>\n#include <string>\n\n// A value, or an explanation of the failure.\nstd::expected<int, std::string> divide(int value) {\n    if (value == 0) return std::unexpected(\"Zero divisor\");\n    return 42 / value;\n}\n```"
     }
-    AppSwitch {
+    SettingsSwitch {
         Layout.fillWidth: true
         Layout.minimumWidth: 0
         text: "Use language server highlighting"
@@ -58,86 +66,47 @@ ColumnLayout {
         text: "Native syntax highlighting covers recognized languages immediately. C and C++ additionally use clangd when available. Snippets are parsed in an isolated temporary workspace; they are never built or run. Android uses syntax highlighting."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
+        font.pixelSize: 16
     }
     Label {
         Layout.fillWidth: true
         text: codeRendering.serverStatus
         color: text.indexOf("CODE_") === 0 ? Theme.warning : Theme.inkMuted
         wrapMode: Text.Wrap
-        font.pixelSize: 13
+        font.pixelSize: 16
     }
-    AppButton {
-        Layout.maximumWidth: settings.width
-        text: "Configure language server"
-        onClicked: serverDialog.open()
+    Label {
+        text: "Language server executable"
+        color: Theme.inkMuted
+        font.pixelSize: 15
     }
-    Dialog {
-        id: serverDialog
-        modal: true
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: Math.min(580, parent ? parent.width - 40 : 580)
-        title: "C and C++ language server"
-        header: Label {
-            text: serverDialog.title
-            color: Theme.ink
-            font.pixelSize: 20
-            leftPadding: 20
-            topPadding: 20
-            bottomPadding: 12
-            rightPadding: 20
+    TextField {
+        id: serverPath
+        Layout.fillWidth: true
+        text: codeRendering.clangdPath
+        placeholderText: "Automatic from PATH"
+        selectByMouse: true
+        font.pixelSize: 17
+    }
+    Label {
+        Layout.fillWidth: true
+        text: "Choose an executable path, without command-line arguments. Saving retries a stopped language server."
+        color: Theme.inkMuted
+        wrapMode: Text.Wrap
+        font.pixelSize: 16
+    }
+    SettingsButton {
+        text: "Save language server"
+        primary: true
+        onClicked: {
+            if (!codeRendering.setClangdPath(serverPath.text))
+                settings.pathError = "CODE_SERVER_PATH: Choose an executable clangd file, or install clangd and leave the path empty.";
+            else
+                settings.pathError = "";
         }
-        background: Rectangle {
-            color: Theme.surface
-            radius: 18
-            border.color: Theme.rule
-        }
-        onOpened: {
-            serverPath.text = codeRendering.clangdPath;
-            settings.pathError = "";
-        }
-        contentItem: ColumnLayout {
-            spacing: 14
-            Label {
-                text: "clangd executable"
-                color: Theme.inkMuted
-            }
-            TextField {
-                id: serverPath
-                Layout.fillWidth: true
-                placeholderText: "Automatic from PATH"
-                selectByMouse: true
-            }
-            Label {
-                Layout.fillWidth: true
-                text: "Choose an executable path, without command-line arguments. Save also retries a stopped language server."
-                color: Theme.inkMuted
-                wrapMode: Text.Wrap
-            }
-            ErrorBlock {
-                Layout.fillWidth: true
-                message: settings.pathError
-            }
-        }
-        footer: RowLayout {
-            spacing: 12
-            Item {
-                Layout.fillWidth: true
-            }
-            AppButton {
-                text: "Cancel"
-                onClicked: serverDialog.close()
-            }
-            AppButton {
-                text: "Save"
-                primary: true
-                onClicked: {
-                    if (codeRendering.setClangdPath(serverPath.text))
-                        serverDialog.close();
-                    else
-                        settings.pathError = "CODE_SERVER_PATH: Choose an executable clangd file, or install clangd and leave the path empty.";
-                }
-            }
-        }
+    }
+    SettingsError {
+        Layout.fillWidth: true
+        message: settings.pathError
     }
 }

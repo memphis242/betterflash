@@ -45,7 +45,7 @@ SearchController::SearchController(AppController *app, Summarizer *ai, const QSt
     configureCredentials();
     static_assert(SearchWorker::channelCount == std::tuple_size_v<decltype(m_channels)>);
     m_worker = new SearchWorker(dataDirectory + QStringLiteral("/search/embeddings.sqlite"),
-                                {m_channels[0].epoch, m_channels[1].epoch});
+                                {m_channels[0].epoch, m_channels[1].epoch}, m_testEpoch);
     m_worker->moveToThread(&m_thread);
     connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_worker, &SearchWorker::literalReady, this, [this](int channel, quint64 epoch, const QVariantList &hits) {
@@ -78,6 +78,13 @@ SearchController::SearchController(AppController *app, Summarizer *ai, const QSt
         if (epoch == state(channel).epoch->load()) setFailure(error, channel);
     });
     connect(m_worker, &SearchWorker::remoteNeeded, this, &SearchController::requestRemote);
+    connect(m_worker, &SearchWorker::testFinished, this, [this](quint64 epoch, bool success, const QString &message) {
+        if (epoch != m_testEpoch->load()) return;
+        m_testBusy = false;
+        m_testStatus = success ? message : QString();
+        m_testError = success ? QString() : message;
+        emit testChanged();
+    });
     m_thread.setObjectName(QStringLiteral("library-search")); m_thread.start();
     for (int channel = 0; channel < int(m_channels.size()); ++channel) {
         struct QueryState &search = state(channel);
@@ -96,6 +103,7 @@ SearchController::~SearchController() {
         ++*state(channel).epoch; abortRemote(channel);
     }
     stopDownload();
+    cancelTest();
     m_thread.quit(); m_thread.wait();
 }
 struct SearchController::QueryState &SearchController::state(int channel) {
@@ -178,6 +186,143 @@ void SearchController::rebuildIndex() {
         if (search.active && !search.query.trimmed().isEmpty()) search.debounce.start();
         search.status = QStringLiteral("Rebuilding the search cache"); notify(channel);
     }
+}
+
+void SearchController::testModel() {
+    cancelTest();
+    const quint64 epoch = ++*m_testEpoch;
+    m_testBusy = true;
+    m_testStatus = QStringLiteral("Testing model connection and embeddings");
+    m_testError.clear();
+    emit testChanged();
+    if (m_provider != QStringLiteral("remote")) {
+        if (!modelReady()) {
+            m_testAfterDownload = true;
+            m_testStatus = QStringLiteral("Downloading the selected local embedding model");
+            prepareModel();
+            return;
+        }
+        QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, profile = resolvedProfile(), directory = modelDirectory()] {
+            worker->testLocal(epoch, profile, directory);
+        }, Qt::QueuedConnection);
+        return;
+    }
+    const QUrl endpoint(m_endpoint);
+    if (!validEndpoint(endpoint) || m_model.isEmpty()) {
+        m_testBusy = false; m_testStatus.clear();
+        m_testError = QStringLiteral("SEARCH_TEST_ENDPOINT: Configure a valid embedding endpoint and model before testing.");
+        emit testChanged(); return;
+    }
+    QByteArray authorization;
+    if (m_reuseKey) {
+        if (m_ai->provider() != QStringLiteral("remote")) {
+            m_testBusy = false; m_testStatus.clear();
+            m_testError = QStringLiteral("SEARCH_TEST_KEY_PROVIDER: Reusing the language model key requires the language model provider to be remote.");
+            emit testChanged(); return;
+        }
+        if (!sameOrigin(endpoint, QUrl(m_ai->endpoint()))) {
+            m_testBusy = false; m_testStatus.clear();
+            m_testError = QStringLiteral("SEARCH_TEST_KEY_ORIGIN: The embedding endpoint must share the language model key's origin.");
+            emit testChanged(); return;
+        }
+        const auto request = m_ai->configuredRequest();
+        if (request) authorization = request->rawHeader("Authorization");
+    } else if (m_credentials->hasKey()) {
+        authorization = "Bearer " + m_credentials->key().toUtf8();
+    }
+    if (authorization.isEmpty() && endpoint.scheme() != QStringLiteral("http")) {
+        m_testBusy = false; m_testStatus.clear();
+        m_testError = QStringLiteral("SEARCH_TEST_KEY: Configure an embedding API key before testing this endpoint.");
+        emit testChanged(); return;
+    }
+    QNetworkRequest request(endpoint);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(30000);
+    if (!authorization.isEmpty()) request.setRawHeader("Authorization", authorization);
+    const QJsonArray input{
+        QStringLiteral("Multiplication combines equal groups of quantities."),
+        QStringLiteral("Multiplying numbers finds the total in repeated groups."),
+        QStringLiteral("A recipe uses flour, water, yeast, and a warm oven.")};
+    const QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("input"), input},
+                              {QStringLiteral("encoding_format"), QStringLiteral("float")}};
+    m_testBody.clear();
+    m_testReply = m_network.post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    QNetworkReply *const reply = m_testReply;
+    reply->setReadBufferSize(1024 * 1024);
+    QTimer::singleShot(30000, reply, [this, reply] {
+        if (m_testReply == reply && !reply->isFinished()) reply->abort();
+    });
+    connect(reply, &QIODevice::readyRead, this, [this, reply] {
+        if (m_testReply != reply) return;
+        m_testBody.append(reply->readAll());
+        if (m_testBody.size() > 1024 * 1024) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch] {
+        if (m_testReply != reply) return;
+        m_testReply = nullptr; reply->deleteLater();
+        const QByteArray body = std::exchange(m_testBody, {});
+        if (epoch != m_testEpoch->load()) return;
+        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        auto fail = [this](const QString &message) {
+            m_testBusy = false; m_testStatus.clear(); m_testError = message; emit testChanged();
+        };
+        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300 || body.size() > 1024 * 1024) {
+            fail(QStringLiteral("SEARCH_TEST_HTTP_%1: Check the endpoint, API key and model identifier.").arg(code)); return;
+        }
+        QJsonParseError parse;
+        const QJsonArray data = QJsonDocument::fromJson(body, &parse).object().value(QStringLiteral("data")).toArray();
+        if (parse.error != QJsonParseError::NoError || data.size() != 3) {
+            fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint did not return three indexed embedding vectors.")); return;
+        }
+        std::array<QVector<float>, 3> vectors;
+        QSet<int> indices;
+        for (const QJsonValue &entry : data) {
+            const QJsonObject object = entry.toObject();
+            const QJsonValue position = object.value(QStringLiteral("index"));
+            const int index = position.toInt(-1);
+            if (!position.isDouble() || position.toDouble() != index || index < 0 || index >= 3 || indices.contains(index)) {
+                fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint returned invalid vector indexes.")); return;
+            }
+            indices.insert(index);
+            const QJsonArray values = object.value(QStringLiteral("embedding")).toArray();
+            if (values.isEmpty() || values.size() > 16384) { fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint returned an invalid embedding vector.")); return; }
+            QVector<float> vector; vector.reserve(values.size()); double norm = 0;
+            for (const QJsonValue &value : values) {
+                if (!value.isDouble() || !std::isfinite(value.toDouble())) { fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint returned a nonnumeric vector.")); return; }
+                const float number = float(value.toDouble()); vector.append(number); norm += double(number) * number;
+            }
+            if (!std::isfinite(norm) || norm <= 1e-20) { fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint returned a zero vector.")); return; }
+            const float scale = float(1.0 / std::sqrt(norm)); for (float &value : vector) value *= scale;
+            vectors[static_cast<size_t>(index)] = std::move(vector);
+        }
+        if (vectors[1].size() != vectors[0].size() || vectors[2].size() != vectors[0].size()) {
+            fail(QStringLiteral("SEARCH_TEST_DIMENSIONS: The endpoint returned inconsistent vector dimensions.")); return;
+        }
+        double self = 0, related = 0, unrelated = 0;
+        for (qsizetype index = 0; index < vectors[0].size(); ++index) {
+            self += double(vectors[0][index]) * vectors[0][index];
+            related += double(vectors[0][index]) * vectors[1][index];
+            unrelated += double(vectors[0][index]) * vectors[2][index];
+        }
+        if (indices.size() != 3 || !std::isfinite(self) || std::abs(self - 1.0) > 0.01
+            || !std::isfinite(related) || !std::isfinite(unrelated) || related <= unrelated) {
+            fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint did not preserve related-text similarity.")); return;
+        }
+        m_testBusy = false;
+        m_testStatus = QStringLiteral("Endpoint returned %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
+            .arg(vectors[0].size()).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3);
+        m_testError.clear(); emit testChanged();
+    });
+}
+
+void SearchController::cancelTest() {
+    ++*m_testEpoch;
+    if (m_testReply) { m_testReply->disconnect(this); m_testReply->abort(); m_testReply->deleteLater(); m_testReply = nullptr; }
+    m_testBody.clear();
+    m_testAfterDownload = false;
+    if (!m_testBusy) return;
+    m_testBusy = false; m_testStatus = QStringLiteral("Model test canceled"); emit testChanged();
 }
 void SearchController::setActive(bool active) {
     struct QueryState &search = state(0);
@@ -327,6 +472,7 @@ void SearchController::requestRemote(int channel, quint64 epoch, const QStringLi
     if (!validEndpoint(endpoint) || m_model.isEmpty()) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Configure an embedding endpoint and model in Search settings."), channel); return; }
     QByteArray authorization;
     if (m_reuseKey) {
+        if (m_ai->provider() != QStringLiteral("remote")) { setFailure(QStringLiteral("SEARCH_KEY_PROVIDER: Reusing the language model key requires the language model provider to be remote."), channel); return; }
         if (!sameOrigin(endpoint, QUrl(m_ai->endpoint()))) { setFailure(QStringLiteral("SEARCH_KEY_ORIGIN: The language model service changed. Configure a key for this embedding service in Search settings."), channel); return; }
         const auto request = m_ai->configuredRequest();
         if (!request) { setFailure(QStringLiteral("SEARCH_KEY: Configure the existing language model connection or provide a separate embedding key."), channel); return; }
@@ -391,6 +537,15 @@ void SearchController::prepareModel() {
 void SearchController::downloadNext() {
     if (m_assetIndex >= m_downloadAssets.size()) {
         m_downloading = false; m_downloadProgress = 1; setDownloadStatus(QStringLiteral("Local model ready"));
+        if (m_testAfterDownload) {
+            m_testAfterDownload = false;
+            const quint64 epoch = m_testEpoch->load();
+            m_testStatus = QStringLiteral("Testing model connection and embeddings");
+            emit testChanged();
+            QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, profile = resolvedProfile(), directory = modelDirectory()] {
+                worker->testLocal(epoch, profile, directory);
+            }, Qt::QueuedConnection);
+        }
         for (int channel = 0; channel < int(m_channels.size()); ++channel) runSemantic(channel);
         return;
     }
@@ -432,9 +587,18 @@ void SearchController::stopDownload() {
     if (m_downloadReply) { m_downloadReply->disconnect(this); m_downloadReply->abort(); m_downloadReply->deleteLater(); m_downloadReply = nullptr; }
     m_downloadFile.reset(); m_downloadHash.reset(); m_downloading = false;
 }
-void SearchController::downloadFailure(const QString &message) { stopDownload(); m_downloadCanceled = true; setSharedFailure(message); }
+void SearchController::downloadFailure(const QString &message) {
+    stopDownload(); m_downloadCanceled = true; setSharedFailure(message);
+    if (m_testAfterDownload) {
+        m_testAfterDownload = false; m_testBusy = false; m_testStatus.clear(); m_testError = message; emit testChanged();
+    }
+}
 void SearchController::cancelDownload() {
     stopDownload(); m_downloadCanceled = true;
+    if (m_testAfterDownload) {
+        m_testAfterDownload = false; m_testBusy = false; m_testStatus.clear();
+        m_testError = QStringLiteral("SEARCH_TEST_MODEL: Local model download canceled before testing."); emit testChanged();
+    }
     for (int channel = 0; channel < int(m_channels.size()); ++channel) {
         struct QueryState &search = state(channel);
         search.busy = false; search.status = QStringLiteral("Download canceled. Text search is available."); notify(channel);

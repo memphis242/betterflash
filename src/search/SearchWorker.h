@@ -15,7 +15,8 @@ class SearchWorker final : public QObject {
 public:
     static constexpr int channelCount = 2;
     using Epochs = std::array<std::shared_ptr<std::atomic<quint64>>, channelCount>;
-    explicit SearchWorker(QString cachePath, Epochs epochs);
+    explicit SearchWorker(QString cachePath, Epochs epochs,
+                          std::shared_ptr<std::atomic<quint64>> testEpoch);
     ~SearchWorker() override;
     void search(int channel, quint64 epoch, const QVariantList &cards, const QVariantList &decks,
                 const QString &deck, const QString &query);
@@ -23,6 +24,7 @@ public:
                   const QString &scope, bool remote);
     void acceptRemote(int channel, quint64 epoch, const QVariantList &vectors);
     void clearCache();
+    void testLocal(quint64 epoch, const QString &profile, const QString &directory);
 signals:
     void literalReady(int channel, quint64 epoch, const QVariantList &hits);
     void fuzzyReady(int channel, quint64 epoch, const QVariantList &hits);
@@ -30,6 +32,7 @@ signals:
     void progress(int channel, quint64 epoch, int completed, int total);
     void remoteNeeded(int channel, quint64 epoch, const QStringList &texts);
     void failed(int channel, quint64 epoch, const QString &error);
+    void testFinished(quint64 epoch, bool success, const QString &message);
 private:
     struct Job { QString key; QString text; bool query = false; };
     struct QueryState {
@@ -59,6 +62,7 @@ private:
     void finish(int channel, quint64 epoch);
     const QString m_cachePath;
     const Epochs m_currentEpochs;
+    const std::shared_ptr<std::atomic<quint64>> m_testEpoch;
     std::array<struct QueryState, channelCount> m_states;
     QString m_loadedProfile;
     QString m_loadedDirectory;

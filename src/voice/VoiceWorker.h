@@ -30,9 +30,12 @@ public:
     void setApiKey(const QString &key) { m_apiKey = key; }
     void setProvider(const QString &provider) { m_provider = provider; }
     void setSttModel(const QString &model) { m_sttModel = model; }
+    void setRuntimePath(const QString &path) { m_runtimePath = path; }
 
 public slots:
     void initialize();
+    void initializeForTest();
+    void testAudio(const QByteArray &wav);
     void setListening(bool listening, quint64 epoch);
     void shutdown();
 
@@ -42,9 +45,12 @@ signals:
     void processingChanged(bool processing, quint64 epoch);
     void transcriptReady(const QString &transcript, quint64 epoch);
     void errorOccurred(const QString &code, const QString &message, bool fatal);
+    void testFinished(const QString &transcript, bool passed, const QString &error);
 
 private:
     bool loadLibrary();
+    bool loadLocalModel();
+    bool decodeWav(const QByteArray &wav, QByteArray *pcm, int *sampleRate) const;
     bool prepareAudio();
     void startCapture();
     void stopCapture();
@@ -56,6 +62,7 @@ private:
     void reportError(const QString &code, const QString &message, bool fatal);
 
     QString m_modelPath;
+    QString m_runtimePath;
     QString m_apiKey;
     QString m_provider = QStringLiteral("groq");
     QString m_sttModel = QStringLiteral("whisper-large-v3-turbo");
@@ -73,6 +80,9 @@ private:
     bool m_listening = false;
     bool m_processing = false;
     bool m_shuttingDown = false;
+    bool m_testMode = false;
+    bool m_testSubmitted = false;
+    bool m_testAnswered = false;
 
     using ModelNew = void *(*)(const char *);
     using ModelFree = void (*)(void *);
@@ -88,4 +98,5 @@ private:
     RecognizerReset m_recognizerReset = nullptr;
     AcceptWaveform m_acceptWaveform = nullptr;
     Result m_result = nullptr;
+    Result m_finalResult = nullptr;
 };

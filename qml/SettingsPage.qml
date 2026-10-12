@@ -5,11 +5,40 @@ import QtQuick.Layouts
 Item {
     id: settingsPage
     required property var ui
+    component SettingsButton: AppButton { font.pixelSize: 16 }
+    component SettingsCombo: ComboBox { font.pixelSize: 17 }
+    component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
+    component SettingsError: ErrorBlock { textSize: 16 }
+
     property int section: ui.settingsSection()
-    onSectionChanged: ui.setSettingsSection(section)
+    onSectionChanged: {
+        ui.setSettingsSection(section)
+        if (section !== 2) voiceKeyDraft = ""
+        if (section !== 3) aiKeyDraft = ""
+        if (section !== 4) syncTokenDraft = ""
+    }
     readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search", "Code rendering"]
     readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice review", "Language model", "Device sync", "Collection data", "Library search", "Code rendering"]
     property var sectionScrollPositions: ({})
+    property string aiEndpointDraft: ai.endpoint
+    property string aiModelDraft: ai.model
+    property string voiceKeyDraft: ""
+    property string aiKeyDraft: ""
+    property string syncTokenDraft: ""
+    property string exportDestinationDraft: ""
+    onVisibleChanged: if (!visible) {
+        voiceKeyDraft = ""
+        aiKeyDraft = ""
+        syncTokenDraft = ""
+    }
+
+    Connections {
+        target: ai
+        function onConfigurationChanged() {
+            if (!aiEndpointField.activeFocus) settingsPage.aiEndpointDraft = ai.endpoint;
+            if (!aiModelField.activeFocus) settingsPage.aiModelDraft = ai.model;
+        }
+    }
 
     function selectSection(index) {
         if (index < 0 || index >= sections.length || index === section)
@@ -34,7 +63,7 @@ Item {
             textFormat: Text.PlainText
             text: parent.label
             color: Theme.inkMuted
-            font.pixelSize: 12
+            font.pixelSize: 15
             Layout.fillWidth: true
         }
         Label {
@@ -44,7 +73,7 @@ Item {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             font.family: Theme.monoFont
-            font.pixelSize: 12
+            font.pixelSize: 17
         }
     }
     RowLayout {
@@ -165,40 +194,13 @@ Item {
                         id: titleHover
                     }
                 }
-                AppButton {
+                SettingsButton {
                     objectName: "resetShortcuts"
                     visible: settingsPage.section === 1 && shortcuts.customized
                     text: settingsPage.width < 720 ? "Reset" : "Reset bindings"
                     hint: "Reset key bindings"
                     Layout.maximumWidth: Math.max(76, settingsContent.width * 0.45)
                     onClicked: shortcuts.reset()
-                }
-                AppButton {
-                    objectName: "settingsPrimary"
-                    visible: settingsPage.section >= 2 && settingsPage.section <= 6
-                    text: settingsPage.section === 5 ? "Export" : settingsPage.width < 720 ? "Edit" : "Edit connection"
-                    hint: settingsPage.section === 5 ? "Export collection" : "Edit connection"
-                    primary: true
-                    Layout.maximumWidth: Math.max(76, settingsContent.width * 0.45)
-                    onClicked: {
-                        switch (settingsPage.section) {
-                        case 2:
-                            settingsPage.ui.openVoiceConfig();
-                            break;
-                        case 3:
-                            settingsPage.ui.openAiConfig();
-                            break;
-                        case 4:
-                            settingsPage.ui.openSyncConfig();
-                            break;
-                        case 5:
-                            settingsPage.ui.exportData();
-                            break;
-                        case 6:
-                            searchSettings.openConnection();
-                            break;
-                        }
-                    }
                 }
             }
             ScrollView {
@@ -223,7 +225,7 @@ Item {
                             value: Theme.dark ? "Aubergine" : "Paper"
                             Layout.fillWidth: true
                         }
-                        AppButton {
+                        SettingsButton {
                             Layout.maximumWidth: settingsContent.width
                             text: Theme.dark ? "Switch to paper" : "Switch to aubergine"
                             onClicked: Theme.toggle()
@@ -234,8 +236,9 @@ Item {
                             color: Theme.inkMuted
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
+                            font.pixelSize: 16
                         }
-                        AppSwitch {
+                        SettingsSwitch {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             text: "Reduce motion"
@@ -304,7 +307,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
-                        AppSwitch {
+                        SettingsSwitch {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             objectName: "voiceEnabled"
@@ -314,35 +317,164 @@ Item {
                         }
                         ValueRow {
                             label: "Speech recognition"
-                            value: voice.sttProvider === "groq" ? "Groq / " + voice.sttModel : "Local test / " + voice.modelPath
-                            Layout.fillWidth: true
-                        }
-                        ValueRow {
-                            label: "Playback"
-                            value: "System text-to-speech"
+                            value: voice.sttProvider === "groq" ? "Groq / " + voice.sttModel : "Local / " + voice.sttProfile
                             Layout.fillWidth: true
                         }
                         Label {
+                            text: "Speech recognition"
+                            color: Theme.inkMuted
+                            font.pixelSize: 15
+                        }
+                        SettingsCombo {
+                            id: sttProviderInline
+                            Layout.fillWidth: true
+                            model: ["Local model", "Groq cloud"]
+                            currentIndex: voice.sttProvider === "groq" ? 1 : 0
+                            onActivated: voice.sttProvider = currentIndex === 1 ? "groq" : "local"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Choose on-device speech recognition or Groq"
+                        }
+                        TextField {
+                            Layout.fillWidth: true
+                            visible: sttProviderInline.currentIndex === 1
+                            text: voice.sttModel
+                            onEditingFinished: voice.sttModel = text.trim()
+                            placeholderText: "whisper-large-v3-turbo"
+                            font.pixelSize: 17
+                        }
+                        TextField {
+                            Layout.fillWidth: true
+                            visible: sttProviderInline.currentIndex === 0
+                            text: voice.modelPath
+                            onEditingFinished: voice.modelPath = text.trim()
+                            placeholderText: "Local model folder"
+                            font.pixelSize: 17
+                        }
+                        SettingsCombo {
+                            Layout.fillWidth: true
+                            visible: sttProviderInline.currentIndex === 0
+                            model: ["Automatic compact", "Small English"]
+                            currentIndex: voice.sttProfile === "small-en" ? 1 : 0
+                            onActivated: voice.sttProfile = currentIndex === 1 ? "small-en" : "automatic"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Choose the local speech recognition profile"
+                        }
+                        ValueRow {
+                            visible: sttProviderInline.currentIndex === 0
+                            label: "Speech model status"
+                            value: voice.sttModelStatus
+                            Layout.fillWidth: true
+                        }
+                        ProgressBar {
+                            visible: sttProviderInline.currentIndex === 0 && voice.sttModelDownloading
+                            value: voice.sttModelProgress
+                            Layout.fillWidth: true
+                        }
+                        SettingsButton {
+                            visible: sttProviderInline.currentIndex === 0
+                            text: voice.sttModelDownloading ? "Cancel download" : voice.sttModelReady ? "Download again" : "Download local speech model"
+                            onClicked: voice.sttModelDownloading ? voice.cancelSttDownload() : voice.downloadSttModel()
+                        }
+                        SettingsButton {
+                            text: voice.sttTestBusy ? "Testing..." : voice.sttProvider === "local" && !voice.sttModelReady ? "Download and test" : "Test model"
+                            enabled: !voice.modelTestBusy
+                            onClicked: voice.testSttModel()
+                        }
+                        ValueRow {
+                            label: "Recognition check"
+                            value: voice.sttTestStatus
+                            visible: !!voice.sttTestStatus
+                            Layout.fillWidth: true
+                        }
+                        SettingsError { message: voice.sttTestError; Layout.fillWidth: true }
+                        ValueRow {
+                            label: "Playback"
+                            value: voice.ttsProvider === "system" ? "System speech engine" : "Piper on this device"
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            visible: voice.sttProvider === "groq"
                             textFormat: Text.PlainText
                             text: "With Groq selected, microphone audio is sent to Groq while voice review is enabled. Questions, answers, grades, deferring, postponing and pausing can be spoken."
                             color: Theme.inkMuted
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
+                            font.pixelSize: 16
                         }
-                        Flow {
+                        ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 10
-                            AppButton {
-                                width: Math.min(implicitWidth, parent.width)
-                                text: voice.hasApiKey ? "Replace Groq key" : "Add Groq key"
-                                onClicked: settingsPage.ui.openCredentials("voice")
+                            visible: sttProviderInline.currentIndex === 1
+                            TextField {
+                                Layout.fillWidth: true
+                                echoMode: TextInput.Password
+                                text: settingsPage.voiceKeyDraft
+                                placeholderText: voice.hasApiKey ? "Leave empty to keep the stored Groq key" : "Groq API key"
+                                font.pixelSize: 17
+                                onTextChanged: if (activeFocus) settingsPage.voiceKeyDraft = text
                             }
-                            AppButton {
-                                width: Math.min(implicitWidth, parent.width)
+                            SettingsButton {
+                                text: "Save key"
+                                enabled: settingsPage.voiceKeyDraft.trim().length > 0
+                                onClicked: {
+                                    voice.setApiKey(settingsPage.voiceKeyDraft.trim())
+                                    settingsPage.voiceKeyDraft = ""
+                                }
+                            }
+                            SettingsButton {
                                 visible: voice.hasApiKey
-                                text: "Clear key"
+                                text: "Clear stored key"
                                 onClicked: voice.clearApiKey()
                             }
+                        }
+                        Label { text: "Text-to-speech provider"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            Layout.fillWidth: true
+                            model: ["Local Piper voice", "System speech engine"]
+                            currentIndex: voice.ttsProvider === "system" ? 1 : 0
+                            onActivated: voice.ttsProvider = currentIndex === 1 ? "system" : "local"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Use the bundled local voice runtime, or an installed system speech engine"
+                        }
+                        Label { text: "Text-to-speech profile"; visible: voice.ttsProvider === "local"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            Layout.fillWidth: true
+                            visible: voice.ttsProvider === "local"
+                            model: ["Amy low / compact (67 MB download)", "LJSpeech medium (67 MB download)"]
+                            currentIndex: voice.ttsProfile === "ljspeech-medium" ? 1 : 0
+                            onActivated: voice.ttsProfile = ["amy-low", "ljspeech-medium"][currentIndex]
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Choose a local speech synthesis profile"
+                        }
+                        ValueRow {
+                            label: "Speech output status"
+                            value: voice.ttsStatus
+                            Layout.fillWidth: true
+                        }
+                        ProgressBar {
+                            visible: voice.ttsProvider === "local" && voice.ttsModelDownloading
+                            value: voice.ttsModelProgress
+                            Layout.fillWidth: true
+                        }
+                        SettingsButton {
+                            visible: voice.ttsProvider === "local"
+                            text: voice.ttsModelDownloading ? "Cancel download" : voice.ttsReady ? "Download again" : "Download local speech model"
+                            onClicked: voice.ttsModelDownloading ? voice.cancelTtsDownload() : voice.downloadTtsModel()
+                        }
+                        SettingsButton {
+                            text: voice.ttsTestBusy ? "Testing..." : voice.ttsProvider === "local" && !voice.ttsReady ? "Download and test" : "Test model"
+                            enabled: !voice.modelTestBusy
+                            onClicked: voice.testTtsModel()
+                        }
+                        ValueRow {
+                            label: "Speech output check"
+                            value: voice.ttsTestStatus
+                            visible: !!voice.ttsTestStatus
+                            Layout.fillWidth: true
+                        }
+                        SettingsError {
+                            message: voice.ttsTestError
+                            Layout.fillWidth: true
                         }
                         ValueRow {
                             label: "Credential storage"
@@ -354,7 +486,7 @@ Item {
                             value: voice.status
                             Layout.fillWidth: true
                         }
-                        ErrorBlock {
+                        SettingsError {
                             message: voice.lastError
                             Layout.fillWidth: true
                         }
@@ -364,7 +496,7 @@ Item {
                             color: Theme.inkMuted
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
-                            font.pixelSize: 12
+                            font.pixelSize: 16
                         }
                     }
                     ColumnLayout {
@@ -372,15 +504,97 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
+                        Label { text: "Provider"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            id: aiProvider
+                            Layout.fillWidth: true
+                            model: ["Local model", "Remote provider"]
+                            currentIndex: ai.provider === "remote" ? 1 : 0
+                            onActivated: if (typeof ai.provider !== "undefined") ai.provider = currentIndex === 1 ? "remote" : "local"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Local models work offline. Remote providers require a key."
+                        }
+                        Label { visible: aiProvider.currentIndex === 0; text: "Local profile"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            visible: aiProvider.currentIndex === 0
+                            Layout.fillWidth: true
+                            model: ["Automatic", "Gemma 4 E2B", "LFM 2.5 350M"]
+                            currentIndex: ai.localProfile === "lfm" ? 2 : ai.localProfile === "gemma" ? 1 : 0
+                            onActivated: if (typeof ai.localProfile !== "undefined") ai.localProfile = ["automatic", "gemma", "lfm"][currentIndex]
+                        }
+                        Label { visible: aiProvider.currentIndex === 0; text: "Acceleration"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            visible: aiProvider.currentIndex === 0
+                            Layout.fillWidth: true
+                            model: ["Automatic", "CPU"]
+                            currentIndex: ai.acceleration === "cpu" ? 1 : 0
+                            onActivated: if (typeof ai.acceleration !== "undefined") ai.acceleration = ["automatic", "cpu"][currentIndex]
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Use an available GPU automatically, or force CPU execution"
+                        }
                         ValueRow {
-                            label: "Endpoint"
-                            value: ai.endpoint
+                            visible: aiProvider.currentIndex === 0
+                            label: "Local model"
+                            value: ai.localModelLabel || ai.resolvedProfile || "Automatic hardware profile"
+                            Layout.fillWidth: true
+                        }
+                        ProgressBar {
+                            visible: aiProvider.currentIndex === 0 && ai.localDownloading
+                            value: ai.localDownloadProgress
+                            Layout.fillWidth: true
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            SettingsButton {
+                                visible: aiProvider.currentIndex === 0
+                                text: ai.localDownloading ? "Cancel download" : ai.localModelReady ? "Prepare again" : "Prepare local model"
+                                onClicked: ai.localDownloading ? ai.cancelLocalDownload() : ai.prepareLocalModel()
+                            }
+                            SettingsButton {
+                                text: ai.testBusy ? "Testing..." : ai.provider === "local" && !ai.localModelReady ? "Download and test" : "Test model"
+                                enabled: !ai.testBusy
+                                onClicked: if (typeof ai.testModel === "function") ai.testModel()
+                            }
+                        }
+                        ValueRow {
+                            visible: aiProvider.currentIndex === 0
+                            label: "Local status"
+                            value: ai.localStatus || "Ready to prepare"
                             Layout.fillWidth: true
                         }
                         ValueRow {
-                            label: "Model"
-                            value: ai.model
+                            visible: aiProvider.currentIndex === 0
+                            label: "Execution device"
+                            value: ai.acceleratorStatus
                             Layout.fillWidth: true
+                        }
+                        SettingsError {
+                            visible: aiProvider.currentIndex === 0
+                            message: ai.localError
+                            Layout.fillWidth: true
+                        }
+                        Label { visible: aiProvider.currentIndex === 1; text: "Remote endpoint"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        TextField {
+                            id: aiEndpointField
+                            visible: aiProvider.currentIndex === 1
+                            Layout.fillWidth: true
+                            text: settingsPage.aiEndpointDraft
+                            onTextChanged: if (activeFocus) settingsPage.aiEndpointDraft = text
+                            onEditingFinished: ai.endpoint = settingsPage.aiEndpointDraft.trim()
+                            font.pixelSize: 17
+                            placeholderText: "https://api.groq.com/openai/v1/chat/completions"
+                        }
+                        Label { visible: aiProvider.currentIndex === 1; text: "Remote model"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        TextField {
+                            id: aiModelField
+                            visible: aiProvider.currentIndex === 1
+                            Layout.fillWidth: true
+                            text: settingsPage.aiModelDraft
+                            onTextChanged: if (activeFocus) settingsPage.aiModelDraft = text
+                            onEditingFinished: ai.model = settingsPage.aiModelDraft.trim()
+                            font.pixelSize: 17
+                            placeholderText: "Provider model identifier"
                         }
                         Label {
                             textFormat: Text.PlainText
@@ -388,28 +602,50 @@ Item {
                             color: Theme.inkMuted
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
+                            font.pixelSize: 16
                         }
-                        Flow {
+                        ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 10
-                            AppButton {
-                                width: Math.min(implicitWidth, parent.width)
-                                text: ai.hasApiKey ? "Replace API key" : "Add API key"
-                                onClicked: settingsPage.ui.openCredentials("ai")
+                            visible: aiProvider.currentIndex === 1
+                            TextField {
+                                Layout.fillWidth: true
+                                echoMode: TextInput.Password
+                                text: settingsPage.aiKeyDraft
+                                placeholderText: ai.hasApiKey ? "Leave empty to keep the stored API key" : "Provider API key"
+                                font.pixelSize: 17
+                                onTextChanged: if (activeFocus) settingsPage.aiKeyDraft = text
                             }
-                            AppButton {
-                                width: Math.min(implicitWidth, parent.width)
+                            SettingsButton {
+                                text: "Save key"
+                                enabled: settingsPage.aiKeyDraft.trim().length > 0
+                                onClicked: {
+                                    ai.setApiKey(settingsPage.aiKeyDraft.trim())
+                                    settingsPage.aiKeyDraft = ""
+                                }
+                            }
+                            SettingsButton {
                                 text: "Clear key"
                                 visible: ai.hasApiKey
                                 onClicked: ai.clearApiKey()
                             }
                         }
                         ValueRow {
+                            label: "Model test"
+                            value: ai.testStatus
+                            visible: !!ai.testStatus
+                            Layout.fillWidth: true
+                        }
+                        SettingsError {
+                            message: ai.testError
+                            Layout.fillWidth: true
+                        }
+                        ValueRow {
                             label: "Credential storage"
                             value: ai.keyStorageStatus
                             Layout.fillWidth: true
                         }
-                        ErrorBlock {
+                        SettingsError {
                             message: ai.error
                             Layout.fillWidth: true
                         }
@@ -429,22 +665,47 @@ Item {
                             value: sync.lastSync ? settingsPage.ui.dateTime(sync.lastSync) : "No completed sync"
                             Layout.fillWidth: true
                         }
-                        Flow {
+                        Label { text: "Server address"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        TextField {
+                            id: syncEndpointInline
+                            Layout.fillWidth: true
+                            text: sync.endpoint
+                            onEditingFinished: sync.endpoint = text.trim()
+                            placeholderText: "https://your-server.example"
+                            font.pixelSize: 17
+                        }
+                        ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 10
-                            AppButton {
+                            SettingsButton {
                                 width: Math.min(implicitWidth, parent.width)
                                 objectName: "synchronize"
                                 text: sync.busy ? "Syncing..." : "Synchronize now"
                                 enabled: !sync.busy && !!sync.endpoint
                                 onClicked: sync.synchronize()
                             }
-                            AppButton {
-                                width: Math.min(implicitWidth, parent.width)
-                                text: sync.hasToken ? "Replace token" : "Add token"
-                                onClicked: settingsPage.ui.openCredentials("sync")
+                            SettingsButton {
+                                text: "Save connection"
+                                primary: true
+                                onClicked: sync.endpoint = syncEndpointInline.text.trim()
                             }
-                            AppButton {
+                            TextField {
+                                Layout.fillWidth: true
+                                echoMode: TextInput.Password
+                                text: settingsPage.syncTokenDraft
+                                placeholderText: sync.hasToken ? "Leave empty to keep the stored token" : "Sync access token"
+                                font.pixelSize: 17
+                                onTextChanged: if (activeFocus) settingsPage.syncTokenDraft = text
+                            }
+                            SettingsButton {
+                                text: "Save token"
+                                enabled: settingsPage.syncTokenDraft.trim().length > 0
+                                onClicked: {
+                                    sync.setToken(settingsPage.syncTokenDraft.trim())
+                                    settingsPage.syncTokenDraft = ""
+                                }
+                            }
+                            SettingsButton {
                                 width: Math.min(implicitWidth, parent.width)
                                 text: "Clear token"
                                 visible: sync.hasToken
@@ -463,7 +724,7 @@ Item {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
-                        ErrorBlock {
+                        SettingsError {
                             message: sync.error
                             Layout.fillWidth: true
                         }
@@ -484,13 +745,27 @@ Item {
                             color: Theme.inkMuted
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
+                            font.pixelSize: 16
                         }
-                        AppButton {
+                        Label { text: "Export destination"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        TextField {
+                            Layout.fillWidth: true
+                            text: settingsPage.exportDestinationDraft
+                            onTextChanged: if (activeFocus) settingsPage.exportDestinationDraft = text
+                            placeholderText: "Choose a .json file"
+                            font.pixelSize: 17
+                        }
+                        SettingsButton {
+                            text: "Export collection"
+                            primary: true
+                            onClicked: settingsPage.ui.exportData(settingsPage.exportDestinationDraft)
+                        }
+                        SettingsButton {
                             Layout.maximumWidth: settingsContent.width
                             text: "Import collection"
                             onClicked: settingsPage.ui.importData()
                         }
-                        AppButton {
+                        SettingsButton {
                             Layout.maximumWidth: settingsContent.width
                             visible: app.decks.length === 0
                             objectName: "loadExamples"

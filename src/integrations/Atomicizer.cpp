@@ -70,7 +70,7 @@ Atomicizer::Atomicizer(AppController *app, Summarizer *provider, QObject *parent
     : QObject(parent), m_app(app), m_provider(provider) {
     Q_ASSERT(m_app && m_provider);
     connect(m_provider, &Summarizer::configurationChanged, this, &Atomicizer::cancel);
-    connect(m_provider, &Summarizer::keyChanged, this, [this] { if (!m_provider->hasApiKey()) cancel(); });
+    connect(m_provider, &Summarizer::keyChanged, this, [this] { if (m_provider->provider() == QStringLiteral("remote") && !m_provider->hasApiKey()) cancel(); });
     connect(m_app, &AppController::atomicSplitApplied, this,
         [this](const QString &sourceId, bool success, const QStringList &) {
             if (!m_applying || sourceId != m_source.value(QStringLiteral("id")).toString()) return;
@@ -96,12 +96,7 @@ void Atomicizer::fail(const QString &code, const QString &message) {
 }
 void Atomicizer::cancel() {
     if (m_applying) return;
-    if (m_reply) {
-        m_reply->disconnect(this);
-        m_reply->abort();
-        m_reply->deleteLater();
-        m_reply = nullptr;
-    }
+    m_provider->cancelCompletion(m_job); m_job = 0;
     if (m_busy) {
         m_busy = false;
         m_status = QStringLiteral("Request canceled. The original card is saved.");
@@ -125,8 +120,6 @@ void Atomicizer::propose(const QString &cardId) {
         break;
     }
     if (m_source.isEmpty()) { fail(QStringLiteral("ATOMICIZE_CARD"), QStringLiteral("Choose a saved card from the library.")); return; }
-    const auto request = m_provider->configuredRequest();
-    if (!request) { fail(request.error().code, request.error().message); return; }
     const QString front = m_source.value(QStringLiteral("front")).toString();
     const QString back = m_source.value(QStringLiteral("back")).toString();
     if (front.size() + back.size() > 32000) {
@@ -159,40 +152,31 @@ void Atomicizer::propose(const QString &cardId) {
                 + QString::fromUtf8(QJsonDocument(source).toJson(QJsonDocument::Compact))}}
     };
     const QJsonObject payload{{QStringLiteral("model"), m_provider->model()}, {QStringLiteral("temperature"), 0.15},
-        {QStringLiteral("max_tokens"), 3000}, {QStringLiteral("response_format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_object")}}},
+        {QStringLiteral("max_tokens"), m_provider->provider() == QStringLiteral("local") ? (m_provider->resolvedProfile() == QStringLiteral("lfm") ? 1200 : 2400) : 3000}, {QStringLiteral("response_format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_object")}}},
         {QStringLiteral("messages"), messages}};
     m_busy = true;
     m_status = QStringLiteral("Checking whether the saved card contains independent concepts.");
-    m_reply = m_network.post(*request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    QNetworkReply *const reply = m_reply;
-    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
-        if (received > 512 * 1024 || total > 512 * 1024) reply->abort();
+    m_job = m_provider->complete(payload, this, [this](std::expected<QString, struct ProviderError> result) {
+        m_job = 0;
+        if (!result) {
+            const QString code = result.error().code.startsWith(QStringLiteral("LLM_HTTP_"))
+                ? QStringLiteral("ATOMICIZE_HTTP")
+                : result.error().code.startsWith(QStringLiteral("LLM_RESPONSE"))
+                    ? QStringLiteral("ATOMICIZE_RESPONSE") : result.error().code;
+            fail(code, result.error().message);
+            return;
+        }
+        receiveContent(*result);
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply] { receive(reply); });
     emit changed();
 }
-void Atomicizer::receive(QNetworkReply *reply) {
-    if (m_reply != reply) { reply->deleteLater(); return; }
-    m_reply = nullptr;
-    const QByteArray body = reply->readAll();
-    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const bool successful = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
-    reply->deleteLater();
-    if (!successful) {
-        const QString fix = status == 401 || status == 403 ? QStringLiteral("Check your provider key and model access.")
-            : status == 429 ? QStringLiteral("The provider's rate limit was reached. Wait and try again.")
-            : QStringLiteral("Check the provider endpoint and connection, then try again.");
-        fail(QStringLiteral("ATOMICIZE_HTTP_%1").arg(status), fix); return;
-    }
-    QJsonParseError error;
-    const QJsonDocument envelope = QJsonDocument::fromJson(body, &error);
-    const QJsonArray choices = envelope.object().value(QStringLiteral("choices")).toArray();
-    QString content = choices.isEmpty() ? QString() : choices.first().toObject()
-        .value(QStringLiteral("message")).toObject().value(QStringLiteral("content")).toString().trimmed();
+void Atomicizer::receiveContent(const QString &response) {
+    QJsonParseError error{};
+    QString content = response.trimmed();
     static const QRegularExpression fenced(QStringLiteral("^```(?:json)?\\s*([\\s\\S]*?)\\s*```$"));
     const auto match = fenced.match(content);
     if (match.hasMatch()) content = match.captured(1);
-    if (error.error != QJsonParseError::NoError || content.isEmpty() || content.size() > 110000) {
+    if (content.isEmpty() || content.size() > 110000) {
         fail(QStringLiteral("ATOMICIZE_RESPONSE"), QStringLiteral("The provider returned no usable proposal. Check JSON-mode model compatibility.")); return;
     }
     const QJsonDocument proposal = QJsonDocument::fromJson(content.toUtf8(), &error);

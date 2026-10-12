@@ -16,6 +16,7 @@ Rectangle {
     property string summaryCaption: "Automatic summary"
     property string summaryError: ""
     property bool summaryRetryVisible: false
+    property string summaryRetryText: "Retry summary"
     property bool summaryBusy: false
     property bool saveExternally: false
     property string mediaRoot: ""
@@ -454,8 +455,8 @@ Rectangle {
                         wrapMode: Text.Wrap
                     }
                     AppButton {
-                        visible: pane.summaryRetryVisible && pane.summaryError.length > 0
-                        text: "Retry summary"
+                        visible: pane.summaryRetryVisible
+                        text: pane.summaryRetryText
                         enabled: !pane.summaryBusy && !pane.busy
                         hint: "Request a new summary"
                         onClicked: pane.summaryRetryRequested()

@@ -62,3 +62,9 @@ These Android additions have not been built or exercised on a device. Model
 download, lifecycle cancellation, memory use and retrieval latency need device
 verification once the Android kit is available. Desktop builds and runtime
 launches do not establish Android readiness.
+
+The Android language-model default is the compact LFM 2.5 350M profile. The
+larger Gemma profile is reserved for desktop hardware. Android local speech is
+still a draft because the current managed Vosk and Piper packages target Linux
+x86-64; compatible Android-native packages, lifecycle handling, and device
+validation are required before offline voice can be enabled there.

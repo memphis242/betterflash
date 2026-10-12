@@ -43,6 +43,9 @@ class SearchController final : public QObject {
     Q_PROPERTY(bool useLanguageModelKey READ useLanguageModelKey NOTIFY changed)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY changed)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY changed)
+    Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
+    Q_PROPERTY(QString testStatus READ testStatus NOTIFY testChanged)
+    Q_PROPERTY(QString testError READ testError NOTIFY testChanged)
 public:
     explicit SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent = nullptr);
     ~SearchController() override;
@@ -67,6 +70,9 @@ public:
     bool useLanguageModelKey() const { return m_reuseKey; }
     bool hasApiKey() const;
     QString keyStorageStatus() const;
+    bool testBusy() const { return m_testBusy; }
+    QString testStatus() const { return m_testStatus; }
+    QString testError() const { return m_testError; }
     void setSemanticEnabled(bool enabled);
     void setProvider(const QString &provider);
     void setLocalProfile(const QString &profile);
@@ -82,12 +88,15 @@ public:
     Q_INVOKABLE bool setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key);
     Q_INVOKABLE void clearApiKey();
     Q_INVOKABLE void rebuildIndex();
+    Q_INVOKABLE void testModel();
+    Q_INVOKABLE void cancelTest();
 signals:
     void resultsAboutToChange();
     void resultsChanged();
     void changed();
     void deckResultsChanged();
     void deckChanged();
+    void testChanged();
 private:
     struct QueryState {
         const std::shared_ptr<std::atomic<quint64>> epoch = std::make_shared<std::atomic<quint64>>(0);
@@ -154,4 +163,11 @@ private:
     QString m_downloadDirectory;
     std::unique_ptr<QSaveFile> m_downloadFile;
     std::unique_ptr<QCryptographicHash> m_downloadHash;
+    const std::shared_ptr<std::atomic<quint64>> m_testEpoch = std::make_shared<std::atomic<quint64>>(0);
+    QPointer<QNetworkReply> m_testReply;
+    QByteArray m_testBody;
+    bool m_testBusy = false;
+    QString m_testStatus;
+    QString m_testError;
+    bool m_testAfterDownload = false;
 };

@@ -1,7 +1,8 @@
 # Atomicize a saved card
 
-Atomicize is an optional library action. It uses the endpoint, model, and key in
-Language model settings. Clicking it sends the selected saved card's front,
+Atomicize is an optional library action. It uses the local model selected in
+Language model settings by default, or an explicitly configured remote
+endpoint, model, and key. Clicking it sends the selected saved card's front,
 back, kind, and answer-point count to that provider. It sends no other cards,
 review history, credentials in content, or image pixels.
 
@@ -42,7 +43,8 @@ from the current source.
 
 ## Model boundaries
 
-The request uses chat completions with JSON object mode. The model must support
+The request uses chat completions with JSON object mode. The local model and
+remote provider must support
 that mode. Provider output is checked for types, bounds, duplicate questions,
 image references, and a maximum of five cards. These checks do not determine
 whether the meaning is correct or whether closely related concepts belong

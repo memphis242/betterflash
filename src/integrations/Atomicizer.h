@@ -41,11 +41,10 @@ signals:
     void applied();
 private:
     void fail(const QString &code, const QString &message);
-    void receive(QNetworkReply *reply);
+    void receiveContent(const QString &response);
     AppController *const m_app;
     Summarizer *const m_provider;
-    QNetworkAccessManager m_network;
-    QPointer<QNetworkReply> m_reply;
+    quint64 m_job = 0;
     QVariantMap m_source;
     QVariantList m_proposals;
     QString m_status;

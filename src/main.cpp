@@ -67,6 +67,7 @@ int main(int argc, char **argv) {
     parser.addVersionOption();
     parser.addOption({QStringLiteral("data-dir"), QStringLiteral("Use an isolated collection and settings directory."), QStringLiteral("directory")});
     parser.addOption({QStringLiteral("demo"), QStringLiteral("Create the optional example deck in an empty collection.")});
+    parser.addOption({QStringLiteral("settings"), QStringLiteral("Open the Settings page at startup.")});
     parser.addOption({QStringLiteral("screenshot"), QStringLiteral("Save a window capture after startup."), QStringLiteral("file")});
     parser.addOption({QStringLiteral("queue-designs"), QStringLiteral("Open the isolated review queue design gallery.")});
     parser.addOption({QStringLiteral("control-designs"), QStringLiteral("Open the isolated review control design gallery.")});
@@ -368,6 +369,8 @@ int main(int argc, char **argv) {
         initialization->start();
     }
     engine.loadFromModule(QStringLiteral("BetterFlash"), QStringLiteral("Main"));
+    if (parser.isSet(QStringLiteral("settings")) && !engine.rootObjects().isEmpty())
+        engine.rootObjects().first()->setProperty("page", 3);
     if (parser.isSet(QStringLiteral("screenshot"))) {
         const QString output = parser.value(QStringLiteral("screenshot"));
         QTimer::singleShot(2500, &application, [&engine, output] {

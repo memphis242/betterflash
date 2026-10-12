@@ -8,8 +8,8 @@ flowchart TB
     UI --> Media[Image import pool]
     UI --> Voice[Voice controller]
     Voice --> Audio[Audio conversion and recognition worker]
-    Voice --> Speech[System speech engine]
-    UI --> Summary[Optional provider summary]
+    Voice --> Speech[Managed local speech or explicit provider]
+    UI --> Summary[Local model or explicit provider summary]
     UI --> Search[Staged card search worker]
     Search --> Embeddings[Native ONNX embeddings and local cache]
     Search --> Encoding[Optional BYOK encoding endpoint]
@@ -27,7 +27,7 @@ belong to the application thread. A dedicated worker owns its SQLite connection
 and all database transactions. Queued signals publish completed snapshots and
 review sessions; the interface displays a selected grade after its durable
 transaction commits. Grading advances after the commit; previous/next navigation is also explicit. Audio capture, sample conversion, voice activity detection,
-and optional local recognition have a separate worker thread. Image validation
+and local recognition have a separate worker thread. Image validation
 and content-addressed import run in the Qt thread pool.
 
 Network operations are asynchronous and have timeouts and response limits.
@@ -42,6 +42,16 @@ The selected embedding model downloads on first semantic search; text matching
 continues while it downloads or if semantic search is disabled. No browser
 engine, Electron or Python runtime is required. The independent sync server
 uses Python's standard library.
+
+Language-model inference uses native llama.cpp with bounded contexts, response
+limits, cancellation, and hardware-aware profile selection. Automatic desktop
+selection chooses Gemma 4 E2B on machines with at least 12 GiB RAM and LFM 2.5
+350M on smaller systems; Android selects LFM 2.5 350M. Automatic acceleration
+uses a suitable GPU backend when enough memory is available and otherwise falls
+back to CPU. Models and inference contexts are released after each operation.
+Managed speech assets are downloaded and validated on supported Fedora x86-64
+systems. Android speech remains a draft until compatible native packages are
+built and verified on a device. See [local model support](local-models.md).
 
 Card search has its own worker thread and SQLite embedding cache, separate from
 the collection database. Queries publish literal results, then fuzzy results,

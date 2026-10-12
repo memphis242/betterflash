@@ -12,7 +12,9 @@ automatic agent co-author attribution, or a remote session label.
 - Qt Quick is the native interface. Do not add Electron or a browser engine.
 - Database access belongs to its worker thread. Persist a mutation and its
   outgoing event in one transaction before reporting success or advancing review.
-- Voice is BYOK by default. Local models are optional test tools. Keep keys out
+- Model integrations default to managed local inference. Cloud providers are
+  optional BYOK connections. Download on first use, expose preparation and model
+  checks in Settings, cap inference resources, and release idle models. Keep keys out
   of Markdown, backups, SQLite collection tables, sync payloads, and logs.
 - UI defaults to the warm dark theme. Keep left navigation collapsible and
   pinned, page actions visible, and lists bounded.

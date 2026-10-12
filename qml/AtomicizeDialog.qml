@@ -120,14 +120,15 @@ Dialog {
         spacing: 10
         Label {
             textFormat: Text.PlainText
-            text: "The front and back are sent to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
+            text: ai.provider === "local" ? "The front and back are processed on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
+                : "The front and back are sent to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
             color: Theme.inkMuted
             font.pixelSize: 11
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
         RowLayout {
-            visible: !ai.hasApiKey
+            visible: ai.provider === "remote" && !ai.hasApiKey
             Layout.fillWidth: true
             Label {
                 textFormat: Text.PlainText

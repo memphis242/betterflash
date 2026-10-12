@@ -72,14 +72,16 @@ collapsible, keeps its chosen width, and uses the same menu/dock controls as
 the left navigation. Narrow windows show the deck tree or details at full
 width; collapse details to return to the tree.
 
-With a configured language model key, selecting a deck automatically summarizes
-its due review prompts after a short delay. Results are cached in memory for
+With a prepared local language model, selecting a deck automatically summarizes
+its due review prompts after a short delay. An explicitly configured remote
+provider is also supported. Results are cached in memory for
 up to twelve deck/content/provider combinations, preventing repeat requests
 when revisiting unchanged decks. Leaving the view or starting a review cancels
 its pending request. The request uses due variants including descendants,
 preserves cloze masking and reverse prompts, and follows the existing payload
 limits. No review session is started to generate a summary. Errors appear in
-the pane with a retry action; without a key, the pane points to Settings.
+the pane with a retry action; without a prepared local model or configured
+remote provider, the pane points to Language model settings.
 
 The main app uses actual generated summaries. Illustrative summaries and
 window-local description edits are confined to the design gallery.

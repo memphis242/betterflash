@@ -6,6 +6,11 @@ ColumnLayout {
     id: settings
     readonly property var search: librarySearch
     spacing: 18
+    component SettingsButton: AppButton { font.pixelSize: 16 }
+    component SettingsCombo: ComboBox { font.pixelSize: 17 }
+    component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
+    component SettingsError: ErrorBlock { textSize: 16 }
+
 
     component ValueRow: ColumnLayout {
         property string label: ""
@@ -14,30 +19,27 @@ ColumnLayout {
         Label {
             text: parent.label
             color: Theme.inkMuted
-            font.pixelSize: 12
+            font.pixelSize: 15
             Layout.fillWidth: true
         }
         Label {
             text: parent.value
             color: Theme.ink
             font.family: Theme.monoFont
-            font.pixelSize: 12
+            font.pixelSize: 17
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
     }
 
-    function openConnection() {
-        connectionDialog.open();
-    }
-
     Label {
         text: "Search cards in the selected deck or across the library. Text matches appear first. Semantic search then adds cards with related meaning. Local models run on this device and download on first use."
         color: Theme.inkMuted
+        font.pixelSize: 16
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
-    AppSwitch {
+    SettingsSwitch {
         Layout.fillWidth: true
         Layout.minimumWidth: 0
         objectName: "semanticSearchEnabled"
@@ -51,7 +53,74 @@ ColumnLayout {
         value: settings.search.modelLabel + " / " + settings.search.resolvedProfile + (settings.search.resolvedProfile === "desktop" ? " (~110 MB)" : settings.search.resolvedProfile === "compact" ? " (~34 MB)" : "")
         Layout.fillWidth: true
     }
-    ComboBox {
+    Label {
+        visible: settings.search.provider === "remote"
+        text: "Remote endpoint"
+        color: Theme.inkMuted
+        font.pixelSize: 15
+    }
+    TextField {
+        id: remoteEndpoint
+        visible: settings.search.provider === "remote"
+        Layout.fillWidth: true
+        text: settings.search.remoteEndpoint
+        placeholderText: "https://example.invalid/embeddings"
+        font.pixelSize: 17
+    }
+    Label {
+        visible: settings.search.provider === "remote"
+        text: "Embedding model"
+        color: Theme.inkMuted
+        font.pixelSize: 15
+    }
+    TextField {
+        id: remoteModel
+        visible: settings.search.provider === "remote"
+        Layout.fillWidth: true
+        text: settings.search.remoteModel
+        placeholderText: "text-embedding model"
+        font.pixelSize: 17
+    }
+    CheckBox {
+        id: reuseKey
+        visible: settings.search.provider === "remote"
+        text: "Use the existing language model key"
+        font.pixelSize: 15
+    }
+    TextField {
+        id: serviceKey
+        visible: settings.search.provider === "remote" && !reuseKey.checked
+        Layout.fillWidth: true
+        echoMode: TextInput.Password
+        placeholderText: settings.search.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"
+        font.pixelSize: 17
+        onVisibleChanged: if (!visible) text = ""
+    }
+    SettingsButton {
+        visible: settings.search.provider === "remote"
+        text: "Save remote connection"
+        primary: true
+        onClicked: {
+            if (settings.search.setRemoteConfiguration(remoteEndpoint.text.trim(), remoteModel.text.trim(), reuseKey.checked, serviceKey.text))
+                serviceKey.text = "";
+        }
+    }
+    SettingsButton {
+        text: settings.search.testBusy ? "Testing..." : settings.search.provider === "local" && !settings.search.modelReady ? "Download and test" : "Test model"
+        enabled: !settings.search.testBusy
+        onClicked: if (typeof settings.search.testModel === "function") settings.search.testModel()
+    }
+    ValueRow {
+        label: "Model test"
+        value: settings.search.testStatus
+        visible: !!settings.search.testStatus
+        Layout.fillWidth: true
+    }
+    SettingsError {
+        message: settings.search.testError
+        Layout.fillWidth: true
+    }
+    SettingsCombo {
         objectName: "semanticSearchProfile"
         Layout.fillWidth: true
         Layout.maximumWidth: 360
@@ -77,14 +146,14 @@ ColumnLayout {
     Flow {
         Layout.fillWidth: true
         spacing: 10
-        AppButton {
+        SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             visible: settings.search.semanticEnabled && settings.search.provider === "local"
             enabled: visible
             text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Download again" : "Download local model"
             onClicked: settings.search.downloading ? settings.search.cancelDownload() : settings.search.prepareModel()
         }
-        AppButton {
+        SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             text: settings.search.provider === "remote" ? "Remote provider" : "Local model"
             onClicked: providerMenu.open()
@@ -102,7 +171,7 @@ ColumnLayout {
                 }
             }
         }
-        AppButton {
+        SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             text: "Rebuild search index"
             enabled: !settings.search.downloading
@@ -123,110 +192,19 @@ ColumnLayout {
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
-    ErrorBlock {
+    SettingsError {
         message: settings.search.error
         Layout.fillWidth: true
     }
 
-    Dialog {
-        id: connectionDialog
-        modal: true
-        title: "Search connection"
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: Math.min(560, parent ? parent.width - 40 : 560)
-        height: Math.min(560, parent ? parent.height - 40 : 560)
-        property alias endpointText: endpoint.text
-        property alias modelText: model.text
-        onOpened: {
-            endpoint.text = settings.search.remoteEndpoint;
-            model.text = settings.search.remoteModel;
-            reuseKey.checked = settings.search.useLanguageModelKey;
-            serviceKey.text = "";
-        }
-        footer: RowLayout {
-            spacing: 12
-            Item {
-                Layout.fillWidth: true
-            }
-            AppButton {
-                text: "Cancel"
-                onClicked: connectionDialog.close()
-            }
-            AppButton {
-                text: "Save connection"
-                primary: true
-                onClicked: {
-                    if (settings.search.setRemoteConfiguration(endpoint.text, model.text, reuseKey.checked, serviceKey.text)) {
-                        settings.search.provider = "remote";
-                        connectionDialog.close();
-                    }
-                }
-            }
-        }
-        background: Rectangle {
-            color: Theme.surface
-            border.color: Theme.rule
-            radius: 8
-        }
-        contentItem: ScrollView {
-            contentWidth: availableWidth
-            clip: true
-            ColumnLayout {
-                width: connectionDialog.contentItem.availableWidth
-                spacing: 12
-                Label {
-                    text: "Provider mode sends your query and cards in the search scope for encoding. Search within decks always searches the entire library, regardless of the selected deck, and includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
-                    color: Theme.inkMuted
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Label {
-                    text: "Endpoint"
-                    color: Theme.inkMuted
-                }
-                TextField {
-                    id: endpoint
-                    Layout.fillWidth: true
-                    placeholderText: "https://example.invalid/embeddings"
-                }
-                Label {
-                    text: "Embedding model"
-                    color: Theme.inkMuted
-                }
-                TextField {
-                    id: model
-                    Layout.fillWidth: true
-                    placeholderText: "text-embedding model"
-                }
-                CheckBox {
-                    id: reuseKey
-                    text: "Use the existing language model key"
-                }
-                TextField {
-                    id: serviceKey
-                    Layout.fillWidth: true
-                    echoMode: TextInput.Password
-                    placeholderText: settings.search.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"
-                    visible: !reuseKey.checked
-                }
-                ValueRow {
-                    label: "Key storage"
-                    value: settings.search.keyStorageStatus
-                    Layout.fillWidth: true
-                }
-                AppButton {
-                    Layout.maximumWidth: parent.width
-                    text: "Clear stored embedding key"
-                    visible: settings.search.hasApiKey && !reuseKey.checked
-                    onClicked: settings.search.clearApiKey()
-                }
-                ErrorBlock {
-                    message: settings.search.error
-                    Layout.fillWidth: true
-                }
-            }
-        }
-        onClosed: serviceKey.text = ""
+    ValueRow {
+        label: "Key storage"
+        value: settings.search.keyStorageStatus
+        Layout.fillWidth: true
+    }
+    SettingsButton {
+        text: "Clear stored embedding key"
+        visible: settings.search.hasApiKey && settings.search.provider === "remote" && !reuseKey.checked
+        onClicked: settings.search.clearApiKey()
     }
 }

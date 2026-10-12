@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(BetterFlash VERSION 0.1.0 LANGUAGES CXX)
+project(BetterFlash VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +10,9 @@ qt_standard_project_setup(REQUIRES 6.7)
 include(cmake/MicroTeX.cmake)
 include(cmake/OnnxRuntime.cmake)
 include(cmake/SyntaxHighlighting.cmake)
+include(cmake/LocalModels.cmake)
+include(cmake/ModelArchive.cmake)
+include(cmake/LocalSpeech.cmake)
 include(GNUInstallDirs)
 
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/core/*.h)
@@ -21,10 +24,17 @@ endif()
 target_include_directories(betterflash_core PUBLIC src)
 target_link_libraries(betterflash_core PUBLIC Qt6::Core Qt6::Gui Qt6::Sql)
 
+file(GLOB MODEL_SOURCES CONFIGURE_DEPENDS src/models/*.cpp src/models/*.h)
+add_library(betterflash_models STATIC ${MODEL_SOURCES})
+target_include_directories(betterflash_models PUBLIC src)
+target_link_libraries(betterflash_models PUBLIC Qt6::Core Qt6::Network Qt6::Concurrent
+    PRIVATE betterflash_archive llama-common)
+target_compile_options(betterflash_models PRIVATE -Wall -Wextra -Wpedantic)
+
 file(GLOB VOICE_SOURCES CONFIGURE_DEPENDS src/voice/*.cpp src/voice/*.h)
 add_library(betterflash_voice STATIC ${VOICE_SOURCES})
 target_include_directories(betterflash_voice PUBLIC src)
-target_link_libraries(betterflash_voice PUBLIC Qt6::Core Qt6::Multimedia Qt6::TextToSpeech Qt6::Network)
+target_link_libraries(betterflash_voice PUBLIC Qt6::Core Qt6::Multimedia Qt6::TextToSpeech Qt6::Network betterflash_models PRIVATE betterflash_local_speech)
 
 file(GLOB RENDER_SOURCES CONFIGURE_DEPENDS src/render/*.cpp src/render/*.h)
 add_library(betterflash_render STATIC ${RENDER_SOURCES})
@@ -38,7 +48,7 @@ qt_add_resources(betterflash_render math_assets PREFIX /tex BASE "${microtex_SOU
 file(GLOB INTEGRATION_SOURCES CONFIGURE_DEPENDS src/integrations/*.cpp src/integrations/*.h)
 add_library(betterflash_integrations STATIC ${INTEGRATION_SOURCES})
 target_include_directories(betterflash_integrations PUBLIC src)
-target_link_libraries(betterflash_integrations PUBLIC betterflash_core Qt6::Network Qt6::Gui Qt6::Concurrent)
+target_link_libraries(betterflash_integrations PUBLIC betterflash_core Qt6::Network Qt6::Gui Qt6::Concurrent betterflash_models)
 target_link_libraries(betterflash_voice PRIVATE betterflash_integrations)
 
 file(GLOB SEARCH_SOURCES CONFIGURE_DEPENDS src/search/*.cpp src/search/*.h)
