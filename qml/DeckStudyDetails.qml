@@ -34,7 +34,7 @@ Rectangle {
     readonly property color panelRule: Theme.ledgerRule
 
     onDeckIdChanged: {
-        if (pane.descriptionEditing) {
+        if (pane.hasDescriptionDraft(pane.deckId)) {
             descriptionTabs.currentIndex = 0
             descriptionEditor.text = pane.draftForCurrentDeck()
             const editingDeckId = pane.deckId
@@ -84,7 +84,7 @@ Rectangle {
     function openDescriptionEditor() {
         if (pane.busy || pane.deckId.length === 0)
             return
-        if (!pane.descriptionEditing) {
+        if (!pane.hasDescriptionDraft(pane.deckId)) {
             const drafts = Object.assign({}, pane.descriptionDrafts)
             drafts[pane.deckId] = pane.description
             pane.descriptionDrafts = drafts
@@ -99,11 +99,14 @@ Rectangle {
             descriptionEditor.cursorPosition = descriptionEditor.length
         })
     }
+    function hasDescriptionDraft(id) {
+        return id.length > 0 && Object.prototype.hasOwnProperty.call(pane.descriptionDrafts, id)
+    }
     function draftForCurrentDeck() {
-        return pane.descriptionEditing ? String(pane.descriptionDrafts[pane.deckId]) : pane.description
+        return pane.hasDescriptionDraft(pane.deckId) ? String(pane.descriptionDrafts[pane.deckId]) : pane.description
     }
     function updateDescriptionDraft(text) {
-        if (!pane.descriptionEditing || pane.deckId.length === 0)
+        if (!pane.hasDescriptionDraft(pane.deckId))
             return
         if (String(pane.descriptionDrafts[pane.deckId]) === String(text))
             return
@@ -124,7 +127,7 @@ Rectangle {
             pane.discardDescriptionDraft(pane.deckId)
     }
     function saveDescription() {
-        if (!pane.descriptionEditing || pane.busy || pane.deckId.length === 0)
+        if (!pane.hasDescriptionDraft(pane.deckId) || pane.busy)
             return
         const id = pane.deckId
         const text = String(pane.descriptionDrafts[id])

@@ -39,6 +39,7 @@ Item {
     }
     onSummaryKeyChanged: scheduleSummary()
     onCanSummarizeChanged: scheduleSummary()
+    onVisibleChanged: if (!visible && graphDeckMenu) graphDeckMenu.close()
     Component.onCompleted: scheduleSummary()
 
     function cancelOwnedSummary() {
