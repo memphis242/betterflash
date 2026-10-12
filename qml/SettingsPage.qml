@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 
 Item {
     id: settingsPage
@@ -10,10 +11,16 @@ Item {
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
     component SettingsError: ErrorBlock { textSize: 16 }
 
+    readonly property var voiceController: voice
+    readonly property var languageController: ai
     property int section: ui.settingsSection()
     onSectionChanged: {
         ui.setSettingsSection(section)
-        if (section !== 2) voiceKeyDraft = ""
+        if (section !== 2) {
+            voiceKeyDraft = ""
+            if (voiceSettings)
+                voiceSettings.clearSecretDraft()
+        }
         if (section !== 3) aiKeyDraft = ""
         if (section !== 4) syncTokenDraft = ""
     }
@@ -23,11 +30,16 @@ Item {
     property string aiEndpointDraft: ai.endpoint
     property string aiModelDraft: ai.model
     property string voiceKeyDraft: ""
+    Settings { id: voicePreferences; category: "voiceSettings"; property int selectedTab: 0 }
+    property int voiceTabIndex: voicePreferences.selectedTab
+    onVoiceTabIndexChanged: voicePreferences.selectedTab = Math.max(0, Math.min(1, voiceTabIndex))
     property string aiKeyDraft: ""
     property string syncTokenDraft: ""
     property string exportDestinationDraft: ""
     onVisibleChanged: if (!visible) {
         voiceKeyDraft = ""
+        if (voiceSettings)
+            voiceSettings.clearSecretDraft()
         aiKeyDraft = ""
         syncTokenDraft = ""
     }
@@ -307,196 +319,13 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
-                        SettingsSwitch {
+                        VoiceSettings {
+                            id: voiceSettings
                             Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            objectName: "voiceEnabled"
-                            text: "Enable voice review"
-                            checked: voice.enabled
-                            onToggled: voice.enabled = checked
-                        }
-                        ValueRow {
-                            label: "Speech recognition"
-                            value: voice.sttProvider === "groq" ? "Groq / " + voice.sttModel : "Local / " + voice.sttProfile
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: "Speech recognition"
-                            color: Theme.inkMuted
-                            font.pixelSize: 15
-                        }
-                        SettingsCombo {
-                            id: sttProviderInline
-                            Layout.fillWidth: true
-                            model: ["Local model", "Groq cloud"]
-                            currentIndex: voice.sttProvider === "groq" ? 1 : 0
-                            onActivated: voice.sttProvider = currentIndex === 1 ? "groq" : "local"
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Choose on-device speech recognition or Groq"
-                        }
-                        TextField {
-                            Layout.fillWidth: true
-                            visible: sttProviderInline.currentIndex === 1
-                            text: voice.sttModel
-                            onEditingFinished: voice.sttModel = text.trim()
-                            placeholderText: "whisper-large-v3-turbo"
-                            font.pixelSize: 17
-                        }
-                        TextField {
-                            Layout.fillWidth: true
-                            visible: sttProviderInline.currentIndex === 0
-                            text: voice.modelPath
-                            onEditingFinished: voice.modelPath = text.trim()
-                            placeholderText: "Local model folder"
-                            font.pixelSize: 17
-                        }
-                        SettingsCombo {
-                            Layout.fillWidth: true
-                            visible: sttProviderInline.currentIndex === 0
-                            model: ["Automatic compact", "Small English"]
-                            currentIndex: voice.sttProfile === "small-en" ? 1 : 0
-                            onActivated: voice.sttProfile = currentIndex === 1 ? "small-en" : "automatic"
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Choose the local speech recognition profile"
-                        }
-                        ValueRow {
-                            visible: sttProviderInline.currentIndex === 0
-                            label: "Speech model status"
-                            value: voice.sttModelStatus
-                            Layout.fillWidth: true
-                        }
-                        ProgressBar {
-                            visible: sttProviderInline.currentIndex === 0 && voice.sttModelDownloading
-                            value: voice.sttModelProgress
-                            Layout.fillWidth: true
-                        }
-                        SettingsButton {
-                            visible: sttProviderInline.currentIndex === 0
-                            text: voice.sttModelDownloading ? "Cancel download" : voice.sttModelReady ? "Download again" : "Download local speech model"
-                            onClicked: voice.sttModelDownloading ? voice.cancelSttDownload() : voice.downloadSttModel()
-                        }
-                        SettingsButton {
-                            text: voice.sttTestBusy ? "Testing..." : voice.sttProvider === "local" && !voice.sttModelReady ? "Download and test" : "Test model"
-                            enabled: !voice.modelTestBusy
-                            onClicked: voice.testSttModel()
-                        }
-                        ValueRow {
-                            label: "Recognition check"
-                            value: voice.sttTestStatus
-                            visible: !!voice.sttTestStatus
-                            Layout.fillWidth: true
-                        }
-                        SettingsError { message: voice.sttTestError; Layout.fillWidth: true }
-                        ValueRow {
-                            label: "Playback"
-                            value: voice.ttsProvider === "system" ? "System speech engine" : "Piper on this device"
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            visible: voice.sttProvider === "groq"
-                            textFormat: Text.PlainText
-                            text: "With Groq selected, microphone audio is sent to Groq while voice review is enabled. Questions, answers, grades, deferring, postponing and pausing can be spoken."
-                            color: Theme.inkMuted
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                            font.pixelSize: 16
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-                            visible: sttProviderInline.currentIndex === 1
-                            TextField {
-                                Layout.fillWidth: true
-                                echoMode: TextInput.Password
-                                text: settingsPage.voiceKeyDraft
-                                placeholderText: voice.hasApiKey ? "Leave empty to keep the stored Groq key" : "Groq API key"
-                                font.pixelSize: 17
-                                onTextChanged: if (activeFocus) settingsPage.voiceKeyDraft = text
-                            }
-                            SettingsButton {
-                                text: "Save key"
-                                enabled: settingsPage.voiceKeyDraft.trim().length > 0
-                                onClicked: {
-                                    voice.setApiKey(settingsPage.voiceKeyDraft.trim())
-                                    settingsPage.voiceKeyDraft = ""
-                                }
-                            }
-                            SettingsButton {
-                                visible: voice.hasApiKey
-                                text: "Clear stored key"
-                                onClicked: voice.clearApiKey()
-                            }
-                        }
-                        Label { text: "Text-to-speech provider"; color: Theme.inkMuted; font.pixelSize: 15 }
-                        SettingsCombo {
-                            Layout.fillWidth: true
-                            model: ["Local Piper voice", "System speech engine"]
-                            currentIndex: voice.ttsProvider === "system" ? 1 : 0
-                            onActivated: voice.ttsProvider = currentIndex === 1 ? "system" : "local"
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Use the bundled local voice runtime, or an installed system speech engine"
-                        }
-                        Label { text: "Text-to-speech profile"; visible: voice.ttsProvider === "local"; color: Theme.inkMuted; font.pixelSize: 15 }
-                        SettingsCombo {
-                            Layout.fillWidth: true
-                            visible: voice.ttsProvider === "local"
-                            model: ["Amy low / compact (67 MB download)", "LJSpeech medium (67 MB download)"]
-                            currentIndex: voice.ttsProfile === "ljspeech-medium" ? 1 : 0
-                            onActivated: voice.ttsProfile = ["amy-low", "ljspeech-medium"][currentIndex]
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Choose a local speech synthesis profile"
-                        }
-                        ValueRow {
-                            label: "Speech output status"
-                            value: voice.ttsStatus
-                            Layout.fillWidth: true
-                        }
-                        ProgressBar {
-                            visible: voice.ttsProvider === "local" && voice.ttsModelDownloading
-                            value: voice.ttsModelProgress
-                            Layout.fillWidth: true
-                        }
-                        SettingsButton {
-                            visible: voice.ttsProvider === "local"
-                            text: voice.ttsModelDownloading ? "Cancel download" : voice.ttsReady ? "Download again" : "Download local speech model"
-                            onClicked: voice.ttsModelDownloading ? voice.cancelTtsDownload() : voice.downloadTtsModel()
-                        }
-                        SettingsButton {
-                            text: voice.ttsTestBusy ? "Testing..." : voice.ttsProvider === "local" && !voice.ttsReady ? "Download and test" : "Test model"
-                            enabled: !voice.modelTestBusy
-                            onClicked: voice.testTtsModel()
-                        }
-                        ValueRow {
-                            label: "Speech output check"
-                            value: voice.ttsTestStatus
-                            visible: !!voice.ttsTestStatus
-                            Layout.fillWidth: true
-                        }
-                        SettingsError {
-                            message: voice.ttsTestError
-                            Layout.fillWidth: true
-                        }
-                        ValueRow {
-                            label: "Credential storage"
-                            value: voice.keyStorageStatus
-                            Layout.fillWidth: true
-                        }
-                        ValueRow {
-                            label: "Status"
-                            value: voice.status
-                            Layout.fillWidth: true
-                        }
-                        SettingsError {
-                            message: voice.lastError
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            textFormat: Text.PlainText
-                            text: "Say 'start review', 'show answer', 'good', 'next card', 'previous card', 'defer', 'pause', or 'resume'. Partial recall accepts 'two of three points'. Use 'confirm rating' or 'keep rating' when correcting an earlier result."
-                            color: Theme.inkMuted
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                            font.pixelSize: 16
+                            voice: settingsPage.voiceController
+                            ai: settingsPage.languageController
+                            tabIndex: settingsPage.voiceTabIndex
+                            onTabIndexChanged: settingsPage.voiceTabIndex = tabIndex
                         }
                     }
                     ColumnLayout {
@@ -514,7 +343,7 @@ Item {
                             ToolTip.visible: hovered
                             ToolTip.text: "Local models work offline. Remote providers require a key."
                         }
-                        Label { visible: aiProvider.currentIndex === 0; text: "Local profile"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        Label { visible: aiProvider.currentIndex === 0; text: "Selected local model"; color: Theme.inkMuted; font.pixelSize: 15 }
                         SettingsCombo {
                             visible: aiProvider.currentIndex === 0
                             Layout.fillWidth: true
@@ -543,24 +372,30 @@ Item {
                             value: ai.localDownloadProgress
                             Layout.fillWidth: true
                         }
-                        ColumnLayout {
+                        Flow {
                             Layout.fillWidth: true
                             spacing: 10
-                            SettingsButton {
+                            ModelActionButton {
+                                width: Math.min(implicitWidth, parent.width)
                                 visible: aiProvider.currentIndex === 0
-                                text: ai.localDownloading ? "Cancel download" : ai.localModelReady ? "Prepare again" : "Prepare local model"
+                                actionKind: "download"
+                                text: ai.localDownloading ? "Cancel download" : ai.localModelReady ? "Verify model files" : "Download local model"
+                                hint: "Download, verify, extract, and store the selected model for offline use. It is loaded into memory only when needed."
                                 onClicked: ai.localDownloading ? ai.cancelLocalDownload() : ai.prepareLocalModel()
                             }
-                            SettingsButton {
-                                text: ai.testBusy ? "Testing..." : ai.provider === "local" && !ai.localModelReady ? "Download and test" : "Test model"
-                                enabled: !ai.testBusy
+                            ModelActionButton {
+                                width: Math.min(implicitWidth, parent.width)
+                                actionKind: "test"
+                                text: ai.testBusy ? "Testing..." : "Test model"
+                                enabled: !ai.testBusy && !voice.modelTestBusy && (ai.provider === "remote" || ai.localModelReady)
+                                hint: enabled ? "Run a short language model validation" : "Download the local model before testing"
                                 onClicked: if (typeof ai.testModel === "function") ai.testModel()
                             }
                         }
-                        ValueRow {
+                        ModelStatus {
                             visible: aiProvider.currentIndex === 0
-                            label: "Local status"
-                            value: ai.localStatus || "Ready to prepare"
+                            text: ai.localStatus || "Model files are not available"
+                            state: ai.localDownloading ? "busy" : ai.localModelReady && !ai.localError && !ai.testError ? "ready" : ai.localModelReady ? "degraded" : "missing"
                             Layout.fillWidth: true
                         }
                         ValueRow {
@@ -630,14 +465,12 @@ Item {
                                 onClicked: ai.clearApiKey()
                             }
                         }
-                        ValueRow {
-                            label: "Model test"
-                            value: ai.testStatus
-                            visible: !!ai.testStatus
-                            Layout.fillWidth: true
-                        }
-                        SettingsError {
-                            message: ai.testError
+                        ModelTestResult {
+                            title: "Language model test"
+                            report: ai.testReport
+                            status: ai.testStatus
+                            error: ai.testError
+                            busy: ai.testBusy
                             Layout.fillWidth: true
                         }
                         ValueRow {
