@@ -71,7 +71,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -2114,31 +2114,6 @@ ApplicationWindow {
         id: moveCardDialog
         ui: window
     }
-    Sheet {
-        id: allHistoryDialog
-        objectName: "allHistoryDialog"
-        title: "Review records"
-        width: Math.min(950, window.width - 2 * window.gutter)
-        height: Math.min(740, window.height - 40)
-        standardButtons: Dialog.Close
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                textFormat: Text.PlainText
-                text: app.history.length >= 200 ? "Most recent 200 reviews. Export the collection for the full history." : app.history.length + " review records"
-                color: Theme.inkMuted
-                font.family: Theme.monoFont
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
-            }
-            HistoryList {
-                ui: window
-                records: app.history
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-        }
-    }
     FileDialog {
         id: imageDialog
         objectName: "imageDialog"
@@ -2256,7 +2231,7 @@ ApplicationWindow {
         deckPicker.open()
     }
     function openAllHistory() {
-        allHistoryDialog.open()
+        page = 2
     }
     function openRebind(action) {
         rebindAction = action
