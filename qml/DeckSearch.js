@@ -55,3 +55,32 @@ function match(name, query) {
     }
     return { tier: 2, distance: total, label: "Similar spelling" }
 }
+
+function aggregateContent(decks, cards) {
+    const parents = ({})
+    const matches = ({})
+    const tierNames = ["exact", "prefix", "contains", "fuzzy", "semantic"]
+    const labels = ["Exact", "Prefix", "Contains query", "Similar spelling", "Related meaning"]
+    for (const deck of decks) parents[deck.id] = deck.parentId || ""
+    for (const card of cards) {
+        const tier = tierNames.indexOf(card.searchTier)
+        if (tier < 0 || parents[card.deckId] === undefined) continue
+        const score = Number(card.searchScore || 0)
+        const visited = []
+        let id = card.deckId
+        while (id && parents[id] !== undefined && visited.indexOf(id) < 0) {
+            visited.push(id)
+            if (!matches[id]) matches[id] = { tier: tier, score: score, label: labels[tier], count: 0, ownCount: 0 }
+            const hit = matches[id]
+            ++hit.count
+            if (id === card.deckId) ++hit.ownCount
+            if (tier < hit.tier || tier === hit.tier && score > hit.score) {
+                hit.tier = tier
+                hit.score = score
+                hit.label = labels[tier]
+            }
+            id = parents[id]
+        }
+    }
+    return matches
+}
