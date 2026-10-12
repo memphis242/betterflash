@@ -11,8 +11,11 @@ Rectangle {
     property string status: ""
     property string title: "Model validation"
     readonly property string outcome: busy ? "running" : report.outcome || (error ? "failed" : "")
+    readonly property bool hasWordScore: report.wordErrorRate !== undefined
+        && Number.isFinite(Number(report.wordErrorRate)) && Number(report.wordErrorRate) >= 0
     readonly property color resultColor: outcome === "passed" ? Theme.success
-        : outcome === "failed" ? Theme.error : outcome === "running" ? Theme.warning : Theme.rule
+        : outcome === "failed" ? (hasWordScore ? Theme.warning : Theme.error)
+        : outcome === "running" ? Theme.warning : Theme.rule
     visible: busy || !!error || !!report.outcome
     implicitHeight: content.implicitHeight + 36
     color: Theme.surface
@@ -40,7 +43,7 @@ Rectangle {
                 text: {
                     switch (control.outcome) {
                     case "passed": return "Passed";
-                    case "failed": return "Failed";
+                    case "failed": return control.hasWordScore ? "Transcript differs" : "Failed";
                     case "running": return "Running";
                     case "canceled": return "Canceled";
                     default: return "";
@@ -82,6 +85,21 @@ Rectangle {
                     Accessible.name: parent.modelData.label
                 }
             }
+        }
+        Label {
+            visible: control.hasWordScore
+            text: "Word error rate " + (Number(control.report.wordErrorRate) * 100).toFixed(1)
+                + "%  |  " + Number(control.report.substitutions || 0) + " substitutions, "
+                + Number(control.report.deletions || 0) + " omissions, "
+                + Number(control.report.insertions || 0) + " insertions"
+            textFormat: Text.PlainText
+            color: control.resultColor
+            font.pixelSize: 16
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            ToolTip.visible: wordScoreHover.hovered
+            ToolTip.text: "Word error rate is substitutions, omissions, and insertions divided by the expected word count. Lower is better; insertions can make it exceed 100%."
+            HoverHandler { id: wordScoreHover }
         }
         Repeater {
             model: control.report.comparisons || []
@@ -132,7 +150,7 @@ Rectangle {
             }
         }
         Label {
-            visible: !!control.report.details
+            visible: !!control.report.details && (control.hasWordScore || control.report.details !== control.error)
             text: control.report.details || ""
             textFormat: Text.PlainText
             color: Theme.inkMuted
@@ -141,7 +159,7 @@ Rectangle {
             wrapMode: Text.Wrap
         }
         Label {
-            visible: !!control.status && !control.error
+            visible: !!control.status && (!control.error || control.hasWordScore)
             text: control.status
             textFormat: Text.PlainText
             color: control.resultColor === Theme.rule ? Theme.inkMuted : control.resultColor
@@ -150,6 +168,7 @@ Rectangle {
             wrapMode: Text.Wrap
         }
         ErrorBlock {
+            visible: !control.hasWordScore
             message: control.error
             textSize: 16
             Layout.fillWidth: true

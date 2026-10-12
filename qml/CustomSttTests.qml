@@ -8,6 +8,11 @@ ColumnLayout {
     required property var voice
     readonly property var tests: voice.customSttTests
     property var expectedDrafts: ({})
+    readonly property bool draftSetReady: tests.entries.length > 0 && tests.entries.every(entry => {
+        const value = root.expectedFor(entry).trim()
+        return value.length > 0 && value.length <= 16384 && value.split(/\s+/).length <= 512
+    })
+    readonly property bool providerReady: voice.sttProvider === "groq" ? voice.hasApiKey : voice.sttModelReady && !voice.sttModelDownloading
     Layout.fillWidth: true
     spacing: 10
     onVisibleChanged: if (!visible && tests.recording) tests.stopRecording()
@@ -54,6 +59,7 @@ ColumnLayout {
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 12
                 Label {
                     text: "Custom tests"
                     color: Theme.ink
@@ -200,7 +206,7 @@ ColumnLayout {
                 AppButton {
                     text: tests.recording ? "Stop recording" : "Record new sample"
                     glyph: tests.recording ? "stop" : "mic"
-                    enabled: !tests.busy && (tests.recording || tests.entries.length < 5)
+                    enabled: tests.recording || (!voice.modelTestBusy && !tests.busy && tests.entries.length < 5)
                     hint: tests.recording ? "Stop recording and add the sample" : "Record a sample using the system microphone"
                     onClicked: tests.recording ? tests.stopRecording() : tests.startRecording()
                 }
@@ -208,8 +214,10 @@ ColumnLayout {
                 ModelActionButton {
                     text: tests.busy ? "Testing..." : "Test custom set"
                     actionKind: "test"
-                    enabled: tests.canRun && !tests.recording
-                    hint: enabled ? "Transcribe every custom recording" : "Add recordings with expected transcripts first"
+                    enabled: root.draftSetReady && root.providerReady && !voice.modelTestBusy && !tests.busy && !tests.recording
+                    hint: enabled ? "Transcribe every custom recording" : !root.providerReady
+                        ? "Download the local model or configure the selected provider first"
+                        : "Add expected transcripts of up to 512 words; wait for any active model check to finish"
                     onClicked: {
                         root.commitDrafts()
                         tests.runTests()
@@ -231,7 +239,7 @@ ColumnLayout {
                 font.pixelSize: 14
             }
             Label {
-                visible: tests.busy && voice.sttProvider === "groq"
+                visible: tests.entries.length > 0 && voice.sttProvider === "groq"
                 Layout.fillWidth: true
                 text: "Groq will upload each selected recording for transcription."
                 color: Theme.warning

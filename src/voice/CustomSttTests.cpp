@@ -26,6 +26,8 @@ namespace {
 constexpr qsizetype MaxRecordingBytes = VoiceUtteranceBuffer::MaxBytes;
 constexpr qsizetype MaxSourceBytes = 64 * 1024 * 1024;
 constexpr int MaxEntries = 5;
+static_assert(MaxRecordingBytes % 2 == 0);
+static_assert(MaxSourceBytes >= MaxRecordingBytes);
 
 bool managedPath(const QString &directory, const QString &path) {
     const QFileInfo rootInfo(QDir::cleanPath(directory));
@@ -89,6 +91,10 @@ bool decodeWave(const QByteArray &wave, WaveData *output, QString *error) {
     format.setSampleRate(static_cast<int>(sampleRate));
     format.setChannelCount(static_cast<int>(channels));
     format.setSampleFormat(bits == 8 ? QAudioFormat::UInt8 : bits == 16 ? QAudioFormat::Int16 : QAudioFormat::Int32);
+    if (dataSize % format.bytesPerFrame() != 0) {
+        if (error) *error = QStringLiteral("The WAV contains an incomplete audio frame. Export it as PCM WAV again.");
+        return false;
+    }
     const double sourceDuration = static_cast<double>(dataSize) / (sampleRate * channels * (bits / 8));
     if (sourceDuration > 60.0) {
         if (error) *error = QStringLiteral("The recording must be no longer than 60 seconds.");
@@ -119,7 +125,7 @@ CustomSttTests::~CustomSttTests() {
 
 QVariantList CustomSttTests::entries() const {
     QVariantList result;
-    for (const Entry &entry : m_entries) {
+    for (const struct Entry &entry : m_entries) {
         result.append(QVariantMap{{QStringLiteral("id"), entry.id}, {QStringLiteral("label"), entry.label},
             {QStringLiteral("expected"), entry.expected}, {QStringLiteral("transcript"), entry.transcript},
             {QStringLiteral("status"), entry.status}, {QStringLiteral("error"), entry.error},
@@ -138,7 +144,7 @@ bool CustomSttTests::canRun() const {
             && !QFileInfo::exists(QDir(m_modelPath).filePath(QStringLiteral("../runtime/libvosk.dll")))
             && qEnvironmentVariableIsEmpty("BETTERFLASH_VOSK_LIBRARY")))) return false;
     if (m_provider == QStringLiteral("groq") && m_apiKey.isEmpty()) return false;
-    for (const Entry &entry : m_entries)
+    for (const struct Entry &entry : m_entries)
         if (entry.expected.trimmed().isEmpty() || entry.path.isEmpty()) return false;
     return true;
 }
@@ -153,7 +159,7 @@ void CustomSttTests::setConfiguration(QString provider, QString modelPath, QStri
     const QString nextConfiguration = provider + QLatin1Char('|') + modelPath + QLatin1Char('|') + model;
     const QString nextCredentialHash = QString::fromLatin1(QCryptographicHash::hash(apiKey.toUtf8(), QCryptographicHash::Sha256).toHex());
     bool resultsChanged = false;
-    for (Entry &entry : m_entries) {
+    for (struct Entry &entry : m_entries) {
         if (!entry.resultConfiguration.isEmpty() && (entry.resultConfiguration != nextConfiguration || entry.resultCredentialHash != nextCredentialHash)) {
             resultsChanged = true;
             entry.transcript.clear();
@@ -183,7 +189,7 @@ void CustomSttTests::addRecording(const QUrl &source) {
         setState(false, QStringLiteral("Recording import failed."), error);
         return;
     }
-    Entry entry;
+    struct Entry entry;
     entry.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     entry.label = QFileInfo(source.toLocalFile()).completeBaseName();
     entry.path = path;
@@ -197,7 +203,7 @@ void CustomSttTests::addRecording(const QUrl &source) {
 
 void CustomSttTests::setExpected(const QString &id, const QString &text) {
     if (m_busy || m_recording) return;
-    Entry *const entry = find(id);
+    struct Entry *const entry = find(id);
     if (!entry) return;
     const QString value = text.trimmed();
     if (value.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size() > 512) {
@@ -219,7 +225,7 @@ void CustomSttTests::setExpected(const QString &id, const QString &text) {
 
 void CustomSttTests::setLabel(const QString &id, const QString &text) {
     if (m_busy || m_recording) return;
-    Entry *const entry = find(id);
+    struct Entry *const entry = find(id);
     if (!entry) return;
     const QString value = text.trimmed();
     if (value.isEmpty() || entry->label == value) return;
@@ -230,9 +236,9 @@ void CustomSttTests::setLabel(const QString &id, const QString &text) {
 
 void CustomSttTests::removeRecording(const QString &id) {
     if (m_busy || m_recording) return;
-    const auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [&id](const Entry &entry) { return entry.id == id; });
+    const auto it = std::find_if(m_entries.cbegin(), m_entries.cend(), [&id](const struct Entry &entry) { return entry.id == id; });
     if (it == m_entries.cend()) return;
-    const Entry removed = *it;
+    const struct Entry removed = *it;
     const qsizetype index = std::distance(m_entries.cbegin(), it);
     m_entries.erase(it);
     if (!persist()) { m_entries.insert(index, removed); setState(false, QStringLiteral("Recording removal failed."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
@@ -246,10 +252,17 @@ void CustomSttTests::runTests() {
     if (m_provider == QStringLiteral("local") && m_modelPath.isEmpty()) { setState(false, QStringLiteral("Tests cannot run."), QStringLiteral("Select a local speech model first.")); return; }
     if (m_provider == QStringLiteral("groq") && m_apiKey.isEmpty()) { setState(false, QStringLiteral("Tests cannot run."), QStringLiteral("Add a Groq API key first.")); return; }
     const quint64 generation = ++m_generation;
+    const QVector<struct Entry> savedEntries = m_entries;
     m_busy = true;
     m_current = -1;
-    for (Entry &entry : m_entries) { entry.transcript.clear(); entry.error.clear(); entry.status = QStringLiteral("Queued"); entry.wordErrorRate = -1.0; entry.substitutions = entry.deletions = entry.insertions = 0; entry.resultConfiguration.clear(); entry.resultCredentialHash.clear(); }
-    if (!persist()) { m_busy = false; setState(false, QStringLiteral("Custom tests could not start."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
+    for (struct Entry &entry : m_entries) { entry.transcript.clear(); entry.error.clear(); entry.status = QStringLiteral("Queued"); entry.wordErrorRate = -1.0; entry.substitutions = entry.deletions = entry.insertions = 0; entry.resultConfiguration.clear(); entry.resultCredentialHash.clear(); }
+    if (!persist()) {
+        m_entries = savedEntries;
+        m_busy = false;
+        setState(false, QStringLiteral("Custom tests could not start."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage."));
+        notifyEntries();
+        return;
+    }
     notifyEntries();
     setState(true, QStringLiteral("Running custom speech tests."));
     startNext(generation);
@@ -261,7 +274,7 @@ void CustomSttTests::cancelTests() {
     ++m_generation;
     m_busy = false;
     retireWorker();
-    for (Entry &entry : m_entries) if (entry.status == QStringLiteral("Queued") || entry.status == QStringLiteral("Running")) entry.status = QStringLiteral("Canceled");
+    for (struct Entry &entry : m_entries) if (entry.status == QStringLiteral("Queued") || entry.status == QStringLiteral("Running")) entry.status = QStringLiteral("Canceled");
     notifyEntries();
     if (!persist()) setState(false, QStringLiteral("Custom tests canceled."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage."));
     else setState(false, QStringLiteral("Custom tests canceled."));
@@ -309,7 +322,7 @@ void CustomSttTests::stopRecording() {
     m_recording = false;
     if (m_recordedPcm.size() < VoiceUtteranceBuffer::FrameBytes) { delete m_audioSource; m_audioSource = nullptr; m_recordedPcm.clear(); setState(false, QStringLiteral("Recording discarded."), QStringLiteral("Record at least 20 ms of audio.")); return; }
     if (m_entries.size() >= MaxEntries) { delete m_audioSource; m_audioSource = nullptr; m_recordedPcm.clear(); setState(false, QStringLiteral("Recording discarded."), QStringLiteral("Custom tests support up to five recordings.")); return; }
-    Entry entry;
+    struct Entry entry;
     entry.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     entry.label = QStringLiteral("Microphone recording %1").arg(m_entries.size() + 1);
     entry.path = QDir(m_directory).filePath(entry.id + QStringLiteral(".wav"));
@@ -327,15 +340,15 @@ void CustomSttTests::stopRecording() {
     setState(false, QStringLiteral("Add an expected transcript before running the test."));
 }
 
-CustomSttTests::Entry *CustomSttTests::find(const QString &id) { for (Entry &entry : m_entries) if (entry.id == id) return &entry; return nullptr; }
-const CustomSttTests::Entry *CustomSttTests::find(const QString &id) const { for (const Entry &entry : m_entries) if (entry.id == id) return &entry; return nullptr; }
+struct CustomSttTests::Entry *CustomSttTests::find(const QString &id) { for (struct Entry &entry : m_entries) if (entry.id == id) return &entry; return nullptr; }
+const struct CustomSttTests::Entry *CustomSttTests::find(const QString &id) const { for (const struct Entry &entry : m_entries) if (entry.id == id) return &entry; return nullptr; }
 
 void CustomSttTests::load() {
     QSettings settings;
     settings.beginGroup(QStringLiteral("voice/customTests"));
     const QStringList ids = settings.value(QStringLiteral("ids")).toStringList();
     for (const QString &id : ids) {
-        Entry entry;
+        struct Entry entry;
         entry.id = id;
         entry.label = settings.value(id + QStringLiteral("/label")).toString();
         entry.path = settings.value(id + QStringLiteral("/path")).toString();
@@ -362,7 +375,7 @@ bool CustomSttTests::persist() {
     QSettings settings;
     settings.beginGroup(QStringLiteral("voice/customTests"));
     QStringList ids;
-    for (const Entry &entry : m_entries) {
+    for (const struct Entry &entry : m_entries) {
         ids.append(entry.id);
         settings.setValue(entry.id + QStringLiteral("/label"), entry.label);
         settings.setValue(entry.id + QStringLiteral("/path"), entry.path);
@@ -422,7 +435,7 @@ void CustomSttTests::startNext(const quint64 generation) {
         emit entriesChanged();
         return;
     }
-    Entry &entry = m_entries[m_current];
+    struct Entry &entry = m_entries[m_current];
     entry.status = QStringLiteral("Running");
     notifyEntries();
     auto *const thread = new QThread;
@@ -439,29 +452,31 @@ void CustomSttTests::startNext(const quint64 generation) {
     m_worker = worker;
     m_threads.append(thread);
     connect(thread, &QThread::started, worker, &VoiceWorker::initializeForTest);
-    m_workerGeneration = generation;
+    const quint64 workerEpoch = ++m_nextWorkerGeneration;
+    Q_ASSERT(workerEpoch != 0);
+    m_workerGeneration = workerEpoch;
     connect(worker, &VoiceWorker::ready, worker, [worker, recordingPath] {
         QFile file(recordingPath);
         if (!file.open(QIODevice::ReadOnly)) { emit worker->testFinished({}, false, QStringLiteral("The recording could not be opened.")); return; }
         worker->testAudio(file.readAll());
     });
-    connect(worker, &VoiceWorker::testFinished, this, [this, generation, id](const QString &transcript, const bool, const QString &workerError) { finishCurrent(generation, id, transcript, workerError); });
-    connect(worker, &VoiceWorker::errorOccurred, this, [this, generation, id](const QString &code, const QString &message, const bool) { finishCurrent(generation, id, {}, code + QStringLiteral(": ") + message); });
+    connect(worker, &VoiceWorker::testFinished, this, [this, generation, workerEpoch, id](const QString &transcript, const bool, const QString &workerError) { finishCurrent(generation, workerEpoch, id, transcript, workerError); });
+    connect(worker, &VoiceWorker::errorOccurred, this, [this, generation, workerEpoch, id](const QString &code, const QString &message, const bool) { finishCurrent(generation, workerEpoch, id, {}, code + QStringLiteral(": ") + message); });
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
-    QTimer::singleShot(45000, this, [this, generation, id] {
-        if (m_busy && generation == m_generation && generation == m_workerGeneration && m_current >= 0
+    QTimer::singleShot(45000, this, [this, generation, workerEpoch, id] {
+        if (m_busy && generation == m_generation && workerEpoch == m_workerGeneration && m_current >= 0
             && m_current < m_entries.size() && m_entries.at(m_current).id == id)
-            finishCurrent(generation, id, {}, QStringLiteral("VOICE_CUSTOM_TEST_TIMEOUT: The recognition request timed out."));
+            finishCurrent(generation, workerEpoch, id, {}, QStringLiteral("VOICE_CUSTOM_TEST_TIMEOUT: The recognition request timed out."));
     });
 }
 
-void CustomSttTests::finishCurrent(const quint64 generation, QString id, const QString &transcript, const QString &workerError) {
-    if (!m_busy || generation != m_generation || generation != m_workerGeneration) return;
-    m_workerGeneration = 0;
-    Entry *const entry = find(id);
+void CustomSttTests::finishCurrent(const quint64 generation, const quint64 workerEpoch, const QString &id, const QString &transcript, const QString &workerError) {
+    if (!m_busy || generation != m_generation || workerEpoch != m_workerGeneration) return;
+    struct Entry *const entry = find(id);
     if (!entry || m_current < 0 || m_current >= m_entries.size() || m_entries.at(m_current).id != id) return;
+    m_workerGeneration = 0;
     const QString boundedTranscript = transcript.left(16384);
     entry->transcript = boundedTranscript;
     entry->error = workerError;
@@ -481,6 +496,7 @@ void CustomSttTests::retireWorker() {
     m_worker = nullptr;
     m_thread = nullptr;
     if (worker && thread) {
+        thread->requestInterruption();
         QMetaObject::invokeMethod(worker, [worker, thread] { if (worker) worker->shutdown(); if (thread) thread->quit(); }, Qt::QueuedConnection);
     }
 }

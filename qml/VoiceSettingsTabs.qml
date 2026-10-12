@@ -12,8 +12,12 @@ Item {
     activeFocusOnTab: true
     Keys.onLeftPressed: root.select(0)
     Keys.onRightPressed: root.select(1)
-    Keys.onHomePressed: root.select(0)
-    Keys.onEndPressed: root.select(1)
+    Keys.onPressed: event => {
+        if (event.key === Qt.Key_Home || event.key === Qt.Key_End) {
+            root.select(event.key === Qt.Key_Home ? 0 : 1)
+            event.accepted = true
+        }
+    }
 
     function select(index) {
         const next = Math.max(0, Math.min(1, index))
@@ -57,8 +61,12 @@ Item {
                 onClicked: root.select(index)
                 Keys.onLeftPressed: root.select(index - 1)
                 Keys.onRightPressed: root.select(index + 1)
-                Keys.onHomePressed: root.select(0)
-                Keys.onEndPressed: root.select(1)
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Home || event.key === Qt.Key_End) {
+                        root.select(event.key === Qt.Key_Home ? 0 : 1)
+                        event.accepted = true
+                    }
+                }
                 ToolTip.visible: hovered
                 ToolTip.text: modelData.hint
 
@@ -98,8 +106,8 @@ Item {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        height: selected ? 3 : 1
-                        color: selected ? Theme.accent : Theme.rule
+                        height: parent.selected ? 3 : 1
+                        color: parent.selected ? Theme.accent : Theme.rule
                     }
                 }
             }

@@ -152,14 +152,20 @@ int main(int argc, char **argv) {
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::warnings,&galleryEngine,
             [&galleryEngine,warningProperty](const QList<QQmlError> &errors) {
                 QStringList warnings=galleryEngine.property(warningProperty).toStringList();
-                for (const QQmlError &error:errors) warnings.append(error.toString());
+                for (const QQmlError &error:errors) {
+                    warnings.append(error.toString());
+                    qWarning().noquote() << QStringLiteral("DESIGN_QML: %1").arg(error.toString());
+                }
                 galleryEngine.setProperty(warningProperty,warnings);
             });
         QObject::connect(&galleryEngine,&QQmlApplicationEngine::objectCreationFailed,&application,
             [] {QCoreApplication::exit(1);},Qt::QueuedConnection);
         const QString galleryModule = QString::fromLatin1(selectedGallery->moduleName);
         galleryEngine.loadFromModule(QStringLiteral("BetterFlash"), galleryModule);
-        if (galleryEngine.rootObjects().isEmpty()) return 1;
+        if (galleryEngine.rootObjects().isEmpty()) {
+            qCritical().noquote() << QStringLiteral("DESIGN_LOAD: Could not open the design window. Rebuild BetterFlash and inspect the DESIGN_QML details.");
+            return 1;
+        }
         if (parser.isSet(QStringLiteral("screenshot"))) {
             const QString output=parser.value(QStringLiteral("screenshot"));
             QTimer::singleShot(1000,&application,[&galleryEngine,output] {

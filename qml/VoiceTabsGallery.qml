@@ -68,16 +68,20 @@ ApplicationWindow {
                 Repeater {
                     model: root.choices
                     delegate: Rectangle {
+                        id: specimen
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true
-                        implicitHeight: 182
+                        implicitHeight: specimenColumn.implicitHeight + 32
                         color: Theme.surface
                         border.color: root.selectedStyle === index ? Theme.accent : Theme.rule
                         border.width: root.selectedStyle === index ? 2 : 1
                         radius: 9
                         ColumnLayout {
-                            anchors.fill: parent
+                            id: specimenColumn
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
                             anchors.margins: 16
                             spacing: 10
                             RowLayout {
@@ -101,6 +105,8 @@ ApplicationWindow {
                                 text: modelData.description
                                 color: Theme.inkMuted
                                 font.pixelSize: 14
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
                             }
                             VoiceSettingsTabs {
                                 id: previewTabs

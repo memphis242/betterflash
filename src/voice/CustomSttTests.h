@@ -64,20 +64,20 @@ private:
         QString resultCredentialHash;
     };
 
-    [[nodiscard]] Entry *find(const QString &id);
-    [[nodiscard]] const Entry *find(const QString &id) const;
+    [[nodiscard]] struct Entry *find(const QString &id);
+    [[nodiscard]] const struct Entry *find(const QString &id) const;
     void load();
     bool persist();
     void notifyEntries();
     void setState(bool busy, QString status, QString error = {});
-    void finishCurrent(quint64 generation, QString id, const QString &transcript, const QString &workerError);
+    void finishCurrent(quint64 generation, quint64 workerEpoch, const QString &id, const QString &transcript, const QString &workerError);
     void startNext(quint64 generation);
     void retireWorker();
     bool importWave(const QUrl &source, QString *path, double *duration, QString *error) const;
     static void score(const QString &expected, const QString &actual, int *substitutions,
         int *deletions, int *insertions, double *wer);
 
-    QVector<Entry> m_entries;
+    QVector<struct Entry> m_entries;
     QString m_directory;
     QString m_provider = QStringLiteral("local");
     QString m_modelPath;
@@ -90,6 +90,7 @@ private:
     int m_current = -1;
     quint64 m_generation = 0;
     quint64 m_workerGeneration = 0;
+    quint64 m_nextWorkerGeneration = 0;
     QPointer<VoiceWorker> m_worker;
     QPointer<QThread> m_thread;
     QVector<QPointer<QThread>> m_threads;
