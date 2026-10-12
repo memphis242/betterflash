@@ -1122,7 +1122,7 @@ ApplicationWindow {
             window.editorSession += 1
             const c = editingCard()
             localCardError = ""
-            cardDeck.currentIndex = Math.max(0, cardDeck.indexOfValue(c.deckId || app.selectedDeckId))
+            cardDeck.currentIndex = cardDeck.indexOfValue(c.deckId || app.selectedDeckId)
             cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
             cardInverted = c.kind === "reverse"
             editorSource.text = c.id ? c.front + (c.back ? "\n\n---\n\n" + c.back : "") : "\n\n---\n\n"
@@ -1153,6 +1153,7 @@ ApplicationWindow {
                     model: app.decks
                     textRole: "name"
                     valueRole: "id"
+                    displayText: currentIndex < 0 ? "Choose a deck" : currentText
                     Layout.fillWidth: true
                     ToolTip.visible: hovered
                     ToolTip.text: "Deck containing this card"

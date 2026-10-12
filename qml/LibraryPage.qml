@@ -366,7 +366,7 @@ Item {
     }
 
     function beginDrag(kind, id, position) {
-        if (app.busy) return
+        if (app.busy) return false
         dragKind = kind
         dragDeckId = kind === "deck" ? id : ""
         if (kind === "deck") {
@@ -384,6 +384,7 @@ Item {
         } else dragCardIds = []
         dragging = true
         updateDrag(position)
+        return true
     }
     function deckIsWithin(id, ancestorId) {
         const visited = []
@@ -692,8 +693,7 @@ Item {
                                 if (!(pressedButtons & Qt.LeftButton)) return
                                 const position = mapToItem(library, mouse.x, mouse.y)
                                 if (!dragged && Math.hypot(position.x - pressPosition.x, position.y - pressPosition.y) >= Qt.styleHints.startDragDistance) {
-                                    dragged = true
-                                    library.beginDrag("deck", treeRow.modelData.id, position)
+                                    dragged = library.beginDrag("deck", treeRow.modelData.id, position)
                                 }
                                 if (library.dragging) library.updateDrag(position)
                             }
@@ -946,8 +946,7 @@ Item {
                                     if (!(pressedButtons & Qt.LeftButton)) return
                                     const position = mapToItem(library, mouse.x, mouse.y)
                                     if (!dragged && Math.hypot(position.x - pressPosition.x, position.y - pressPosition.y) >= Qt.styleHints.startDragDistance) {
-                                        dragged = true
-                                        library.beginDrag("cards", cardRow.modelData.id, position)
+                                        dragged = library.beginDrag("cards", cardRow.modelData.id, position)
                                     }
                                     if (library.dragging) library.updateDrag(position)
                                 }
