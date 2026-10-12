@@ -78,6 +78,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("deck-graph-variant"), QStringLiteral("Open deck hierarchy study 1 or 2."), QStringLiteral("number"), QStringLiteral("2")});
     parser.addOption({QStringLiteral("card-timeline-designs"), QStringLiteral("Preview calendar-scaled card history with illustrative data.")});
     parser.addOption({QStringLiteral("menu-designs"), QStringLiteral("Compare three shared menu designs without changing the collection.")});
+    parser.addOption({QStringLiteral("voice-tab-designs"), QStringLiteral("Compare three speech settings tab styles without changing the collection.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -106,7 +107,8 @@ int main(int argc, char **argv) {
         {parser.isSet(QStringLiteral("sidebar-designs")), "BetterFlash Sidebar Studies", "SidebarDesignGallery", "sidebarStudyWarnings"},
         {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"},
         {parser.isSet(QStringLiteral("card-timeline-designs")), "BetterFlash Card Timeline Studies", "CardTimelineGallery", "cardTimelineWarnings"},
-        {parser.isSet(QStringLiteral("menu-designs")), "BetterFlash Menu Studies", "MenuDesignGallery", "menuDesignWarnings"}
+        {parser.isSet(QStringLiteral("menu-designs")), "BetterFlash Menu Studies", "MenuDesignGallery", "menuDesignWarnings"},
+        {parser.isSet(QStringLiteral("voice-tab-designs")), "BetterFlash Voice Tab Studies", "VoiceTabsGallery", "voiceTabWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {

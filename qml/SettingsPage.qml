@@ -206,6 +206,16 @@ Item {
                         id: titleHover
                     }
                 }
+                SettingsSwitch {
+                    objectName: "voiceEnabled"
+                    visible: settingsPage.section === 2
+                    text: "Enable voice review"
+                    checked: settingsPage.voiceController.enabled
+                    Layout.maximumWidth: Math.max(156, settingsContent.width * 0.5)
+                    onToggled: settingsPage.voiceController.enabled = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Enable voice commands and spoken card review"
+                }
                 SettingsButton {
                     objectName: "resetShortcuts"
                     visible: settingsPage.section === 1 && shortcuts.customized
