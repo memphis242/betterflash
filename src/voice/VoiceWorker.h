@@ -31,6 +31,7 @@ public:
     void setProvider(const QString &provider) { m_provider = provider; }
     void setSttModel(const QString &model) { m_sttModel = model; }
     void setRuntimePath(const QString &path) { m_runtimePath = path; }
+    void setOpenTranscriptionTest(const bool open) { m_openTranscriptionTest = open; }
 
 public slots:
     void initialize();
@@ -83,6 +84,7 @@ private:
     bool m_testMode = false;
     bool m_testSubmitted = false;
     bool m_testAnswered = false;
+    bool m_openTranscriptionTest = false;
 
     using ModelNew = void *(*)(const char *);
     using ModelFree = void (*)(void *);

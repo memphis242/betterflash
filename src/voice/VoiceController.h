@@ -19,6 +19,7 @@ class LocalTtsWorker;
 class ModelDownload;
 class QAudioSink;
 class QBuffer;
+class CustomSttTests;
 
 class VoiceController final : public QObject {
     Q_OBJECT
@@ -56,6 +57,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString modelTestStatus READ modelTestStatus NOTIFY modelTestChanged)
     Q_PROPERTY(QString modelTestError READ modelTestError NOTIFY modelTestChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyStorageStatusChanged)
+    Q_PROPERTY(QObject *customSttTests READ customSttTests CONSTANT)
 public:
     explicit VoiceController(QObject *parent = nullptr);
     ~VoiceController() override;
@@ -94,6 +96,7 @@ public:
     [[nodiscard]] QString modelTestStatus() const { return m_modelTestStatus; }
     [[nodiscard]] QString modelTestError() const { return m_modelTestError; }
     [[nodiscard]] QString keyStorageStatus() const;
+    [[nodiscard]] QObject *customSttTests() const;
 
     Q_INVOKABLE void setEnabled(bool enabled);
     void setModelPath(const QString &path);
@@ -223,6 +226,8 @@ private:
     QString m_lastKey;
     SecretStore *const m_secret;
     QTextToSpeech *m_speech = nullptr;
+    CustomSttTests *const m_customSttTests;
+    bool m_customVoiceSuspended = false;
     QPointer<VoiceWorker> m_worker;
     QPointer<QThread> m_workerThread;
     QVector<QPointer<QThread>> m_threads;
