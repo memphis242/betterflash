@@ -1,6 +1,7 @@
 #include "VoiceController.h"
 
 #include "VoiceWorker.h"
+#include "CustomSttTests.h"
 #include "LocalTtsWorker.h"
 #include "integrations/SecretStore.h"
 #include "models/ModelDownload.h"
@@ -27,8 +28,48 @@
 #include <QMicrophonePermission>
 #endif
 
+namespace {
+QStringList validationWords(const QString &text) {
+    return text.trimmed().toCaseFolded().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+}
+
+void validationScore(const QString &expected, const QString &actual, int *substitutions, int *deletions,
+    int *insertions, double *wordErrorRate) {
+    const QStringList reference = validationWords(expected);
+    const QStringList hypothesis = validationWords(actual);
+    const int columns = hypothesis.size() + 1;
+    QVector<int> distance((reference.size() + 1) * columns);
+    QVector<char> operation(distance.size(), 0);
+    for (int row = 0; row <= reference.size(); ++row) distance[row * columns] = row;
+    for (int column = 0; column <= hypothesis.size(); ++column) distance[column] = column;
+    for (int row = 1; row <= reference.size(); ++row) for (int column = 1; column <= hypothesis.size(); ++column) {
+        const int substitution = distance[(row - 1) * columns + column - 1]
+            + (reference.at(row - 1) == hypothesis.at(column - 1) ? 0 : 1);
+        const int deletion = distance[(row - 1) * columns + column] + 1;
+        const int insertion = distance[row * columns + column - 1] + 1;
+        distance[row * columns + column] = std::min({substitution, deletion, insertion});
+        operation[row * columns + column] = distance[row * columns + column] == substitution ? 0
+            : distance[row * columns + column] == deletion ? 1 : 2;
+    }
+    int row = reference.size(), column = hypothesis.size();
+    int substitutionsValue = 0, deletionsValue = 0, insertionsValue = 0;
+    while (row > 0 || column > 0) {
+        const char step = row > 0 && column > 0 ? operation[row * columns + column] : row > 0 ? 1 : 2;
+        if (step == 0) { if (reference.at(row - 1) != hypothesis.at(column - 1)) ++substitutionsValue; --row; --column; }
+        else if (step == 1) { ++deletionsValue; --row; }
+        else { ++insertionsValue; --column; }
+    }
+    *substitutions = substitutionsValue;
+    *deletions = deletionsValue;
+    *insertions = insertionsValue;
+    *wordErrorRate = reference.isEmpty() ? (hypothesis.isEmpty() ? 0.0 : 1.0)
+        : static_cast<double>(substitutionsValue + deletionsValue + insertionsValue) / reference.size();
+}
+}
+
 VoiceController::VoiceController(QObject *parent)
-    : QObject(parent), m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)) {
+    : QObject(parent), m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)),
+      m_speech(nullptr), m_customSttTests(new CustomSttTests(this)) {
     m_localDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("models/voice"));
     m_sttDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("stt")), this);
     m_ttsDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("tts")), this);
@@ -68,12 +109,29 @@ VoiceController::VoiceController(QObject *parent)
         });
     }
     m_lastKey = m_secret->key();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    connect(m_customSttTests, &CustomSttTests::stateChanged, this, [this] {
+        const bool active = m_customSttTests->busy() || m_customSttTests->recording();
+        if (active && !m_customVoiceSuspended) {
+            m_customVoiceSuspended = true;
+            m_testSavedWantsListening = m_wantsListening;
+            stopListening();
+            stopSpeaking();
+        }
+        if (active) setModelTestState(true, m_customSttTests->status(), m_customSttTests->error());
+        else if (m_customVoiceSuspended) {
+            m_customVoiceSuspended = false;
+            setModelTestState(m_sttTestBusy || m_ttsTestBusy, m_customSttTests->status(), m_customSttTests->error());
+            if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); }
+        }
+    });
     connect(m_secret, &SecretStore::changed, this, [this] {
         emit hasApiKeyChanged();
         emit keyStorageStatusChanged();
         const QString key = m_secret->key();
         if (key != m_lastKey) {
             m_lastKey = key;
+            m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, key);
             if (m_sttProvider == QStringLiteral("groq")) {
                 if (m_sttTestBusy)
                     finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider key changed."));
@@ -107,6 +165,7 @@ VoiceController::~VoiceController() {
 
 bool VoiceController::hasApiKey() const { return m_secret->hasKey(); }
 QString VoiceController::keyStorageStatus() const { return m_secret->status(); }
+QObject *VoiceController::customSttTests() const { return m_customSttTests; }
 
 void VoiceController::persistConfiguration() const {
     QSettings settings;
@@ -128,6 +187,7 @@ void VoiceController::setModelPath(const QString &path) {
     persistConfiguration();
     emit modelPathChanged();
     emit modelReadinessChanged();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
     if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }
 
@@ -145,6 +205,7 @@ void VoiceController::setSttProvider(const QString &provider) {
     persistConfiguration();
     emit sttProviderChanged();
     emit modelReadinessChanged();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
     if (m_enabled) restartWorker();
 }
 
@@ -161,6 +222,7 @@ void VoiceController::setSttModel(const QString &model) {
     resetSttTestReport();
     persistConfiguration();
     emit sttModelChanged();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
     if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
 }
 
@@ -309,7 +371,7 @@ double VoiceController::ttsModelProgress() const { return m_ttsDownload->progres
 void VoiceController::downloadSttModel() {
     if (m_sttProvider != QStringLiteral("local")) return;
     const QString managedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
-    if (m_modelPath != managedPath) { m_modelPath = managedPath; persistConfiguration(); emit modelPathChanged(); }
+    if (m_modelPath != managedPath) { m_modelPath = managedPath; persistConfiguration(); m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key()); emit modelPathChanged(); }
     m_sttDownload->start();
 }
 void VoiceController::downloadTtsModel() { if (m_ttsProvider == QStringLiteral("local")) m_ttsDownload->start(); }
@@ -324,7 +386,7 @@ void VoiceController::setModelTestState(const bool busy, const QString &status, 
 }
 
 void VoiceController::testSttModel() {
-    if (m_modelTestBusy) return;
+    if (m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
     m_sttTestBusy = true;
     m_pendingSttTest = true;
     m_sttTestError.clear();
@@ -350,7 +412,7 @@ void VoiceController::testSttModel() {
 }
 
 void VoiceController::testTtsModel() {
-    if (m_modelTestBusy) return;
+    if (m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
     m_ttsTestBusy = true;
     m_pendingTtsTest = true;
     m_ttsTestError.clear();
@@ -413,8 +475,20 @@ void VoiceController::beginSttTest() {
     connect(worker, &VoiceWorker::testFinished, this, [this, generation](const QString &transcript, const bool passed, const QString &error) {
         if (generation != m_testGeneration || !m_sttTestBusy) return;
         m_sttTestReport.insert(QStringLiteral("output"), transcript);
-        finishSttTest(passed, passed ? QStringLiteral("Passed: known spoken digits matched") : QStringLiteral("Speech recognition validation failed"),
-            passed ? QString() : error + (transcript.isEmpty() ? QString() : QStringLiteral(" Heard: %1").arg(transcript)));
+        if (!transcript.isEmpty()) {
+            int substitutions = 0, deletions = 0, insertions = 0;
+            double wordErrorRate = 0.0;
+            validationScore(m_sttTestReport.value(QStringLiteral("expected")).toString(), transcript,
+                &substitutions, &deletions, &insertions, &wordErrorRate);
+            m_sttTestReport.insert(QStringLiteral("substitutions"), substitutions);
+            m_sttTestReport.insert(QStringLiteral("deletions"), deletions);
+            m_sttTestReport.insert(QStringLiteral("insertions"), insertions);
+            m_sttTestReport.insert(QStringLiteral("wordErrorRate"), wordErrorRate);
+        }
+        const QString mismatch = transcript.isEmpty() ? (error.isEmpty() ? QStringLiteral("The recognizer returned no transcript.") : error) : QStringLiteral("The recognizer completed, but its transcript differs from the expected phrase.")
+            + (error.isEmpty() ? QString() : QStringLiteral(" %1").arg(error));
+        finishSttTest(passed, passed ? QStringLiteral("Passed: known spoken digits matched") : QStringLiteral("Recognition completed; transcript differs"),
+            passed ? QString() : mismatch + (transcript.isEmpty() ? QString() : QStringLiteral(" Heard: %1").arg(transcript)));
     });
     connect(worker, &VoiceWorker::errorOccurred, this, [this, generation](const QString &code, const QString &message, const bool) {
         if (generation == m_testGeneration && m_sttTestBusy) finishSttTest(false, QStringLiteral("Speech recognition validation failed"), code + QStringLiteral(": ") + message);

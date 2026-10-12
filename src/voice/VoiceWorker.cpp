@@ -190,6 +190,7 @@ void VoiceWorker::initializeForTest() {
         connect(m_transcriber, &VoiceTranscriber::transcriptReady, this, [this](const QString &text, const quint64) {
             if (!m_testMode || m_shuttingDown || m_testAnswered) return;
             m_testAnswered = true;
+            if (m_openTranscriptionTest) { emit testFinished(text, false, {}); return; }
             QString digits = text.toCaseFolded();
             static const QStringList words = {QStringLiteral("zero"), QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("three"),
                 QStringLiteral("four"), QStringLiteral("five"), QStringLiteral("six"), QStringLiteral("seven"), QStringLiteral("eight"), QStringLiteral("nine")};
@@ -246,6 +247,7 @@ void VoiceWorker::testAudio(const QByteArray &wav) {
     }
     parts.append(QJsonDocument::fromJson(QByteArray(m_finalResult(m_recognizer))).object().value(QStringLiteral("text")).toString());
     const QString transcript = parts.join(QLatin1Char(' ')).simplified();
+    if (m_openTranscriptionTest) { emit testFinished(transcript, false, {}); return; }
     const QString expected = QStringLiteral("one zero zero zero one nine oh two one oh zero one eight zero three");
     const bool passed = transcript == expected;
     emit testFinished(transcript, passed, passed ? QString() : QStringLiteral("Expected the bundled Vosk validation phrase."));

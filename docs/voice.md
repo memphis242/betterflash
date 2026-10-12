@@ -8,9 +8,11 @@ does not start a microphone or load inference models.
 
 ## Managed local speech
 
-On Fedora x86-64, enabling voice or testing recognition downloads Vosk's small
-English model and its native runtime inside the application. Reading or testing
-speech output downloads a Piper voice with a pinned Sherpa-ONNX runtime. No
+On Fedora x86-64, enabling voice or using a prepared local model loads Vosk's
+small English model and its native runtime inside the application. The
+**Download local model** action obtains those files; testing requires them to be
+prepared and does not download them. Reading uses the same separate download
+step for a Piper voice with a pinned Sherpa-ONNX runtime. No
 Python package, standalone speech daemon, or command-line model server is
 needed. Downloads show progress and can be canceled; SHA-256 and exact byte
 sizes are verified before safe archive extraction. The application retains
@@ -72,6 +74,28 @@ a passing result. The test recording cannot dispatch review commands, grade a
 card, or populate an answer. A recognition test is bounded to 45 seconds after
 asset preparation, and cloud requests have their own 30-second timeout.
 [Official validation recording](https://github.com/alphacep/vosk-api/tree/v0.3.45/python/example)
+
+The bundled small Vosk profile is a basic offline baseline. Its validation
+result distinguishes an exact phrase match from a completed transcription
+whose words differ, and retains the transcript and word-level error counts so
+model quality is visible rather than reported as an opaque pass or failure.
+
+### Custom recognition tests
+
+Speech recognition settings also provide a custom test set for recordings that
+reflect the user's microphone, accent, vocabulary, and review commands. Import
+or record up to five short WAV samples, enter the transcript expected for each,
+and run the set against the selected local or Groq provider. Recordings are
+normalized to mono 16-bit PCM at 16 kHz, bounded to 60 seconds, and stored in
+the per-user application data directory. They are independent of cards,
+sync, backups, and model downloads.
+
+Each result retains the raw transcript and reports word error rate, accuracy,
+substitutions, deletions, and insertions. A completed result can therefore be
+useful even when it is not an exact match. Changing the selected provider,
+model, path, or credential cancels an active set. Custom testing does not
+download model files automatically and shares the normal speech worker so it
+does not keep another recognition model loaded.
 
 **Test model** for local reading synthesizes a short phrase, checks that samples
 are finite, in range, non-silent, and have a plausible length, then plays it
