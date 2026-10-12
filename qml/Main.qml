@@ -735,7 +735,7 @@ ApplicationWindow {
 
     header: ToolBar {
         objectName: "globalHeader"
-        height: 56
+        height: 76
         background: Rectangle {
             color: Theme.canvas
             Rectangle {
@@ -752,20 +752,26 @@ ApplicationWindow {
             spacing: 10
             Item {
                 objectName: "appMark"
-                Layout.preferredWidth: 32
-                Layout.preferredHeight: 32
+                Layout.preferredWidth: 48
+                Layout.preferredHeight: 48
                 BrandMark { anchors.fill: parent }
+            }
+            Rectangle {
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: 40
+                Layout.leftMargin: 8
+                Layout.rightMargin: 8
+                color: Theme.rule
             }
             Label {
                 objectName: "pageTitle"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Layout.leftMargin: 6
                 text: ["Review", "Library", "History", "Settings"][window.page] || ""
                 textFormat: Text.PlainText
                 color: Theme.ink
                 font.family: Theme.uiFont
-                font.pixelSize: 18
+                font.pixelSize: 24
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
@@ -777,7 +783,7 @@ ApplicationWindow {
                 font.family: Theme.monoFont
                 font.pixelSize: 11
                 elide: Text.ElideRight
-                Layout.maximumWidth: 360
+                Layout.maximumWidth: Math.min(360, window.width * 0.3)
             }
             GlyphButton {
                 objectName: "commandPaletteButton"
