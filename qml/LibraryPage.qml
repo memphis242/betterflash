@@ -22,6 +22,8 @@ Item {
     property bool restoringSearchSelection: false
     property string searchSelectionId: ""
     property real searchSelectionScrollY: 0
+    property var selectedCardIds: []
+    property string cardSelectionAnchorId: ""
     readonly property var searchEngine: librarySearch
     readonly property bool searchingCards: ui.cardSearchText.trim().length > 0
     readonly property var visibleCards: library.searchingCards
@@ -146,6 +148,44 @@ Item {
         cardList.currentIndex = index
         ui.selectedCardId = card.id
     }
+    function hydrateCardSelection() {
+        if (selectedCardIds.length === 0 && ui.selectedCardId && visibleCards.some(card => card.id === ui.selectedCardId)) {
+            selectedCardIds = [ui.selectedCardId]
+            cardSelectionAnchorId = ui.selectedCardId
+        }
+    }
+    function chooseCardWithModifiers(index, modifiers) {
+        const card = visibleCards[index]
+        if (!card)
+            return
+        const shift = (modifiers & Qt.ShiftModifier) !== 0
+        const toggle = (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) !== 0
+        let ids = selectedCardIds.slice()
+        if (shift && cardSelectionAnchorId) {
+            const anchor = visibleCards.findIndex(item => item.id === cardSelectionAnchorId)
+            if (anchor >= 0) {
+                const first = Math.min(anchor, index)
+                const last = Math.max(anchor, index)
+                ids = visibleCards.slice(first, last + 1).map(item => item.id)
+            } else {
+                ids = [card.id]
+            }
+        } else if (toggle) {
+            const existing = ids.indexOf(card.id)
+            if (existing >= 0)
+                ids.splice(existing, 1)
+            else
+                ids.push(card.id)
+            if (!cardSelectionAnchorId)
+                cardSelectionAnchorId = card.id
+        } else {
+            ids = [card.id]
+            cardSelectionAnchorId = card.id
+        }
+        selectedCardIds = ids
+        cardList.currentIndex = index
+        ui.selectedCardId = card.id
+    }
     function openCard(card) {
         if (!card)
             return
@@ -189,7 +229,20 @@ Item {
             if (ui.selectedDeck.id)
                 library.revealDeck(ui.selectedDeck.id)
         }
-        function onSelectedDeckIdChanged() { if (ui.selectedDeck.id) library.revealDeck(ui.selectedDeck.id) }
+        function onSelectedDeckIdChanged() {
+            library.selectedCardIds = []
+            library.cardSelectionAnchorId = ""
+            if (ui.selectedDeck.id) {
+                library.revealDeck(ui.selectedDeck.id)
+                Qt.callLater(library.hydrateCardSelection)
+            }
+        }
+        function onCardsChanged() {
+            const valid = new Set(app.cards.filter(card => card.deckId === ui.selectedDeck.id).map(card => card.id))
+            library.selectedCardIds = library.selectedCardIds.filter(id => valid.has(id))
+            if (library.cardSelectionAnchorId && !valid.has(library.cardSelectionAnchorId))
+                library.cardSelectionAnchorId = ""
+        }
     }
 
     Connections {
@@ -223,7 +276,7 @@ Item {
             Layout.fillHeight: true
             Layout.fillWidth: library.effectiveLeftOpen && !library.cardsVisible
             Layout.preferredWidth: library.effectiveLeftOpen ? (library.cardsVisible ? (libraryRow.width - 12) * library.splitRatio : libraryRow.width - reopenCards.width) : 56
-            Layout.minimumWidth: library.effectiveLeftOpen && library.cardsVisible ? 280 : 0
+            Layout.minimumWidth: !library.effectiveLeftOpen ? 56 : library.cardsVisible ? 280 : 0
             Layout.maximumWidth: !library.effectiveLeftOpen ? 56 : library.cardsVisible ? Math.max(280, libraryRow.width - 312) : Infinity
             color: Theme.surface
             border.color: Theme.rule
@@ -235,20 +288,11 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 42
-                    Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                    Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold; Layout.fillWidth: true }
                     GlyphButton { glyph: "search"; hint: "Find a deck (" + shortcuts.bindings.deckSearch + ")"; onClicked: library.focusDeckSearch() }
                     GlyphButton {
                         glyph: "more"; hint: "Deck actions"; onClicked: deckMenu.open()
-                        Menu {
-                            id: deckMenu; y: parent.height
-                            MenuItem { text: "New deck"; onTriggered: ui.openDeckEditor("") }
-                            MenuItem { text: "New child deck"; enabled: !!ui.selectedDeck.id; onTriggered: ui.openDeckEditor("", ui.selectedDeck.id) }
-                            MenuItem { text: "Edit deck"; enabled: !!ui.selectedDeck.id; onTriggered: ui.openDeckEditor(ui.selectedDeck.id) }
-                            MenuItem { text: "Review this deck"; enabled: !!ui.selectedDeck.id; onTriggered: { ui.page = 0; if (!app.reviewing) app.startReview(ui.selectedDeck.id) } }
-                            MenuItem { text: "Reset deck"; visible: app.developmentToolsEnabled; enabled: !app.busy && !!ui.selectedDeck.id; onTriggered: ui.confirmReset("deck", ui.selectedDeck.id, ui.selectedDeck.name) }
-                            MenuSeparator { visible: !!ui.selectedDeck.id }
-                            MenuItem { text: "Delete deck"; enabled: !!ui.selectedDeck.id; onTriggered: ui.confirmDelete("deck", ui.selectedDeck.id, ui.selectedDeck.name) }
-                        }
+                        DeckActionsMenu { id: deckMenu; ui: library.ui; deckId: library.ui.selectedDeck.id; headerMode: true }
                     }
                     PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
                 }
@@ -280,7 +324,7 @@ Item {
                             }
                             Item { visible: !treeRow.modelData.hasChildren; implicitWidth: 26; implicitHeight: 30 }
                             Icon { kind: treeRow.modelData.expanded ? "folder-open" : "folder"; width: 22; height: 22; stroke: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accent : Theme.inkMuted }
-                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 14; elide: Text.ElideRight }
+                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 17; elide: Text.ElideRight }
                             Label { visible: Number(treeRow.modelData.deck.ownCardCount || 0) > 0; text: String(treeRow.modelData.deck.ownCardCount || 0); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                         }
                         MouseArea {
@@ -291,8 +335,21 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: 42 + treeRow.modelData.depth * 20
                             hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton
-                            onClicked: library.chooseTreeRow(treeRow.index)
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) {
+                                    deckContextMenu.deckId = treeRow.modelData.id
+                                    deckContextMenu.popup()
+                                } else {
+                                    library.chooseTreeRow(treeRow.index)
+                                }
+                            }
+                        }
+                        DeckActionsMenu {
+                            id: deckContextMenu
+                            ui: library.ui
+                            deckId: treeRow.modelData.id
+                            onBeforeAction: library.showDeck(deckId, false)
                         }
                     }
                     Label {
@@ -337,7 +394,7 @@ Item {
                     }
                 }
             }
-            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 4; collapsed: true; hint: "Expand deck pane"; onClicked: { library.leftOpen = true; if (library.width < 720) library.rightOpen = false } }
+            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 2; collapsed: true; hint: "Expand deck pane"; onClicked: { library.leftOpen = true; if (library.width < 720) library.rightOpen = false } }
         }
         Item {
             id: splitHandle; visible: library.effectiveLeftOpen && library.cardsVisible; Layout.preferredWidth: visible ? 12 : 0; Layout.fillHeight: true; activeFocusOnTab: true
@@ -368,10 +425,29 @@ Item {
                     Layout.fillWidth: true; Layout.preferredHeight: 42
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: 2
-                        Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 20; font.weight: Font.DemiBold }
+                        Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
                         Label { textFormat: Text.PlainText; text: ui.selectedDeck.name + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
-                    GlyphButton { glyph: "plus"; hint: "Add card"; onClicked: ui.openCardEditor("") }
+                    ToolButton {
+                        id: addCardButton
+                        implicitWidth: 40
+                        implicitHeight: 40
+                        padding: 0
+                        ToolTip.visible: hovered || activeFocus
+                        ToolTip.text: "Add card"
+                        Accessible.name: "Add card"
+                        contentItem: Item {
+                            anchors.fill: parent
+                            Icon { kind: "plus"; width: 21; height: 21; anchors.centerIn: parent; stroke: Theme.onAccent; lineWidth: 1.8 }
+                        }
+                        background: Rectangle {
+                            radius: width / 2
+                            color: Theme.accent
+                            border.width: addCardButton.activeFocus ? 2 : 0
+                            border.color: addCardButton.hovered || addCardButton.down ? Theme.ink : Theme.transparent
+                        }
+                        onClicked: ui.openCardEditor("")
+                    }
                     GlyphButton { glyph: "search"; hint: "Find a card"; onClicked: { library.cardSearchVisible = true; cardSearch.forceActiveFocus() } }
                     PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
                 }
@@ -405,7 +481,10 @@ Item {
                     id: cardList; objectName: "libraryCardList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: library.visibleCards; currentIndex: -1; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     onContentYChanged: if (ui.page === 1 && !ui.restoringDeck && !library.restoringSearchSelection) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
-                    Component.onCompleted: Qt.callLater(function() { library.restoreScroll(ui.libraryScrollY) })
+                    Component.onCompleted: Qt.callLater(function() {
+                        library.restoreScroll(ui.libraryScrollY)
+                        library.hydrateCardSelection()
+                    })
                     delegate: Item {
                         id: cardRow
                         required property var modelData
@@ -433,7 +512,7 @@ Item {
                                 text: cardRow.modelData.searchGroup || ""
                                 color: Theme.ink
                                 font.family: Theme.monoFont
-                                font.pixelSize: 12
+                                font.pixelSize: 16
                                 font.weight: Font.DemiBold
                                 horizontalAlignment: Text.AlignHCenter
                                 elide: Text.ElideRight
@@ -455,9 +534,32 @@ Item {
                             y: cardRow.headingHeight
                             width: cardRow.width
                             height: 82
-                            highlighted: ui.selectedCardId === cardRow.modelData.id || cardList.activeFocus && cardList.currentIndex === cardRow.index
-                            onClicked: library.chooseCard(cardRow.index)
-                            onDoubleClicked: library.openCard(cardRow.modelData)
+                            highlighted: library.selectedCardIds.indexOf(cardRow.modelData.id) >= 0
+                            CardActionsMenu {
+                                id: cardActionsMenu
+                                ui: library.ui
+                                cardId: cardRow.modelData.id
+                                onBeforeAction: library.chooseCard(cardRow.index)
+                            }
+                            MouseArea {
+                                id: cardMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    cardList.forceActiveFocus()
+                                    if (mouse.button === Qt.RightButton) {
+                                        cardActionsMenu.cardId = cardRow.modelData.id
+                                        cardActionsMenu.popup()
+                                    } else {
+                                        library.chooseCardWithModifiers(cardRow.index, mouse.modifiers)
+                                    }
+                                }
+                                onDoubleClicked: function(mouse) {
+                                    if (mouse.button === Qt.LeftButton)
+                                        library.openCard(cardRow.modelData)
+                                }
+                            }
                             contentItem: ColumnLayout {
                                 spacing: 5
                                 Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
@@ -481,24 +583,61 @@ Item {
                                     }
                                 }
                             }
-                            background: Rectangle { color: cardButton.highlighted || cardButton.hovered ? Theme.accentSoft : Theme.transparent; border.width: cardButton.highlighted ? 2 : 0; border.color: Theme.accent; Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.rule } }
+                            background: Rectangle {
+                                color: cardButton.highlighted || cardMouse.containsMouse ? Theme.accentSoft : Theme.transparent
+                                border.width: cardButton.highlighted ? 2 : (cardList.activeFocus && cardList.currentIndex === cardRow.index ? 1 : 0)
+                                border.color: cardButton.highlighted ? Theme.accent : Theme.rule
+                                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.rule }
+                            }
                         }
                     }
-                    Keys.onReturnPressed: library.openCard(visibleCards[currentIndex])
-                    Keys.onEnterPressed: library.openCard(visibleCards[currentIndex])
-                    onCurrentIndexChanged: if (!library.restoringSearchSelection && activeFocus && visibleCards[currentIndex]) ui.selectedCardId = visibleCards[currentIndex].id
+                    Keys.onPressed: function(event) {
+                        if (!visibleCards[currentIndex])
+                            return
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier))
+                                library.chooseCardWithModifiers(currentIndex, event.modifiers)
+                            else
+                                library.openCard(visibleCards[currentIndex])
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Space) {
+                            library.chooseCardWithModifiers(currentIndex, event.modifiers)
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                            const next = event.key === Qt.Key_Up ? Math.max(0, currentIndex - 1) : Math.min(count - 1, currentIndex + 1)
+                            currentIndex = next
+                            ui.selectedCardId = visibleCards[next].id
+                            if (!(event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)))
+                                library.chooseCardWithModifiers(next, event.modifiers)
+                            event.accepted = true
+                        }
+                    }
                     Label { visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : "This deck has no cards yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
                 }
             }
         }
-        PaneToggleButton {
+        Item {
+            visible: !library.effectiveLeftOpen && !library.cardsVisible
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+        }
+        Item {
             id: reopenCards
             visible: !library.cardsVisible && !!ui.selectedDeck.id
-            Layout.preferredWidth: 52
-            Layout.alignment: Qt.AlignTop
-            collapsed: true
-            rightSide: true
-            hint: "Open card pane"; onClicked: library.rightOpen = true
+            Layout.preferredWidth: 56
+            Layout.minimumWidth: 56
+            Layout.maximumWidth: 56
+            Layout.fillHeight: true
+            Rectangle { anchors.fill: parent; color: Theme.surface; border.color: Theme.rule }
+            PaneToggleButton {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 2
+                collapsed: true
+                rightSide: true
+                hint: "Open card pane"
+                onClicked: library.rightOpen = true
+            }
         }
     }
 }
