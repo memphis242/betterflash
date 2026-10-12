@@ -9,20 +9,26 @@ Item {
     id: learning
     required property var ui
     property bool active: false
-    readonly property bool narrow: width < 700
+    readonly property bool narrow: width < 950
     readonly property var stats: activity.analytics.stats || ({})
     readonly property bool hasStats: Object.keys(stats).length > 0
     readonly property bool hasError: Boolean(activity.error.code)
-    readonly property string scopeName: preferences.deckId.length > 0
-        ? String((app.decks.find(deck => String(deck.id) === preferences.deckId) || {}).name || "Selected deck")
-        : "Entire library"
+    readonly property string scopeName: selectedDeckIds.length === 0
+        ? "Entire library"
+        : selectedDeckIds.length === 1
+            ? String((app.decks.find(deck => String(deck.id) === String(selectedDeckIds[0])) || {}).name || "Selected deck")
+            : selectedDeckIds.length + " decks"
     property Settings preferences: Settings {
         category: "historyLearning"
         property string deckId: ""
+        property var deckIds: []
+        property bool deckSelectionMigrated: false
     }
+    readonly property var selectedDeckIds: sequenceValues(preferences.deckIds)
+    property bool decksSnapshotReady: false
     StudyActivityModel {
         id: activity
-        deckId: learning.preferences.deckId
+        deckIds: learning.selectedDeckIds
         active: learning.active
     }
     readonly property color recallColor: stats.averageRecall === null || stats.averageRecall === undefined ? Theme.inkMuted
@@ -48,6 +54,31 @@ Item {
         scopePopup.height = Math.min(380, placeBelow ? below : above)
         scopePopup.y = placeBelow ? scopeButton.height + 8 : -scopePopup.height - 8
     }
+    function validDeckIds() {
+        const available = app.decks.map(deck => String(deck.id))
+        return selectedDeckIds.map(id => String(id)).filter((id, index, ids) =>
+            available.indexOf(id) >= 0 && ids.indexOf(id) === index)
+    }
+    function sequenceValues(value) {
+        if (value === undefined || value === null || typeof value === "string") return []
+        if (typeof value.length !== "number") return []
+        const values = []
+        for (let index = 0; index < value.length; ++index) values.push(value[index])
+        return values
+    }
+    function reconcileDeckSelection() {
+        if (app.busy || !decksSnapshotReady) return
+        const valid = validDeckIds()
+        if (valid.length !== selectedDeckIds.length)
+            preferences.deckIds = valid
+        if (!preferences.deckSelectionMigrated) preferences.deckSelectionMigrated = true
+    }
+    Component.onCompleted: {
+        if (!preferences.deckSelectionMigrated && selectedDeckIds.length === 0 && preferences.deckId.length > 0)
+            preferences.deckIds = [preferences.deckId]
+        if (!app.busy && app.decks.length > 0) decksSnapshotReady = true
+        reconcileDeckSelection()
+    }
     onActiveChanged: if (!active) scopePopup.close()
     onWidthChanged: if (scopePopup && scopePopup.visible) fitScopePopup()
     onHeightChanged: if (scopePopup && scopePopup.visible) fitScopePopup()
@@ -59,12 +90,12 @@ Item {
     Connections {
         target: app
         function onDecksChanged() {
-            if (learning.preferences.deckId && !app.busy && !app.decks.some(deck => String(deck.id) === learning.preferences.deckId))
-                learning.preferences.deckId = ""
+            learning.decksSnapshotReady = true
+            learning.reconcileDeckSelection()
         }
         function onBusyChanged() {
-            if (!app.busy && learning.preferences.deckId && !app.decks.some(deck => String(deck.id) === learning.preferences.deckId))
-                learning.preferences.deckId = ""
+            if (!app.busy && app.decks.length > 0) learning.decksSnapshotReady = true
+            learning.reconcileDeckSelection()
         }
     }
     Rectangle {
@@ -98,14 +129,14 @@ Item {
                 font.pixelSize: 12
                 elide: Text.ElideRight
                 ToolTip.visible: scopeHover.hovered
-                ToolTip.text: learning.preferences.deckId ? "Statistics and activity for " + learning.scopeName + ", including subdecks" : "Statistics and activity across your entire library"
+                ToolTip.text: learning.selectedDeckIds.length > 0 ? "Statistics and activity for " + learning.scopeName + ", including each deck's subdecks" : "Statistics and activity across your entire library"
                 HoverHandler { id: scopeHover }
             }
             GlyphButton {
                 id: scopeButton
                 glyph: "filter"
                 hint: "Filter learning by deck"
-                selected: scopePopup.visible || learning.preferences.deckId.length > 0
+                selected: scopePopup.visible || learning.selectedDeckIds.length > 0
                 onClicked: {
                     if (scopePopup.visible) scopePopup.close()
                     else { learning.fitScopePopup(); scopePopup.open() }
@@ -118,8 +149,11 @@ Item {
                     y: scopeButton.height + 8
                     margins: 12
                     decks: app.decks
-                    selectedDeckId: learning.preferences.deckId
-                    onDeckChosen: id => learning.preferences.deckId = id
+                    selectedDeckIds: learning.selectedDeckIds
+                    onDeckSelectionChanged: ids => {
+                        learning.preferences.deckIds = ids
+                        learning.preferences.deckId = ids.length === 1 ? String(ids[0]) : ""
+                    }
                     onClosed: if (learning.active) scopeButton.forceActiveFocus()
                 }
             }
@@ -161,26 +195,32 @@ Item {
                     Layout.fillWidth: true
                     visible: !learning.hasError
                     columns: learning.narrow ? 1 : 2
-                    columnSpacing: 26
-                    rowSpacing: 18
+                    spacing: 26
                     CalendarHeatmap {
+                        id: learningCalendar
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
+                        Layout.preferredWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.7
+                        Layout.maximumWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.7
                         Layout.preferredHeight: implicitHeight
                         days: activity.analytics.days || []
                         today: String(activity.analytics.today || "")
                         firstDate: String(activity.analytics.firstDate || "")
                     }
                     ColumnLayout {
-                        Layout.fillWidth: learning.narrow
-                        Layout.preferredWidth: learning.narrow ? learningScroll.availableWidth : 275
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.3 - 26
+                        Layout.maximumWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.3 - 26
                         Layout.alignment: Qt.AlignTop
                         spacing: 3
                         Label {
+                            Layout.minimumWidth: 0
                             text: "Last 30 days / Provisional"
                             color: Theme.inkMuted
                             font.family: Theme.uiFont
                             font.pixelSize: 12
+                            elide: Text.ElideRight
                             Layout.bottomMargin: 5
                         }
                         Repeater {
@@ -195,12 +235,18 @@ Item {
                                     spacing: 10
                                     Label {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: measure.modelData.label
                                         color: Theme.inkMuted
                                         font.family: Theme.uiFont
                                         font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                        ToolTip.visible: measureLabelHover.hovered
+                                        ToolTip.text: measure.modelData.label
+                                        HoverHandler { id: measureLabelHover }
                                     }
                                     Label {
+                                        Layout.minimumWidth: 0
                                         text: learning.hasStats ? measure.modelData.value : "-"
                                         color: measure.modelData.color
                                         font.family: Theme.monoFont
