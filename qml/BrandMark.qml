@@ -17,7 +17,7 @@ Item {
             return "qrc:/branding/walnut.png"
         }
     }
-    property string accessibleLabel: "BetterFlash walnut mark"
+    property string accessibleLabel: "the BetterFlash walnut"
     implicitWidth: 32
     implicitHeight: 32
     Accessible.name: accessibleLabel

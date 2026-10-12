@@ -34,6 +34,7 @@ ApplicationWindow {
     palette.toolTipText: Theme.ink
 
     readonly property int gutter: width < 600 ? 12 : 24
+    readonly property int collapsedNavigationWidth: 96
     property int page: preferences.page
     property bool navCollapsed: preferences.navCollapsed
     property string deckBrowserParentId: preferences.deckBrowserParentId
@@ -747,26 +748,32 @@ ApplicationWindow {
         }
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: window.gutter
             anchors.rightMargin: window.gutter
             spacing: 10
             Item {
                 objectName: "appMark"
-                Layout.preferredWidth: 48
-                Layout.preferredHeight: 48
-                BrandMark { anchors.fill: parent }
-            }
-            Rectangle {
-                Layout.preferredWidth: 1
-                Layout.preferredHeight: 40
-                Layout.leftMargin: 8
-                Layout.rightMargin: 8
-                color: Theme.rule
+                Layout.preferredWidth: window.collapsedNavigationWidth
+                Layout.minimumWidth: Layout.preferredWidth
+                Layout.maximumWidth: Layout.preferredWidth
+                Layout.fillHeight: true
+                BrandMark {
+                    anchors.centerIn: parent
+                    width: 48
+                    height: 48
+                }
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 1
+                    height: 40
+                    color: Theme.rule
+                }
             }
             Label {
                 objectName: "pageTitle"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
+                Layout.leftMargin: 14
                 text: ["Review", "Library", "History", "Settings"][window.page] || ""
                 textFormat: Text.PlainText
                 color: Theme.ink
@@ -808,7 +815,9 @@ ApplicationWindow {
             id: navigation
             objectName: "sideNavigation"
             Layout.fillHeight: true
-            Layout.preferredWidth: window.effectiveNavCollapsed ? 76 : 218
+            Layout.preferredWidth: window.effectiveNavCollapsed ? window.collapsedNavigationWidth : 218
+            Layout.minimumWidth: Layout.preferredWidth
+            Layout.maximumWidth: Layout.preferredWidth
             collapsed: window.effectiveNavCollapsed
             distributed: true
             reviewGlyph: "review-flip"

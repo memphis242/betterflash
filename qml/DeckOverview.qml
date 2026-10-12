@@ -131,15 +131,18 @@ Item {
         }
         function onBusyChanged() { Qt.callLater(overview.finishDescriptionSave); }
     }
-    ColumnLayout {
+    GridLayout {
         anchors.fill: parent
-        spacing: 0
+        columns: overview.narrow ? 1 : 3
+        columnSpacing: 0
+        rowSpacing: 0
         RowLayout {
+            Layout.row: 0
+            Layout.column: 0
             Layout.fillWidth: true
             Layout.leftMargin: 24
             Layout.rightMargin: 18
             Layout.preferredHeight: 54
-            Item { Layout.fillWidth: true }
             AppButton {
                 text: "New root deck"
                 primary: app.decks.length === 0
@@ -175,112 +178,117 @@ Item {
                     }
                 }
             }
+            Item { Layout.fillWidth: true }
         }
-        RowLayout {
-            visible: app.decks.length > 0
+        DeckHierarchyStudy {
+            id: graph
+            visible: app.decks.length > 0 && (!overview.narrow || !overview.paneOpen)
+            Layout.row: 1
+            Layout.column: 0
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
-            DeckHierarchyStudy {
-                id: graph
-                visible: !overview.narrow || !overview.paneOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: 0
-                variant: 1
-                decks: overview.decks
-                selectedId: app.selectedDeckId
-                detailsVisible: overview.paneOpen
-                interactionBusy: app.busy || app.reviewing
-                onDeckSelected: id => {
+            Layout.minimumWidth: 0
+            variant: 1
+            decks: overview.decks
+            selectedId: app.selectedDeckId
+            detailsVisible: overview.paneOpen
+            interactionBusy: app.busy || app.reviewing
+            onDeckSelected: id => {
+                overview.ui.setDeck(id, true);
+                overview.preferences.detailsOpen = true;
+            }
+            onReviewRequested: id => {
+                overview.cancelOwnedSummary();
+                if (!graph.interactionBusy && id) {
                     overview.ui.setDeck(id, true);
-                    overview.preferences.detailsOpen = true;
-                }
-                onReviewRequested: id => {
-                    overview.cancelOwnedSummary();
-                    if (!graph.interactionBusy && id) {
-                        overview.ui.setDeck(id, true);
-                        app.startReview(id);
-                    }
-                }
-                onContextMenuRequested: (id, menuPoint) => overview.openGraphDeckMenu(id, menuPoint)
-                onShowDetailsRequested: overview.preferences.detailsOpen = true
-            }
-            DeckActionsMenu {
-                id: graphDeckMenu
-                parent: Overlay.overlay
-                ui: overview.ui
-                deckId: ""
-                onBeforeAction: { overview.cancelOwnedSummary(); graphDeckMenu.close() }
-            }
-            Item {
-                id: resizeHandle
-                visible: overview.paneOpen && !overview.narrow
-                Layout.preferredWidth: 10
-                Layout.fillHeight: true
-                activeFocusOnTab: true
-                Accessible.name: "Resize deck details. Use Left or Right; Home restores the default width."
-                Keys.onLeftPressed: overview.preferences.paneWidth = Math.min(overview.width * 0.48, details.width + 24)
-                Keys.onRightPressed: overview.preferences.paneWidth = Math.max(300, details.width - 24)
-                Keys.onPressed: event => {
-                    if (event.key === Qt.Key_Home) { overview.preferences.paneWidth = 360; event.accepted = true; }
-                }
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: 2
-                    height: 44
-                    color: resizeHandle.activeFocus ? Theme.accent : Theme.rule
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.SizeHorCursor
-                    property real pressX: 0
-                    property real pressWidth: 0
-                    onPressed: mouse => {
-                        resizeHandle.forceActiveFocus();
-                        pressX = mapToItem(overview, mouse.x, mouse.y).x;
-                        pressWidth = details.width;
-                    }
-                    onPositionChanged: mouse => {
-                        if (pressed)
-                            overview.preferences.paneWidth = Math.max(300, Math.min(overview.width * 0.48,
-                                pressWidth - (mapToItem(overview, mouse.x, mouse.y).x - pressX)));
-                    }
+                    app.startReview(id);
                 }
             }
-            DeckStudyDetails {
-                id: details
-                visible: overview.paneOpen
-                Layout.fillWidth: overview.narrow
-                Layout.preferredWidth: overview.narrow ? overview.width : Math.max(300, Math.min(overview.preferences.paneWidth, overview.width * 0.48))
-                Layout.fillHeight: true
-                deck: overview.selectedDeck
-                mediaRoot: media.rootPath
-                busy: app.busy
-                actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
-                actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)
-                saveExternally: true
-                summaryText: overview.summaryResult.text || (!ai.hasApiKey
-                    ? "Add your provider key in Settings / Language model to summarize the due cards."
-                    : overview.summaryResult.error ? "" : "A summary of the due cards will appear here.")
-                summaryCaption: "Automatic summary"
-                summaryBusy: ai.busy && overview.pendingSummaryKey === overview.summaryKey
-                summaryError: overview.summaryResult.error || ""
-                summaryRetryVisible: ai.hasApiKey
-                onSummaryRetryRequested: overview.retrySummary()
-                onDescriptionSaved: (id, text) => overview.saveDescription(id, text)
-                onCollapseRequested: overview.preferences.detailsOpen = false
-                onReviewRequested: id => {
-                    overview.cancelOwnedSummary();
-                    if ((overview.selectedDeck.total || 0) === 0)
-                        overview.ui.openCardEditor("");
-                    else
-                        app.startReview(id);
+            onContextMenuRequested: (id, menuPoint) => overview.openGraphDeckMenu(id, menuPoint)
+            onShowDetailsRequested: overview.preferences.detailsOpen = true
+        }
+        DeckActionsMenu {
+            id: graphDeckMenu
+            parent: Overlay.overlay
+            ui: overview.ui
+            deckId: ""
+            onBeforeAction: { overview.cancelOwnedSummary(); graphDeckMenu.close() }
+        }
+        Item {
+            id: resizeHandle
+            visible: overview.paneOpen && !overview.narrow
+            Layout.row: 0
+            Layout.column: 1
+            Layout.rowSpan: 2
+            Layout.preferredWidth: 10
+            Layout.fillHeight: true
+            activeFocusOnTab: true
+            Accessible.name: "Resize deck details. Use Left or Right; Home restores the default width."
+            Keys.onLeftPressed: overview.preferences.paneWidth = Math.min(overview.width * 0.48, details.width + 24)
+            Keys.onRightPressed: overview.preferences.paneWidth = Math.max(300, details.width - 24)
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Home) { overview.preferences.paneWidth = 360; event.accepted = true; }
+            }
+            Rectangle {
+                anchors.centerIn: parent
+                width: 2
+                height: 44
+                color: resizeHandle.activeFocus ? Theme.accent : Theme.rule
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.SizeHorCursor
+                property real pressX: 0
+                property real pressWidth: 0
+                onPressed: mouse => {
+                    resizeHandle.forceActiveFocus();
+                    pressX = mapToItem(overview, mouse.x, mouse.y).x;
+                    pressWidth = details.width;
                 }
+                onPositionChanged: mouse => {
+                    if (pressed)
+                        overview.preferences.paneWidth = Math.max(300, Math.min(overview.width * 0.48,
+                            pressWidth - (mapToItem(overview, mouse.x, mouse.y).x - pressX)));
+                }
+            }
+        }
+        DeckStudyDetails {
+            id: details
+            visible: overview.paneOpen
+            Layout.row: overview.narrow ? 1 : 0
+            Layout.column: overview.narrow ? 0 : 2
+            Layout.rowSpan: overview.narrow ? 1 : 2
+            Layout.fillWidth: overview.narrow
+            Layout.preferredWidth: overview.narrow ? overview.width : Math.max(300, Math.min(overview.preferences.paneWidth, overview.width * 0.48))
+            Layout.fillHeight: true
+            deck: overview.selectedDeck
+            mediaRoot: media.rootPath
+            busy: app.busy
+            actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
+            actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)
+            saveExternally: true
+            summaryText: overview.summaryResult.text || (!ai.hasApiKey
+                ? "Add your provider key in Settings / Language model to summarize the due cards."
+                : overview.summaryResult.error ? "" : "A summary of the due cards will appear here.")
+            summaryCaption: "Automatic summary"
+            summaryBusy: ai.busy && overview.pendingSummaryKey === overview.summaryKey
+            summaryError: overview.summaryResult.error || ""
+            summaryRetryVisible: ai.hasApiKey
+            onSummaryRetryRequested: overview.retrySummary()
+            onDescriptionSaved: (id, text) => overview.saveDescription(id, text)
+            onCollapseRequested: overview.preferences.detailsOpen = false
+            onReviewRequested: id => {
+                overview.cancelOwnedSummary();
+                if ((overview.selectedDeck.total || 0) === 0)
+                    overview.ui.openCardEditor("");
+                else
+                    app.startReview(id);
             }
         }
         Label {
             visible: app.decks.length === 0
+            Layout.row: 1
+            Layout.column: 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 24
