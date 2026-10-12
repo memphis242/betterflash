@@ -1,8 +1,14 @@
 # Learning overview (provisional)
 
 History includes a calendar of review activity and a numerical summary. Its
-default scope is the entire library. The filter selects a deck and its children
-without changing the deck selected on Review or Library.
+default scope is the entire library. The filter can select multiple decks and
+their children without changing the deck selected on Review or Library. A
+selected parent and child are treated as one union: cards, variants, reviews,
+and activity days are counted once. Empty selection means the entire library.
+The deck picker uses checkbox selection. Clicking a checkbox toggles that deck;
+Shift-clicking selects the range from the last checkbox click, using the
+checked state of the anchor for the range. The Entire library option, or no
+explicit deck selection, means the whole library.
 
 ## Thirty-day summary
 

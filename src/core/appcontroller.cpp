@@ -286,16 +286,16 @@ void AppController::loadCardTimeline(const QString &cardId, int offset, const QS
     },Qt::QueuedConnection);
     if (!queued) emit cardTimelineReady(requestedId,{{"requestId",requestedRequestId},{"offset",requestedOffset},{"events",QVariantList{}},{"totalEvents",0},{"hasMore",false},{"nextOffset",0},{"reviewCount",0},{"successfulCount",0},{"averageRecall",0.0},{"averageSeconds",0.0},{"firstRecordedAt",QString()},{"firstSavedAt",QString()},{"error",QVariantMap{{"code","WORKER_UNAVAILABLE"},{"message","Could not load card history. Restart the application."},{"details",QString()}}}});
 }
-void AppController::loadStudyAnalytics(const QString &deckId, const QString &requestId)
+void AppController::loadStudyAnalytics(const QStringList &deckIds, const QString &requestId)
 {
-    const QString requestedDeckId = deckId;
+    const QStringList requestedDeckIds = deckIds;
     const QString requestedRequestId = requestId;
     const QString requestedToday = QDate::currentDate().toString(Qt::ISODate);
-    const bool queued = QMetaObject::invokeMethod(m_worker, [worker = m_worker, requestedDeckId, requestedRequestId] {
-        worker->loadStudyAnalytics(requestedDeckId, requestedRequestId);
+    const bool queued = QMetaObject::invokeMethod(m_worker, [worker = m_worker, requestedDeckIds, requestedRequestId] {
+        worker->loadStudyAnalytics(requestedDeckIds, requestedRequestId);
     }, Qt::QueuedConnection);
     if (!queued) {
-        emit studyAnalyticsReady(requestedDeckId, {{"requestId", requestedRequestId}, {"deckId", requestedDeckId},
+        emit studyAnalyticsReady(requestedDeckIds, {{"requestId", requestedRequestId}, {"deckIds", QVariant::fromValue(requestedDeckIds)},
             {"today", requestedToday}, {"firstDate", requestedToday},
             {"days", QVariantList{}}, {"stats", QVariantMap{{"practiceScore", QVariant{}}, {"averageRecall", QVariant{}}, {"averageGrade", QVariant{}},
                 {"eligibleDecks", 0}, {"reviewedDecks", 0}, {"totalVariants", 0}, {"reviewedVariants", 0}, {"activeDays", 0},

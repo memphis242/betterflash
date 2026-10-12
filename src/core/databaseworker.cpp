@@ -1528,14 +1528,22 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
     emit cardTimelineReady(cardId, result);
 }
 
-void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &requestId)
+void DatabaseWorker::loadStudyAnalytics(const QStringList &deckIds, const QString &requestId)
 {
     assertThread();
+    QStringList scopeIds;
+    QSet<QString> seenScopeIds;
+    for (const QString &id : deckIds) {
+        if (!seenScopeIds.contains(id)) {
+            scopeIds.append(id);
+            seenScopeIds.insert(id);
+        }
+    }
     const QDate today = QDateTime::currentDateTime().date();
     const QString todayString = today.toString(Qt::ISODate);
     const auto makeResult = [&](const QVariantList &days, const QVariantMap &stats, const QVariantMap &error,
                                 const QString &firstDate = QString()) {
-        return QVariantMap{{"requestId", requestId}, {"deckId", deckId}, {"today", todayString},
+        return QVariantMap{{"requestId", requestId}, {"deckIds", QVariant::fromValue(scopeIds)}, {"today", todayString},
                            {"firstDate", firstDate.isEmpty() ? todayString : firstDate}, {"days", days},
                            {"stats", stats}, {"error", error}};
     };
@@ -1544,32 +1552,71 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
     };
     m_sqlDetail.clear();
     if (!m_db.isValid() || !m_db.isOpen()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("STORAGE_UNAVAILABLE"), QStringLiteral("Could not load study analytics. Storage is unavailable."), m_sqlDetail));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("STORAGE_UNAVAILABLE"), QStringLiteral("Could not load study analytics. Storage is unavailable."), m_sqlDetail));
         return;
     }
-    if (!deckId.isEmpty() && !model::validUuid(deckId)) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("DECK_ID_INVALID"), QStringLiteral("Choose a saved deck to view its study analytics.")));
-        return;
+    for (const QString &deckId : scopeIds) {
+        if (!model::validUuid(deckId)) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("DECK_ID_INVALID"), QStringLiteral("Choose saved decks to view their study analytics.")));
+            return;
+        }
     }
     if (!m_db.transaction()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load a consistent study snapshot. Try refreshing."), m_db.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load a consistent study snapshot. Try refreshing."), m_db.lastError().text()));
         return;
     }
     auto rollbackSnapshot = qScopeGuard([this] { m_db.rollback(); });
-    if (!deckId.isEmpty()) {
+    if (!scopeIds.isEmpty()) {
         QSqlQuery scope(m_db);
         scope.prepare("SELECT id FROM decks WHERE id=?");
-        scope.addBindValue(deckId);
-        if (!scope.exec()) {
-            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
-            return;
-        }
-        if (!scope.next()) {
-            if (scope.lastError().isValid()) {
-                emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
+        for (const QString &deckId : scopeIds) {
+            scope.bindValue(0, deckId);
+            if (!scope.exec()) {
+                emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
                 return;
             }
-            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("DECK_NOT_FOUND"), QStringLiteral("This deck is unavailable. Refresh the collection.")));
+            if (!scope.next()) {
+                if (scope.lastError().isValid()) {
+                    emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
+                    return;
+                }
+                emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("DECK_NOT_FOUND"), QStringLiteral("A selected deck is unavailable. Refresh the collection.")));
+                return;
+            }
+            scope.finish();
+        }
+        QSqlQuery createRoots(m_db);
+        if (!createRoots.exec(QStringLiteral("CREATE TEMP TABLE IF NOT EXISTS betterflash_analytics_roots(id TEXT PRIMARY KEY)"))) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), createRoots.lastError().text()));
+            return;
+        }
+        QSqlQuery createDecks(m_db);
+        if (!createDecks.exec(QStringLiteral("CREATE TEMP TABLE IF NOT EXISTS betterflash_analytics_decks(id TEXT PRIMARY KEY)"))) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), createDecks.lastError().text()));
+            return;
+        }
+        QSqlQuery clearRoots(m_db);
+        if (!clearRoots.exec(QStringLiteral("DELETE FROM betterflash_analytics_roots"))) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), clearRoots.lastError().text()));
+            return;
+        }
+        QSqlQuery clearDecks(m_db);
+        if (!clearDecks.exec(QStringLiteral("DELETE FROM betterflash_analytics_decks"))) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), clearDecks.lastError().text()));
+            return;
+        }
+        QSqlQuery insertRoot(m_db);
+        insertRoot.prepare(QStringLiteral("INSERT INTO betterflash_analytics_roots(id) VALUES(?)"));
+        for (const QString &deckId : scopeIds) {
+            insertRoot.bindValue(0, deckId);
+            if (!insertRoot.exec()) {
+                emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), insertRoot.lastError().text()));
+                return;
+            }
+        }
+        QSqlQuery populateDecks(m_db);
+        if (!populateDecks.exec(QStringLiteral("WITH RECURSIVE descendants(id) AS (SELECT id FROM betterflash_analytics_roots UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) INSERT INTO betterflash_analytics_decks(id) SELECT id FROM descendants"))) {
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not prepare the study analytics scope."), populateDecks.lastError().text()));
             return;
         }
     }
@@ -1577,27 +1624,26 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
     QHash<QString, QString> variantDeck;
     QHash<QString, int> deckVariantCount;
     QSqlQuery current(m_db);
-    const QString currentSql = deckId.isEmpty()
+    const QString currentSql = scopeIds.isEmpty()
         ? QStringLiteral("SELECT n.deck_id,v.id FROM notes n JOIN review_variants v ON v.card_id=n.id ORDER BY n.deck_id,v.id")
-        : QStringLiteral("WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT n.deck_id,v.id FROM notes n JOIN review_variants v ON v.card_id=n.id WHERE n.deck_id IN (SELECT id FROM descendants) ORDER BY n.deck_id,v.id");
+        : QStringLiteral("SELECT n.deck_id,v.id FROM notes n JOIN review_variants v ON v.card_id=n.id JOIN betterflash_analytics_decks s ON s.id=n.deck_id ORDER BY n.deck_id,v.id");
     current.prepare(currentSql);
-    if (!deckId.isEmpty()) current.addBindValue(deckId);
     if (!current.exec()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
         return;
     }
     while (current.next()) {
         const QString sourceDeck = current.value(0).toString();
         const QString variantId = current.value(1).toString();
         if (sourceDeck.isEmpty() || variantId.isEmpty()) {
-            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid current review variant.")));
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid current review variant.")));
             return;
         }
         variantDeck.insert(variantId, sourceDeck);
         deckVariantCount[sourceDeck] = deckVariantCount.value(sourceDeck) + 1;
     }
     if (current.lastError().isValid()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
         return;
     }
 
@@ -1611,13 +1657,12 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
     const QDate previousEnd = today.addDays(-30);
     int currentReviewCount = 0;
     QSqlQuery reviews(m_db);
-    const QString reviewSql = deckId.isEmpty()
+    const QString reviewSql = scopeIds.isEmpty()
         ? QStringLiteral("SELECT id,variant_id,grade,recall_fraction,reviewed_at FROM reviews ORDER BY reviewed_at,id")
-        : QStringLiteral("WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT r.id,r.variant_id,r.grade,r.recall_fraction,r.reviewed_at FROM reviews r JOIN notes n ON n.id=r.card_id WHERE n.deck_id IN (SELECT id FROM descendants) ORDER BY r.reviewed_at,r.id");
+        : QStringLiteral("SELECT r.id,r.variant_id,r.grade,r.recall_fraction,r.reviewed_at FROM reviews r JOIN notes n ON n.id=r.card_id JOIN betterflash_analytics_decks s ON s.id=n.deck_id ORDER BY r.reviewed_at,r.id");
     reviews.prepare(reviewSql);
-    if (!deckId.isEmpty()) reviews.addBindValue(deckId);
     if (!reviews.exec()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
         return;
     }
     QString firstDate;
@@ -1629,7 +1674,7 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
         const QString reviewedAt = reviews.value(4).toString();
         const QDateTime instant = QDateTime::fromString(reviewedAt, Qt::ISODateWithMs);
         if (reviewId.isEmpty() || variantId.isEmpty() || !instant.isValid() || grade < 0 || grade > 4 || !std::isfinite(recall) || recall < 0.0 || recall > 1.0) {
-            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid saved review."), reviewedAt));
+            emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid saved review."), reviewedAt));
             return;
         }
         const QDate localDate = instant.toLocalTime().date();
@@ -1650,7 +1695,7 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
         if (inPrevious && (!previousLatest.contains(variantId) || later(previousLatest.value(variantId), point))) previousLatest.insert(variantId, point);
     }
     if (reviews.lastError().isValid()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
         return;
     }
 
@@ -1696,11 +1741,11 @@ void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &re
     current.finish();
     reviews.finish();
     if (!m_db.commit()) {
-        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not finish reading study analytics. Try refreshing."), m_db.lastError().text()));
+        emit studyAnalyticsReady(scopeIds, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not finish reading study analytics. Try refreshing."), m_db.lastError().text()));
         return;
     }
     rollbackSnapshot.dismiss();
-    emit studyAnalyticsReady(deckId, makeResult(days, stats, {}, firstDate));
+    emit studyAnalyticsReady(scopeIds, makeResult(days, stats, {}, firstDate));
 }
 
 void DatabaseWorker::loadExample()
