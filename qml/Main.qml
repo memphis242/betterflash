@@ -71,7 +71,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -2105,6 +2105,10 @@ ApplicationWindow {
             }
         }
     }
+    DeckHeatmapDialog {
+        id: deckHeatmapDialog
+        ui: window
+    }
     CardDetailDialog {
         id: detailDialog
         objectName: "cardDetailDialog"
@@ -2209,6 +2213,10 @@ ApplicationWindow {
         }
     }
 
+    function openDeckHeatmap(id) {
+        if (id && deckById(id).id)
+            deckHeatmapDialog.openForDeck(id)
+    }
     function openPostpone() {
         postponeDialog.open()
     }

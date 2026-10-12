@@ -91,6 +91,11 @@ Item {
         graphDeckMenu.y = overlayPoint.y;
         graphDeckMenu.open();
     }
+    StudyActivityModel {
+        id: deckActivity
+        deckId: app.selectedDeckId
+        active: overview.visible && overview.paneOpen
+    }
     Timer {
         id: summaryDelay
         interval: 700
@@ -169,6 +174,10 @@ Item {
                     AppMenuItem { glyph: "plus"
                         text: "Add card"
                         onTriggered: overview.ui.openCardEditor("")
+                    }
+                    AppMenuItem { glyph: "calendar-page"
+                        text: "Heatmap"
+                        onTriggered: overview.ui.openDeckHeatmap(app.selectedDeckId)
                     }
                     AppMenuItem { glyph: "empty-box"
                         text: "Reset deck"
@@ -263,6 +272,12 @@ Item {
             Layout.fillHeight: true
             deck: overview.selectedDeck
             mediaRoot: media.rootPath
+            heatmapAvailable: true
+            activityAnalytics: deckActivity.analytics
+            activityLoading: deckActivity.loading
+            activityError: deckActivity.error
+            onHeatmapRequested: id => overview.ui.openDeckHeatmap(id)
+            onActivityRetryRequested: deckActivity.reload()
             busy: app.busy
             actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
             actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)

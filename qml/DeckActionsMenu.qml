@@ -51,6 +51,11 @@ AppMenu {
             app.startReview(menu.deckId)
         }
     }
+    AppMenuItem { glyph: "calendar-page"
+        text: "Heatmap"
+        enabled: menu.deckAvailable
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckHeatmap(menu.deckId) }
+    }
     AppMenuItem { glyph: "empty-box"
         text: "Reset deck state"
         visible: app.developmentToolsEnabled
