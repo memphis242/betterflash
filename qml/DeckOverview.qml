@@ -81,6 +81,15 @@ Item {
         savingDescriptionId = "";
         savingDescription = "";
     }
+    function openGraphDeckMenu(deckId, menuPoint) {
+        if (!deckId || !Overlay.overlay)
+            return;
+        graphDeckMenu.deckId = deckId;
+        const overlayPoint = graph.mapToItem(Overlay.overlay, menuPoint.x, menuPoint.y);
+        graphDeckMenu.x = overlayPoint.x;
+        graphDeckMenu.y = overlayPoint.y;
+        graphDeckMenu.open();
+    }
     Timer {
         id: summaryDelay
         interval: 700
@@ -131,7 +140,7 @@ Item {
             Layout.preferredHeight: 54
             Item { Layout.fillWidth: true }
             AppButton {
-                text: "New deck"
+                text: "New root deck"
                 primary: app.decks.length === 0
                 enabled: !app.busy
                 hint: "Create a top-level deck"
@@ -181,11 +190,27 @@ Item {
                 decks: overview.decks
                 selectedId: app.selectedDeckId
                 detailsVisible: overview.paneOpen
+                interactionBusy: app.busy || app.reviewing
                 onDeckSelected: id => {
                     overview.ui.setDeck(id, true);
                     overview.preferences.detailsOpen = true;
                 }
+                onReviewRequested: id => {
+                    overview.cancelOwnedSummary();
+                    if (!graph.interactionBusy && id) {
+                        overview.ui.setDeck(id, true);
+                        app.startReview(id);
+                    }
+                }
+                onContextMenuRequested: (id, menuPoint) => overview.openGraphDeckMenu(id, menuPoint)
                 onShowDetailsRequested: overview.preferences.detailsOpen = true
+            }
+            DeckActionsMenu {
+                id: graphDeckMenu
+                parent: Overlay.overlay
+                ui: overview.ui
+                deckId: ""
+                onBeforeAction: { overview.cancelOwnedSummary(); graphDeckMenu.close() }
             }
             Item {
                 id: resizeHandle

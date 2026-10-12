@@ -11,13 +11,17 @@ Item {
     property string selectedId: "biology"
     property bool detailsVisible: true
     signal deckSelected(string deckId)
+    signal reviewRequested(string deckId)
+    signal contextMenuRequested(string deckId, point menuPoint)
     signal showDetailsRequested()
+    property bool interactionBusy: false
+    property string pendingSelectionId: ""
     property var expandedBranches: ({})
     readonly property var visibleDecks: collectVisible()
     readonly property var diagram: Study.layout(visibleDecks, variant)
     readonly property bool allExpanded: decks.filter(d => decks.some(c => c.parent === d.id)).every(d => isExpanded(d))
     readonly property var ancestors: ancestorIds(selectedId)
-    readonly property var captions: ["Parents above, subdecks below", "Follow each branch from left to right"]
+    readonly property var captions: ["Parents above, subdecks below", ""]
     property real viewScale: 1
     readonly property color lineColor: Theme.rule
     readonly property color activeColor: Theme.accent
@@ -27,7 +31,45 @@ Item {
     onLineColorChanged: edges.requestPaint()
     onActiveColorChanged: edges.requestPaint()
     onViewScaleChanged: edges.requestPaint()
-    onVisibleChanged: if (visible && selectionNeedsReveal) selectionReveal.restart()
+    onVisibleChanged: {
+        if (visible && selectionNeedsReveal)
+            selectionReveal.restart()
+        if (!visible) {
+            selectionDelay.stop()
+            pendingSelectionId = ""
+        }
+    }
+    onInteractionBusyChanged: if (interactionBusy) {
+        selectionDelay.stop()
+        pendingSelectionId = ""
+    }
+
+    Timer {
+        id: selectionDelay
+        interval: Qt.styleHints.mouseDoubleClickInterval
+        onTriggered: {
+            if (graph.pendingSelectionId.length > 0)
+                graph.deckSelected(graph.pendingSelectionId)
+            graph.pendingSelectionId = ""
+        }
+    }
+
+    function scheduleSelection(id) {
+        if (!graph.visible || graph.interactionBusy)
+            return;
+        graph.pendingSelectionId = id;
+        selectionDelay.restart();
+    }
+    function startReview(id) {
+        selectionDelay.stop();
+        graph.pendingSelectionId = "";
+        graph.reviewRequested(id);
+    }
+    function showContextMenu(id, x, y) {
+        selectionDelay.stop();
+        graph.pendingSelectionId = "";
+        graph.contextMenuRequested(id, Qt.point(x, y));
+    }
 
     function generationLabel(depth) {
         switch (depth) {
@@ -105,6 +147,8 @@ Item {
         return visible;
     }
     function toggleBranch(id) {
+        selectionDelay.stop();
+        pendingSelectionId = "";
         const deck = decks.find(d => d.id === id);
         if (!deck) return;
         const position = nodePosition(id);
@@ -142,6 +186,8 @@ Item {
         });
     }
     function navigate(id, key) {
+        selectionDelay.stop();
+        pendingSelectionId = "";
         const index = visibleDecks.findIndex(d => d.id === id);
         if (index < 0) return false;
         let target = null;
@@ -187,7 +233,7 @@ Item {
             Layout.preferredHeight: 58
             spacing: 8
             Label {
-                visible: graph.width >= 620
+                visible: graph.width >= 620 && graph.captions[graph.variant].length > 0
                 text: graph.captions[graph.variant]
                 color: Theme.inkMuted
                 font.pixelSize: 11
@@ -331,12 +377,22 @@ Item {
                         Accessible.description: "Deck in " + modelData.deck.parentPath
                         ToolTip.visible: hovered || activeFocus
                         ToolTip.text: modelData.deck.name + " / " + modelData.deck.total + " cards including subdecks"
-                        onClicked: graph.deckSelected(modelData.id)
+                        onClicked: graph.scheduleSelection(modelData.id)
                         TapHandler {
-                            gesturePolicy: TapHandler.WithinBounds
-                            onDoubleTapped: if (node.childCount > 0) graph.toggleBranch(node.modelData.id)
+                            acceptedButtons: Qt.RightButton
+                            onTapped: {
+                                const menuPoint = node.mapToItem(graph, node.width + 8, 0);
+                                graph.showContextMenu(node.modelData.id, menuPoint.x, menuPoint.y);
+                            }
                         }
+                        onDoubleClicked: graph.startReview(node.modelData.id)
                         Keys.onPressed: event => {
+                            if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) {
+                                const menuPoint = node.mapToItem(graph, node.width + 8, 0);
+                                graph.showContextMenu(node.modelData.id, menuPoint.x, menuPoint.y);
+                                event.accepted = true;
+                                return;
+                            }
                             if (graph.navigate(modelData.id, event.key)) event.accepted = true
                         }
                         contentItem: Label {
@@ -376,6 +432,31 @@ Item {
                             glyph: graph.isExpanded(node.modelData.deck) ? "minus" : "plus"
                             hint: (graph.isExpanded(node.modelData.deck) ? "Hide" : "Show") + " " + node.childCount + " subdecks in " + node.modelData.deck.name
                             onClicked: graph.toggleBranch(node.modelData.id)
+                        }
+                        Rectangle {
+                            visible: Number(node.modelData.deck.due || 0) > 0
+                            x: node.width - width - 10
+                            y: 10
+                            width: 26
+                            height: width
+                            radius: width / 2
+                            color: Theme.canvas
+                            border.color: Theme.accent
+                            border.width: 1.5
+                            z: 2
+                            Label {
+                                anchors.fill: parent
+                                text: "R"
+                                color: Theme.accent
+                                font.family: Theme.monoFont
+                                font.pixelSize: 12
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            ToolTip.visible: reviewBadgeHover.hovered
+                            ToolTip.text: "Pending review: " + node.modelData.deck.due + " review item" + (node.modelData.deck.due === 1 ? "" : "s")
+                            HoverHandler { id: reviewBadgeHover }
                         }
                     }
                 }
