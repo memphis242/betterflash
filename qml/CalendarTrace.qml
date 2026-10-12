@@ -25,7 +25,7 @@ Item {
     ToolTip.text: readoutText()
     ToolTip.delay: 350
 
-    readonly property int plotTop: markerKey.y + markerKey.height + 20
+    readonly property int plotTop: 114
     readonly property int plotBottom: Math.max(plotTop + 72, height - 76)
     readonly property int plotHeight: Math.max(1, plotBottom - plotTop)
     readonly property int plotLeft: 48
@@ -512,44 +512,6 @@ Item {
         }
     }
 
-    Flow {
-        id: markerKey
-        x: 18
-        y: 76
-        width: Math.max(0, trace.width - 36)
-        spacing: 20
-        Repeater {
-            model: [
-                {label: "Today", color: trace.todayMarkerColor,
-                    hint: "Today's position on the timeline."},
-                {label: "Review due", color: trace.dueMarkerColor,
-                    hint: "Scheduled review date. An overdue review appears before today."}
-            ]
-            delegate: Row {
-                required property var modelData
-                spacing: 8
-                height: 18
-                Rectangle {
-                    width: 2
-                    height: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: modelData.color
-                }
-                Label {
-                    text: modelData.label
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: Theme.inkMuted
-                    font.family: Theme.monoFont
-                    font.pixelSize: 12
-                }
-                HoverHandler { id: keyHover }
-                ToolTip.visible: keyHover.hovered
-                ToolTip.text: modelData.hint
-                ToolTip.delay: 350
-            }
-        }
-    }
-
     Canvas {
         id: plot
         x: 0
@@ -696,6 +658,42 @@ Item {
                 ctx.globalAlpha = 1
             }
             ctx.restore()
+
+            ctx.font = "12px '" + Theme.monoFont + "'"
+            ctx.textAlign = "left"
+            const markerLabels = []
+            for (const event of trace.events) {
+                if (event.kind !== "due" && event.kind !== "now") continue
+                if (trace.validDate(event.at) <= 0) continue
+                const x = trace.timeToX(event.at)
+                if (x < trace.plotLeft || x > trace.width - trace.plotRight) continue
+                const text = event.kind === "due" ? "Review due" : "Today"
+                const width = ctx.measureText(text).width
+                const left = Math.max(trace.plotLeft,
+                    Math.min(trace.width - trace.plotRight - width, x - width / 2))
+                markerLabels.push({x: x, left: left, width: width, text: text,
+                    color: event.kind === "due" ? trace.dueMarkerColor : trace.todayMarkerColor})
+            }
+            markerLabels.sort((a, b) => a.x - b.x)
+            const rowEnds = []
+            for (const label of markerLabels) {
+                let row = 0
+                while (row < rowEnds.length && label.left < rowEnds[row] + 10) ++row
+                rowEnds[row] = label.left + label.width
+                label.baseline = trace.plotTop - 12 - row * 18
+                ctx.strokeStyle = label.color
+                ctx.lineWidth = 2
+                ctx.beginPath()
+                ctx.moveTo(label.x, label.baseline + 4)
+                ctx.lineTo(label.x, trace.plotTop)
+                ctx.stroke()
+            }
+            for (const label of markerLabels) {
+                ctx.fillStyle = Theme.ledgerSurface
+                ctx.fillRect(label.left - 3, label.baseline - 13, label.width + 6, 17)
+                ctx.fillStyle = label.color
+                ctx.fillText(label.text, label.left, label.baseline)
+            }
         }
     }
 
