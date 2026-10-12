@@ -153,8 +153,14 @@ are recorded in [study support ideas](docs/study-support-ideas.md).
 
 ### Review history
 
-The History page shows the latest three review sessions above a scrollable list
-of every recorded session. Select a row to open a collapsible, resizable details
+The History page shows the latest three review sessions above a dated history
+list. History defaults to the current local Monday-to-Sunday week. Controls beside
+its title move the period backward or forward by seven days, select a single date
+or an inclusive date range, and return to this week. Sessions are filtered by the
+local date of their last answer, matching the timestamp shown in each row. The
+recent three sessions and Learning statistics keep their own scopes.
+
+Select a row to open a collapsible, resizable details
 pane with the cards reviewed, overall recall, each rating's count, and response
 times. The overall recall score is the mean recalled fraction; its color follows
 the average rating, as it does in card details. Reverse directions and cloze
@@ -168,7 +174,8 @@ its recorded time. Resetting or deleting a deck preserves its past reviews.
 
 The learning overview below the lists combines a calendar heatmap with
 provisional recall, coverage, consistency and trend statistics. Its filter scopes
-the view to one deck and its children; the default is the entire library. Review
+the view to selected decks and their children, counting each card once; the
+default is the entire library. Review
 deck details include a compact heatmap, and **Heatmap** in Review or Library deck
 actions opens the full calendar. See [learning overview](docs/learning-overview.md)
 for the score formula and the treatment of unreviewed, moved and deleted cards.
