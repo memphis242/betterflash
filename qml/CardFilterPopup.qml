@@ -27,7 +27,8 @@ Popup {
     signal resetRequested()
     padding: 16
     focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    // The parent button handles its own toggle; other outside presses dismiss.
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     background: Rectangle { color: Theme.surfaceRaised; radius: 12; border.color: Theme.rule; border.width: 1 }
     onOpened: {
         tagList.currentIndex = Math.max(0, tags.findIndex(row => selectedTags.indexOf(row.tag) >= 0))

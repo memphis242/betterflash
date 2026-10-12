@@ -107,7 +107,7 @@ Item {
     onLeftOpenChanged: librarySettings.leftOpen = leftOpen
     onRightOpenChanged: {
         librarySettings.rightOpen = rightOpen
-        if (!rightOpen && cardFilters && cardFilters.opened) cardFilters.close()
+        if (!rightOpen && cardFilters && cardFilters.visible) cardFilters.close()
     }
     onSplitRatioChanged: librarySettings.splitRatio = splitRatio
     onDeckSearchVisibleChanged: librarySettings.deckSearchVisible = deckSearchVisible
@@ -692,7 +692,7 @@ Item {
     onVisibleChanged: {
         updateCardSearch()
         updateDeckSearch()
-        if (!visible && cardFilters && cardFilters.opened) cardFilters.close()
+        if (!visible && cardFilters && cardFilters.visible) cardFilters.close()
     }
     Connections {
         target: ui
@@ -1059,9 +1059,9 @@ Item {
                     GlyphButton { glyph: "search"; selected: library.searchingCards || library.cardSearchVisible; hint: library.cardSearchVisible ? "Hide card search" : "Show card search"; onClicked: library.toggleCardSearch() }
                     GlyphButton {
                         id: cardFilterButton
-                        glyph: "filter"; selected: library.activeFilterCount > 0 || cardFilters.opened
+                        glyph: "filter"; selected: library.activeFilterCount > 0 || cardFilters.visible
                         hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
-                        onClicked: cardFilters.opened ? cardFilters.close() : cardFilters.open()
+                        onClicked: cardFilters.visible ? cardFilters.close() : cardFilters.open()
                     }
                 }
                 RowLayout {
