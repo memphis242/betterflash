@@ -142,22 +142,22 @@ Item {
                 hint: "Selected deck actions"
                 enabled: !!overview.selectedDeck.id && !app.busy
                 onClicked: deckMenu.open()
-                Menu {
+                AppMenu {
                     id: deckMenu
                     y: parent.height
-                    MenuItem {
+                    AppMenuItem { glyph: "folder"
                         text: "New child deck"
                         onTriggered: overview.ui.openDeckEditor("", app.selectedDeckId)
                     }
-                    MenuItem {
+                    AppMenuItem { glyph: "edit"
                         text: "Edit deck"
                         onTriggered: overview.ui.openDeckEditor(app.selectedDeckId)
                     }
-                    MenuItem {
+                    AppMenuItem { glyph: "plus"
                         text: "Add card"
                         onTriggered: overview.ui.openCardEditor("")
                     }
-                    MenuItem {
+                    AppMenuItem { glyph: "empty-box"
                         text: "Reset deck"
                         visible: app.developmentToolsEnabled
                         height: visible ? implicitHeight : 0

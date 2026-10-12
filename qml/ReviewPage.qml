@@ -222,33 +222,33 @@ Item {
                     glyph: "more"
                     hint: "Review actions"
                     onClicked: reviewMenu.open()
-                    Menu {
+                    AppMenu {
                         id: reviewMenu
                         y: parent.height
-                        MenuItem {
+                        AppMenuItem { glyph: "edit"
                             text: "Edit current card"
                             onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id)
                         }
-                        MenuItem {
+                        AppMenuItem { glyph: "review-ledger"
                             text: "Summarize remaining cards"
                             enabled: app.queueCount > 0
                             onTriggered: ui.openSummary()
                         }
-                        MenuItem {
+                        AppMenuItem { glyph: "empty-box"
                             text: "Reset card"
                             visible: app.developmentToolsEnabled
                             height: visible ? implicitHeight : 0
                             enabled: !app.busy && page.hasCard
                             onTriggered: ui.confirmReset("card", app.currentCard.cardId || app.currentCard.id, page.reviewSnippet(app.currentCard).slice(0, 80))
                         }
-                        MenuItem {
+                        AppMenuItem { glyph: "empty-box"
                             text: "Reset deck"
                             visible: app.developmentToolsEnabled
                             height: visible ? implicitHeight : 0
                             enabled: !app.busy && !!app.currentCard.deckId
                             onTriggered: ui.confirmReset("deck", app.currentCard.deckId, app.currentCard.deckName)
                         }
-                        MenuItem {
+                        AppMenuItem { glyph: "close"; danger: true
                             text: app.reviewedCount >= app.sessionTotal ? "Finish review" : "End review"
                             onTriggered: app.stopReview()
                         }

@@ -20,13 +20,13 @@ ColumnLayout {
     }
 
     Label {
-        text: "Card search"
+        text: "Library search"
         color: Theme.ink
         font.family: Theme.contentFont
         font.pixelSize: 27
     }
     Label {
-        text: "Text matches appear first. Semantic search then adds cards with related meaning. Local models run on this device and download on first use."
+        text: "Search cards in the selected deck or across the library. Text matches appear first. Semantic search then adds cards with related meaning. Local models run on this device and download on first use."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -78,10 +78,10 @@ ColumnLayout {
         AppButton {
             text: settings.search.provider === "remote" ? "Remote provider" : "Local model"
             onClicked: providerMenu.open()
-            Menu {
+            AppMenu {
                 id: providerMenu
-                MenuItem { text: "Local model"; onTriggered: settings.search.provider = "local" }
-                MenuItem { text: "Remote encoding service"; onTriggered: settings.search.provider = "remote" }
+                AppMenuItem { glyph: "cards"; text: "Local model"; onTriggered: settings.search.provider = "local" }
+                AppMenuItem { glyph: "arrow-right"; text: "Remote encoding service"; onTriggered: settings.search.provider = "remote" }
             }
         }
         AppButton {
@@ -147,7 +147,7 @@ ColumnLayout {
                 width: connectionDialog.contentItem.availableWidth
                 spacing: 12
                 Label {
-                text: "Provider mode sends your query and cards in the search scope for encoding: the selected deck, or the entire library when no deck is selected. This includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
+                text: "Provider mode sends your query and cards in the search scope for encoding. Search within decks always searches the entire library, regardless of the selected deck, and includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true

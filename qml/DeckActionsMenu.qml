@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-Menu {
+AppMenu {
     id: menu
     required property var ui
     property string deckId: ""
@@ -16,31 +16,32 @@ Menu {
             menu.ui.setDeck(menu.deckId, stayOnPage)
     }
 
-    MenuItem {
+    AppMenuItem { glyph: "plus"
         visible: menu.headerMode
         height: visible ? implicitHeight : 0
         text: "New deck"
         enabled: !app.busy
         onTriggered: { menu.beforeAction(); menu.ui.openDeckEditor("") }
     }
-    MenuSeparator { visible: menu.headerMode }
+    AppMenuSeparator { visible: menu.headerMode }
 
-    MenuItem {
+    AppMenuItem { glyph: "plus"
         text: "Add card"
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.selectDeck(true); menu.ui.openCardEditor("") }
     }
-    MenuItem {
+    AppMenuItem { glyph: "folder"
         text: "Add subdeck"
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.ui.openDeckEditor("", menu.deckId) }
     }
-    MenuItem {
+    AppMenuItem { glyph: "edit"
         text: "Rename deck"
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.ui.openDeckEditor(menu.deckId) }
     }
-    MenuItem {
+    AppMenuSeparator {}
+    AppMenuItem { glyph: "review-flip"
         text: "Start review"
         enabled: menu.deckAvailable && !app.busy
         onTriggered: {
@@ -50,30 +51,30 @@ Menu {
             app.startReview(menu.deckId)
         }
     }
-    MenuItem {
+    AppMenuItem { glyph: "empty-box"
         text: "Reset deck state"
         visible: app.developmentToolsEnabled
         height: visible ? implicitHeight : 0
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.ui.confirmReset("deck", menu.deckId, menu.deck.name) }
     }
-    MenuSeparator {}
-    MenuItem {
+    AppMenuSeparator {}
+    AppMenuItem { glyph: "pin"
         text: "Checkpoint"
         enabled: menu.deckAvailable
         ToolTip.visible: hovered
         ToolTip.text: "Deck checkpoints are planned and inactive for now."
         onTriggered: {}
     }
-    MenuItem {
+    AppMenuItem { glyph: "clock"
         text: "Restore to known checkpoint"
         enabled: menu.deckAvailable
         ToolTip.visible: hovered
         ToolTip.text: "Checkpoint restoration is planned and inactive for now."
         onTriggered: {}
     }
-    MenuSeparator {}
-    MenuItem {
+    AppMenuSeparator {}
+    AppMenuItem { glyph: "close"; danger: true
         text: "Delete deck"
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.ui.confirmDelete("deck", menu.deckId, menu.deck.name) }
