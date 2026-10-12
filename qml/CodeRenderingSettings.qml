@@ -8,18 +8,15 @@ ColumnLayout {
     property string pathError: ""
 
     Label {
-        text: "Code rendering"
-        color: Theme.ink
-        font.family: Theme.contentFont
-        font.pixelSize: 27
-    }
-    Label {
         Layout.fillWidth: true
         text: "Fenced Markdown blocks use the language after the opening backticks. Choose separate code colors for each app appearance."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
     }
-    Label { text: "Dark appearance"; color: Theme.inkMuted }
+    Label {
+        text: "Dark appearance"
+        color: Theme.inkMuted
+    }
     ComboBox {
         Layout.fillWidth: true
         Layout.maximumWidth: 400
@@ -29,7 +26,10 @@ ColumnLayout {
         ToolTip.visible: hovered
         ToolTip.text: "Code theme when the app uses dark mode"
     }
-    Label { text: "Light appearance"; color: Theme.inkMuted }
+    Label {
+        text: "Light appearance"
+        color: Theme.inkMuted
+    }
     ComboBox {
         Layout.fillWidth: true
         Layout.maximumWidth: 400
@@ -44,7 +44,9 @@ ColumnLayout {
         baseFontSize: 17
         markdown: "```cpp\n#include <expected>\n#include <string>\n\n// A value, or an explanation of the failure.\nstd::expected<int, std::string> divide(int value) {\n    if (value == 0) return std::unexpected(\"Zero divisor\");\n    return 42 / value;\n}\n```"
     }
-    Switch {
+    AppSwitch {
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
         text: "Use language server highlighting"
         checked: codeRendering.languageServerEnabled
         onToggled: codeRendering.languageServerEnabled = checked
@@ -65,6 +67,7 @@ ColumnLayout {
         font.pixelSize: 13
     }
     AppButton {
+        Layout.maximumWidth: settings.width
         text: "Configure language server"
         onClicked: serverDialog.open()
     }
@@ -79,13 +82,26 @@ ColumnLayout {
             text: serverDialog.title
             color: Theme.ink
             font.pixelSize: 20
-            leftPadding: 20; topPadding: 20; bottomPadding: 12; rightPadding: 20
+            leftPadding: 20
+            topPadding: 20
+            bottomPadding: 12
+            rightPadding: 20
         }
-        background: Rectangle { color: Theme.surface; radius: 18; border.color: Theme.rule }
-        onOpened: { serverPath.text = codeRendering.clangdPath; settings.pathError = "" }
+        background: Rectangle {
+            color: Theme.surface
+            radius: 18
+            border.color: Theme.rule
+        }
+        onOpened: {
+            serverPath.text = codeRendering.clangdPath;
+            settings.pathError = "";
+        }
         contentItem: ColumnLayout {
             spacing: 14
-            Label { text: "clangd executable"; color: Theme.inkMuted }
+            Label {
+                text: "clangd executable"
+                color: Theme.inkMuted
+            }
             TextField {
                 id: serverPath
                 Layout.fillWidth: true
@@ -98,17 +114,28 @@ ColumnLayout {
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
             }
-            ErrorBlock { Layout.fillWidth: true; message: settings.pathError }
+            ErrorBlock {
+                Layout.fillWidth: true
+                message: settings.pathError
+            }
         }
         footer: RowLayout {
             spacing: 12
-            Item { Layout.fillWidth: true }
-            AppButton { text: "Cancel"; onClicked: serverDialog.close() }
+            Item {
+                Layout.fillWidth: true
+            }
             AppButton {
-                text: "Save"; primary: true
+                text: "Cancel"
+                onClicked: serverDialog.close()
+            }
+            AppButton {
+                text: "Save"
+                primary: true
                 onClicked: {
-                    if (codeRendering.setClangdPath(serverPath.text)) serverDialog.close()
-                    else settings.pathError = "CODE_SERVER_PATH: Choose an executable clangd file, or install clangd and leave the path empty."
+                    if (codeRendering.setClangdPath(serverPath.text))
+                        serverDialog.close();
+                    else
+                        settings.pathError = "CODE_SERVER_PATH: Choose an executable clangd file, or install clangd and leave the path empty.";
                 }
             }
         }

@@ -11,27 +11,35 @@ ColumnLayout {
         property string label: ""
         property string value: ""
         spacing: 5
-        Label { text: parent.label; color: Theme.inkMuted; font.pixelSize: 12; Layout.fillWidth: true }
-        Label { text: parent.value; color: Theme.ink; font.family: Theme.monoFont; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        Label {
+            text: parent.label
+            color: Theme.inkMuted
+            font.pixelSize: 12
+            Layout.fillWidth: true
+        }
+        Label {
+            text: parent.value
+            color: Theme.ink
+            font.family: Theme.monoFont
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+        }
     }
 
     function openConnection() {
-        connectionDialog.open()
+        connectionDialog.open();
     }
 
-    Label {
-        text: "Library search"
-        color: Theme.ink
-        font.family: Theme.contentFont
-        font.pixelSize: 27
-    }
     Label {
         text: "Search cards in the selected deck or across the library. Text matches appear first. Semantic search then adds cards with related meaning. Local models run on this device and download on first use."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
-    Switch {
+    AppSwitch {
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
         objectName: "semanticSearchEnabled"
         text: "Include semantic matches"
         checked: settings.search.semanticEnabled
@@ -70,21 +78,32 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 10
         AppButton {
+            width: Math.min(implicitWidth, parent.width)
             visible: settings.search.semanticEnabled && settings.search.provider === "local"
             enabled: visible
             text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Download again" : "Download local model"
             onClicked: settings.search.downloading ? settings.search.cancelDownload() : settings.search.prepareModel()
         }
         AppButton {
+            width: Math.min(implicitWidth, parent.width)
             text: settings.search.provider === "remote" ? "Remote provider" : "Local model"
             onClicked: providerMenu.open()
             AppMenu {
                 id: providerMenu
-                AppMenuItem { glyph: "cards"; text: "Local model"; onTriggered: settings.search.provider = "local" }
-                AppMenuItem { glyph: "arrow-right"; text: "Remote encoding service"; onTriggered: settings.search.provider = "remote" }
+                AppMenuItem {
+                    glyph: "cards"
+                    text: "Local model"
+                    onTriggered: settings.search.provider = "local"
+                }
+                AppMenuItem {
+                    glyph: "arrow-right"
+                    text: "Remote encoding service"
+                    onTriggered: settings.search.provider = "remote"
+                }
             }
         }
         AppButton {
+            width: Math.min(implicitWidth, parent.width)
             text: "Rebuild search index"
             enabled: !settings.search.downloading
             hint: "Clear cached embeddings. The next search encodes cards in the active search scope again."
@@ -115,31 +134,41 @@ ColumnLayout {
         title: "Search connection"
         parent: Overlay.overlay
         anchors.centerIn: parent
-        width: Math.min(560, settings.width - 24)
+        width: Math.min(560, parent ? parent.width - 40 : 560)
         height: Math.min(560, parent ? parent.height - 40 : 560)
         property alias endpointText: endpoint.text
         property alias modelText: model.text
         onOpened: {
-            endpoint.text = settings.search.remoteEndpoint
-            model.text = settings.search.remoteModel
-            reuseKey.checked = settings.search.useLanguageModelKey
-            serviceKey.text = ""
+            endpoint.text = settings.search.remoteEndpoint;
+            model.text = settings.search.remoteModel;
+            reuseKey.checked = settings.search.useLanguageModelKey;
+            serviceKey.text = "";
         }
         footer: RowLayout {
             spacing: 12
-            Item { Layout.fillWidth: true }
-            AppButton { text: "Cancel"; onClicked: connectionDialog.close() }
+            Item {
+                Layout.fillWidth: true
+            }
             AppButton {
-                text: "Save connection"; primary: true
+                text: "Cancel"
+                onClicked: connectionDialog.close()
+            }
+            AppButton {
+                text: "Save connection"
+                primary: true
                 onClicked: {
                     if (settings.search.setRemoteConfiguration(endpoint.text, model.text, reuseKey.checked, serviceKey.text)) {
-                        settings.search.provider = "remote"
-                        connectionDialog.close()
+                        settings.search.provider = "remote";
+                        connectionDialog.close();
                     }
                 }
             }
         }
-        background: Rectangle { color: Theme.surface; border.color: Theme.rule; radius: 8 }
+        background: Rectangle {
+            color: Theme.surface
+            border.color: Theme.rule
+            radius: 8
+        }
         contentItem: ScrollView {
             contentWidth: availableWidth
             clip: true
@@ -147,16 +176,33 @@ ColumnLayout {
                 width: connectionDialog.contentItem.availableWidth
                 spacing: 12
                 Label {
-                text: "Provider mode sends your query and cards in the search scope for encoding. Search within decks always searches the entire library, regardless of the selected deck, and includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
-                color: Theme.inkMuted
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
+                    text: "Provider mode sends your query and cards in the search scope for encoding. Search within decks always searches the entire library, regardless of the selected deck, and includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
+                    color: Theme.inkMuted
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
-                Label { text: "Endpoint"; color: Theme.inkMuted }
-                TextField { id: endpoint; Layout.fillWidth: true; placeholderText: "https://example.invalid/embeddings" }
-                Label { text: "Embedding model"; color: Theme.inkMuted }
-                TextField { id: model; Layout.fillWidth: true; placeholderText: "text-embedding model" }
-                CheckBox { id: reuseKey; text: "Use the existing language model key" }
+                Label {
+                    text: "Endpoint"
+                    color: Theme.inkMuted
+                }
+                TextField {
+                    id: endpoint
+                    Layout.fillWidth: true
+                    placeholderText: "https://example.invalid/embeddings"
+                }
+                Label {
+                    text: "Embedding model"
+                    color: Theme.inkMuted
+                }
+                TextField {
+                    id: model
+                    Layout.fillWidth: true
+                    placeholderText: "text-embedding model"
+                }
+                CheckBox {
+                    id: reuseKey
+                    text: "Use the existing language model key"
+                }
                 TextField {
                     id: serviceKey
                     Layout.fillWidth: true
@@ -164,13 +210,21 @@ ColumnLayout {
                     placeholderText: settings.search.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"
                     visible: !reuseKey.checked
                 }
-                ValueRow { label: "Key storage"; value: settings.search.keyStorageStatus; Layout.fillWidth: true }
+                ValueRow {
+                    label: "Key storage"
+                    value: settings.search.keyStorageStatus
+                    Layout.fillWidth: true
+                }
                 AppButton {
+                    Layout.maximumWidth: parent.width
                     text: "Clear stored embedding key"
                     visible: settings.search.hasApiKey && !reuseKey.checked
                     onClicked: settings.search.clearApiKey()
                 }
-                ErrorBlock { message: settings.search.error; Layout.fillWidth: true }
+                ErrorBlock {
+                    message: settings.search.error
+                    Layout.fillWidth: true
+                }
             }
         }
         onClosed: serviceKey.text = ""
