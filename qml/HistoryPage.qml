@@ -86,7 +86,8 @@ Item {
             return;
         historyStartDate = nextStart;
         historyEndDate = nextEnd;
-        historyCurrentWeek = false;
+        const currentStart = mondayFor(localToday());
+        historyCurrentWeek = nextStart === currentStart && nextEnd === addDays(currentStart, 6);
     }
     function applyHistoryRange(startDate, endDate) {
         historyStartDate = startDate;
