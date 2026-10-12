@@ -292,7 +292,7 @@ Item {
                     GlyphButton { glyph: "search"; hint: "Find a deck (" + shortcuts.bindings.deckSearch + ")"; onClicked: library.focusDeckSearch() }
                     GlyphButton {
                         glyph: "more"; hint: "Deck actions"; onClicked: deckMenu.open()
-                        DeckActionsMenu { id: deckMenu; ui: library.ui; deckId: library.ui.selectedDeck.id; headerMode: true }
+                        DeckActionsMenu { id: deckMenu; ui: library.ui; deckId: library.ui.selectedDeck.id || ""; headerMode: true }
                     }
                     PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
                 }
@@ -310,6 +310,7 @@ Item {
                     delegate: Item {
                         id: treeRow; required property var modelData; required property int index
                         width: treeList.width; height: 50
+                        function openContextMenu() { deckContextMenu.popup(treeRow, 0, height) }
                         Rectangle {
                             anchors.fill: parent; anchors.leftMargin: 4 + treeRow.modelData.depth * 20; anchors.rightMargin: 4; radius: 5
                             color: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accentSoft : (treeMouse.containsMouse ? Theme.surfaceRaised : Theme.transparent)
@@ -371,7 +372,10 @@ Item {
                     Keys.onPressed: function(event) {
                         const row = library.treeRows[currentIndex]
                         if (!row) return
-                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { library.chooseTreeRow(currentIndex); event.accepted = true }
+                        if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) {
+                            if (currentItem) currentItem.openContextMenu()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { library.chooseTreeRow(currentIndex); event.accepted = true }
                         else if (event.key === Qt.Key_Right && row.hasChildren) { if (!row.expanded) library.toggleDeck(row.id); else currentIndex = Math.min(count - 1, currentIndex + 1); event.accepted = true }
                         else if (event.key === Qt.Key_Left) {
                             if (row.expanded && row.hasChildren)
@@ -492,6 +496,7 @@ Item {
                         readonly property int headingHeight: modelData.groupStart ? 44 : 0
                         width: cardList.width
                         height: headingHeight + 82
+                        function openContextMenu() { cardActionsMenu.popup(cardRow, 0, height) }
                         RowLayout {
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -594,7 +599,10 @@ Item {
                     Keys.onPressed: function(event) {
                         if (!visibleCards[currentIndex])
                             return
-                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) {
+                            if (currentItem) currentItem.openContextMenu()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier))
                                 library.chooseCardWithModifiers(currentIndex, event.modifiers)
                             else
