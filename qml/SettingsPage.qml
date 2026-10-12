@@ -94,8 +94,18 @@ Item {
                 onClicked: settingsPage.selectSection(index)
                 Keys.onUpPressed: sectionList.moveSelection(index - 1)
                 Keys.onDownPressed: sectionList.moveSelection(index + 1)
-                Keys.onHomePressed: sectionList.moveSelection(0)
-                Keys.onEndPressed: sectionList.moveSelection(sectionList.count - 1)
+                Keys.onPressed: event => {
+                    switch (event.key) {
+                    case Qt.Key_Home:
+                        sectionList.moveSelection(0);
+                        event.accepted = true;
+                        break;
+                    case Qt.Key_End:
+                        sectionList.moveSelection(sectionList.count - 1);
+                        event.accepted = true;
+                        break;
+                    }
+                }
                 contentItem: Label {
                     id: sectionLabel
                     text: sectionButton.text
