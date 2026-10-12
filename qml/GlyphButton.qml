@@ -20,13 +20,13 @@ ToolButton {
             width: control.glyphSize
             height: control.glyphSize
             kind: control.glyph
-            stroke: control.selected || control.accentOnHover && (control.hovered || control.down || control.activeFocus) ? Theme.accent : Theme.ink
+            stroke: control.selected || control.enabled && control.accentOnHover && (control.hovered || control.down || control.activeFocus) ? Theme.accent : Theme.ink
         }
     }
     background: Rectangle {
         radius: width / 2
-        color: control.hovered || control.down ? Theme.accentSoft : Theme.transparent
-        border.width: control.activeFocus || control.selected ? 2 : 1
-        border.color: control.activeFocus || control.selected || control.accentOnHover && (control.hovered || control.down) ? Theme.accent : Theme.rule
+        color: control.enabled && (control.hovered || control.down) ? Theme.accentSoft : Theme.transparent
+        border.width: control.enabled && control.activeFocus || control.selected ? 2 : 1
+        border.color: control.selected || control.enabled && (control.activeFocus || control.accentOnHover && (control.hovered || control.down)) ? Theme.accent : Theme.rule
     }
 }
