@@ -24,6 +24,8 @@ Item {
     readonly property int cellGap: 3
     readonly property int cellSize: Math.max(9, Math.min(compact ? 14 : 12, Math.floor((calendarViewport.width + cellGap) / Math.max(1, weekCount)) - cellGap, Math.floor((calendarViewport.height - 31) / 7) - cellGap))
     readonly property int cellStride: cellSize + cellGap
+    readonly property real columnStride: (calendarViewport.contentWidth + cellGap) / weekCount
+    readonly property real cellWidth: columnStride - cellGap
     readonly property var dayLookup: indexedDays()
     readonly property var cells: calendarDays()
     readonly property var monthLabels: calendarMonths()
@@ -37,6 +39,31 @@ Item {
     Accessible.role: Accessible.Pane
     Accessible.name: compact ? "Review activity over the last 13 weeks" : "Review activity calendar for " + year
     Accessible.description: "Arrow keys move between dates. Page Up and Page Down change the year. Home returns to today."
+
+    component YearButton: Item {
+        id: yearButton
+        required property bool available
+        required property string glyph
+        required property string hint
+        signal activated()
+        implicitWidth: 32
+        implicitHeight: 32
+
+        GlyphButton {
+            id: yearControl
+            anchors.fill: parent
+            glyph: yearButton.glyph
+            hint: yearButton.hint
+            enabled: yearButton.available
+            opacity: enabled ? 1 : 0.35
+            ToolTip.visible: false
+            onClicked: yearButton.activated()
+        }
+        HoverHandler { id: yearHover }
+        ToolTip.visible: yearHover.hovered || yearControl.activeFocus
+        ToolTip.delay: 250
+        ToolTip.text: hint
+    }
 
     function parseDay(value) {
         const parts = String(value || "").split("-");
@@ -101,7 +128,7 @@ Item {
             if (timestamp !== periodStart && date.getUTCDate() !== 1)
                 continue;
             const week = Math.floor((timestamp - gridStart) / dayMs / 7);
-            if (labels.length && (week - labels[labels.length - 1].week) * cellStride < 30)
+            if (labels.length && (week - labels[labels.length - 1].week) * columnStride < 30)
                 labels.pop();
             labels.push({
                 week: week,
@@ -139,7 +166,7 @@ Item {
     function scrollToDate(timestamp, animated) {
         const column = Math.floor((timestamp - gridStart) / dayMs / 7);
         const maximum = Math.max(0, calendarViewport.contentWidth - calendarViewport.width);
-        const target = Math.max(0, Math.min(maximum, column * cellStride - calendarViewport.width / 2 + cellSize / 2));
+        const target = Math.max(0, Math.min(maximum, column * columnStride - calendarViewport.width / 2 + cellWidth / 2));
         scrollAnimation.stop();
         if (animated && !Theme.reducedMotion) {
             scrollAnimation.from = calendarViewport.contentX;
@@ -244,23 +271,22 @@ Item {
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
-            GlyphButton {
+            YearButton {
                 visible: !heatmap.compact
                 glyph: "chevron-left-bold"
-                hint: "Previous calendar year"
-                implicitWidth: 32
-                implicitHeight: 32
-                enabled: heatmap.year > heatmap.earliestYear
-                onClicked: heatmap.changeYear(heatmap.year - 1)
+                available: heatmap.year > heatmap.earliestYear
+                hint: available ? "Previous calendar year"
+                    : heatmap.days.length ? "No review history before " + heatmap.earliestYear + " in this selection"
+                    : "No review history yet in this selection"
+                onActivated: heatmap.changeYear(heatmap.year - 1)
             }
-            GlyphButton {
+            YearButton {
                 visible: !heatmap.compact
                 glyph: "chevron-right-bold"
-                hint: "Next calendar year"
-                implicitWidth: 32
-                implicitHeight: 32
-                enabled: heatmap.year < heatmap.currentYear
-                onClicked: heatmap.changeYear(heatmap.year + 1)
+                available: heatmap.year < heatmap.currentYear
+                hint: available ? "Next calendar year"
+                    : "Already showing " + heatmap.currentYear + ", the current year. Future years have no review history."
+                onActivated: heatmap.changeYear(heatmap.year + 1)
             }
             AppButton {
                 visible: !heatmap.compact
@@ -303,7 +329,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                contentWidth: heatmap.weekCount * heatmap.cellStride - heatmap.cellGap
+                contentWidth: Math.max(heatmap.compact ? 0 : width, heatmap.weekCount * heatmap.cellStride - heatmap.cellGap)
                 contentHeight: 22 + 7 * heatmap.cellStride - heatmap.cellGap + 12
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.AutoFlickIfNeeded
@@ -330,7 +356,7 @@ Item {
                     model: heatmap.monthLabels
                     Label {
                         required property var modelData
-                        x: modelData.week * heatmap.cellStride
+                        x: modelData.week * heatmap.columnStride
                         width: Math.min(36, calendarViewport.contentWidth - x)
                         height: 18
                         text: modelData.text
@@ -348,9 +374,9 @@ Item {
                         required property var modelData
                         readonly property int count: modelData.timestamp <= heatmap.todayMs ? Math.max(0, Number((heatmap.dayLookup[modelData.date] || {}).count) || 0) : 0
                         readonly property bool keyboardSelected: heatmap.activeFocus && heatmap.selectedDate === modelData.timestamp
-                        x: modelData.week * heatmap.cellStride
+                        x: modelData.week * heatmap.columnStride
                         y: 22 + modelData.weekday * heatmap.cellStride
-                        width: heatmap.cellSize
+                        width: heatmap.cellWidth
                         height: heatmap.cellSize
                         radius: 2
                         visible: modelData.inPeriod
