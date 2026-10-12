@@ -4,6 +4,28 @@ Search is scoped to cards directly in the selected deck. It does not silently
 include descendant decks. When no deck is selected, search covers every card in
 the library and each result retains its owning deck in the card snapshot.
 
+## Search controls and filters
+
+The search buttons toggle their textboxes without clearing their queries or
+results. Escape also hides the corresponding controls. Clear a query explicitly
+to remove its restriction; hiding it keeps the search active.
+
+The Decks pane's first field matches deck names with exact, prefix and fuzzy
+matching. Its adjacent dropdown reveals **Search within decks**, which searches
+card contents across the library through all five retrieval layers. Both fields
+are AND restrictions, and an empty field imposes no restriction. A deck includes
+its descendants' cards for this content search. Ancestors needed to show the
+folder path remain visible as context even if their own names do not match.
+Each result reports its strongest card match and matching-card count; its tooltip
+distinguishes direct cards from cards in subdecks.
+
+The Cards pane's filter control restricts tags, card type and review state.
+Selected tags are OR alternatives; tag, type, state and query restrictions are
+ANDed. Plain click selects one tag, Ctrl-click toggles a tag, and Shift-click
+selects a range. Filters apply before retrieval, including the semantic candidate
+limit, so unrelated tags cannot crowd matching cards out of the results.
+Closing the filter popup preserves its selections.
+
 ## Result layers
 
 The worker publishes the inexpensive text results first, then fuzzy results,
@@ -70,8 +92,10 @@ This helps bridge terse expressions such as `3x=21` and natural-language
 queries. It does not solve a problem or guarantee that every related card will
 be retrieved.
 
-Semantic retrieval adds up to twelve candidates with cosine scores at least
-0.35, after excluding cards already present in a text layer. The
+Card-pane semantic retrieval adds up to twelve candidates with cosine scores at
+least 0.35, after excluding cards already present in a text layer. Deck-content
+search retains all candidates above that threshold so one deck cannot crowd
+other matching decks out of the results. The
 threshold is an initial retrieval heuristic, not a probability or accuracy
 claim, and needs refinement with actual deck use. Spelling tolerance comes
 primarily from the fuzzy layer; embeddings add meaning-based recall.
@@ -83,6 +107,11 @@ SQLite cache lives at `<collection directory>/search/embeddings.sqlite`, with
 its own connection and schema. It never modifies the collection's card or
 scheduling tables. No vector database or approximate-nearest-neighbor server
 is required for a selected-deck or library-wide search.
+
+Card search and deck-content search keep independent query state, cancellation,
+results and errors. They share one worker thread, embedding model and vector
+cache. Local inference yields between passages so one search can progress while
+the other is indexing. Changing shared semantic settings restarts both channels.
 
 Cache identity includes model/provider configuration, query/document role and
 the encoded text. Changed content, tags or deck names therefore produces new
@@ -110,6 +139,8 @@ limits. Redirects are rejected for credential-bearing embedding calls.
 Provider mode sends the query and uncached passages for all cards in the
 selected deck, or all cards in the library when no deck is selected, including
 both faces, tags, deck names and derived math terms.
+**Search within decks** searches the entire library regardless of the selected
+deck. In provider mode, it may send uncached passages from every deck.
 The connection dialog explains this before saving. Provider charges may apply.
 Cached vectors avoid repeatedly transmitting unchanged text.
 

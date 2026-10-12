@@ -98,19 +98,28 @@ shows its deck. Card pages fit the available window height, with navigation at
 the top of the Cards pane. Ctrl-click adds individual selections and Shift-click
 selects a contiguous range.
 
+Search icons toggle their fields while preserving active queries. The dropdown
+beside deck search reveals **Search within decks** to search card contents and
+meaning; deck-name and card-content queries are combined with AND. Parent decks
+include matches in their subdecks. The Cards pane's filter button adds tags,
+card type and review-state restrictions, with Ctrl/Shift multi-selection for tags.
+
 Drag a deck onto a row's center to make it a child, or near the row's edge to
 place it alongside that deck. An indented insertion line shows the destination;
 sibling decks remain alphabetically ordered. Drag selected cards onto a deck to
 move them, or choose **Move card** from the shared card menu and type or select
 the destination. Moves preserve review schedules and history.
 
-Settings > Code rendering provides separate dark and light code themes. Fenced
+Settings > Code rendering provides separate dark and light code themes, defaulting
+to Iceberg Dark and Iceberg Light. Fenced
 blocks have one continuous background; inline code has distinct styling.
 Recognized language identifiers select native syntax highlighting. C and C++
 also use an available `clangd` language server for semantic highlighting.
 See [code rendering](docs/code-rendering.md) for configuration and current limits.
 
-Compare three shared menu styles with `./scripts/run-desktop.sh --menu-designs`.
+Shared action menus use the Soft rows treatment with inset rows and grouped
+actions. Atomicize uses an atom glyph and reset uses an empty box.
+Compare the original menu studies with `./scripts/run-desktop.sh --menu-designs`.
 The gallery includes card and deck actions, light/dark modes, and menus opened
 from a right-click or three-dot button. Actions in this gallery are previews.
 
