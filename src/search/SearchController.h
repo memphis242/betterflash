@@ -173,6 +173,7 @@ private:
     bool m_testBusy = false;
     QString m_testStatus;
     QString m_testError;
+    QString m_lastCredentialKey;
     QVariantMap m_testReport;
     bool m_testAfterDownload = false;
 };

@@ -89,14 +89,15 @@ public:
     [[nodiscard]] quint64 complete(const QJsonObject &payload, QObject *context, Completion callback);
     void cancelCompletion(quint64 id);
     std::expected<QNetworkRequest, struct ProviderError> configuredRequest() const;
-    Q_INVOKABLE void setApiKey(const QString &key) { m_credentials->setKey(key); }
-    Q_INVOKABLE void clearApiKey() { m_credentials->clear(); }
+    Q_INVOKABLE void setApiKey(const QString &key);
+    Q_INVOKABLE void clearApiKey();
     Q_INVOKABLE void summarizeRemaining();
     Q_INVOKABLE void summarizeDeck(const QString &deckId);
     Q_INVOKABLE void cancel();
 signals:
     void configurationChanged();
     void keyChanged();
+    void actualCredentialChanged();
     void changed();
     void localChanged();
     void testChanged();
@@ -140,6 +141,7 @@ private:
     QString m_model;
     QString m_status;
     QString m_error;
+    QString m_lastKey;
     QString m_summary;
     QString m_summaryDeckId;
     bool m_busy = false;
