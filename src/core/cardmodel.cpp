@@ -169,7 +169,7 @@ QVariantMap toMap(const struct Card &r)
 QVariantMap toMap(const struct Variant &r)
 { return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty}}; }
 QVariantMap toMap(const struct Review &r)
-{ return {{"id",r.id},{"cardId",r.cardId},{"variantId",r.variantId},{"deckName",r.deckName},{"grade",r.grade},{"recallFraction",r.recallFraction},{"responseSeconds",r.responseSeconds},{"reviewedAt",r.reviewedAt},{"due",r.due}}; }
+{ QVariantMap result{{"id",r.id},{"cardId",r.cardId},{"variantId",r.variantId},{"deckName",r.deckName},{"grade",r.grade},{"recallFraction",r.recallFraction},{"responseSeconds",r.responseSeconds},{"reviewedAt",r.reviewedAt},{"due",r.due}}; if (!r.sessionId.isEmpty()) { result.insert("sessionId",r.sessionId);result.insert("sessionDeckName",r.sessionDeckName);result.insert("sessionStartedAt",r.sessionStartedAt); } return result; }
 
 std::expected<struct Deck, QString> deckFromMap(const QVariantMap &m)
 {
@@ -261,7 +261,24 @@ std::expected<struct Review, QString> reviewFromMap(const QVariantMap &m)
     const auto reviewed = utcInstant(m.value("reviewedAt").toString());
     const auto due = utcInstant(m.value("due").toString());
     if (!reviewed || !due) return std::unexpected(QStringLiteral("Review timestamp is invalid."));
-    return Review{m.value("id").toString(),m.value("cardId").toString(),m.value("variantId").toString(),m.value("deckName").toString(),m.value("grade").toInt(),m.value("recallFraction").toDouble(),m.value("responseSeconds").toDouble(),*reviewed,*due};
+    const QStringList sessionFields{QStringLiteral("sessionId"),QStringLiteral("sessionDeckName"),QStringLiteral("sessionStartedAt")};
+    int sessionFieldCount=0;
+    for (const QString &field : sessionFields) if (m.contains(field)) ++sessionFieldCount;
+    if (sessionFieldCount!=0&&sessionFieldCount!=sessionFields.size())
+        return std::unexpected(QStringLiteral("Review session metadata must be supplied as a complete set."));
+    QString sessionId,sessionDeckName,sessionStartedAt;
+    if (sessionFieldCount==sessionFields.size()) {
+        if (m.value("sessionId").metaType().id()!=QMetaType::QString
+            ||m.value("sessionDeckName").metaType().id()!=QMetaType::QString
+            ||m.value("sessionStartedAt").metaType().id()!=QMetaType::QString)
+            return std::unexpected(QStringLiteral("Review session metadata has an invalid type."));
+        sessionId=m.value("sessionId").toString();sessionDeckName=m.value("sessionDeckName").toString();sessionStartedAt=m.value("sessionStartedAt").toString();
+        const auto started=utcInstant(sessionStartedAt);
+        if (!validUuid(sessionId)||!text(m,"sessionDeckName",256,true)||!text(m,"sessionStartedAt",40,true)||!started)
+            return std::unexpected(QStringLiteral("Review session fields are invalid."));
+        sessionStartedAt=*started;
+    }
+    return Review{m.value("id").toString(),m.value("cardId").toString(),m.value("variantId").toString(),m.value("deckName").toString(),m.value("grade").toInt(),m.value("recallFraction").toDouble(),m.value("responseSeconds").toDouble(),*reviewed,*due,sessionId,sessionDeckName,sessionStartedAt};
 }
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {

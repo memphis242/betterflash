@@ -43,7 +43,7 @@ public:
     void applySyncResponse(const QVariantMap &response);
 
 signals:
-    void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
+    void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
@@ -85,6 +85,9 @@ private:
     bool m_queueDirty = true;
     int m_sessionTotal = 0;
     bool m_sessionActive = false;
+    QString m_sessionId;
+    QString m_sessionDeckName;
+    QString m_sessionStartedAt;
     QString m_sqlDetail;
 
     void assertThread() const;
@@ -131,4 +134,5 @@ private:
     bool recordSequence(const QString &type, const QString &id, qint64 seq);
     bool eventEffects(const QVariantMap &event, qint64 seq, bool executeEffects, bool &applied);
     bool importRecords(const struct betterflash::model::Collection &records);
+    std::expected<QVariantList, QString> reviewSessions();
 };

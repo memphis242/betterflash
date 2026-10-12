@@ -285,10 +285,11 @@ void AppController::loadCardTimeline(const QString &cardId, int offset, const QS
     },Qt::QueuedConnection);
     if (!queued) emit cardTimelineReady(requestedId,{{"requestId",requestedRequestId},{"offset",requestedOffset},{"events",QVariantList{}},{"totalEvents",0},{"hasMore",false},{"nextOffset",0},{"reviewCount",0},{"successfulCount",0},{"averageRecall",0.0},{"averageSeconds",0.0},{"firstRecordedAt",QString()},{"firstSavedAt",QString()},{"error",QVariantMap{{"code","WORKER_UNAVAILABLE"},{"message","Could not load card history. Restart the application."},{"details",QString()}}}});
 }
-void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history)
+void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history,const QVariantList &reviewSessions)
 {
-    m_decks=decks;m_cards=cards;m_history=history;
-    emit decksChanged();emit cardsChanged();emit historyChanged();
+    const bool sessionsChanged=m_reviewSessions!=reviewSessions;
+    m_decks=decks;m_cards=cards;m_history=history;m_reviewSessions=reviewSessions;
+    emit decksChanged();emit cardsChanged();emit historyChanged();if (sessionsChanged) emit reviewSessionsChanged();
     if (!m_selectedDeckId.isEmpty()) {
         const bool exists=std::any_of(m_decks.begin(),m_decks.end(),[&](const QVariant &d){return d.toMap().value("id").toString()==m_selectedDeckId;});
         if (!exists) setSelectedDeckId({});

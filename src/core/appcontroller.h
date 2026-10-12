@@ -17,6 +17,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList decks READ decks NOTIFY decksChanged)
     Q_PROPERTY(QVariantList cards READ cards NOTIFY cardsChanged)
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
+    Q_PROPERTY(QVariantList reviewSessions READ reviewSessions NOTIFY reviewSessionsChanged)
     Q_PROPERTY(QString selectedDeckId READ selectedDeckId WRITE setSelectedDeckId NOTIFY selectedDeckIdChanged)
     Q_PROPERTY(QString storagePath READ storagePath CONSTANT)
     Q_PROPERTY(QString mediaPath READ mediaPath CONSTANT)
@@ -45,6 +46,7 @@ public:
     QVariantList decks() const { return m_decks; }
     QVariantList cards() const { return m_cards; }
     QVariantList history() const { return m_history; }
+    QVariantList reviewSessions() const { return m_reviewSessions; }
     QString selectedDeckId() const { return m_selectedDeckId; }
     QString storagePath() const { return m_storagePath; }
     QString mediaPath() const;
@@ -103,7 +105,7 @@ public:
     Q_INVOKABLE void applySyncResponse(const QVariantMap &response);
 
 signals:
-    void decksChanged(); void cardsChanged(); void historyChanged();
+    void decksChanged(); void cardsChanged(); void historyChanged(); void reviewSessionsChanged();
     void selectedDeckIdChanged(); void statusMessageChanged(); void currentCardChanged();
     void lastErrorChanged(); void busyChanged(); void reviewingChanged();
     void answerRevealedChanged(); void pausedChanged(); void reviewStateChanged();
@@ -121,7 +123,7 @@ signals:
 
 private:
     bool invoke(const std::function<void(DatabaseWorker *)> &call);
-    void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
+    void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
     void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
                      bool inspecting, const QString &cursorVariantId);
@@ -139,7 +141,7 @@ private:
     QString m_statusMessage;
     QString m_spokenAnswer;
     QString m_reviewCursorVariantId;
-    QVariantList m_decks,m_cards,m_history,m_pendingCards,m_reviewCards;
+    QVariantList m_decks,m_cards,m_history,m_reviewSessions,m_pendingCards,m_reviewCards;
     QVariantMap m_currentCard,m_lastError,m_pendingGradeCorrection;
     QSet<QString> m_leftReviewedVariants;
     bool m_busy = true;
