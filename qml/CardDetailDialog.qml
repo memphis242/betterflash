@@ -122,26 +122,19 @@ Dialog {
             }
             AppButton {
                 text: detail.width < 500 ? "Edit" : "Edit card"
+                glyph: "edit"
+                primary: true
                 onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
             }
             GlyphButton {
                 glyph: "more"; hint: "Card actions"
                 onClicked: cardMenu.open()
-                Menu {
+                CardActionsMenu {
                     id: cardMenu
                     y: parent.height
-                    MenuItem { text: "Atomicize card"; onTriggered: detail.ui.openAtomicize(detail.cardId) }
-                    MenuItem {
-                        text: "Reset card"
-                        visible: app.developmentToolsEnabled
-                        height: visible ? implicitHeight : 0
-                        enabled: !app.busy
-                        onTriggered: { detail.close(); detail.ui.confirmReset("card", detail.cardId, detail.ui.compactText(detail.card.front).slice(0, 80)) }
-                    }
-                    MenuItem {
-                        text: "Delete card"
-                        onTriggered: { detail.close(); detail.ui.confirmDelete("card", detail.cardId, detail.ui.compactText(detail.card.front).slice(0, 80)) }
-                    }
+                    ui: detail.ui
+                    cardId: detail.cardId
+                    onBeforeAction: detail.close()
                 }
             }
             GlyphButton { glyph: "close"; hint: "Close card detail"; onClicked: detail.close() }
