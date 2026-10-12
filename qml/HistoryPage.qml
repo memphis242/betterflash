@@ -76,7 +76,8 @@ Item {
                 selectedId: historyPage.selectedSessionId
                 rowHeight: compact ? 88 : 64
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(records.length * rowHeight, ledger.height * 0.45)
+                Layout.preferredHeight: Math.min(records.length * rowHeight, (historyPage.height - 2 * historyPage.ui.gutter) * 0.45)
+                Layout.maximumHeight: Layout.preferredHeight
                 visible: records.length > 0
                 onSessionActivated: id => historyPage.selectSession(id)
             }

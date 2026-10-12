@@ -144,6 +144,18 @@ def validate_variant(record):
     number(record, "difficulty", 0, 1)
 
 
+def review_session(record):
+    fields = ("sessionId", "sessionDeckName", "sessionStartedAt")
+    present = sum(key in record for key in fields)
+    if present == 0:
+        return None
+    if present != len(fields):
+        raise ProtocolError("INVALID_EVENT", "Review session metadata must be supplied as a complete set.")
+    identifiers(record, "sessionId")
+    return (record["sessionId"], text(record, "sessionDeckName", 256, True),
+            instant(text(record, "sessionStartedAt", 40, True)))
+
+
 def validate_review(record):
     identifiers(record, "id", "cardId", "variantId")
     text(record, "deckName", 256, True)
@@ -152,6 +164,7 @@ def validate_review(record):
     number(record, "responseSeconds", 0, 86400)
     instant(text(record, "reviewedAt", 40, True))
     instant(text(record, "due", 40, True))
+    review_session(record)
 
 
 def validate_payload(kind, payload):
@@ -196,6 +209,7 @@ def validate_payload(kind, payload):
                     validate_variant(previous_variant)
                     if (any(review[key] != previous_review[key] for key in ("id", "cardId", "variantId", "deckName", "responseSeconds"))
                             or instant(review["reviewedAt"]) != instant(previous_review["reviewedAt"])
+                            or review_session(review) != review_session(previous_review)
                             or any(variant[key] != previous_variant[key] for key in ("id", "cardId", "key", "reviewCount"))
                             or variant["reviewCount"] < 1
                             or instant(previous_review["due"]) != instant(previous_variant["due"])):
@@ -245,12 +259,41 @@ class Store:
                              "seq INTEGER PRIMARY KEY AUTOINCREMENT,"
                              "event_id TEXT UNIQUE NOT NULL,device_id TEXT NOT NULL,"
                              "event_json TEXT NOT NULL,created_at TEXT NOT NULL)")
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                projected = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_sessions'").fetchone()
+                database.execute("CREATE TABLE IF NOT EXISTS review_sessions("
+                                 "session_id TEXT PRIMARY KEY,deck_name TEXT NOT NULL,started_at TEXT NOT NULL)")
+                if not projected:
+                    for row in database.execute("SELECT event_json FROM events ORDER BY seq"):
+                        self.record_review_session(database, json.loads(row["event_json"]))
+                database.commit()
+            except BaseException:
+                database.rollback()
+                raise
 
     def connect(self):
         database = sqlite3.connect(self.path, timeout=15, isolation_level=None)
         database.row_factory = sqlite3.Row
         database.execute("PRAGMA synchronous=FULL")
         return database
+
+    @staticmethod
+    def record_review_session(database, event):
+        if event["type"] not in ("review.add", "review.correct"):
+            return
+        session = review_session(event["payload"]["review"])
+        if session is None:
+            return
+        session_id, deck_name, started = session
+        started_at = started.isoformat(timespec="milliseconds")
+        existing = database.execute("SELECT deck_name,started_at FROM review_sessions WHERE session_id=?",
+                                    (session_id,)).fetchone()
+        if existing and (existing["deck_name"] != deck_name or existing["started_at"] != started_at):
+            raise ProtocolError("SESSION_CONFLICT", "This session identifier already has a different deck or start time. Refresh the originating client before syncing again.", 409)
+        if not existing:
+            database.execute("INSERT INTO review_sessions(session_id,deck_name,started_at) VALUES(?,?,?)",
+                             (session_id, deck_name, started_at))
 
     def media_sizes(self, event):
         result = {}
@@ -288,6 +331,7 @@ class Store:
                         raise Conflict()
                     if not existing:
                         self.media_sizes(event)
+                        self.record_review_session(database, event)
                         database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
                                          (event["id"], body["deviceId"], canonical, event["createdAt"]))
                     if event["id"] not in accepted:

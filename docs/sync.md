@@ -56,6 +56,18 @@ device before using corrections; older clients reject the new event type.
 For upgraded collections and imported backups without review ownership metadata,
 an exact match to the correction's previous schedule establishes ownership.
 
+Reviews may carry the optional, complete set `sessionId`, `sessionDeckName`, and
+`sessionStartedAt`. These fields identify the selected deck's review run and are
+immutable during a rating correction. All records with the same session ID must
+agree on its deck name and start time; clients reject inconsistent records within
+the import or sync transaction. Reviews without session metadata remain valid.
+
+Upgrade every synced client to the session-history build (local schema 4) before
+using tracked review sessions. Older clients accept review events but discard
+session metadata, leaving their copies as estimated groups after an upgrade.
+The sync protocol does not yet negotiate client capabilities. Upgrade the server
+too, so it validates session fields and their preservation during corrections.
+
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically.
 Upload referenced assets before sending a card event. A card and a received page
 can reference at most 64 unique images and 64 MiB of attached data. The server
