@@ -9,7 +9,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMap>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -1524,6 +1526,181 @@ void DatabaseWorker::loadCardTimeline(const QString &cardId, int offset, const Q
                              {"bestSuccessfulSeconds", bestSuccessfulSeconds}, {"hasSuccessfulReview", successfulCount > 0},
                              {"firstRecordedAt", firstRecordedAt}, {"firstSavedAt", firstSavedAt}, {"error", QVariantMap{}}};
     emit cardTimelineReady(cardId, result);
+}
+
+void DatabaseWorker::loadStudyAnalytics(const QString &deckId, const QString &requestId)
+{
+    assertThread();
+    const QDate today = QDateTime::currentDateTime().date();
+    const QString todayString = today.toString(Qt::ISODate);
+    const auto makeResult = [&](const QVariantList &days, const QVariantMap &stats, const QVariantMap &error,
+                                const QString &firstDate = QString()) {
+        return QVariantMap{{"requestId", requestId}, {"deckId", deckId}, {"today", todayString},
+                           {"firstDate", firstDate.isEmpty() ? todayString : firstDate}, {"days", days},
+                           {"stats", stats}, {"error", error}};
+    };
+    const auto makeError = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        return makeResult({}, {}, {{"code", code}, {"message", message}, {"detail", detail}});
+    };
+    m_sqlDetail.clear();
+    if (!m_db.isValid() || !m_db.isOpen()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("STORAGE_UNAVAILABLE"), QStringLiteral("Could not load study analytics. Storage is unavailable."), m_sqlDetail));
+        return;
+    }
+    if (!deckId.isEmpty() && !model::validUuid(deckId)) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("DECK_ID_INVALID"), QStringLiteral("Choose a saved deck to view its study analytics.")));
+        return;
+    }
+    if (!m_db.transaction()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load a consistent study snapshot. Try refreshing."), m_db.lastError().text()));
+        return;
+    }
+    auto rollbackSnapshot = qScopeGuard([this] { m_db.rollback(); });
+    if (!deckId.isEmpty()) {
+        QSqlQuery scope(m_db);
+        scope.prepare("SELECT id FROM decks WHERE id=?");
+        scope.addBindValue(deckId);
+        if (!scope.exec()) {
+            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
+            return;
+        }
+        if (!scope.next()) {
+            if (scope.lastError().isValid()) {
+                emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), scope.lastError().text()));
+                return;
+            }
+            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("DECK_NOT_FOUND"), QStringLiteral("This deck is unavailable. Refresh the collection.")));
+            return;
+        }
+    }
+
+    QHash<QString, QString> variantDeck;
+    QHash<QString, int> deckVariantCount;
+    QSqlQuery current(m_db);
+    const QString currentSql = deckId.isEmpty()
+        ? QStringLiteral("SELECT n.deck_id,v.id FROM notes n JOIN review_variants v ON v.card_id=n.id ORDER BY n.deck_id,v.id")
+        : QStringLiteral("WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT n.deck_id,v.id FROM notes n JOIN review_variants v ON v.card_id=n.id WHERE n.deck_id IN (SELECT id FROM descendants) ORDER BY n.deck_id,v.id");
+    current.prepare(currentSql);
+    if (!deckId.isEmpty()) current.addBindValue(deckId);
+    if (!current.exec()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
+        return;
+    }
+    while (current.next()) {
+        const QString sourceDeck = current.value(0).toString();
+        const QString variantId = current.value(1).toString();
+        if (sourceDeck.isEmpty() || variantId.isEmpty()) {
+            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid current review variant.")));
+            return;
+        }
+        variantDeck.insert(variantId, sourceDeck);
+        deckVariantCount[sourceDeck] = deckVariantCount.value(sourceDeck) + 1;
+    }
+    if (current.lastError().isValid()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), current.lastError().text()));
+        return;
+    }
+
+    struct ReviewPoint { qint64 at = 0; QString id; int grade = 0; double recall = 0.0; };
+    QHash<QString, struct ReviewPoint> currentLatest;
+    QHash<QString, struct ReviewPoint> previousLatest;
+    struct Day { int count = 0; double recall = 0.0; };
+    QMap<QString, struct Day> dayTotals;
+    const QDate currentStart = today.addDays(-29);
+    const QDate previousStart = today.addDays(-59);
+    const QDate previousEnd = today.addDays(-30);
+    int currentReviewCount = 0;
+    QSqlQuery reviews(m_db);
+    const QString reviewSql = deckId.isEmpty()
+        ? QStringLiteral("SELECT id,variant_id,grade,recall_fraction,reviewed_at FROM reviews ORDER BY reviewed_at,id")
+        : QStringLiteral("WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT r.id,r.variant_id,r.grade,r.recall_fraction,r.reviewed_at FROM reviews r JOIN notes n ON n.id=r.card_id WHERE n.deck_id IN (SELECT id FROM descendants) ORDER BY r.reviewed_at,r.id");
+    reviews.prepare(reviewSql);
+    if (!deckId.isEmpty()) reviews.addBindValue(deckId);
+    if (!reviews.exec()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
+        return;
+    }
+    QString firstDate;
+    while (reviews.next()) {
+        const QString reviewId = reviews.value(0).toString();
+        const QString variantId = reviews.value(1).toString();
+        const int grade = reviews.value(2).toInt();
+        const double recall = reviews.value(3).toDouble();
+        const QString reviewedAt = reviews.value(4).toString();
+        const QDateTime instant = QDateTime::fromString(reviewedAt, Qt::ISODateWithMs);
+        if (reviewId.isEmpty() || variantId.isEmpty() || !instant.isValid() || grade < 0 || grade > 4 || !std::isfinite(recall) || recall < 0.0 || recall > 1.0) {
+            emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_DATA"), QStringLiteral("Study analytics contains an invalid saved review."), reviewedAt));
+            return;
+        }
+        const QDate localDate = instant.toLocalTime().date();
+        if (!localDate.isValid() || localDate > today) continue;
+        const QString localDateString = localDate.toString(Qt::ISODate);
+        if (firstDate.isEmpty() || localDateString < firstDate) firstDate = localDateString;
+        struct Day &day = dayTotals[localDateString];
+        ++day.count; day.recall += recall;
+        const bool inCurrent = localDate >= currentStart && localDate <= today;
+        const bool inPrevious = localDate >= previousStart && localDate <= previousEnd;
+        if (inCurrent) ++currentReviewCount;
+        if (!variantDeck.contains(variantId)) continue;
+        const struct ReviewPoint point{instant.toMSecsSinceEpoch(), reviewId, grade, recall};
+        const auto later = [](const struct ReviewPoint &left, const struct ReviewPoint &right) {
+            return left.at < right.at || (left.at == right.at && left.id < right.id);
+        };
+        if (inCurrent && (!currentLatest.contains(variantId) || later(currentLatest.value(variantId), point))) currentLatest.insert(variantId, point);
+        if (inPrevious && (!previousLatest.contains(variantId) || later(previousLatest.value(variantId), point))) previousLatest.insert(variantId, point);
+    }
+    if (reviews.lastError().isValid()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not load study analytics. Refresh and try again."), reviews.lastError().text()));
+        return;
+    }
+
+    QVariantList days;
+    for (auto it = dayTotals.cbegin(); it != dayTotals.cend(); ++it)
+        days.append(QVariantMap{{"date", it.key()}, {"count", it.value().count}, {"averageRecall", it.value().count > 0 ? it.value().recall / it.value().count : 0.0}});
+    auto observedRecall = [](const QHash<QString, struct ReviewPoint> &latest) {
+        double total = 0.0; for (const struct ReviewPoint &point : latest) total += point.recall;
+        return latest.isEmpty() ? 0.0 : total / latest.size();
+    };
+    const double currentObservedRecall = observedRecall(currentLatest);
+    const double previousObservedRecall = observedRecall(previousLatest);
+    int activeDays = 0;
+    for (auto it = dayTotals.cbegin(); it != dayTotals.cend(); ++it) {
+        const QDate day = QDate::fromString(it.key(), Qt::ISODate);
+        if (day >= currentStart && day <= today) ++activeDays;
+    }
+    QHash<QString, double> deckObservedRecall;
+    QSet<QString> reviewedDeckSet;
+    double gradeTotal = 0.0;
+    for (auto variant = currentLatest.cbegin(); variant != currentLatest.cend(); ++variant) {
+        const QString sourceDeck = variantDeck.value(variant.key());
+        deckObservedRecall[sourceDeck] += variant.value().recall;
+        reviewedDeckSet.insert(sourceDeck);
+        gradeTotal += variant.value().grade;
+    }
+    const int eligibleDecks = deckVariantCount.size();
+    const QVariant averageRecall = currentLatest.isEmpty() ? QVariant{} : QVariant(currentObservedRecall);
+    const QVariant averageGrade = currentLatest.isEmpty() ? QVariant{} : QVariant(gradeTotal / currentLatest.size());
+    double practiceTotal = 0.0;
+    for (auto it = deckVariantCount.cbegin(); it != deckVariantCount.cend(); ++it) {
+        practiceTotal += deckObservedRecall.value(it.key()) / it.value();
+    }
+    const QVariant practiceScore = eligibleDecks == 0 ? QVariant{} : QVariant(100.0 * practiceTotal / eligibleDecks);
+    const QVariant recallChange = (currentLatest.isEmpty() || previousLatest.isEmpty()) ? QVariant{} : QVariant(100.0 * (currentObservedRecall - previousObservedRecall));
+    assert(currentLatest.size() <= variantDeck.size());
+    assert(reviewedDeckSet.size() <= eligibleDecks);
+    assert(activeDays >= 0 && activeDays <= 30);
+    const QVariantMap stats{{"practiceScore", practiceScore}, {"averageRecall", averageRecall}, {"averageGrade", averageGrade},
+                            {"eligibleDecks", eligibleDecks}, {"reviewedDecks", reviewedDeckSet.size()}, {"totalVariants", variantDeck.size()},
+                            {"reviewedVariants", currentLatest.size()}, {"activeDays", activeDays},
+                            {"windowDays", 30}, {"recallChange", recallChange}, {"currentReviewCount", currentReviewCount}};
+    current.finish();
+    reviews.finish();
+    if (!m_db.commit()) {
+        emit studyAnalyticsReady(deckId, makeError(QStringLiteral("ANALYTICS_READ"), QStringLiteral("Could not finish reading study analytics. Try refreshing."), m_db.lastError().text()));
+        return;
+    }
+    rollbackSnapshot.dismiss();
+    emit studyAnalyticsReady(deckId, makeResult(days, stats, {}, firstDate));
 }
 
 void DatabaseWorker::loadExample()

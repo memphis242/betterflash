@@ -101,6 +101,7 @@ public:
     Q_INVOKABLE void importCollection(const QString &path);
     Q_INVOKABLE void loadExampleDeck();
     Q_INVOKABLE void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
+    Q_INVOKABLE void loadStudyAnalytics(const QString &deckId = {}, const QString &requestId = {});
     Q_INVOKABLE void requestSyncBatch(const QString &requestId = {});
     Q_INVOKABLE void applySyncResponse(const QVariantMap &response);
 
@@ -118,6 +119,7 @@ signals:
     void syncResponseApplied(const QString &requestId,bool success,bool hasMore);
     void syncApplied(bool success, bool hasMore);
     void cardTimelineReady(const QString &cardId, const QVariantMap &result);
+    void studyAnalyticsReady(const QString &deckId, const QVariantMap &result);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
 

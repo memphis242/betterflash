@@ -39,6 +39,7 @@ public:
     void importCollection(const QString &path);
     void loadExample();
     void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
+    void loadStudyAnalytics(const QString &deckId = {}, const QString &requestId = {});
     void requestSyncBatch(const QString &requestId);
     void applySyncResponse(const QVariantMap &response);
 
@@ -57,6 +58,7 @@ signals:
     void syncResponseApplied(const QString &requestId,bool success,bool hasMore);
     void syncApplied(bool success, bool hasMore);
     void cardTimelineReady(const QString &cardId, const QVariantMap &result);
+    void studyAnalyticsReady(const QString &deckId, const QVariantMap &result);
 
 private:
     QString m_path;
