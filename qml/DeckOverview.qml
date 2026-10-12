@@ -254,6 +254,7 @@ Item {
                 Layout.preferredWidth: overview.narrow ? overview.width : Math.max(300, Math.min(overview.preferences.paneWidth, overview.width * 0.48))
                 Layout.fillHeight: true
                 deck: overview.selectedDeck
+                mediaRoot: media.rootPath
                 busy: app.busy
                 actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
                 actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)

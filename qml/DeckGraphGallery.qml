@@ -161,6 +161,7 @@ ApplicationWindow {
                 }
             }
             DeckStudyDetails {
+                mediaRoot: deckStudyApp ? deckStudyApp.mediaPath : ""
                 id: details
                 visible: gallery.paneOpen
                 Layout.preferredWidth: Math.max(320, Math.min(gallery.preferences.paneWidth, gallery.width * 0.45))

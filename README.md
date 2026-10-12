@@ -48,16 +48,23 @@ For an isolated demonstration:
 The Review page uses **Branch ledger**: circular deck nodes form a scrollable
 forest, with columns for **Root deck**, **Children**, **Grandchildren**,
 **Great-grandchildren**, and deeper generations. Column headings stay visible
-while scrolling. Branches expand without shrinking the nodes.
+while scrolling. Branches expand without shrinking the nodes. Double-click a
+node to start its review, or right-click for the shared deck actions. An outlined
+**R** badge marks a deck with due review items, including its descendants.
 
 Selecting a deck opens its resizable right pane with due counts, recent review
 performance, a remaining-card summary, and a description. The description area
 uses an I-beam cursor; double-click to edit it in place. Enter, F2 and touch
 long-press also begin editing. Ctrl+Enter saves, Escape cancels, and plain Enter
-inserts a newline. Drafts stay with their deck when navigating away.
+inserts a newline. Source and Preview tabs support Markdown, with a full-width
+Save description button below the text box. Drafts stay with their deck when
+navigating away.
 Descriptions are saved to the collection and queued for sync.
 Start review includes the selected deck's descendants;
-an empty deck offers Add card instead.
+an empty deck offers Add card instead. During a review, End review and Summarize
+remaining cards sit beside Pause/Resume and are also available in the actions
+menu. Defer-to-end and rescheduling remain available while paused, including
+their keyboard shortcuts; neither action resumes the session.
 
 The isolated [review queue design studies](docs/queue-design-studies.md) gallery
 compares twelve native QML queue treatments without opening the collection.
