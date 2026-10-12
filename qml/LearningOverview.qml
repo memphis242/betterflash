@@ -195,7 +195,8 @@ Item {
                     Layout.fillWidth: true
                     visible: !learning.hasError
                     columns: learning.narrow ? 1 : 2
-                    spacing: 26
+                    columnSpacing: 26
+                    rowSpacing: 18
                     CalendarHeatmap {
                         id: learningCalendar
                         Layout.fillWidth: true
