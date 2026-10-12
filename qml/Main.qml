@@ -756,8 +756,18 @@ ApplicationWindow {
                 Layout.preferredHeight: 32
                 BrandMark { anchors.fill: parent }
             }
-            Item {
+            Label {
+                objectName: "pageTitle"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.leftMargin: 6
+                text: ["Review", "Library", "History", "Settings"][window.page] || ""
+                textFormat: Text.PlainText
+                color: Theme.ink
+                font.family: Theme.uiFont
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
             }
             Label {
                 textFormat: Text.PlainText
