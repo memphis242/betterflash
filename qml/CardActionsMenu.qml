@@ -33,6 +33,14 @@ Menu {
     }
     MenuSeparator {}
     MenuItem {
+        text: "Move card"
+        enabled: menu.cardAvailable && !app.busy
+        onTriggered: {
+            menu.beforeAction()
+            menu.ui.openMoveCard(menu.cardId)
+        }
+    }
+    MenuItem {
         text: "Delete card"
         enabled: menu.cardAvailable
         onTriggered: {

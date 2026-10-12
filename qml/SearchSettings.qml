@@ -87,7 +87,7 @@ ColumnLayout {
         AppButton {
             text: "Rebuild search index"
             enabled: !settings.search.downloading
-            hint: "Clear cached embeddings. The next search encodes the selected deck again."
+            hint: "Clear cached embeddings. The next search encodes cards in the active search scope again."
             onClicked: settings.search.rebuildIndex()
         }
     }
@@ -147,7 +147,7 @@ ColumnLayout {
                 width: connectionDialog.contentItem.availableWidth
                 spacing: 12
                 Label {
-                text: "Provider mode sends your query and all cards in the selected deck for encoding, including both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
+                text: "Provider mode sends your query and cards in the search scope for encoding: the selected deck, or the entire library when no deck is selected. This includes both faces, tags, deck names, and derived math terms. Cached cards are reused. Provider charges may apply. A reused language model key must belong to the same service."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true

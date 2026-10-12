@@ -69,7 +69,8 @@ ApplicationWindow {
     property string summarizedQueue: ""
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
+    property bool deckSelectionRestored: false
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || allHistoryDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -227,6 +228,7 @@ ApplicationWindow {
         property bool detailOpen: false
         property int detailWidth: 380
         property string selectedDeckId: ""
+        property bool libraryAllDecks: false
         property string selectedCardId: ""
         property real libraryY: 0
         property int settingsSection: 0
@@ -335,15 +337,14 @@ ApplicationWindow {
         try {
             contexts = JSON.parse(preferences.deckContexts)
         } catch (e) {}
-        if (app.selectedDeckId)
-            contexts[app.selectedDeckId] = {
-                card: selectedCardId,
-                detail: detailOpen,
-                scroll: libraryScrollY,
-                search: cardSearchText
-            }
+        contexts[app.selectedDeckId || "__library__"] = {
+            card: selectedCardId,
+            detail: detailOpen,
+            scroll: libraryScrollY,
+            search: cardSearchText
+        }
         preferences.deckContexts = JSON.stringify(contexts)
-        const saved = contexts[id] || ({})
+        const saved = contexts[id || "__library__"] || ({})
         restoringDeck = true
         app.selectedDeckId = id
         preferences.selectedDeckId = id
@@ -391,6 +392,13 @@ ApplicationWindow {
         }
         editingCardId = id || ""
         cardDialog.open()
+    }
+    function openMoveCard(id) {
+        if (!cardById(id).id)
+            return
+        if (detailDialog.visible)
+            detailDialog.close()
+        moveCardDialog.openFor([id])
     }
     function focusEditorSource() {
         if (!cardDialog.visible || editorTabs.currentIndex !== 0)
@@ -1088,6 +1096,27 @@ ApplicationWindow {
             color: Theme.surface
             radius: 16
             border.color: Theme.ledgerRule
+        }
+        header: Item {
+            implicitHeight: 76
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: cardDialog.padding
+                anchors.rightMargin: cardDialog.padding
+                anchors.topMargin: 18
+                anchors.bottomMargin: 12
+                spacing: 16
+                Label {
+                    text: cardDialog.title
+                    font.family: Theme.uiFont
+                    font.pixelSize: 24
+                    font.bold: true
+                    color: Theme.ink
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                GlyphButton { glyph: "close"; hint: "Close card editor"; onClicked: cardDialog.close() }
+            }
         }
         onOpened: {
             window.editorSession += 1
@@ -2053,6 +2082,10 @@ ApplicationWindow {
         objectName: "cardDetailDialog"
         ui: window
     }
+    MoveCardDialog {
+        id: moveCardDialog
+        ui: window
+    }
     Sheet {
         id: allHistoryDialog
         objectName: "allHistoryDialog"
@@ -2130,16 +2163,18 @@ ApplicationWindow {
                     return
                 }
             }
-            if (!app.selectedDeckId || !window.deckById(app.selectedDeckId).id) {
+            if (!window.deckSelectionRestored) {
+                window.deckSelectionRestored = true
                 const saved = window.deckById(preferences.selectedDeckId)
-                if (saved.id)
-                    app.selectedDeckId = saved.id
-                else
-                    app.selectedDeckId = app.decks.length ? app.decks[0].id : ""
+                app.selectedDeckId = preferences.libraryAllDecks ? "" : saved.id || (app.decks.length ? app.decks[0].id : "")
+            } else if (app.selectedDeckId && !window.deckById(app.selectedDeckId).id) {
+                app.selectedDeckId = ""
             }
         }
         function onSelectedDeckIdChanged() {
             preferences.selectedDeckId = app.selectedDeckId
+            if (window.deckSelectionRestored)
+                preferences.libraryAllDecks = !app.selectedDeckId
         }
         function onCardsChanged() {
             if (window.selectedCardId && !window.cardById(window.selectedCardId).id) {
