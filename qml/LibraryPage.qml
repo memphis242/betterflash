@@ -1026,6 +1026,16 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
+                    GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
+                    Label {
+                        text: library.cardPages.length > 0 ? (library.boundedPageIndex + 1) + " / " + library.cardPages.length : "0 / 0"
+                        color: Theme.ink; font.family: Theme.monoFont; font.pixelSize: 12
+                        ToolTip.visible: pageHover.hovered
+                        ToolTip.text: "Page " + (library.cardPages.length > 0 ? library.boundedPageIndex + 1 : 0) + " of " + library.cardPages.length + ". Page size fits the available height."
+                        HoverHandler { id: pageHover }
+                    }
+                    GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
+                    Item { Layout.fillWidth: true }
                     ToolButton {
                         id: addCardButton
                         implicitWidth: 40
@@ -1053,16 +1063,6 @@ Item {
                         hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
                         onClicked: cardFilters.opened ? cardFilters.close() : cardFilters.open()
                     }
-                    Item { Layout.fillWidth: true }
-                    GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
-                    Label {
-                        text: library.cardPages.length > 0 ? (library.boundedPageIndex + 1) + " / " + library.cardPages.length : "0 / 0"
-                        color: Theme.ink; font.family: Theme.monoFont; font.pixelSize: 12
-                        ToolTip.visible: pageHover.hovered
-                        ToolTip.text: "Page " + (library.cardPages.length > 0 ? library.boundedPageIndex + 1 : 0) + " of " + library.cardPages.length + ". Page size fits the available height."
-                        HoverHandler { id: pageHover }
-                    }
-                    GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
                 }
                 RowLayout {
                     Layout.fillWidth: true; visible: library.cardSearchVisible; spacing: 6
@@ -1315,11 +1315,23 @@ Item {
     }
     CardFilterPopup {
         id: cardFilters
-        parent: library
+        parent: cardFilterButton
+        property real availableBelow: 520
         width: Math.min(380, library.width - 24)
-        height: Math.min(520, library.height - 24)
-        x: Math.max(12, Math.min(library.width - width - 12, cardFilterButton.mapToItem(library, 0, 0).x))
-        y: Math.max(12, Math.min(library.height - height - 12, cardFilterButton.mapToItem(library, 0, cardFilterButton.height + 8).y))
+        height: Math.min(520, availableBelow)
+        x: cardFilterButton.width - width
+        y: cardFilterButton.height + 8
+        margins: 12
+        function fitBelowButton() {
+            const top = cardFilterButton.mapToItem(library, 0, cardFilterButton.height + 8).y
+            availableBelow = Math.max(0, library.height - top - 12)
+        }
+        onAboutToShow: fitBelowButton()
+        Connections {
+            target: library
+            function onHeightChanged() { if (cardFilters.visible) Qt.callLater(cardFilters.fitBelowButton) }
+            function onWidthChanged() { if (cardFilters.visible) Qt.callLater(cardFilters.fitBelowButton) }
+        }
         tags: library.availableTags
         selectedTags: library.filterTags
         selectedKind: library.filterKind
