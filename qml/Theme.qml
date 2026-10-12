@@ -33,6 +33,10 @@ QtObject {
     readonly property color recallHard: dark ? "#e7a17d" : "#a34b34"
     readonly property color recallGood: dark ? "#a9c79b" : "#38704a"
     readonly property color recallEasy: dark ? "#91c9b6" : "#286c5c"
+    readonly property color activityLow: dark ? "#3b5140" : "#c3d8bd"
+    readonly property color activityMedium: dark ? "#53704e" : "#8cb581"
+    readonly property color activityHigh: dark ? "#7d9b69" : "#5e8e56"
+    readonly property color activityPeak: dark ? "#b2ca93" : "#315f3c"
     readonly property var recallHoverFills: dark ? ["#54333c", "#54462f", "#593c31", "#344b39", "#304c48"] : ["#f1d6d7", "#f2e6c8", "#f3ded3", "#dcebdc", "#d7ebe5"]
     readonly property var tagFills: dark ? ["#58406d", "#80543f", "#42684f", "#813f4b"] : ["#e4d4ed", "#f0d8c8", "#d4e5d5", "#efd4d7"]
     readonly property var tagInks: dark ? ["#f4e8fb", "#fff0e4", "#e6f5e7", "#ffe8eb"] : ["#4b315c", "#693b26", "#2f5438", "#6b2934"]
