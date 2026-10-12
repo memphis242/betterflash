@@ -160,6 +160,7 @@ private:
     void persistConfiguration() const;
     void setModelTestState(bool busy, const QString &status, const QString &error = {});
     void configureDownloads(bool onlyTts = false);
+    void configureSttDownloads();
     void continuePendingOperations();
     void beginSttTest();
     void finishSttTest(bool passed, const QString &message, const QString &error = {});

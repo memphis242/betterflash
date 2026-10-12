@@ -50,6 +50,7 @@ the official Sherpa C API header used to describe the downloaded runtime ABI.
 | --- | --- | --- |
 | Vosk native runtime | [Vosk API 0.3.45](https://github.com/alphacep/vosk-api/tree/v0.3.45) and its official Linux x64 wheel | [Apache-2.0](https://github.com/alphacep/vosk-api/blob/v0.3.45/COPYING) |
 | Vosk small English model | [vosk-model-small-en-us-0.15](https://alphacephei.com/vosk/models) | Apache-2.0 as listed in the model catalog |
+| Vosk English balanced model | [vosk-model-en-us-0.22-lgraph](https://alphacephei.com/vosk/models) | Apache-2.0 as listed in the model catalog |
 | Sherpa-ONNX C API/runtime | [Sherpa-ONNX 1.10.46](https://github.com/k2-fsa/sherpa-onnx/tree/v1.10.46) | [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/v1.10.46/LICENSE) for Sherpa's own code |
 | Embedded espeak-ng phonemizer | [csukuangfj/espeak-ng f6fed6c58b5e0998b8e68c6610125e2d07d595a7](https://github.com/csukuangfj/espeak-ng/tree/f6fed6c58b5e0998b8e68c6610125e2d07d595a7) | [GPL-3.0-or-later](https://github.com/csukuangfj/espeak-ng/blob/f6fed6c58b5e0998b8e68c6610125e2d07d595a7/src/libespeak-ng/speech.c), [license text](https://github.com/csukuangfj/espeak-ng/blob/f6fed6c58b5e0998b8e68c6610125e2d07d595a7/COPYING) |
 | Sherpa's companion ONNX Runtime | [ONNX Runtime 1.17.1](https://github.com/microsoft/onnxruntime/tree/v1.17.1) | [MIT](https://github.com/microsoft/onnxruntime/blob/v1.17.1/LICENSE) |

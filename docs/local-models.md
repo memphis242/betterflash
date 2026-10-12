@@ -44,8 +44,9 @@ voice's subjective quality. Listen to the sample to evaluate its clarity.
 
 ## Speech
 
-Fedora x86-64 uses the managed Vosk small English recognition model and a
-native runtime. Local speech synthesis uses a managed Piper/Sherpa-ONNX voice;
+Fedora x86-64 uses the managed Vosk English 0.22 lgraph recognition model and a
+native runtime. The compact Vosk small English profile remains available for
+lower-memory devices and is the intended Android profile. Local speech synthesis uses a managed Piper/Sherpa-ONNX voice;
 the compact Amy low profile and desktop LJSpeech medium profile are available.
 Speech assets are downloaded on demand. See [Voice review](voice.md) for package sizes, validation,
 licensing notes, and the current Android boundary.
@@ -67,7 +68,7 @@ There is no Python interpreter or separate local inference server.
 | Feature | Model files and execution | Current device support | Allocation lifetime |
 | --- | --- | --- | --- |
 | Language | Gemma/LFM quantized GGUF through llama.cpp | CPU, or Vulkan GPU with sufficient free memory | One request at a time; model and context released after completion |
-| Recognition | Vosk small English through the Vosk C API | CPU | Loaded by the recognition worker while voice recognition is enabled; separate validation workers release their model afterward |
+| Recognition | Vosk English 0.22 lgraph through the Vosk C API (compact 0.15 profile also available) | CPU | Loaded by the recognition worker while voice recognition is enabled; separate validation workers release their model afterward |
 | Speech output | Piper ONNX voices through Sherpa-ONNX, with eSpeak phonemization | CPU, up to four inference threads | Loaded lazily; voice model released after 30 seconds idle |
 | Embeddings | Quantized BGE ONNX through ONNX Runtime | CPU, four desktop threads or two compact threads | Search worker retains its selected model for reuse; standalone validation releases its model after the check |
 

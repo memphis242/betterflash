@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QLibrary>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QMediaDevices>
@@ -29,6 +30,14 @@
 #endif
 
 namespace {
+constexpr int kCurrentSttProfileVersion = 2;
+
+QString managedSttModelDirectory(const QString &root, const QString &profile) {
+    Q_ASSERT(profile == QStringLiteral("small-en") || profile == QStringLiteral("balanced-en"));
+    return QDir(root).filePath(profile == QStringLiteral("balanced-en")
+        ? QStringLiteral("model-balanced-en") : QStringLiteral("model"));
+}
+
 QStringList validationWords(const QString &text) {
     return text.trimmed().toCaseFolded().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
 }
@@ -79,19 +88,41 @@ VoiceController::VoiceController(QObject *parent)
 #endif
     QSettings settings;
     settings.beginGroup(QStringLiteral("voice"));
-    m_modelPath = settings.value(QStringLiteral("modelPath")).toString();
-    if (m_modelPath.isEmpty()) m_modelPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
+    const QString storedModelPath = settings.value(QStringLiteral("modelPath")).toString().trimmed();
+    const QString storedProfile = settings.value(QStringLiteral("sttProfile")).toString().trimmed();
+    const int storedProfileVersion = settings.value(QStringLiteral("sttProfileVersion"), 0).toInt();
+    const bool desktop =
+#if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+        true;
+#else
+        false;
+#endif
+    m_sttProfile = desktop ? QStringLiteral("balanced-en") : QStringLiteral("small-en");
+    if (storedProfileVersion >= kCurrentSttProfileVersion
+        && (storedProfile == QStringLiteral("small-en") || storedProfile == QStringLiteral("balanced-en")))
+        m_sttProfile = storedProfile;
+    const QString oldManagedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
+    const bool oldManagedDefault = storedModelPath.isEmpty() || storedModelPath == oldManagedPath;
+    if (!desktop && storedProfileVersion < kCurrentSttProfileVersion)
+        m_sttProfile = QStringLiteral("small-en");
+    if (storedModelPath.isEmpty() || (desktop && storedProfileVersion < kCurrentSttProfileVersion && oldManagedDefault))
+        m_modelPath = managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile);
+    else
+        m_modelPath = storedModelPath;
     const QString provider = settings.value(QStringLiteral("provider"), QStringLiteral("local")).toString().trimmed().toLower();
     if (provider == QStringLiteral("local") || provider == QStringLiteral("groq")) m_sttProvider = provider;
     const QString model = settings.value(QStringLiteral("sttModel"), m_sttModel).toString().trimmed();
     static const QRegularExpression validModel(QStringLiteral(R"(^[A-Za-z0-9._:-]{1,128}$)"));
     if (validModel.match(model).hasMatch()) m_sttModel = model;
-    const QString profile = settings.value(QStringLiteral("sttProfile"), m_sttProfile).toString().trimmed();
-    if (profile == QStringLiteral("small-en")) m_sttProfile = profile;
     const QString ttsProvider = settings.value(QStringLiteral("ttsProvider"), m_ttsProvider).toString().trimmed().toLower();
     if (ttsProvider == QStringLiteral("local") || ttsProvider == QStringLiteral("system")) m_ttsProvider = ttsProvider;
     const QString ttsProfile = settings.value(QStringLiteral("ttsProfile"), m_ttsProfile).toString().trimmed();
     if (ttsProfile == QStringLiteral("amy-low") || ttsProfile == QStringLiteral("ljspeech-medium")) m_ttsProfile = ttsProfile;
+    if (storedProfileVersion < kCurrentSttProfileVersion) {
+        settings.setValue(QStringLiteral("sttProfileVersion"), kCurrentSttProfileVersion);
+        settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
+        settings.setValue(QStringLiteral("modelPath"), m_modelPath);
+    }
     configureDownloads();
     for (ModelDownload *const download : {m_sttDownload, m_ttsDownload, m_fixtureDownload}) {
         connect(download, &ModelDownload::changed, this, [this] { emit modelReadinessChanged(); });
@@ -174,6 +205,7 @@ void VoiceController::persistConfiguration() const {
     settings.setValue(QStringLiteral("provider"), m_sttProvider);
     settings.setValue(QStringLiteral("sttModel"), m_sttModel);
     settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
+    settings.setValue(QStringLiteral("sttProfileVersion"), kCurrentSttProfileVersion);
     settings.setValue(QStringLiteral("ttsProvider"), m_ttsProvider);
     settings.setValue(QStringLiteral("ttsProfile"), m_ttsProfile);
 }
@@ -228,16 +260,25 @@ void VoiceController::setSttModel(const QString &model) {
 
 void VoiceController::setSttProfile(const QString &profile) {
     const QString value = profile.trimmed();
-    if (value != QStringLiteral("small-en")) {
-        setError(QStringLiteral("VOICE_PROFILE_INVALID"), QStringLiteral("Choose the small English recognition profile."));
+    if (value != QStringLiteral("small-en") && value != QStringLiteral("balanced-en")) {
+        setError(QStringLiteral("VOICE_PROFILE_INVALID"), QStringLiteral("Choose a supported English recognition profile."));
         return;
     }
     if (m_sttProfile == value) return;
     if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech profile changed."));
     m_sttProfile = value;
+    const QString managedPath = managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile);
+    if (m_modelPath != managedPath) {
+        m_modelPath = managedPath;
+        emit modelPathChanged();
+    }
     resetSttTestReport();
+    configureSttDownloads();
     persistConfiguration();
     emit sttProfileChanged();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    emit modelReadinessChanged();
+    if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }
 
 void VoiceController::setTtsProvider(const QString &provider) {
@@ -282,18 +323,7 @@ void VoiceController::configureDownloads(const bool onlyTts) {
     }
 #if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
     if (!onlyTts) {
-        m_sttDownload->configure({
-            {QUrl(QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")),
-                QStringLiteral("vosk-model-small-en-us-0.15.zip"), 41205931,
-                QByteArrayLiteral("30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"),
-                QStringLiteral("vosk-model-small-en-us-0.15/"), QStringLiteral("model")},
-            {QUrl(QStringLiteral("https://files.pythonhosted.org/packages/fc/ca/83398cfcd557360a3d7b2d732aee1c5f6999f68618d1645f38d53e14c9ff/vosk-0.3.45-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl")),
-                QStringLiteral("vosk-0.3.45-linux-x64.whl"), 7173758,
-                QByteArrayLiteral("25e025093c4399d7278f543568ed8cc5460ac3a4bf48c23673ace1e25d26619f"),
-                QStringLiteral("vosk/"), QStringLiteral("runtime")},
-            {QUrl(QStringLiteral("https://raw.githubusercontent.com/alphacep/vosk-api/v0.3.45/COPYING")),
-                QStringLiteral("licenses/Vosk-Apache-2.0.txt"), 10173,
-                QByteArrayLiteral("bb618af833c817ab01c1564bd3ec75ba4b4f9cf30910a4a2168e30a674ee8cc6"), {}, {}}});
+        configureSttDownloads();
     }
     const struct ModelDownloadAsset runtime{QUrl(QStringLiteral("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.10.46/sherpa-onnx-v1.10.46-linux-x64-shared.tar.bz2")),
         QStringLiteral("sherpa-onnx-v1.10.46-linux-x64-shared.tar.bz2"), 20540943,
@@ -322,9 +352,36 @@ void VoiceController::configureDownloads(const bool onlyTts) {
 #endif
 }
 
+void VoiceController::configureSttDownloads() {
+#if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+    const bool balanced = m_sttProfile == QStringLiteral("balanced-en");
+    const struct ModelDownloadAsset model{
+        QUrl(balanced ? QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip")
+            : QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")),
+        balanced ? QStringLiteral("vosk-model-en-us-0.22-lgraph.zip") : QStringLiteral("vosk-model-small-en-us-0.15.zip"),
+        balanced ? 130557655 : 41205931,
+        balanced ? QByteArrayLiteral("d9838b4aaa82a75c4a17f5aca300eaca129aaab2a7cbf951bafbb500eb9c4334")
+                 : QByteArrayLiteral("30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"),
+        balanced ? QStringLiteral("vosk-model-en-us-0.22-lgraph/") : QStringLiteral("vosk-model-small-en-us-0.15/"),
+        balanced ? QStringLiteral("model-balanced-en") : QStringLiteral("model")};
+    const QSignalBlocker suppressCanceledDownloadSignals(m_sttDownload);
+    m_sttDownload->configure({model,
+        {QUrl(QStringLiteral("https://files.pythonhosted.org/packages/fc/ca/83398cfcd557360a3d7b2d732aee1c5f6999f68618d1645f38d53e14c9ff/vosk-0.3.45-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl")),
+            QStringLiteral("vosk-0.3.45-linux-x64.whl"), 7173758,
+            QByteArrayLiteral("25e025093c4399d7278f543568ed8cc5460ac3a4bf48c23673ace1e25d26619f"),
+            QStringLiteral("vosk/"), QStringLiteral("runtime")},
+        {QUrl(QStringLiteral("https://raw.githubusercontent.com/alphacep/vosk-api/v0.3.45/COPYING")),
+            QStringLiteral("licenses/Vosk-Apache-2.0.txt"), 10173,
+            QByteArrayLiteral("bb618af833c817ab01c1564bd3ec75ba4b4f9cf30910a4a2168e30a674ee8cc6"), {}, {}}});
+    emit modelReadinessChanged();
+#else
+    m_sttDownload->configure({});
+#endif
+}
+
 bool VoiceController::sttModelReady() const {
     if (m_sttProvider == QStringLiteral("groq")) return m_secret->hasKey();
-    if (m_modelPath == QDir(m_sttDownload->directory()).filePath(QStringLiteral("model")) && !m_sttDownload->ready()) return false;
+    if (m_modelPath == managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile) && !m_sttDownload->ready()) return false;
     const QDir modelDirectory(m_modelPath);
     if (!modelDirectory.exists()) return false;
     const QStringList libraryCandidates = {qEnvironmentVariable("BETTERFLASH_VOSK_LIBRARY"),
@@ -341,7 +398,16 @@ bool VoiceController::sttModelReady() const {
 
 QString VoiceController::sttModelStatus() const {
     if (m_sttProvider == QStringLiteral("groq")) return m_secret->hasKey() ? QStringLiteral("Groq key is available") : QStringLiteral("Add a Groq API key");
-    if (sttModelReady()) return QStringLiteral("Small English recognition is ready for offline use");
+    const QString managedPath = managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile);
+    if (sttModelReady()) {
+        if (m_modelPath != managedPath) return QStringLiteral("Custom speech recognition model is ready for offline use");
+        return m_sttProfile == QStringLiteral("balanced-en")
+            ? QStringLiteral("Vosk English 0.22 balanced recognition is ready for offline use")
+            : QStringLiteral("Vosk small English recognition is ready for offline use");
+    }
+    if (m_modelPath != managedPath)
+        return m_modelPath.isEmpty() ? QStringLiteral("Choose a local speech recognition model path")
+            : QStringLiteral("Custom speech recognition path is unavailable: %1").arg(m_modelPath);
 #if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
     return m_sttDownload->error().isEmpty() ? m_sttDownload->status() : m_sttDownload->error();
 #else
@@ -370,8 +436,8 @@ double VoiceController::ttsModelProgress() const { return m_ttsDownload->progres
 
 void VoiceController::downloadSttModel() {
     if (m_sttProvider != QStringLiteral("local")) return;
-    const QString managedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
-    if (m_modelPath != managedPath) { m_modelPath = managedPath; persistConfiguration(); m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key()); emit modelPathChanged(); }
+    const QString managedPath = managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile);
+    if (m_modelPath != managedPath) setModelPath(managedPath);
     m_sttDownload->start();
 }
 void VoiceController::downloadTtsModel() { if (m_ttsProvider == QStringLiteral("local")) m_ttsDownload->start(); }

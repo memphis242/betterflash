@@ -9,7 +9,7 @@ does not start a microphone or load inference models.
 ## Managed local speech
 
 On Fedora x86-64, enabling voice or using a prepared local model loads Vosk's
-small English model and its native runtime inside the application. The
+balanced English model and its native runtime inside the application. The
 **Download local model** action obtains those files; testing requires them to be
 prepared and does not download them. Reading uses the same separate download
 step for a Piper voice with a pinned Sherpa-ONNX runtime. No
@@ -20,7 +20,8 @@ verified files for later offline use. The first download needs Internet access.
 
 | Purpose | Default | Download | Inference |
 | --- | --- | --- | --- |
-| Recognition | Vosk small English 0.15 | 41.2 MB model + 7.2 MB runtime | CPU, native streaming recognition |
+| Recognition | Vosk English 0.22 lgraph (balanced desktop default) | 130.6 MB model + 7.2 MB runtime | CPU, native streaming recognition |
+| Compact recognition | Vosk small English 0.15 (explicit compact profile) | 41.2 MB model + shared runtime | CPU, native streaming recognition |
 | Desktop reading | Piper LJSpeech medium | 67.2 MB voice + 20.5 MB runtime | CPU, at most four threads, 22,050 Hz |
 | Compact reading profile | Piper Amy low | 67.1 MB voice + shared runtime | CPU, at most four threads, 16,000 Hz |
 
@@ -75,8 +76,11 @@ card, or populate an answer. A recognition test is bounded to 45 seconds after
 asset preparation, and cloud requests have their own 30-second timeout.
 [Official validation recording](https://github.com/alphacep/vosk-api/tree/v0.3.45/python/example)
 
-The bundled small Vosk profile is a basic offline baseline. Its validation
-result distinguishes an exact phrase match from a completed transcription
+The balanced Vosk profile is the desktop baseline. It produced an exact phrase
+match on three consecutive runs of the official recording on the development
+machine, with no grammar or vocabulary hints. This is a fixture result, not a
+guarantee for arbitrary microphones or speech. The validation result
+distinguishes an exact phrase match from a completed transcription
 whose words differ, and retains the transcript and word-level error counts so
 model quality is visible rather than reported as an opaque pass or failure.
 

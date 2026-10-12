@@ -93,11 +93,11 @@ ColumnLayout {
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
-                model: ["Vosk small English (41 MB download)"]
-                currentIndex: 0
-                onActivated: voice.sttProfile = "small-en"
+                model: ["Vosk English 0.22 / balanced (131 MB download)", "Vosk small English 0.15 / compact (41 MB download)"]
+                currentIndex: voice.sttProfile === "small-en" ? 1 : 0
+                onActivated: voice.sttProfile = currentIndex === 0 ? "balanced-en" : "small-en"
                 ToolTip.visible: hovered
-                ToolTip.text: "Choose the local speech recognition profile"
+                ToolTip.text: "Choose balanced desktop recognition or the compact profile intended for Android"
             }
             ModelStatus {
                 visible: sttProvider.currentIndex === 0
