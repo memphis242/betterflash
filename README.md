@@ -166,6 +166,13 @@ reviews of the same deck, on the same UTC date, with no gap over 30 minutes.
 Rating corrections update the totals without adding another answer or changing
 its recorded time. Resetting or deleting a deck preserves its past reviews.
 
+The learning overview below the lists combines a calendar heatmap with
+provisional recall, coverage, consistency and trend statistics. Its filter scopes
+the view to one deck and its children; the default is the entire library. Review
+deck details include a compact heatmap, and **Heatmap** in Review or Library deck
+actions opens the full calendar. See [learning overview](docs/learning-overview.md)
+for the score formula and the treatment of unreviewed, moved and deleted cards.
+
 ### Development reset controls
 
 Desktop builds made with `scripts/build-desktop.sh` include **Reset deck** on the
