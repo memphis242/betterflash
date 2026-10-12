@@ -9,6 +9,7 @@ find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Sql Netwo
 qt_standard_project_setup(REQUIRES 6.6)
 include(cmake/MicroTeX.cmake)
 include(cmake/OnnxRuntime.cmake)
+include(cmake/SyntaxHighlighting.cmake)
 include(GNUInstallDirs)
 
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/core/*.h)
@@ -25,9 +26,12 @@ add_library(betterflash_voice STATIC ${VOICE_SOURCES})
 target_include_directories(betterflash_voice PUBLIC src)
 target_link_libraries(betterflash_voice PUBLIC Qt6::Core Qt6::Multimedia Qt6::TextToSpeech Qt6::Network)
 
-add_library(betterflash_render STATIC src/render/MarkdownView.cpp src/render/MarkdownView.h)
+file(GLOB RENDER_SOURCES CONFIGURE_DEPENDS src/render/*.cpp src/render/*.h)
+add_library(betterflash_render STATIC ${RENDER_SOURCES})
 target_include_directories(betterflash_render PUBLIC src)
-target_link_libraries(betterflash_render PUBLIC Qt6::Quick Qt6::Network PRIVATE betterflash_tex)
+target_link_libraries(betterflash_render PUBLIC Qt6::Quick Qt6::Network KF6SyntaxHighlighting PRIVATE betterflash_tex)
+file(GLOB CODE_THEMES CONFIGURE_DEPENDS src/render/themes/*.theme)
+qt_add_resources(betterflash_render code_themes PREFIX /betterflash-code/themes BASE src/render/themes FILES ${CODE_THEMES})
 qt_add_resources(betterflash_render math_assets PREFIX /tex BASE "${microtex_SOURCE_DIR}/res"
     FILES ${MICROTEX_RESOURCES})
 

@@ -1,4 +1,5 @@
 #include "MarkdownView.h"
+#include "CodeRendering.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QCache>
@@ -17,6 +18,9 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextImageFormat>
+#include <QTextFrame>
+#include <QBitArray>
+#include <QUuid>
 #include <QThread>
 #include <QTimer>
 #include <algorithm>
@@ -89,40 +93,41 @@ QImage renderMath(const QString &formula, const QColor &foreground, const qreal 
     return image;
 }
 
-const QHash<QString, QString> &keywordPatterns() {
-    static const QHash<QString, QString> patterns{
-        {QStringLiteral("python"), QStringLiteral("\\b(?:def|class|return|if|elif|else|for|while|in|import|from|as|with|try|except|raise|yield|async|await|None|True|False|and|or|not|pass)\\b")},
-        {QStringLiteral("cpp"), QStringLiteral("\\b(?:const|constexpr|consteval|static_assert|auto|struct|class|return|if|else|for|while|switch|case|break|namespace|using|template|typename|public|private|protected|int|double|float|bool|void|nullptr|true|false|include|std)\\b")},
-        {QStringLiteral("rust"), QStringLiteral("\\b(?:fn|let|mut|const|pub|impl|struct|enum|trait|use|mod|match|if|else|for|while|loop|return|Self|self|Some|None|Ok|Err|true|false|async|await)\\b")},
-        {QStringLiteral("javascript"), QStringLiteral("\\b(?:const|let|var|function|class|return|if|else|for|while|switch|case|break|import|export|from|async|await|new|throw|try|catch|interface|type|extends|implements|public|private|true|false|null|undefined)\\b")},
-        {QStringLiteral("sql"), QStringLiteral("\\b(?:SELECT|FROM|WHERE|JOIN|INNER|OUTER|LEFT|RIGHT|ON|GROUP|BY|ORDER|ASC|DESC|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|INDEX|PRIMARY|KEY|NULL|NOT|AND|OR|LIMIT|AS|DISTINCT|COUNT|SUM)\\b")},
-        {QStringLiteral("shell"), QStringLiteral("\\b(?:if|then|else|elif|fi|for|in|do|done|while|case|esac|function|export|local|set|echo|printf|sudo)\\b")},
-        {QStringLiteral("json"), QStringLiteral("\\b(?:true|false|null)\\b")}
-    };
-    return patterns;
-}
-QString normalizedLanguage(QString language) {
-    language = language.toLower();
-    static const QHash<QString, QString> aliases{
-        {QStringLiteral("c++"), QStringLiteral("cpp")}, {QStringLiteral("c"), QStringLiteral("cpp")},
-        {QStringLiteral("cc"), QStringLiteral("cpp")}, {QStringLiteral("h"), QStringLiteral("cpp")},
-        {QStringLiteral("py"), QStringLiteral("python")}, {QStringLiteral("js"), QStringLiteral("javascript")},
-        {QStringLiteral("ts"), QStringLiteral("javascript")}, {QStringLiteral("typescript"), QStringLiteral("javascript")},
-        {QStringLiteral("bash"), QStringLiteral("shell")}, {QStringLiteral("sh"), QStringLiteral("shell")},
-        {QStringLiteral("rs"), QStringLiteral("rust")}
-    };
-    return aliases.value(language, language);
-}
+
 }
 
 MarkdownView::MarkdownView(QQuickItem *parent) : QQuickPaintedItem(parent), m_document(this) {
     setAntialiasing(true);
     m_document.setUndoRedoEnabled(false);
     m_document.setDocumentMargin(0);
+    connect(this, &QQuickItem::visibleChanged, this, [this] {
+        m_requestedCodeKeys.clear();
+        if (!isVisible()) CodeRendering::instance()->setVisibleSources(this, {});
+        scheduleRender();
+    });
+    connect(this, &QQuickItem::windowChanged, this, &MarkdownView::scheduleRender);
+    connect(CodeRendering::instance(), &CodeRendering::semanticCapacityAvailable, this, [this] {
+        if (isVisible() && m_waitingForCodeCapacity) scheduleRender();
+    });
+    connect(CodeRendering::instance(), &CodeRendering::changed, this, [this] {
+        m_requestedCodeKeys.clear();
+        scheduleRender();
+    });
+    connect(CodeRendering::instance(), &CodeRendering::tokensReady, this, [this](const QString &key) {
+        if (m_codeKeys.contains(key)) scheduleRender();
+    });
+}
+void MarkdownView::setDarkMode(const bool dark) {
+    if (m_darkMode == dark) return;
+    m_darkMode = dark;
+    emit styleChanged();
+    scheduleRender();
 }
 void MarkdownView::setMarkdown(const QString &markdown) {
     if (m_markdown == markdown) return;
     m_markdown = markdown;
+    m_requestedCodeKeys.clear();
+    CodeRendering::instance()->setVisibleSources(this, {});
     m_imageErrors.clear();
     emit markdownChanged();
     scheduleRender();
@@ -223,20 +228,45 @@ void MarkdownView::rebuild() {
     m_document.setDefaultTextOption(textOptions);
     m_document.setTextWidth(documentWidth);
 
+    constexpr int codeFrameProperty = QTextFormat::UserProperty + 1;
+    using CodeTheme = KSyntaxHighlighting::Theme;
+    CodeRendering *const rendering = CodeRendering::instance();
+    const CodeTheme codeTheme = rendering->theme(m_darkMode);
+    const QColor codeSurface(codeTheme.editorColor(CodeTheme::BackgroundColor));
+    const QColor codeInk = CodeRendering::readableColor(QColor(codeTheme.textColor(CodeTheme::Normal)), codeSurface);
+    m_codeKeys.clear();
     struct Formula { QString marker; QString source; };
+    struct Fence { QString marker; QString language; QString source; };
     QList<struct Formula> formulas;
+    QList<struct Fence> fences;
+    const QString markerPrefix = QStringLiteral("BF") + QUuid::createUuid().toString(QUuid::Id128);
     QString markdown;
-    QString fence;
-    const QRegularExpression mathPattern(QStringLiteral(R"((?<!\\)(\$\$[\s\S]+?\$\$|\$(?!\s|\$)[^\n$]+?\$|\\\[[\s\S]+?\\\]|\\\([^\n]+?\\\)))"));
-    const QRegularExpression fencePattern(QStringLiteral("^\\s*(`{3,}|~{3,})"));
-    const QStringList lines = m_markdown.left(256 * 1024).split(QLatin1Char('\n'));
+    static const QRegularExpression mathPattern(QStringLiteral(R"((?<!\\)(\$\$[\s\S]+?\$\$|\$(?!\s|\$)[^\n$]+?\$|\\\[[\s\S]+?\\\]|\\\([^\n]+?\\\)))"));
+    static const QRegularExpression inlinePattern(QStringLiteral(R"((?<!\\)(`+)(?!`)[\s\S]*?\1(?!`))"));
+    static const QRegularExpression fencePattern(QStringLiteral(R"(^ {0,3}(`{3,}|~{3,})(.*)$)"));
+    Q_ASSERT(mathPattern.isValid() && inlinePattern.isValid() && fencePattern.isValid());
+    QString sourceMarkdown = m_markdown.left(256 * 1024);
+    sourceMarkdown.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    sourceMarkdown.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    const QStringList lines = sourceMarkdown.split(QLatin1Char('\n'));
     QString prose;
     const auto flushProse = [&] {
+        QBitArray codeCharacters(prose.size());
+        auto inlineMatches = inlinePattern.globalMatch(prose);
+        while (inlineMatches.hasNext()) {
+            const auto match = inlineMatches.next();
+            codeCharacters.fill(true, match.capturedStart(), match.capturedEnd());
+        }
         qsizetype previous = 0;
         auto matches = mathPattern.globalMatch(prose);
         while (matches.hasNext() && formulas.size() < 200) {
             const auto match = matches.next();
-            const QString marker = QStringLiteral("BFMATH%1TOKEN").arg(formulas.size());
+            bool inCode = false;
+            for (qsizetype position = match.capturedStart(); position < match.capturedEnd(); ++position) {
+                if (codeCharacters.testBit(position)) { inCode = true; break; }
+            }
+            if (inCode) continue;
+            const QString marker = markerPrefix + QStringLiteral("MATH%1TOKEN").arg(formulas.size());
             markdown += prose.mid(previous, match.capturedStart() - previous) + marker;
             formulas.append({marker, match.captured()});
             previous = match.capturedEnd();
@@ -244,14 +274,25 @@ void MarkdownView::rebuild() {
         markdown += prose.mid(previous);
         prose.clear();
     };
-    for (const QString &line : lines) {
-        const auto fenceMatch = fencePattern.match(line);
-        if (fenceMatch.hasMatch()) {
-            if (fence.isEmpty()) { flushProse(); fence = fenceMatch.captured(1).left(1); }
-            else if (line.trimmed().startsWith(fence)) fence.clear();
-            markdown += line + QLatin1Char('\n');
-        } else if (!fence.isEmpty()) markdown += line + QLatin1Char('\n');
-        else prose += line + QLatin1Char('\n');
+    for (qsizetype lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+        const QString &line = lines.at(lineIndex);
+        const auto opening = fencePattern.match(line);
+        if (!opening.hasMatch() || (opening.captured(1).startsWith(QLatin1Char('`')) && opening.captured(2).contains(QLatin1Char('`')))) {
+            prose += line + QLatin1Char('\n');
+            continue;
+        }
+        flushProse();
+        const QString delimiter = opening.captured(1);
+        const QString marker = markerPrefix + QStringLiteral("CODE%1TOKEN").arg(fences.size());
+        QStringList source;
+        while (++lineIndex < lines.size()) {
+            const auto closing = fencePattern.match(lines.at(lineIndex));
+            if (closing.hasMatch() && closing.captured(1).front() == delimiter.front()
+                && closing.captured(1).size() >= delimiter.size() && closing.captured(2).trimmed().isEmpty()) break;
+            source.append(lines.at(lineIndex));
+        }
+        fences.append({marker, opening.captured(2).trimmed().section(QLatin1Char(' '), 0, 0), source.join(QLatin1Char('\n'))});
+        markdown += QLatin1Char('\n') + marker + QStringLiteral("\n\n");
     }
     flushProse();
     m_document.setMarkdown(markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
@@ -300,43 +341,95 @@ void MarkdownView::rebuild() {
             cursor.setCharFormat(imageFormat);
         }
     }
-    QString language;
+    QSet<QString> visibleCode;
+    if (isVisible() && window()) {
+        for (const struct Fence &fence : fences) visibleCode.insert(LspHighlighter::key(CodeRendering::normalizedLanguage(fence.language), fence.source));
+    }
+    m_waitingForCodeCapacity = false;
+    rendering->setVisibleSources(this, visibleCode);
+    for (const struct Fence &fence : fences) {
+        QTextCursor marker = m_document.find(fence.marker);
+        if (marker.isNull()) continue;
+        marker.removeSelectedText();
+        QTextFrameFormat frameFormat;
+        frameFormat.setProperty(codeFrameProperty, true);
+        frameFormat.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+        frameFormat.setPadding(14);
+        frameFormat.setTopMargin(8);
+        frameFormat.setBottomMargin(12);
+        frameFormat.setBorder(0);
+        frameFormat.setBackground(codeSurface);
+        QTextFrame *const frame = marker.insertFrame(frameFormat);
+        QTextCursor code = frame->firstCursorPosition();
+        QFont codeFont(QStringLiteral("IBM Plex Mono"));
+        codeFont.setPixelSize(qRound(m_baseFontSize * .9));
+        codeFont.setFixedPitch(true);
+        QTextCharFormat codeFormat;
+        codeFormat.setFont(codeFont);
+        codeFormat.setForeground(codeInk);
+        code.insertText(fence.source, codeFormat);
+        const int sourceStart = frame->firstPosition();
+        const QString language = CodeRendering::normalizedLanguage(fence.language);
+        const QString key = LspHighlighter::key(language, fence.source);
+        m_codeKeys.insert(key);
+        const bool requestSemantic = isVisible() && window() && !m_requestedCodeKeys.contains(key);
+        bool accepted = false;
+        const QList<struct CodeSpan> spans = rendering->highlight(language, fence.source, m_darkMode, requestSemantic, accepted);
+        if (requestSemantic && accepted) m_requestedCodeKeys.insert(key);
+        if (requestSemantic && !accepted) m_waitingForCodeCapacity = true;
+        for (const struct CodeSpan &span : spans) {
+            Q_ASSERT(span.offset >= 0 && span.length >= 0 && span.offset + span.length <= fence.source.size());
+            QTextCursor token(&m_document);
+            token.setPosition(sourceStart + span.offset);
+            token.setPosition(sourceStart + span.offset + span.length, QTextCursor::KeepAnchor);
+            token.mergeCharFormat(span.format);
+        }
+    }
     for (QTextBlock block = m_document.begin(); block.isValid(); block = block.next()) {
         QTextCursor cursor(block);
         QTextBlockFormat format = block.blockFormat();
-        const bool code = format.hasProperty(QTextFormat::BlockCodeFence)
-            || format.hasProperty(QTextFormat::BlockCodeLanguage);
+        if (cursor.currentFrame()->frameFormat().boolProperty(codeFrameProperty)) {
+            format.setTopMargin(0);
+            format.setBottomMargin(0);
+            format.setLineHeight(118, QTextBlockFormat::ProportionalHeight);
+            format.clearBackground();
+            cursor.setBlockFormat(format);
+            continue;
+        }
+        const bool code = format.hasProperty(QTextFormat::BlockCodeFence) || format.hasProperty(QTextFormat::BlockCodeLanguage);
         if (code) {
-            const QString blockLanguage = format.stringProperty(QTextFormat::BlockCodeLanguage);
-            if (!blockLanguage.isEmpty()) language = normalizedLanguage(blockLanguage);
-            format.setBackground(m_codeBackground);
-            format.setTopMargin(4);
-            format.setBottomMargin(4);
+            // Nested Markdown fences and indented code retain the document parser's structure.
+            format.setBackground(codeSurface);
+            format.setTopMargin(0);
+            format.setBottomMargin(0);
+            format.setLeftMargin(14);
+            format.setRightMargin(14);
             cursor.setBlockFormat(format);
             cursor.select(QTextCursor::BlockUnderCursor);
             QTextCharFormat codeFormat;
-            codeFormat.setFontFamilies({QStringLiteral("IBM Plex Mono"), QStringLiteral("monospace")});
+            codeFormat.setForeground(codeInk);
             codeFormat.setFontFixedPitch(true);
-            codeFormat.setFontPointSize(m_baseFontSize * 0.65);
             cursor.mergeCharFormat(codeFormat);
-            const QString pattern = keywordPatterns().value(language);
-            if (!pattern.isEmpty()) {
-                auto tokens = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption).globalMatch(block.text());
-                while (tokens.hasNext()) {
-                    const auto token = tokens.next();
-                    cursor.setPosition(block.position() + token.capturedStart());
-                    cursor.setPosition(block.position() + token.capturedEnd(), QTextCursor::KeepAnchor);
-                    QTextCharFormat keyword;
-                    keyword.setFontWeight(QFont::Bold);
-                    keyword.setForeground(m_accent);
-                    cursor.mergeCharFormat(keyword);
-                }
-            }
         } else {
-            language.clear();
             format.setLineHeight(130, QTextBlockFormat::ProportionalHeight);
             format.setBottomMargin(m_baseFontSize * 0.45);
             cursor.setBlockFormat(format);
+            QList<struct CodeSpan> inlineFormats;
+            for (auto iterator = block.begin(); !iterator.atEnd(); ++iterator) {
+                const QTextFragment fragment = iterator.fragment();
+                if (!fragment.isValid() || !fragment.charFormat().fontFixedPitch() || fragment.charFormat().isImageFormat()) continue;
+                QTextCharFormat inlineCode;
+                inlineCode.setBackground(codeSurface);
+                inlineCode.setForeground(codeInk);
+                inlineCode.setFontWeight(QFont::DemiBold);
+                inlineFormats.append({fragment.position(), fragment.length(), inlineCode});
+            }
+            for (const struct CodeSpan &span : inlineFormats) {
+                QTextCursor token(&m_document);
+                token.setPosition(span.offset);
+                token.setPosition(span.offset + span.length, QTextCursor::KeepAnchor);
+                token.mergeCharFormat(span.format);
+            }
         }
     }
     if (!error.isEmpty() && error != m_renderError) { m_renderError = error; emit renderErrorChanged(); }

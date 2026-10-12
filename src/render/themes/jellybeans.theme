@@ -1,0 +1,174 @@
+{
+    "_comments": [
+        "Palette adapted from https://github.com/nanotech/jellybeans.vim. BetterFlash token mapping; foreground contrast is adjusted at render time."
+    ],
+    "metadata": {
+        "name": "Jellybeans",
+        "revision": 1,
+        "copyright": [
+            "NanoTech and theme contributors"
+        ],
+        "license": "SPDX-License-Identifier: MIT"
+    },
+    "text-styles": {
+        "Normal": {
+            "text-color": "#e8e8d3",
+            "bold": false,
+            "italic": false
+        },
+        "Keyword": {
+            "text-color": "#8197bf",
+            "bold": true,
+            "italic": false
+        },
+        "Function": {
+            "text-color": "#c6b6ee",
+            "bold": false,
+            "italic": false
+        },
+        "Variable": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "ControlFlow": {
+            "text-color": "#8197bf",
+            "bold": true,
+            "italic": false
+        },
+        "Operator": {
+            "text-color": "#8197bf",
+            "bold": false,
+            "italic": false
+        },
+        "BuiltIn": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "Extension": {
+            "text-color": "#c6b6ee",
+            "bold": false,
+            "italic": false
+        },
+        "Preprocessor": {
+            "text-color": "#8197bf",
+            "bold": false,
+            "italic": false
+        },
+        "Attribute": {
+            "text-color": "#c6b6ee",
+            "bold": false,
+            "italic": false
+        },
+        "Char": {
+            "text-color": "#99ad6a",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialChar": {
+            "text-color": "#99ad6a",
+            "bold": false,
+            "italic": false
+        },
+        "String": {
+            "text-color": "#99ad6a",
+            "bold": false,
+            "italic": false
+        },
+        "VerbatimString": {
+            "text-color": "#99ad6a",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialString": {
+            "text-color": "#99ad6a",
+            "bold": false,
+            "italic": false
+        },
+        "Import": {
+            "text-color": "#8197bf",
+            "bold": false,
+            "italic": false
+        },
+        "DataType": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "DecVal": {
+            "text-color": "#fad07a",
+            "bold": false,
+            "italic": false
+        },
+        "BaseN": {
+            "text-color": "#fad07a",
+            "bold": false,
+            "italic": false
+        },
+        "Float": {
+            "text-color": "#fad07a",
+            "bold": false,
+            "italic": false
+        },
+        "Constant": {
+            "text-color": "#fad07a",
+            "bold": false,
+            "italic": false
+        },
+        "Comment": {
+            "text-color": "#888888",
+            "bold": false,
+            "italic": true
+        },
+        "Documentation": {
+            "text-color": "#888888",
+            "bold": false,
+            "italic": true
+        },
+        "Annotation": {
+            "text-color": "#fad07a",
+            "bold": false,
+            "italic": false
+        },
+        "CommentVar": {
+            "text-color": "#888888",
+            "bold": false,
+            "italic": false
+        },
+        "RegionMarker": {
+            "text-color": "#888888",
+            "bold": false,
+            "italic": false
+        },
+        "Information": {
+            "text-color": "#888888",
+            "bold": false,
+            "italic": false
+        },
+        "Warning": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "Alert": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "Error": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        },
+        "Others": {
+            "text-color": "#cf6a4c",
+            "bold": false,
+            "italic": false
+        }
+    },
+    "editor-colors": {
+        "BackgroundColor": "#151515",
+        "TextSelection": "#888888"
+    }
+}

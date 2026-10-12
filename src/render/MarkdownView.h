@@ -10,6 +10,7 @@
 
 class MarkdownView : public QQuickPaintedItem {
     Q_OBJECT
+    Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY styleChanged)
     Q_PROPERTY(QString markdown READ markdown WRITE setMarkdown NOTIFY markdownChanged)
     Q_PROPERTY(QColor foreground READ foreground WRITE setForeground NOTIFY styleChanged)
     Q_PROPERTY(QColor codeBackground READ codeBackground WRITE setCodeBackground NOTIFY styleChanged)
@@ -20,6 +21,8 @@ class MarkdownView : public QQuickPaintedItem {
 public:
     explicit MarkdownView(QQuickItem *parent = nullptr);
     void paint(QPainter *painter) override;
+    bool darkMode() const { return m_darkMode; }
+    void setDarkMode(bool dark);
     QString markdown() const { return m_markdown; }
     QColor foreground() const { return m_foreground; }
     QColor codeBackground() const { return m_codeBackground; }
@@ -68,4 +71,8 @@ private:
     QColor m_accent;
     qreal m_baseFontSize = 22.0;
     bool m_scheduled = false;
+    bool m_darkMode = true;
+    QSet<QString> m_codeKeys;
+    QSet<QString> m_requestedCodeKeys;
+    bool m_waitingForCodeCapacity = false;
 };

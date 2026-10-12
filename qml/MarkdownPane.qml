@@ -15,6 +15,7 @@ ColumnLayout {
         id: view
         Layout.fillWidth: true
         Layout.preferredHeight: view.implicitHeight
+        darkMode: Theme.dark
         foreground: Theme.ink
         codeBackground: Theme.canvas
         accent: Theme.accent
