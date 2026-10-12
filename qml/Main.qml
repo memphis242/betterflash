@@ -392,6 +392,16 @@ ApplicationWindow {
         editingCardId = id || ""
         cardDialog.open()
     }
+    function focusEditorSource() {
+        if (!cardDialog.visible || editorTabs.currentIndex !== 0)
+            return
+        Qt.callLater(function() {
+            if (cardDialog.visible && editorTabs.currentIndex === 0) {
+                editorSource.forceActiveFocus()
+                editorSource.cursorPosition = Math.min(editorSource.cursorPosition, editorSource.length)
+            }
+        })
+    }
     function editingCard() {
         return cardById(editingCardId)
     }
@@ -1071,8 +1081,14 @@ ApplicationWindow {
         id: cardDialog
         objectName: "cardDialog"
         title: editingCardId ? "Edit card" : "New card"
-        width: Math.min(900, window.width - 2 * window.gutter)
-        height: Math.min(760, window.height - 36)
+        width: Math.min(1120, window.width - 2 * window.gutter)
+        height: Math.min(800, window.height - 2 * window.gutter)
+        padding: cardDialog.width < 650 ? 14 : 24
+        background: Rectangle {
+            color: Theme.surface
+            radius: 16
+            border.color: Theme.ledgerRule
+        }
         onOpened: {
             window.editorSession += 1
             const c = editingCard()
@@ -1085,7 +1101,7 @@ ApplicationWindow {
             cardPoints.value = c.pointCount || 1
             editorTabs.currentIndex = 0
             editorSource.cursorPosition = 0
-            editorSource.forceActiveFocus()
+            window.focusEditorSource()
         }
         onClosed: window.imageSession = -1
         contentItem: ColumnLayout {
@@ -1155,11 +1171,42 @@ ApplicationWindow {
                     objectName: "editorTabs"
                     Layout.fillWidth: true
                     TabButton {
+                        id: sourceTab
                         text: "Source"
+                        background: Rectangle {
+                            radius: 7
+                            color: sourceTab.checked ? Theme.editorTabActive : Theme.editorTabInactive
+                            border.color: sourceTab.checked ? Theme.editorTabActive : Theme.rule
+                        }
+                        contentItem: Label {
+                            text: sourceTab.text
+                            color: sourceTab.checked ? Theme.editorTabActiveInk : Theme.inkMuted
+                            font.family: Theme.monoFont
+                            font.pixelSize: 16
+                            font.bold: sourceTab.checked
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     TabButton {
+                        id: previewTab
                         text: "Preview"
+                        background: Rectangle {
+                            radius: 7
+                            color: previewTab.checked ? Theme.editorTabActive : Theme.editorTabInactive
+                            border.color: previewTab.checked ? Theme.editorTabActive : Theme.rule
+                        }
+                        contentItem: Label {
+                            text: previewTab.text
+                            color: previewTab.checked ? Theme.editorTabActiveInk : Theme.inkMuted
+                            font.family: Theme.monoFont
+                            font.pixelSize: 16
+                            font.bold: previewTab.checked
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
+                    onCurrentIndexChanged: window.focusEditorSource()
                 }
                 GlyphButton {
                     glyph: "image"
@@ -1168,7 +1215,7 @@ ApplicationWindow {
                     onClicked: chooseImage()
                 }
                 GlyphButton {
-                    glyph: "edit"
+                    glyph: "eye-closed-lashes"
                     hint: "Hide selected words (" + shortcuts.bindings.editorCloze + ")"
                     enabled: editorTabs.currentIndex === 0
                     onClicked: hideSelection()
@@ -1179,6 +1226,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 ScrollView {
+                    id: editorScroll
                     objectName: "editorScroll"
                     clip: true
                     contentWidth: availableWidth
@@ -1186,10 +1234,24 @@ ApplicationWindow {
                         id: editorSource
                         objectName: "editorSource"
                         font.family: Theme.monoFont
-                        font.pixelSize: 14
+                        font.pixelSize: 17
                         wrapMode: TextEdit.Wrap
                         selectByMouse: true
                         textFormat: TextEdit.PlainText
+                        width: editorScroll.availableWidth
+                        height: Math.max(editorScroll.availableHeight, implicitHeight)
+                        leftPadding: 14
+                        rightPadding: 14
+                        topPadding: 14
+                        bottomPadding: 14
+                        color: Theme.ink
+                        cursorVisible: true
+                        background: Rectangle {
+                            radius: 10
+                            color: Theme.editorField
+                            border.width: editorSource.activeFocus ? 2 : 1
+                            border.color: editorSource.activeFocus ? Theme.timelineDue : Theme.rule
+                        }
                         placeholderText: "Question in Markdown\n\n---\n\nAnswer in Markdown"
                     }
                 }

@@ -439,6 +439,18 @@ Canvas {
             c.moveTo(10, 5)
             c.lineTo(13, 8)
             break
+        case "eye-closed-lashes":
+            c.moveTo(2, 9)
+            c.bezierCurveTo(6, 13, 12, 13, 16, 9)
+            c.moveTo(4.5, 11)
+            c.lineTo(3, 13)
+            c.moveTo(7.2, 12.2)
+            c.lineTo(6.8, 14.5)
+            c.moveTo(10.5, 12.2)
+            c.lineTo(10.9, 14.5)
+            c.moveTo(13.3, 11)
+            c.lineTo(14.8, 13)
+            break
         case "image":
             c.rect(2, 3, 14, 12)
             c.moveTo(3, 13)
