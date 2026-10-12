@@ -44,62 +44,12 @@ ColumnLayout {
     readonly property string ttsState: localTts && voice.ttsModelDownloading ? "busy"
         : !voice.ttsReady ? "missing" : voice.ttsTestError ? "degraded" : "ready"
 
-    SettingsSwitch {
+    VoiceSettingsTabs {
+        id: voiceTabs
         Layout.fillWidth: true
-        Layout.minimumWidth: 0
-        objectName: "voiceEnabled"
-        text: "Enable voice review"
-        checked: voice.enabled
-        onToggled: voice.enabled = checked
-    }
-
-    RowLayout {
-        Layout.fillWidth: true
-        spacing: 4
-        Repeater {
-            model: ["Speech recognition", "Speech output"]
-            delegate: Button {
-                required property int index
-                required property string modelData
-                Layout.fillWidth: true
-                implicitHeight: 48
-                flat: true
-                text: modelData
-                font.family: Theme.uiFont
-                font.pixelSize: 16
-                contentItem: Row {
-                    spacing: 8
-                    anchors.centerIn: parent
-                    Icon {
-                        kind: index === 0 ? "ear" : "mouth-sound"
-                        width: 24
-                        height: 24
-                        stroke: root.tabIndex === index ? Theme.accent : Theme.inkMuted
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Label {
-                        text: modelData
-                        color: root.tabIndex === index ? Theme.accent : Theme.inkMuted
-                        font: parent.parent.font
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-                background: Rectangle {
-                    color: root.tabIndex === index ? Theme.accentSoft : Theme.transparent
-                    radius: 5
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        height: 2
-                        color: root.tabIndex === index ? Theme.accent : Theme.rule
-                    }
-                }
-                onClicked: root.tabIndex = index
-                ToolTip.visible: hovered
-                ToolTip.text: index === 0 ? "Configure speech recognition" : "Configure speech output"
-            }
-        }
+        currentIndex: root.tabIndex
+        onTabSelected: root.tabIndex = index
+        styleIndex: 0
     }
 
     ColumnLayout {
@@ -175,7 +125,9 @@ ColumnLayout {
                     width: Math.min(implicitWidth, root.width)
                     actionKind: "test"
                     text: voice.sttTestBusy ? "Testing..." : "Test model"
-                    enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy) && (voice.sttProvider === "groq" || voice.sttModelReady)
+                    enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy)
+                        && (!voice.customSttTests || (!voice.customSttTests.busy && !voice.customSttTests.recording))
+                        && (voice.sttProvider === "groq" || voice.sttModelReady)
                     hint: enabled ? "Run a short speech recognition check" : "Download the local model before testing"
                     onClicked: voice.testSttModel()
                 }
@@ -187,6 +139,10 @@ ColumnLayout {
                 status: voice.sttTestStatus
                 error: voice.sttTestError
                 busy: voice.sttTestBusy
+            }
+            CustomSttTests {
+                Layout.fillWidth: true
+                voice: root.voice
             }
             ColumnLayout {
                 Layout.fillWidth: true
