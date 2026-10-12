@@ -27,6 +27,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::syncResponseApplied,this,&AppController::syncResponseApplied);
     connect(m_worker,&DatabaseWorker::syncApplied,this,&AppController::syncApplied);
     connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
+    connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
@@ -284,6 +285,23 @@ void AppController::loadCardTimeline(const QString &cardId, int offset, const QS
         worker->loadCardTimeline(requestedId,requestedOffset,requestedRequestId);
     },Qt::QueuedConnection);
     if (!queued) emit cardTimelineReady(requestedId,{{"requestId",requestedRequestId},{"offset",requestedOffset},{"events",QVariantList{}},{"totalEvents",0},{"hasMore",false},{"nextOffset",0},{"reviewCount",0},{"successfulCount",0},{"averageRecall",0.0},{"averageSeconds",0.0},{"firstRecordedAt",QString()},{"firstSavedAt",QString()},{"error",QVariantMap{{"code","WORKER_UNAVAILABLE"},{"message","Could not load card history. Restart the application."},{"details",QString()}}}});
+}
+void AppController::loadStudyAnalytics(const QString &deckId, const QString &requestId)
+{
+    const QString requestedDeckId = deckId;
+    const QString requestedRequestId = requestId;
+    const QString requestedToday = QDate::currentDate().toString(Qt::ISODate);
+    const bool queued = QMetaObject::invokeMethod(m_worker, [worker = m_worker, requestedDeckId, requestedRequestId] {
+        worker->loadStudyAnalytics(requestedDeckId, requestedRequestId);
+    }, Qt::QueuedConnection);
+    if (!queued) {
+        emit studyAnalyticsReady(requestedDeckId, {{"requestId", requestedRequestId}, {"deckId", requestedDeckId},
+            {"today", requestedToday}, {"firstDate", requestedToday},
+            {"days", QVariantList{}}, {"stats", QVariantMap{{"practiceScore", QVariant{}}, {"averageRecall", QVariant{}}, {"averageGrade", QVariant{}},
+                {"eligibleDecks", 0}, {"reviewedDecks", 0}, {"totalVariants", 0}, {"reviewedVariants", 0}, {"activeDays", 0},
+                {"windowDays", 30}, {"recallChange", QVariant{}}, {"currentReviewCount", 0}}},
+            {"error", QVariantMap{{"code", "WORKER_UNAVAILABLE"}, {"message", "Could not load study analytics. Restart the application."}, {"detail", QString()}}}});
+    }
 }
 void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history,const QVariantList &reviewSessions)
 {
