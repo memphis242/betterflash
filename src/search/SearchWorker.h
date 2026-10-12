@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QSet>
+#include <QVariantMap>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -32,7 +33,7 @@ signals:
     void progress(int channel, quint64 epoch, int completed, int total);
     void remoteNeeded(int channel, quint64 epoch, const QStringList &texts);
     void failed(int channel, quint64 epoch, const QString &error);
-    void testFinished(quint64 epoch, bool success, const QString &message);
+    void testFinished(quint64 epoch, bool success, const QVariantMap &report, const QString &message);
 private:
     struct Job { QString key; QString text; bool query = false; };
     struct QueryState {

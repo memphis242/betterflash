@@ -117,7 +117,9 @@ void VoiceController::persistConfiguration() const {
 void VoiceController::setModelPath(const QString &path) {
     const QString value = path.trimmed();
     if (m_modelPath == value) return;
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech model path changed."));
     m_modelPath = value;
+    resetSttTestReport();
     persistConfiguration();
     emit modelPathChanged();
     emit modelReadinessChanged();
@@ -132,11 +134,12 @@ void VoiceController::setSttProvider(const QString &provider) {
         return;
     }
     if (m_sttProvider == value) return;
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider changed."));
     m_sttProvider = value;
+    resetSttTestReport();
     persistConfiguration();
     emit sttProviderChanged();
     emit modelReadinessChanged();
-    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider changed."));
     if (m_enabled) restartWorker();
 }
 
@@ -148,10 +151,11 @@ void VoiceController::setSttModel(const QString &model) {
         return;
     }
     if (m_sttModel == value) return;
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech model changed."));
     m_sttModel = value;
+    resetSttTestReport();
     persistConfiguration();
     emit sttModelChanged();
-    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech model changed."));
     if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
 }
 
@@ -162,7 +166,9 @@ void VoiceController::setSttProfile(const QString &profile) {
         return;
     }
     if (m_sttProfile == value) return;
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech profile changed."));
     m_sttProfile = value;
+    resetSttTestReport();
     persistConfiguration();
     emit sttProfileChanged();
 }
@@ -178,6 +184,7 @@ void VoiceController::setTtsProvider(const QString &provider) {
     retireTtsWorker();
     if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech output provider changed."));
     m_ttsProvider = value;
+    resetTtsTestReport();
     persistConfiguration();
     emit ttsProviderChanged();
     emit modelReadinessChanged();
@@ -194,6 +201,7 @@ void VoiceController::setTtsProfile(const QString &profile) {
     retireTtsWorker();
     if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech output voice changed."));
     m_ttsProfile = value;
+    resetTtsTestReport();
     configureDownloads(true);
     persistConfiguration();
     emit ttsProfileChanged();
@@ -315,6 +323,9 @@ void VoiceController::testSttModel() {
     m_sttTestBusy = true;
     m_pendingSttTest = true;
     m_sttTestError.clear();
+    m_sttTestReport = QVariantMap{{QStringLiteral("outcome"), QStringLiteral("running")},
+        {QStringLiteral("input"), QStringLiteral("Official Vosk test recording / 16 kHz mono audio")},
+        {QStringLiteral("expected"), QStringLiteral("one zero zero zero one nine oh two one oh zero one eight zero three")}};
     m_sttTestStatus = QStringLiteral("Preparing a known spoken phrase");
     m_testSavedWantsListening = m_wantsListening;
     stopListening();
@@ -324,7 +335,10 @@ void VoiceController::testSttModel() {
         finishSttTest(false, QStringLiteral("Speech recognition validation failed"), QStringLiteral("Add a Groq API key or choose local recognition."));
         return;
     }
-    if (m_sttProvider == QStringLiteral("local") && !sttModelReady()) downloadSttModel();
+    if (m_sttProvider == QStringLiteral("local") && !sttModelReady()) {
+        finishSttTest(false, QStringLiteral("Speech recognition validation failed"), QStringLiteral("VOICE_TEST_MODEL_MISSING: Download the selected local speech model before testing it."));
+        return;
+    }
     if (!m_sttTestBusy) return;
     if (!m_fixtureDownload->ready()) m_fixtureDownload->start();
     continuePendingOperations();
@@ -335,6 +349,9 @@ void VoiceController::testTtsModel() {
     m_ttsTestBusy = true;
     m_pendingTtsTest = true;
     m_ttsTestError.clear();
+    m_ttsTestReport = QVariantMap{{QStringLiteral("outcome"), QStringLiteral("running")},
+        {QStringLiteral("input"), QStringLiteral("BetterFlash speech test. Your next card is ready.")},
+        {QStringLiteral("expected"), QStringLiteral("The selected speech engine synthesizes and plays the complete sample.")}};
     m_ttsTestStatus = QStringLiteral("Preparing a spoken sample");
     m_testSavedWantsListening = m_wantsListening;
     stopListening();
@@ -344,7 +361,10 @@ void VoiceController::testTtsModel() {
         finishTtsTest(false, QStringLiteral("Speech output validation failed"), QStringLiteral("No operating system speech engine is available. Choose the managed local voice."));
         return;
     }
-    if (m_ttsProvider == QStringLiteral("local") && !ttsReady()) downloadTtsModel();
+    if (m_ttsProvider == QStringLiteral("local") && !ttsReady()) {
+        finishTtsTest(false, QStringLiteral("Speech output validation failed"), QStringLiteral("VOICE_TEST_MODEL_MISSING: Download the selected local voice before testing it."));
+        return;
+    }
     if (!m_ttsTestBusy) return;
     continuePendingOperations();
 }
@@ -387,6 +407,7 @@ void VoiceController::beginSttTest() {
     });
     connect(worker, &VoiceWorker::testFinished, this, [this, generation](const QString &transcript, const bool passed, const QString &error) {
         if (generation != m_testGeneration || !m_sttTestBusy) return;
+        m_sttTestReport.insert(QStringLiteral("output"), transcript);
         finishSttTest(passed, passed ? QStringLiteral("Passed: known spoken digits matched") : QStringLiteral("Speech recognition validation failed"),
             passed ? QString() : error + (transcript.isEmpty() ? QString() : QStringLiteral(" Heard: %1").arg(transcript)));
     });
@@ -400,12 +421,13 @@ void VoiceController::beginSttTest() {
 }
 
 void VoiceController::finishSttTest(const bool passed, const QString &message, const QString &error) {
-    Q_UNUSED(passed);
     ++m_testGeneration;
     m_sttTestBusy = false;
     m_pendingSttTest = false;
     m_sttTestStatus = message;
     m_sttTestError = error;
+    m_sttTestReport.insert(QStringLiteral("outcome"), message.startsWith(QStringLiteral("Validation canceled")) ? QStringLiteral("canceled") : passed ? QStringLiteral("passed") : QStringLiteral("failed"));
+    if (!error.isEmpty()) m_sttTestReport.insert(QStringLiteral("details"), error);
     const QPointer<VoiceWorker> worker = m_testWorker;
     const QPointer<QThread> thread = m_testThread;
     m_testWorker = nullptr; m_testThread = nullptr;
@@ -437,14 +459,29 @@ void VoiceController::beginTtsTest() {
 }
 
 void VoiceController::finishTtsTest(const bool passed, const QString &message, const QString &error) {
-    Q_UNUSED(passed);
     ++m_testGeneration;
     m_ttsTestBusy = false;
     m_pendingTtsTest = false;
     m_ttsTestStatus = message;
     m_ttsTestError = error;
+    m_ttsTestReport.insert(QStringLiteral("outcome"), message.startsWith(QStringLiteral("Validation canceled")) ? QStringLiteral("canceled") : passed ? QStringLiteral("passed") : QStringLiteral("failed"));
+    if (!error.isEmpty()) m_ttsTestReport.insert(QStringLiteral("details"), error);
     setModelTestState(m_sttTestBusy, message, error);
     if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); }
+}
+
+void VoiceController::resetSttTestReport() {
+    m_sttTestReport.clear();
+    m_sttTestStatus.clear();
+    m_sttTestError.clear();
+    emit modelTestChanged();
+}
+
+void VoiceController::resetTtsTestReport() {
+    m_ttsTestReport.clear();
+    m_ttsTestStatus.clear();
+    m_ttsTestError.clear();
+    emit modelTestChanged();
 }
 
 void VoiceController::setApiKey(const QString &key) { m_secret->setKey(key); }
@@ -727,6 +764,11 @@ void VoiceController::startLocalPlayback(const QByteArray &pcm, const quint64 re
     if (pcm.isEmpty() || pcm.size() % m_playbackFormat.bytesPerFrame() != 0) {
         speechError(QStringLiteral("The local voice returned malformed audio. Try another voice.")); return;
     }
+    if (m_ttsTestBusy) {
+        m_ttsTestReport.insert(QStringLiteral("output"), QStringLiteral("Synthesized %1 bytes at %2 Hz for %3 seconds; playback started.")
+            .arg(pcm.size()).arg(m_playbackFormat.sampleRate()).arg(seconds, 0, 'f', 2));
+        emit modelTestChanged();
+    }
     if (m_audioSink) { m_audioSink->disconnect(this); m_audioSink->stop(); m_audioSink->deleteLater(); }
     if (m_playbackBuffer) m_playbackBuffer->deleteLater();
     m_playbackBuffer = new QBuffer(this);
@@ -810,7 +852,15 @@ void VoiceController::finishSpeech() {
     m_ttsIssued = false;
     setSpeakingState(false);
     m_echoTail = true;
-    if (m_ttsTestBusy) finishTtsTest(true, QStringLiteral("Passed: synthesized audio played successfully"));
+    if (m_ttsTestBusy) {
+        if (m_ttsProvider == QStringLiteral("system")) {
+            m_ttsTestReport.insert(QStringLiteral("output"), QStringLiteral("System speech engine playback completed."));
+        } else {
+            QString output = m_ttsTestReport.value(QStringLiteral("output")).toString();
+            if (!output.isEmpty()) m_ttsTestReport.insert(QStringLiteral("output"), output.replace(QStringLiteral("playback started."), QStringLiteral("playback completed.")));
+        }
+        finishTtsTest(true, QStringLiteral("Passed: synthesized audio played successfully"));
+    }
     const quint64 generation = ++m_speechGeneration;
     QTimer::singleShot(350, this, [this, generation] {
         if (generation != m_speechGeneration) return;

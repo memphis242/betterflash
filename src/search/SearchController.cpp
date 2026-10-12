@@ -78,9 +78,10 @@ SearchController::SearchController(AppController *app, Summarizer *ai, const QSt
         if (epoch == state(channel).epoch->load()) setFailure(error, channel);
     });
     connect(m_worker, &SearchWorker::remoteNeeded, this, &SearchController::requestRemote);
-    connect(m_worker, &SearchWorker::testFinished, this, [this](quint64 epoch, bool success, const QString &message) {
+    connect(m_worker, &SearchWorker::testFinished, this, [this](quint64 epoch, bool success, const QVariantMap &report, const QString &message) {
         if (epoch != m_testEpoch->load()) return;
         m_testBusy = false;
+        m_testReport = report;
         m_testStatus = success ? message : QString();
         m_testError = success ? QString() : message;
         emit testChanged();
@@ -151,12 +152,13 @@ void SearchController::setSemanticEnabled(bool enabled) {
 }
 void SearchController::setProvider(const QString &provider) {
     if (provider == m_provider || (provider != QStringLiteral("local") && provider != QStringLiteral("remote"))) return;
+    cancelTest(); resetTestReport();
     m_provider = provider; m_settings.setValue(QStringLiteral("search/provider"), provider);
     stopDownload(); restartAll(); emit changed();
 }
 void SearchController::setLocalProfile(const QString &profile) {
     if (profile == m_profile || (profile != QStringLiteral("automatic") && profile != QStringLiteral("desktop") && profile != QStringLiteral("compact"))) return;
-    stopDownload(); m_profile = profile; m_downloadCanceled = false;
+    cancelTest(); resetTestReport(); stopDownload(); m_profile = profile; m_downloadCanceled = false;
     m_settings.setValue(QStringLiteral("search/localProfile"), profile); restartAll(); emit changed();
 }
 bool SearchController::setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key) {
@@ -173,6 +175,7 @@ bool SearchController::setRemoteConfiguration(const QString &endpoint, const QSt
     m_settings.setValue(QStringLiteral("search/reuseLlmKey"), m_reuseKey);
     if (changedOrigin) configureCredentials();
     if (!reuseKey && !key.trimmed().isEmpty()) m_credentials->setKey(key);
+    cancelTest(); resetTestReport();
     restartAll(); emit changed();
     return true;
 }
@@ -187,19 +190,31 @@ void SearchController::rebuildIndex() {
         search.status = QStringLiteral("Rebuilding the search cache"); notify(channel);
     }
 }
+void SearchController::resetTestReport() {
+    m_testReport.clear();
+    m_testStatus.clear();
+    m_testError.clear();
+    emit testChanged();
+}
 
 void SearchController::testModel() {
     cancelTest();
     const quint64 epoch = ++*m_testEpoch;
     m_testBusy = true;
+    m_testReport = QVariantMap{{QStringLiteral("outcome"), QStringLiteral("running")},
+        {QStringLiteral("input"), QStringLiteral("Multiplication combines equal groups of quantities.")},
+        {QStringLiteral("expected"), QStringLiteral("The related sentence should be more similar than the unrelated sentence; vectors should be normalized.")}};
     m_testStatus = QStringLiteral("Testing model connection and embeddings");
     m_testError.clear();
     emit testChanged();
     if (m_provider != QStringLiteral("remote")) {
         if (!modelReady()) {
-            m_testAfterDownload = true;
-            m_testStatus = QStringLiteral("Downloading the selected local embedding model");
-            prepareModel();
+            m_testBusy = false;
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+            m_testReport.insert(QStringLiteral("details"), QStringLiteral("SEARCH_TEST_MODEL_MISSING: Download the selected local embedding model before testing it."));
+            m_testError = QStringLiteral("SEARCH_TEST_MODEL_MISSING: Download the selected local embedding model before testing it.");
+            m_testStatus.clear();
+            emit testChanged();
             return;
         }
         QMetaObject::invokeMethod(m_worker, [worker = m_worker, epoch, profile = resolvedProfile(), directory = modelDirectory()] {
@@ -211,6 +226,8 @@ void SearchController::testModel() {
     if (!validEndpoint(endpoint) || m_model.isEmpty()) {
         m_testBusy = false; m_testStatus.clear();
         m_testError = QStringLiteral("SEARCH_TEST_ENDPOINT: Configure a valid embedding endpoint and model before testing.");
+        m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        m_testReport.insert(QStringLiteral("details"), m_testError);
         emit testChanged(); return;
     }
     QByteArray authorization;
@@ -218,12 +235,16 @@ void SearchController::testModel() {
         if (m_ai->provider() != QStringLiteral("remote")) {
             m_testBusy = false; m_testStatus.clear();
             m_testError = QStringLiteral("SEARCH_TEST_KEY_PROVIDER: Reusing the language model key requires the language model provider to be remote.");
-            emit testChanged(); return;
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        m_testReport.insert(QStringLiteral("details"), m_testError);
+        emit testChanged(); return;
         }
         if (!sameOrigin(endpoint, QUrl(m_ai->endpoint()))) {
             m_testBusy = false; m_testStatus.clear();
             m_testError = QStringLiteral("SEARCH_TEST_KEY_ORIGIN: The embedding endpoint must share the language model key's origin.");
-            emit testChanged(); return;
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        m_testReport.insert(QStringLiteral("details"), m_testError);
+        emit testChanged(); return;
         }
         const auto request = m_ai->configuredRequest();
         if (request) authorization = request->rawHeader("Authorization");
@@ -233,6 +254,8 @@ void SearchController::testModel() {
     if (authorization.isEmpty() && endpoint.scheme() != QStringLiteral("http")) {
         m_testBusy = false; m_testStatus.clear();
         m_testError = QStringLiteral("SEARCH_TEST_KEY: Configure an embedding API key before testing this endpoint.");
+        m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        m_testReport.insert(QStringLiteral("details"), m_testError);
         emit testChanged(); return;
     }
     QNetworkRequest request(endpoint);
@@ -247,6 +270,8 @@ void SearchController::testModel() {
     const QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("input"), input},
                               {QStringLiteral("encoding_format"), QStringLiteral("float")}};
     m_testBody.clear();
+    m_testReport.insert(QStringLiteral("input"), input.at(0).toString());
+    m_testReport.insert(QStringLiteral("expected"), QStringLiteral("The related sentence should be more similar than the unrelated sentence; vectors should be normalized."));
     m_testReply = m_network.post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
     QNetworkReply *const reply = m_testReply;
     reply->setReadBufferSize(1024 * 1024);
@@ -258,14 +283,16 @@ void SearchController::testModel() {
         m_testBody.append(reply->readAll());
         if (m_testBody.size() > 1024 * 1024) reply->abort();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch, input] {
         if (m_testReply != reply) return;
         m_testReply = nullptr; reply->deleteLater();
         const QByteArray body = std::exchange(m_testBody, {});
         if (epoch != m_testEpoch->load()) return;
         const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         auto fail = [this](const QString &message) {
-            m_testBusy = false; m_testStatus.clear(); m_testError = message; emit testChanged();
+            m_testBusy = false; m_testStatus.clear(); m_testError = message;
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+            m_testReport.insert(QStringLiteral("details"), message); emit testChanged();
         };
         if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300 || body.size() > 1024 * 1024) {
             fail(QStringLiteral("SEARCH_TEST_HTTP_%1: Check the endpoint, API key and model identifier.").arg(code)); return;
@@ -296,6 +323,11 @@ void SearchController::testModel() {
             const float scale = float(1.0 / std::sqrt(norm)); for (float &value : vector) value *= scale;
             vectors[static_cast<size_t>(index)] = std::move(vector);
         }
+        m_testReport.insert(QStringLiteral("comparisons"), QVariantList{
+            QVariantMap{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), input.at(0).toString()},
+                        {QStringLiteral("text"), input.at(1).toString()}},
+            QVariantMap{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
+                        {QStringLiteral("text"), input.at(2).toString()}}});
         if (vectors[1].size() != vectors[0].size() || vectors[2].size() != vectors[0].size()) {
             fail(QStringLiteral("SEARCH_TEST_DIMENSIONS: The endpoint returned inconsistent vector dimensions.")); return;
         }
@@ -305,11 +337,23 @@ void SearchController::testModel() {
             related += double(vectors[0][index]) * vectors[1][index];
             unrelated += double(vectors[0][index]) * vectors[2][index];
         }
+        QVariantMap relatedReport{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), input.at(0).toString()},
+            {QStringLiteral("text"), input.at(1).toString()}, {QStringLiteral("similarity"), related}};
+        QVariantMap unrelatedReport{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
+            {QStringLiteral("text"), input.at(2).toString()}, {QStringLiteral("similarity"), unrelated}};
+        m_testReport.insert(QStringLiteral("comparisons"), QVariantList{relatedReport, unrelatedReport});
         if (indices.size() != 3 || !std::isfinite(self) || std::abs(self - 1.0) > 0.01
             || !std::isfinite(related) || !std::isfinite(unrelated) || related <= unrelated) {
             fail(QStringLiteral("SEARCH_TEST_RESPONSE: The endpoint did not preserve related-text similarity.")); return;
         }
         m_testBusy = false;
+        m_testReport.insert(QStringLiteral("output"), QStringLiteral("%1-dimensional normalized vectors").arg(vectors[0].size()));
+        m_testReport.insert(QStringLiteral("comparisons"), QVariantList{
+            QVariantMap{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), input.at(0).toString()},
+                        {QStringLiteral("text"), input.at(1).toString()}, {QStringLiteral("similarity"), related}},
+            QVariantMap{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), input.at(0).toString()},
+                        {QStringLiteral("text"), input.at(2).toString()}, {QStringLiteral("similarity"), unrelated}}});
+        m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("passed"));
         m_testStatus = QStringLiteral("Endpoint returned %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
             .arg(vectors[0].size()).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3);
         m_testError.clear(); emit testChanged();
@@ -322,7 +366,8 @@ void SearchController::cancelTest() {
     m_testBody.clear();
     m_testAfterDownload = false;
     if (!m_testBusy) return;
-    m_testBusy = false; m_testStatus = QStringLiteral("Model test canceled"); emit testChanged();
+    m_testBusy = false; m_testStatus = QStringLiteral("Model test canceled");
+    m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("canceled")); emit testChanged();
 }
 void SearchController::setActive(bool active) {
     struct QueryState &search = state(0);

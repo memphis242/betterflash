@@ -62,7 +62,7 @@ QString Summarizer::localModelLabel() const { return LocalLanguageModel::spec(re
 void Summarizer::setProvider(const QString &provider) {
     if (provider != QStringLiteral("local") && provider != QStringLiteral("remote")) return;
     if (provider == m_provider) return;
-    cancelAllCompletions(); m_provider = provider;
+    cancelAllCompletions(); m_provider = provider; resetTestReport();
     m_localDownload.cancel();
     m_settings.setValue(QStringLiteral("llm/provider"), provider);
     emit configurationChanged();
@@ -70,7 +70,7 @@ void Summarizer::setProvider(const QString &provider) {
 void Summarizer::setLocalProfile(const QString &profile) {
     if (profile != QStringLiteral("automatic") && profile != QStringLiteral("gemma") && profile != QStringLiteral("lfm")) return;
     if (profile == m_profile) return;
-    cancelAllCompletions(); m_profile = profile;
+    cancelAllCompletions(); m_profile = profile; resetTestReport();
     m_localDownload.configure({LocalLanguageModel::spec(resolvedProfile()).asset});
     m_settings.setValue(QStringLiteral("llm/localProfile"), profile);
     emit configurationChanged(); emit localChanged();
@@ -78,7 +78,7 @@ void Summarizer::setLocalProfile(const QString &profile) {
 void Summarizer::setAcceleration(const QString &acceleration) {
     if (acceleration != QStringLiteral("automatic") && acceleration != QStringLiteral("cpu")) return;
     if (acceleration == m_acceleration) return;
-    cancelAllCompletions(); m_acceleration = acceleration;
+    cancelAllCompletions(); m_acceleration = acceleration; resetTestReport();
     m_settings.setValue(QStringLiteral("llm/acceleration"), acceleration);
     m_acceleratorStatus = acceleration == QStringLiteral("cpu") ? QStringLiteral("CPU selected")
         : QStringLiteral("Device is checked when the model runs");
@@ -185,7 +185,18 @@ void Summarizer::cancelAllCompletions() {
 }
 void Summarizer::testModel() {
     cancelTest(); m_testBusy = true; m_testError.clear();
+    m_testReport = QVariantMap{{QStringLiteral("outcome"), QStringLiteral("running")},
+        {QStringLiteral("input"), QStringLiteral("What is 2 + 2? Use the shape {\"answer\":4}.")},
+        {QStringLiteral("expected"), QStringLiteral("A single JSON object containing the numeric field answer with value 4.")}};
     m_testStatus = QStringLiteral("Checking a short structured answer");
+    if (m_provider == QStringLiteral("local") && !localModelReady()) {
+        const QString message = QStringLiteral("LLM_TEST_MODEL_MISSING: Download the selected local language model before testing it.");
+        m_testBusy = false; m_testStatus.clear(); m_testError = message;
+        m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        m_testReport.insert(QStringLiteral("details"), message);
+        emit testChanged();
+        return;
+    }
     const QJsonArray messages{
         QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
             {QStringLiteral("content"), QStringLiteral("Return only one JSON object with a numeric answer field.")}},
@@ -198,14 +209,20 @@ void Summarizer::testModel() {
         m_testJob = 0; m_testBusy = false;
         if (!result) {
             m_testStatus.clear(); m_testError = result.error().code + QStringLiteral(": ") + result.error().message;
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+            m_testReport.insert(QStringLiteral("details"), m_testError);
         } else {
+            m_testReport.insert(QStringLiteral("output"), *result);
             QJsonParseError error{};
             const QJsonDocument answer = QJsonDocument::fromJson(result->toUtf8(), &error);
             if (error.error == QJsonParseError::NoError && answer.isObject() && answer.object().size() == 1
                 && answer.object().value(QStringLiteral("answer")).isDouble() && answer.object().value(QStringLiteral("answer")).toDouble() == 4.0) {
                 m_testStatus = QStringLiteral("Passed: connected and returned the expected structured answer."); m_testError.clear();
+                m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("passed"));
             } else {
                 m_testStatus.clear(); m_testError = QStringLiteral("LLM_TEST_ANSWER: The model responded but did not return the expected JSON answer. Choose another profile or a model supporting JSON output.");
+                m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+                m_testReport.insert(QStringLiteral("details"), m_testError);
             }
         }
         emit testChanged();
@@ -214,7 +231,13 @@ void Summarizer::testModel() {
 }
 void Summarizer::cancelTest() {
     cancelCompletion(m_testJob); m_testJob = 0;
-    if (m_testBusy) { m_testBusy = false; m_testStatus = QStringLiteral("Model check canceled"); emit testChanged(); }
+    if (m_testBusy) { m_testBusy = false; m_testStatus = QStringLiteral("Model check canceled"); m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("canceled")); emit testChanged(); }
+}
+void Summarizer::resetTestReport() {
+    m_testReport.clear();
+    m_testStatus.clear();
+    m_testError.clear();
+    emit testChanged();
 }
 void Summarizer::configureCredentials() {
     if (m_credentials) m_credentials->deleteLater();
@@ -228,7 +251,7 @@ void Summarizer::configureCredentials() {
 void Summarizer::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();
     if (value == m_endpoint) return;
-    cancelAllCompletions();
+    cancelAllCompletions(); resetTestReport();
     const QString previousHost = QUrl(m_endpoint).host();
     m_endpoint = value;
     m_settings.setValue(QStringLiteral("llm/endpoint"), value);
@@ -238,7 +261,7 @@ void Summarizer::setEndpoint(const QString &endpoint) {
 void Summarizer::setModel(const QString &model) {
     const QString value = model.trimmed();
     if (value == m_model) return;
-    cancelAllCompletions();
+    cancelAllCompletions(); resetTestReport();
     m_model = value;
     m_settings.setValue(QStringLiteral("llm/model"), value);
     emit configurationChanged();

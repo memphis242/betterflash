@@ -10,6 +10,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <array>
 #include <atomic>
 #include <memory>
@@ -46,6 +47,7 @@ class SearchController final : public QObject {
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
     Q_PROPERTY(QString testStatus READ testStatus NOTIFY testChanged)
     Q_PROPERTY(QString testError READ testError NOTIFY testChanged)
+    Q_PROPERTY(QVariantMap testReport READ testReport NOTIFY testChanged)
 public:
     explicit SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent = nullptr);
     ~SearchController() override;
@@ -73,6 +75,7 @@ public:
     bool testBusy() const { return m_testBusy; }
     QString testStatus() const { return m_testStatus; }
     QString testError() const { return m_testError; }
+    QVariantMap testReport() const { return m_testReport; }
     void setSemanticEnabled(bool enabled);
     void setProvider(const QString &provider);
     void setLocalProfile(const QString &profile);
@@ -135,6 +138,7 @@ private:
     void downloadNext();
     void downloadFailure(const QString &message);
     void stopDownload();
+    void resetTestReport();
     AppController *const m_app;
     Summarizer *const m_ai;
     SecretStore *m_credentials = nullptr;
@@ -169,5 +173,6 @@ private:
     bool m_testBusy = false;
     QString m_testStatus;
     QString m_testError;
+    QVariantMap m_testReport;
     bool m_testAfterDownload = false;
 };

@@ -9,6 +9,7 @@
 #include <QPointer>
 #include <QSettings>
 #include <QThreadPool>
+#include <QVariantMap>
 #include <expected>
 #include <functional>
 
@@ -38,6 +39,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
     Q_PROPERTY(QString testStatus READ testStatus NOTIFY testChanged)
     Q_PROPERTY(QString testError READ testError NOTIFY testChanged)
+    Q_PROPERTY(QVariantMap testReport READ testReport NOTIFY testChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
@@ -65,6 +67,7 @@ public:
     bool testBusy() const { return m_testBusy; }
     QString testStatus() const { return m_testStatus; }
     QString testError() const { return m_testError; }
+    QVariantMap testReport() const { return m_testReport; }
     bool hasApiKey() const { return m_credentials->hasKey(); }
     QString keyStorageStatus() const { return m_credentials->status(); }
     bool busy() const { return m_busy; }
@@ -104,6 +107,7 @@ private:
     void startCompletion(quint64 id);
     void finishCompletion(quint64 id, std::expected<QString, struct ProviderError> result);
     void cancelAllCompletions();
+    void resetTestReport();
     struct CompletionJob {
         QJsonObject payload{};
         QPointer<QObject> context{};
@@ -131,6 +135,7 @@ private:
     bool m_testBusy = false;
     QString m_testStatus{};
     QString m_testError{};
+    QVariantMap m_testReport{};
     QString m_endpoint;
     QString m_model;
     QString m_status;
