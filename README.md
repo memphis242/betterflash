@@ -151,6 +151,21 @@ and the limits of creation/edit history in existing collections.
 Deferred ideas for weakness ranking and optional language-model study support
 are recorded in [study support ideas](docs/study-support-ideas.md).
 
+### Review history
+
+The History page shows the latest three review sessions above a scrollable list
+of every recorded session. Select a row to open a collapsible, resizable details
+pane with the cards reviewed, overall recall, each rating's count, and response
+times. The overall recall score is the mean recalled fraction; its color follows
+the average rating, as it does in card details. Reverse directions and cloze
+variants count as separate answers, with distinct source cards counted separately.
+
+New reviews retain their session identity across restart, export and sync. Older
+records without that identity appear as **Estimated session** groups: consecutive
+reviews of the same deck, on the same UTC date, with no gap over 30 minutes.
+Rating corrections update the totals without adding another answer or changing
+its recorded time. Resetting or deleting a deck preserves its past reviews.
+
 ### Development reset controls
 
 Desktop builds made with `scripts/build-desktop.sh` include **Reset deck** on the
