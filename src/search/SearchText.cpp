@@ -148,17 +148,16 @@ QString normalizedQuery(const QString &query) {
 
 QList<SearchDocument> documents(const QVariantList &cards, const QVariantList &decks, const QString &deckId) {
     QList<SearchDocument> result;
-    if (deckId.isEmpty()) return result;
     QHash<QString, QVariantMap> byId;
     for (const QVariant &entry : decks) {
         const QVariantMap deck = entry.toMap();
         const QString id = deck.value(QStringLiteral("id")).toString();
         if (!id.isEmpty()) byId.insert(id, deck);
     }
-    const QString path = deckPath(deckId, byId);
     for (const QVariant &entry : cards) {
         const QVariantMap card = entry.toMap();
-        if (card.value(QStringLiteral("deckId")).toString() != deckId) continue;
+        if (!deckId.isEmpty() && card.value(QStringLiteral("deckId")).toString() != deckId) continue;
+        const QString path = deckPath(card.value(QStringLiteral("deckId")).toString(), byId);
         const QString front = card.value(QStringLiteral("front")).toString();
         const QString back = card.value(QStringLiteral("back")).toString();
         const QString tags = card.value(QStringLiteral("tags")).toString();

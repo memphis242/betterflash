@@ -70,11 +70,13 @@ public:
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
     Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
     Q_INVOKABLE void updateDeck(const QString &id, const QString &name, const QString &description = {}, const QString &parentId = {});
+    Q_INVOKABLE bool moveDeck(const QString &id, const QString &parentId = {});
     Q_INVOKABLE void deleteDeck(const QString &id);
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,
                               int pointCount = 1);
     Q_INVOKABLE void deleteCard(const QString &id);
+    Q_INVOKABLE bool moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     Q_INVOKABLE void resetDeck(const QString &id);
     Q_INVOKABLE void resetCard(const QString &id);
     Q_INVOKABLE bool replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
@@ -114,9 +116,11 @@ signals:
     void syncResponseApplied(const QString &requestId,bool success,bool hasMore);
     void syncApplied(bool success, bool hasMore);
     void cardTimelineReady(const QString &cardId, const QVariantMap &result);
+    void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
+    void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
 
 private:
-    void invoke(const std::function<void(DatabaseWorker *)> &call);
+    bool invoke(const std::function<void(DatabaseWorker *)> &call);
     void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
     void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
