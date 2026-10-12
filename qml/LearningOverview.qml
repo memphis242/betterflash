@@ -48,11 +48,9 @@ Item {
     ]
     function fitScopePopup() {
         const buttonTop = scopeButton.mapToItem(ui.contentItem, 0, 0).y
-        const below = Math.max(0, ui.contentItem.height - buttonTop - scopeButton.height - 20)
         const above = Math.max(0, buttonTop - 20)
-        const placeBelow = below >= 230 || below >= above
-        scopePopup.height = Math.min(380, placeBelow ? below : above)
-        scopePopup.y = placeBelow ? scopeButton.height + 8 : -scopePopup.height - 8
+        scopePopup.height = Math.min(scopePopup.implicitHeight, above)
+        scopePopup.y = -scopePopup.height - 8
     }
     function validDeckIds() {
         const available = app.decks.map(deck => String(deck.id))
@@ -146,7 +144,7 @@ Item {
                     parent: scopeButton
                     width: Math.min(400, learning.width)
                     x: scopeButton.width - width
-                    y: scopeButton.height + 8
+                    y: -height - 8
                     margins: 12
                     decks: app.decks
                     selectedDeckIds: learning.selectedDeckIds
@@ -203,7 +201,8 @@ Item {
                         Layout.minimumWidth: 0
                         Layout.preferredWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.7
                         Layout.maximumWidth: learning.narrow ? learningScroll.availableWidth : learningScroll.availableWidth * 0.7
-                        Layout.preferredHeight: implicitHeight
+                        Layout.preferredHeight: learning.narrow ? implicitHeight : Math.max(implicitHeight, learningScroll.availableHeight)
+                        spacious: true
                         days: activity.analytics.days || []
                         today: String(activity.analytics.today || "")
                         firstDate: String(activity.analytics.firstDate || "")

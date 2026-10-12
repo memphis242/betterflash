@@ -9,6 +9,7 @@ Item {
     property string today: ""
     property string firstDate: ""
     property bool compact: false
+    property bool spacious: false
     property int selectedYear: new Date().getFullYear()
     property real selectedDate: todayMs
 
@@ -22,7 +23,7 @@ Item {
     readonly property real gridStart: monday(periodStart)
     readonly property int weekCount: compact ? 13 : Math.ceil(((periodEnd - gridStart) / dayMs + 1) / 7)
     readonly property int cellGap: 3
-    readonly property int cellSize: Math.max(9, Math.min(compact ? 14 : 12, Math.floor((calendarViewport.width + cellGap) / Math.max(1, weekCount)) - cellGap, Math.floor((calendarViewport.height - 31) / 7) - cellGap))
+    readonly property int cellSize: Math.max(9, Math.min(compact ? 14 : spacious ? 24 : 12, Math.floor((calendarViewport.width + cellGap) / Math.max(1, weekCount)) - cellGap, Math.floor((calendarViewport.height - 31) / 7) - cellGap))
     readonly property int cellStride: cellSize + cellGap
     readonly property real columnStride: (calendarViewport.contentWidth + cellGap) / weekCount
     readonly property real cellWidth: columnStride - cellGap

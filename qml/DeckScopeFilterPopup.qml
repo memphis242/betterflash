@@ -10,6 +10,7 @@ Popup {
     property var selectedDeckIds: []
     property string anchorId: ""
     property bool anchorCheckedState: false
+    readonly property int visibleRowTarget: Math.min(7, decks.length + 1)
     signal deckSelectionChanged(var deckIds)
 
     readonly property var choices: {
@@ -26,6 +27,9 @@ Popup {
     }
 
     padding: 14
+    implicitHeight: topPadding + bottomPadding + pickerHeader.implicitHeight
+        + search.implicitHeight + selectionHelp.implicitHeight + 3 * pickerLayout.spacing
+        + visibleRowTarget * 48 + (visibleRowTarget - 1) * deckList.spacing
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     background: Rectangle { radius: 12; color: Theme.surfaceRaised; border.color: Theme.rule }
@@ -93,8 +97,10 @@ Popup {
     onClosed: { anchorId = ""; anchorCheckedState = false }
 
     contentItem: ColumnLayout {
+        id: pickerLayout
         spacing: 10
         RowLayout {
+            id: pickerHeader
             Layout.fillWidth: true
             Label {
                 text: "Learning scope"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 16; font.weight: Font.DemiBold
@@ -122,7 +128,8 @@ Popup {
                 id: deckRow
                 required property var modelData
                 required property int index
-                width: deckList.width; height: 48
+                width: deckList.width
+                height: Math.max(36, Math.min(48, (deckList.height - (popup.visibleRowTarget - 1) * deckList.spacing) / popup.visibleRowTarget))
                 focusPolicy: Qt.NoFocus
                 highlighted: deckRow.modelData.id === "" ? popup.normalizedSelection.length === 0 : popup.normalizedSelection.indexOf(deckRow.modelData.id) >= 0
                 Accessible.name: deckRow.modelData.path + (deckRow.modelData.id ? ", includes subdecks" : ", all decks")
@@ -167,6 +174,7 @@ Popup {
             }
         }
         Label {
+            id: selectionHelp
             visible: popup.height >= 230; Layout.fillWidth: true
             text: "Click to toggle; Shift-click applies a range. No decks selected means entire library."
             color: Theme.inkMuted; font.family: Theme.uiFont; font.pixelSize: 11; wrapMode: Text.Wrap

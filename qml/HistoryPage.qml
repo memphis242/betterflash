@@ -8,7 +8,7 @@ Item {
     id: historyPage
     required property var ui
     readonly property bool narrow: width < 760
-    readonly property real learningHeight: Math.max(190, Math.min(278, (height - 2 * ui.gutter) * 0.39))
+    readonly property real learningHeight: Math.max(190, (height - 2 * ui.gutter) * 0.4)
     readonly property real ledgerHeight: Math.max(0, height - 2 * ui.gutter - learningHeight - 18)
     readonly property bool compactHeight: height < 620
     readonly property var sessionRecords: app.reviewSessions
