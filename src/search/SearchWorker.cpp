@@ -49,16 +49,21 @@ SearchWorker::SearchWorker(QString cachePath, Epochs epochs,
 void SearchWorker::testLocal(quint64 epoch, const QString &profile, const QString &directory) {
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_testEpoch->load() != epoch) return;
-    const auto fail = [this, epoch](const QString &message) {
-        if (m_testEpoch->load() == epoch) emit testFinished(epoch, false, message);
+    QVariantMap report{{QStringLiteral("outcome"), QStringLiteral("running")}};
+    const auto fail = [this, epoch, &report](const QString &message) {
+        report.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+        report.insert(QStringLiteral("details"), message);
+        if (m_testEpoch->load() == epoch) emit testFinished(epoch, false, report, message);
     };
-    auto embedder = std::make_unique<LocalEmbedder>();
-    const auto loaded = embedder->load(directory, profile);
-    if (!loaded) { fail(loaded.error()); return; }
     static const QStringList samples{
         QStringLiteral("Multiplication combines equal groups of quantities."),
         QStringLiteral("Multiplying numbers finds the total in repeated groups."),
         QStringLiteral("A recipe uses flour, water, yeast, and a warm oven.")};
+    report.insert(QStringLiteral("input"), samples.first());
+    report.insert(QStringLiteral("expected"), QStringLiteral("The related sentence should be more similar than the unrelated sentence; vectors should be normalized."));
+    auto embedder = std::make_unique<LocalEmbedder>();
+    const auto loaded = embedder->load(directory, profile);
+    if (!loaded) { fail(loaded.error()); return; }
     QVector<QVector<float>> vectors;
     vectors.reserve(samples.size());
     for (const QString &sample : samples) {
@@ -84,9 +89,20 @@ void SearchWorker::testLocal(quint64 epoch, const QString &profile, const QStrin
         || std::abs(self - 1.0) > 0.02) {
         fail(QStringLiteral("SEARCH_TEST: The model returned invalid or unnormalized vectors.")); return;
     }
-    if (m_testEpoch->load() == epoch)
-        emit testFinished(epoch, true, QStringLiteral("Model responded with %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
-            .arg(dimensions).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3));
+    const QVariantList comparisons{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("Related text")}, {QStringLiteral("query"), samples.first()},
+                    {QStringLiteral("text"), samples.at(1)}, {QStringLiteral("similarity"), related}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("Unrelated text")}, {QStringLiteral("query"), samples.first()},
+                    {QStringLiteral("text"), samples.at(2)}, {QStringLiteral("similarity"), unrelated}}};
+    report.insert(QStringLiteral("output"), QStringLiteral("%1-dimensional normalized vector").arg(dimensions));
+    report.insert(QStringLiteral("comparisons"), comparisons);
+    if (related <= unrelated) {
+        fail(QStringLiteral("SEARCH_TEST: The model did not rank related text above unrelated text.")); return;
+    }
+    const QString message = QStringLiteral("Model responded with %1-dimensional normalized vectors. Related-text similarity: %2; unrelated-text similarity: %3.")
+        .arg(dimensions).arg(related, 0, 'f', 3).arg(unrelated, 0, 'f', 3);
+    report.insert(QStringLiteral("outcome"), QStringLiteral("passed"));
+    if (m_testEpoch->load() == epoch) emit testFinished(epoch, true, report, message);
 }
 SearchWorker::~SearchWorker() {
     const QString name = m_cache.connectionName();

@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QString>
 #include <QVariant>
+#include <QVariantMap>
 #include <QVector>
 #include <QAudioFormat>
 #include <atomic>
@@ -46,9 +47,11 @@ class VoiceController final : public QObject {
     Q_PROPERTY(bool sttTestBusy READ sttTestBusy NOTIFY modelTestChanged)
     Q_PROPERTY(QString sttTestStatus READ sttTestStatus NOTIFY modelTestChanged)
     Q_PROPERTY(QString sttTestError READ sttTestError NOTIFY modelTestChanged)
+    Q_PROPERTY(QVariantMap sttTestReport READ sttTestReport NOTIFY modelTestChanged)
     Q_PROPERTY(bool ttsTestBusy READ ttsTestBusy NOTIFY modelTestChanged)
     Q_PROPERTY(QString ttsTestStatus READ ttsTestStatus NOTIFY modelTestChanged)
     Q_PROPERTY(QString ttsTestError READ ttsTestError NOTIFY modelTestChanged)
+    Q_PROPERTY(QVariantMap ttsTestReport READ ttsTestReport NOTIFY modelTestChanged)
     Q_PROPERTY(bool modelTestBusy READ modelTestBusy NOTIFY modelTestChanged)
     Q_PROPERTY(QString modelTestStatus READ modelTestStatus NOTIFY modelTestChanged)
     Q_PROPERTY(QString modelTestError READ modelTestError NOTIFY modelTestChanged)
@@ -82,9 +85,11 @@ public:
     [[nodiscard]] bool sttTestBusy() const { return m_sttTestBusy; }
     [[nodiscard]] QString sttTestStatus() const { return m_sttTestStatus; }
     [[nodiscard]] QString sttTestError() const { return m_sttTestError; }
+    [[nodiscard]] QVariantMap sttTestReport() const { return m_sttTestReport; }
     [[nodiscard]] bool ttsTestBusy() const { return m_ttsTestBusy; }
     [[nodiscard]] QString ttsTestStatus() const { return m_ttsTestStatus; }
     [[nodiscard]] QString ttsTestError() const { return m_ttsTestError; }
+    [[nodiscard]] QVariantMap ttsTestReport() const { return m_ttsTestReport; }
     [[nodiscard]] bool modelTestBusy() const { return m_modelTestBusy; }
     [[nodiscard]] QString modelTestStatus() const { return m_modelTestStatus; }
     [[nodiscard]] QString modelTestError() const { return m_modelTestError; }
@@ -157,6 +162,8 @@ private:
     void finishSttTest(bool passed, const QString &message, const QString &error = {});
     void beginTtsTest();
     void finishTtsTest(bool passed, const QString &message, const QString &error = {});
+    void resetSttTestReport();
+    void resetTtsTestReport();
     void beginLocalSpeech();
     void retireTtsWorker();
     void startLocalPlayback(const QByteArray &pcm, quint64 request, double seconds);
@@ -194,8 +201,10 @@ private:
     bool m_testSavedWantsListening = false;
     QString m_sttTestStatus = QStringLiteral("Not tested");
     QString m_sttTestError;
+    QVariantMap m_sttTestReport;
     QString m_ttsTestStatus = QStringLiteral("Not tested");
     QString m_ttsTestError;
+    QVariantMap m_ttsTestReport;
     QString m_localDirectory;
     ModelDownload *m_sttDownload = nullptr;
     ModelDownload *m_ttsDownload = nullptr;
