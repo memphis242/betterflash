@@ -130,7 +130,7 @@ private:
     void updateElapsed();
     void freezeElapsed();
     void resetElapsed();
-    bool reviewActionReady(bool needsAnswer);
+    bool reviewActionReady(bool needsAnswer, bool allowPaused = false);
 
     DatabaseWorker *m_worker = nullptr;
     QThread *m_thread = nullptr;

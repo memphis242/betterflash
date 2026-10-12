@@ -574,11 +574,13 @@ ApplicationWindow {
                 return false
             if (action === "pause")
                 return true
-            if (app.paused || !app.currentCard.id)
+            if (!app.currentCard.id)
+                return false
+            if (action === "defer" || action === "postpone")
+                return !app.reviewingCompletedCard
+            if (app.paused)
                 return false
             if ((action === "previousCard" || action === "nextCard") && review.timelineScrollHasFocus)
-                return false
-            if ((action === "defer" || action === "postpone") && app.reviewingCompletedCard)
                 return false
             if (action === "review" && (review.previewHasFocus || review.reviewUtilityHasFocus
                 || activeFocusItem && activeFocusItem.pressed !== undefined && activeFocusItem.checkable !== undefined))

@@ -11,7 +11,7 @@ Item {
     readonly property bool correctionDialogVisible: gradeCorrectionDialog.visible
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
     readonly property bool timelineScrollHasFocus: reviewQueueScrollBar.activeFocus
-    readonly property bool reviewUtilityHasFocus: returnToActive.activeFocus || deferUtility.activeFocus || postponeUtility.activeFocus || voiceUtility.activeFocus
+    readonly property bool reviewUtilityHasFocus: returnToActive.activeFocus || deferUtility.activeFocus || postponeUtility.activeFocus || voiceUtility.activeFocus || reviewPause.activeFocus || reviewEnd.activeFocus
     property bool queueCollapsed: preferences.reviewQueueCollapsed
     property Settings preferences: Settings {
         category: "review"
@@ -165,11 +165,11 @@ Item {
                 spacing: 14
                 ColumnLayout {
                     id: reviewHeaderInfo
-                    readonly property real titleMaxWidth: Math.max(120, reviewWorkspace.width * 0.42)
+                    readonly property real titleMaxWidth: Math.max(0, Math.min(width, reviewWorkspace.width * 0.42))
                     Layout.minimumWidth: 0
-                    Layout.preferredWidth: titleLabel.width + reviewPause.width + 22
+                    Layout.fillWidth: true
                     spacing: 7
-                    RowLayout {
+                    Flow {
                         Layout.fillWidth: true
                         spacing: 14
                         Label {
@@ -181,20 +181,36 @@ Item {
                             font.family: Theme.contentFont
                             font.pixelSize: page.ui.width < 600 ? 21 : 27
                             elide: Text.ElideRight
-                            Layout.minimumWidth: 0
-                            Layout.preferredWidth: Math.min(reviewHeaderInfo.titleMaxWidth, implicitWidth)
-                            Layout.maximumWidth: reviewHeaderInfo.titleMaxWidth
+                            width: Math.min(reviewHeaderInfo.titleMaxWidth, implicitWidth)
+                            height: 44
+                            verticalAlignment: Text.AlignVCenter
                         }
-                        ReviewUtilityButton {
-                            id: reviewPause
-                            objectName: "reviewPause"
-                            hint: (app.paused ? "Resume review" : "Pause review") + " (" + shortcuts.bindings.pause + ")"
-                            Layout.preferredWidth: 44
-                            Layout.preferredHeight: 44
-                            Layout.rightMargin: 8
-                            glyph: app.paused ? "play" : "pause"
-                            enabled: !app.busy
-                            onClicked: app.paused ? app.resumeReview() : app.pauseReview()
+                        Row {
+                            spacing: 10
+                            ReviewUtilityButton {
+                                id: reviewPause
+                                objectName: "reviewPause"
+                                hint: (app.paused ? "Resume review" : "Pause review") + " (" + shortcuts.bindings.pause + ")"
+                                glyph: app.paused ? "play" : "pause"
+                                enabled: !app.busy
+                                onClicked: app.paused ? app.resumeReview() : app.pauseReview()
+                            }
+                            ReviewUtilityButton {
+                                id: reviewEnd
+                                objectName: "reviewEnd"
+                                glyph: "close"
+                                hint: "End review"
+                                enabled: !app.busy
+                                onClicked: app.stopReview()
+                            }
+                            AppButton {
+                                objectName: "reviewSummary"
+                                text: reviewHeaderInfo.width >= 460 ? "Summarize remaining cards" : "Summarize"
+                                hint: "Summarize remaining cards"
+                                height: 44
+                                enabled: !app.busy && app.queueCount > 0
+                                onClicked: ui.openSummary()
+                            }
                         }
                     }
                     Label {
@@ -207,18 +223,9 @@ Item {
                         elide: Text.ElideRight
                     }
                 }
-                Item {
-                    Layout.fillWidth: true
-                }
-                AppButton {
-                    visible: app.queueCount === 0
-                    text: "Finish review"
-                    primary: true
-                    enabled: !app.busy
-                    onClicked: app.stopReview()
-                }
                 GlyphButton {
                     objectName: "reviewMenuButton"
+                    Layout.alignment: Qt.AlignTop
                     glyph: "more"
                     hint: "Review actions"
                     onClicked: reviewMenu.open()
@@ -231,7 +238,7 @@ Item {
                         }
                         AppMenuItem { glyph: "review-ledger"
                             text: "Summarize remaining cards"
-                            enabled: app.queueCount > 0
+                            enabled: !app.busy && app.queueCount > 0
                             onTriggered: ui.openSummary()
                         }
                         AppMenuItem { glyph: "empty-box"
@@ -249,7 +256,8 @@ Item {
                             onTriggered: ui.confirmReset("deck", app.currentCard.deckId, app.currentCard.deckName)
                         }
                         AppMenuItem { glyph: "close"; danger: true
-                            text: app.reviewedCount >= app.sessionTotal ? "Finish review" : "End review"
+                            text: "End review"
+                            enabled: !app.busy
                             onTriggered: app.stopReview()
                         }
                     }
@@ -971,7 +979,7 @@ Item {
                                         objectName: "deferCard"
                                         glyph: "queue-tail"
                                         hint: "Defer this card to the end of the review queue" + (shortcuts.bindings.defer ? " (" + shortcuts.bindings.defer + ")" : "")
-                                        enabled: !app.paused && !app.busy && page.cardGrade(app.currentCard) < 0
+                                        enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
                                         onClicked: app.deferCard()
                                     }
                                     ReviewUtilityButton {
@@ -979,7 +987,7 @@ Item {
                                         objectName: "postponeCard"
                                         glyph: "calendar-day"
                                         hint: "Review this card on a later date" + (shortcuts.bindings.postpone ? " (" + shortcuts.bindings.postpone + ")" : "")
-                                        enabled: !app.paused && !app.busy && page.cardGrade(app.currentCard) < 0
+                                        enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
                                         onClicked: ui.openPostpone()
                                     }
                                 }

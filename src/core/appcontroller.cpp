@@ -182,9 +182,9 @@ void AppController::resetElapsed()
     else m_elapsedTick.stop();
     emit responseSecondsChanged();
 }
-bool AppController::reviewActionReady(bool needsAnswer)
+bool AppController::reviewActionReady(bool needsAnswer, bool allowPaused)
 {
-    if (m_busy||m_paused) return false;
+    if (m_busy||(m_paused&&!allowPaused)) return false;
     if (!m_reviewing||m_currentCard.isEmpty()||(needsAnswer&&!m_answerRevealed)) {
         setError({{"code","REVIEW_NOT_READY"},{"message",needsAnswer?"Reveal the answer before grading this card.":"Start a review first."},{"detail",QString()}});return false;
     }
@@ -236,11 +236,11 @@ void AppController::clearPendingGradeCorrection()
 }
 void AppController::deferCard()
 {
-    if (reviewActionReady(false)) {clearPendingGradeCorrection();invoke([](DatabaseWorker *worker){worker->defer();});}
+    if (reviewActionReady(false, true)) {clearPendingGradeCorrection();invoke([](DatabaseWorker *worker){worker->defer();});}
 }
 void AppController::postponeCard(const QString &date)
 {
-    if (reviewActionReady(false)) {clearPendingGradeCorrection();invoke([=](DatabaseWorker *worker){worker->postpone(date);});}
+    if (reviewActionReady(false, true)) {clearPendingGradeCorrection();invoke([=](DatabaseWorker *worker){worker->postpone(date);});}
 }
 void AppController::postponeDays(int days)
 {
