@@ -1,0 +1,174 @@
+{
+    "_comments": [
+        "Palette adapted from https://github.com/cocopon/iceberg.vim. BetterFlash token mapping; foreground contrast is adjusted at render time."
+    ],
+    "metadata": {
+        "name": "Iceberg Light",
+        "revision": 1,
+        "copyright": [
+            "cocopon"
+        ],
+        "license": "SPDX-License-Identifier: MIT"
+    },
+    "text-styles": {
+        "Normal": {
+            "text-color": "#33374c",
+            "bold": false,
+            "italic": false
+        },
+        "Keyword": {
+            "text-color": "#2d539e",
+            "bold": true,
+            "italic": false
+        },
+        "Function": {
+            "text-color": "#3f83a6",
+            "bold": false,
+            "italic": false
+        },
+        "Variable": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "ControlFlow": {
+            "text-color": "#2d539e",
+            "bold": true,
+            "italic": false
+        },
+        "Operator": {
+            "text-color": "#2d539e",
+            "bold": false,
+            "italic": false
+        },
+        "BuiltIn": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "Extension": {
+            "text-color": "#3f83a6",
+            "bold": false,
+            "italic": false
+        },
+        "Preprocessor": {
+            "text-color": "#2d539e",
+            "bold": false,
+            "italic": false
+        },
+        "Attribute": {
+            "text-color": "#3f83a6",
+            "bold": false,
+            "italic": false
+        },
+        "Char": {
+            "text-color": "#668e3d",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialChar": {
+            "text-color": "#668e3d",
+            "bold": false,
+            "italic": false
+        },
+        "String": {
+            "text-color": "#668e3d",
+            "bold": false,
+            "italic": false
+        },
+        "VerbatimString": {
+            "text-color": "#668e3d",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialString": {
+            "text-color": "#668e3d",
+            "bold": false,
+            "italic": false
+        },
+        "Import": {
+            "text-color": "#2d539e",
+            "bold": false,
+            "italic": false
+        },
+        "DataType": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "DecVal": {
+            "text-color": "#c57339",
+            "bold": false,
+            "italic": false
+        },
+        "BaseN": {
+            "text-color": "#c57339",
+            "bold": false,
+            "italic": false
+        },
+        "Float": {
+            "text-color": "#c57339",
+            "bold": false,
+            "italic": false
+        },
+        "Constant": {
+            "text-color": "#c57339",
+            "bold": false,
+            "italic": false
+        },
+        "Comment": {
+            "text-color": "#8389a3",
+            "bold": false,
+            "italic": true
+        },
+        "Documentation": {
+            "text-color": "#8389a3",
+            "bold": false,
+            "italic": true
+        },
+        "Annotation": {
+            "text-color": "#c57339",
+            "bold": false,
+            "italic": false
+        },
+        "CommentVar": {
+            "text-color": "#8389a3",
+            "bold": false,
+            "italic": false
+        },
+        "RegionMarker": {
+            "text-color": "#8389a3",
+            "bold": false,
+            "italic": false
+        },
+        "Information": {
+            "text-color": "#8389a3",
+            "bold": false,
+            "italic": false
+        },
+        "Warning": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "Alert": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "Error": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        },
+        "Others": {
+            "text-color": "#7759b4",
+            "bold": false,
+            "italic": false
+        }
+    },
+    "editor-colors": {
+        "BackgroundColor": "#e8e9ec",
+        "TextSelection": "#8389a3"
+    }
+}

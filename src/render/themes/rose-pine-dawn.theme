@@ -1,0 +1,174 @@
+{
+    "_comments": [
+        "Palette adapted from https://github.com/rose-pine/palette. BetterFlash token mapping; foreground contrast is adjusted at render time."
+    ],
+    "metadata": {
+        "name": "Rose Pine Dawn",
+        "revision": 1,
+        "copyright": [
+            "Rose Pine"
+        ],
+        "license": "SPDX-License-Identifier: MIT"
+    },
+    "text-styles": {
+        "Normal": {
+            "text-color": "#464261",
+            "bold": false,
+            "italic": false
+        },
+        "Keyword": {
+            "text-color": "#907aa9",
+            "bold": true,
+            "italic": false
+        },
+        "Function": {
+            "text-color": "#d7827e",
+            "bold": false,
+            "italic": false
+        },
+        "Variable": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "ControlFlow": {
+            "text-color": "#907aa9",
+            "bold": true,
+            "italic": false
+        },
+        "Operator": {
+            "text-color": "#907aa9",
+            "bold": false,
+            "italic": false
+        },
+        "BuiltIn": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "Extension": {
+            "text-color": "#d7827e",
+            "bold": false,
+            "italic": false
+        },
+        "Preprocessor": {
+            "text-color": "#907aa9",
+            "bold": false,
+            "italic": false
+        },
+        "Attribute": {
+            "text-color": "#d7827e",
+            "bold": false,
+            "italic": false
+        },
+        "Char": {
+            "text-color": "#286983",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialChar": {
+            "text-color": "#286983",
+            "bold": false,
+            "italic": false
+        },
+        "String": {
+            "text-color": "#286983",
+            "bold": false,
+            "italic": false
+        },
+        "VerbatimString": {
+            "text-color": "#286983",
+            "bold": false,
+            "italic": false
+        },
+        "SpecialString": {
+            "text-color": "#286983",
+            "bold": false,
+            "italic": false
+        },
+        "Import": {
+            "text-color": "#907aa9",
+            "bold": false,
+            "italic": false
+        },
+        "DataType": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "DecVal": {
+            "text-color": "#ea9d34",
+            "bold": false,
+            "italic": false
+        },
+        "BaseN": {
+            "text-color": "#ea9d34",
+            "bold": false,
+            "italic": false
+        },
+        "Float": {
+            "text-color": "#ea9d34",
+            "bold": false,
+            "italic": false
+        },
+        "Constant": {
+            "text-color": "#ea9d34",
+            "bold": false,
+            "italic": false
+        },
+        "Comment": {
+            "text-color": "#797593",
+            "bold": false,
+            "italic": true
+        },
+        "Documentation": {
+            "text-color": "#797593",
+            "bold": false,
+            "italic": true
+        },
+        "Annotation": {
+            "text-color": "#ea9d34",
+            "bold": false,
+            "italic": false
+        },
+        "CommentVar": {
+            "text-color": "#797593",
+            "bold": false,
+            "italic": false
+        },
+        "RegionMarker": {
+            "text-color": "#797593",
+            "bold": false,
+            "italic": false
+        },
+        "Information": {
+            "text-color": "#797593",
+            "bold": false,
+            "italic": false
+        },
+        "Warning": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "Alert": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "Error": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        },
+        "Others": {
+            "text-color": "#b4637a",
+            "bold": false,
+            "italic": false
+        }
+    },
+    "editor-colors": {
+        "BackgroundColor": "#faf4ed",
+        "TextSelection": "#797593"
+    }
+}

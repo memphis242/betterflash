@@ -40,3 +40,20 @@ The native inference runtime is ONNX Runtime 1.20.1 for Linux x86_64 and the
 1.20.0 Android AAR, fetched from official release/Maven archives with pinned
 SHA-256 checksums. It is distributed under the
 MIT License; see `packaging/licenses/ONNX-Runtime-MIT.txt`.
+
+Markdown code highlighting links KDE Syntax Highlighting 6.18.0, fetched from
+[the official KDE archive](https://download.kde.org/stable/frameworks/6.18/syntax-highlighting-6.18.0.tar.xz)
+with a pinned SHA-256. Its library code is MIT licensed; its bundled language
+definitions include MIT, LGPL, GPL and CC0 material with individual notices in
+the definition resources. Aggregate license texts are supplied as
+`packaging/licenses/KSyntaxHighlighting-*.txt`. Extra CMake Modules 6.18.0 is a
+build-time dependency fetched from KDE with a pinned SHA-256; it is not linked
+into the application. Upstream source archives remain available at the URLs
+recorded in `cmake/SyntaxHighlighting.cmake`.
+
+Additional code palettes adapt the upstream Rose Pine, Everforest, Jellybeans
+and Iceberg themes. Their MIT notices are in `packaging/licenses/`; the palette
+conversions and source links are in `src/render/themes/`. Gruvbox and the other
+KDE themes retain their upstream resource notices. BetterFlash adjusts code
+foreground colors where necessary for contrast. `clangd` is an optional external
+program installed separately; it is not redistributed by this project.
