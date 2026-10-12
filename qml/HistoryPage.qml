@@ -13,7 +13,11 @@ Item {
     readonly property bool compactHeight: height < 620
     readonly property var sessionRecords: app.reviewSessions
     readonly property var recentRecords: sessionRecords.slice(0, 3)
+    readonly property var filteredHistoryRecords: sessionRecords.filter(record => historyPage.recordDate(record) >= historyPage.historyStartDate && historyPage.recordDate(record) <= historyPage.historyEndDate)
     property string selectedSessionId: ""
+    property string historyStartDate: ""
+    property string historyEndDate: ""
+    property bool historyCurrentWeek: true
     property Settings preferences: Settings {
         category: "historyPage"
         property bool detailsOpen: false
@@ -30,6 +34,72 @@ Item {
     function startReview() {
         if (app.decks.length)
             ui.runAction("startReview");
+    }
+    function parseDay(value) {
+        const text = String(value || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(text))
+            return NaN;
+        const parts = text.split("-").map(Number);
+        if (parts[0] < 1 || parts[0] > 9999)
+            return NaN;
+        const date = new Date(0);
+        date.setUTCFullYear(parts[0], parts[1] - 1, parts[2]);
+        date.setUTCHours(0, 0, 0, 0);
+        return date.getUTCFullYear() === parts[0] && date.getUTCMonth() === parts[1] - 1 && date.getUTCDate() === parts[2] ? date.getTime() : NaN;
+    }
+    function dayKey(timestamp) {
+        const date = new Date(timestamp);
+        return String(date.getUTCFullYear()).padStart(4, "0") + "-" + String(date.getUTCMonth() + 1).padStart(2, "0") + "-" + String(date.getUTCDate()).padStart(2, "0");
+    }
+    function localToday() {
+        const date = new Date();
+        return String(date.getFullYear()).padStart(4, "0") + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+    }
+    function mondayFor(dateKey) {
+        const day = parseDay(dateKey);
+        if (!Number.isFinite(day))
+            return dateKey;
+        const offset = (new Date(day).getUTCDay() + 6) % 7;
+        return dayKey(day - offset * 86400000);
+    }
+    function addDays(dateKey, amount) {
+        const day = parseDay(dateKey);
+        return Number.isFinite(day) ? dayKey(day + amount * 86400000) : dateKey;
+    }
+    function recordDate(record) {
+        const value = record.lastReviewedAt || record.reviewedAt;
+        const timestamp = new Date(value);
+        if (!Number.isFinite(timestamp.getTime()))
+            return "";
+        return String(timestamp.getFullYear()).padStart(4, "0") + "-" + String(timestamp.getMonth() + 1).padStart(2, "0") + "-" + String(timestamp.getDate()).padStart(2, "0");
+    }
+    function setCurrentWeek() {
+        const start = mondayFor(localToday());
+        historyStartDate = start;
+        historyEndDate = addDays(start, 6);
+        historyCurrentWeek = true;
+    }
+    function shiftHistoryWeek(amount) {
+        const nextStart = addDays(historyStartDate, amount * 7);
+        const nextEnd = addDays(historyEndDate, amount * 7);
+        if (!Number.isFinite(parseDay(nextStart)) || !Number.isFinite(parseDay(nextEnd)))
+            return;
+        historyStartDate = nextStart;
+        historyEndDate = nextEnd;
+        historyCurrentWeek = false;
+    }
+    function applyHistoryRange(startDate, endDate) {
+        historyStartDate = startDate;
+        historyEndDate = endDate;
+        historyCurrentWeek = startDate === mondayFor(localToday()) && endDate === addDays(mondayFor(localToday()), 6);
+    }
+    Component.onCompleted: setCurrentWeek()
+    onVisibleChanged: if (visible && historyCurrentWeek) setCurrentWeek()
+    Timer {
+        interval: 60000
+        repeat: true
+        running: historyPage.visible && historyPage.historyCurrentWeek
+        onTriggered: historyPage.setCurrentWeek()
     }
     onSessionRecordsChanged: if (selectedSessionId && !sessionRecords.some(session => String(session.id || "") === selectedSessionId))
         selectedSessionId = ""
@@ -113,30 +183,75 @@ Item {
                         font.family: Theme.contentFont
                         font.pixelSize: ledger.width < 300 ? 20 : ledger.width < 480 ? 24 : 28
                         font.weight: Font.DemiBold
-                        Layout.fillWidth: true
+                        Layout.fillWidth: ledger.width < 700
                         Layout.minimumWidth: 0
                         elide: Text.ElideRight
+                    }
+                    HistoryDateControls {
+                        visible: ledger.width >= 700
+                        startDate: historyPage.historyStartDate
+                        endDate: historyPage.historyEndDate
+                        currentWeek: historyPage.historyCurrentWeek
+                        Layout.preferredWidth: Math.min(430, Math.max(300, ledger.width * 0.42))
+                        Layout.minimumWidth: 260
+                        onPreviousRequested: historyPage.shiftHistoryWeek(-1)
+                        onNextRequested: historyPage.shiftHistoryWeek(1)
+                        onThisWeekRequested: historyPage.setCurrentWeek()
+                        onRangeSelected: (start, end) => historyPage.applyHistoryRange(start, end)
+                    }
+                    Item {
+                        visible: ledger.width >= 700
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                     }
                     Label {
                         visible: ledger.width >= 380
                         textFormat: Text.PlainText
-                        text: historyPage.sessionRecords.length + " sessions"
+                        text: historyPage.filteredHistoryRecords.length + " sessions"
                         color: Theme.inkMuted
                         font.family: Theme.monoFont
                         font.pixelSize: 12
                     }
                 }
+                RowLayout {
+                    visible: historyPage.sessionRecords.length > 0 && ledger.width < 700
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    HistoryDateControls {
+                        startDate: historyPage.historyStartDate
+                        endDate: historyPage.historyEndDate
+                        currentWeek: historyPage.historyCurrentWeek
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        onPreviousRequested: historyPage.shiftHistoryWeek(-1)
+                        onNextRequested: historyPage.shiftHistoryWeek(1)
+                        onThisWeekRequested: historyPage.setCurrentWeek()
+                        onRangeSelected: (start, end) => historyPage.applyHistoryRange(start, end)
+                    }
+                }
                 HistoryList {
                     objectName: "reviewHistory"
                     ui: historyPage.ui
-                    records: historyPage.sessionRecords
+                    records: historyPage.filteredHistoryRecords
                     selectedId: historyPage.selectedSessionId
                     rowHeight: compact ? 88 : 76
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 0
-                    visible: records.length > 0
+                    visible: historyPage.sessionRecords.length > 0 && records.length > 0
                     onSessionActivated: id => historyPage.selectSession(id)
+                }
+                Item {
+                    visible: historyPage.sessionRecords.length > 0 && historyPage.filteredHistoryRecords.length === 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Label {
+                        anchors.centerIn: parent
+                        text: "No reviews in the selected period."
+                        color: Theme.inkMuted
+                        font.family: Theme.uiFont
+                        font.pixelSize: 16
+                    }
                 }
                 Item {
                     visible: historyPage.sessionRecords.length === 0
