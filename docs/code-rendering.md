@@ -17,7 +17,8 @@ retain Qt's native Markdown parsing and plain code presentation.
 
 Settings > Code rendering remembers independent dark and light theme choices.
 The choices are derived from the actual available theme repository. Defaults are
-Gruvbox Dark and Gruvbox Light. The repository includes KDE's shipped themes and
+Iceberg Dark and Iceberg Light. Explicit user selections remain remembered.
+The repository includes KDE's shipped themes and
 BetterFlash conversions of Rose Pine, Rose Pine Dawn, Everforest Dark/Light,
 Jellybeans and Iceberg Dark/Light palettes. Jellybeans is a dark theme only.
 Token mappings in the conversions are specific to this renderer. Text colors

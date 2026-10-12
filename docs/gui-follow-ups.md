@@ -11,9 +11,8 @@ iteration; broader font selection remains a separate design task.
 
 ## Shared menus
 
-Revisit the visual treatment of menus after the current Library refinements.
-Cover right-click context menus, three-dot menus and other shared menu surfaces
-together. Compare density, padding, grouping, separators, type size, focus and
-hover states, submenus, disabled actions, destructive actions, and tooltips.
-Use the same treatment throughout the application and evaluate both themes.
-Keep current menu behavior while the replacement appearance is being chosen.
+Soft rows is the selected shared menu treatment: inset rows, generous spacing,
+rounded corners, quiet group dividers and clear focus/hover states. Apply it to
+right-click context menus, three-dot menus and other shared action menus in both
+themes. Atomicize uses an atom glyph; reset uses an empty-box glyph. Preserve
+native keyboard navigation, disabled/destructive states and action tooltips.

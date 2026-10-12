@@ -83,8 +83,8 @@ CodeRendering::CodeRendering(QObject *parent) : QObject(parent), m_server(this) 
     }
     m_darkThemes.sort(Qt::CaseInsensitive);
     m_lightThemes.sort(Qt::CaseInsensitive);
-    m_darkTheme = m_settings.value(QStringLiteral("codeRendering/darkTheme"), QStringLiteral("gruvbox Dark")).toString();
-    m_lightTheme = m_settings.value(QStringLiteral("codeRendering/lightTheme"), QStringLiteral("gruvbox Light")).toString();
+    m_darkTheme = m_settings.value(QStringLiteral("codeRendering/darkTheme"), QStringLiteral("Iceberg Dark")).toString();
+    m_lightTheme = m_settings.value(QStringLiteral("codeRendering/lightTheme"), QStringLiteral("Iceberg Light")).toString();
     if (!m_darkThemes.contains(m_darkTheme)) m_darkTheme = m_repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme).name();
     if (!m_lightThemes.contains(m_lightTheme)) m_lightTheme = m_repository.defaultTheme(KSyntaxHighlighting::Repository::LightTheme).name();
     m_serverEnabled = m_settings.value(QStringLiteral("codeRendering/languageServerEnabled"), true).toBool();
