@@ -35,8 +35,8 @@ ApplicationWindow {
         { title: "View card", glyph: "cards", key: "Enter", group: 0, tip: "Open the card's front, back and review timeline." },
         { title: "Edit card", glyph: "edit", key: "Ctrl+E", group: 0, tip: "Edit the question, answer, tags and card format." },
         { title: "Move card", glyph: "arrow-right", key: "M", group: 0, tip: "Choose a destination deck for this card." },
-        { title: "Atomicize card", glyph: "review-stack", key: "", group: 1, tip: "Preview focused cards split from distinct ideas." },
-        { title: "Reset card", glyph: "return-card", key: "", group: 1, tip: "Reset review scheduling and statistics while keeping the card." },
+        { title: "Atomicize card", glyph: "atom", key: "", group: 1, tip: "Preview focused cards split from distinct ideas." },
+        { title: "Reset card", glyph: "empty-box", key: "", group: 1, tip: "Reset review scheduling and statistics while keeping the card." },
         { title: "Delete card", glyph: "close", key: "Del", group: 2, danger: true, tip: "Remove the card after confirmation." }
     ]
     readonly property var deckActions: [

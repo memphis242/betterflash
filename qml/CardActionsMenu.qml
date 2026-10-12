@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-Menu {
+AppMenu {
     id: menu
     required property var ui
     property string cardId: ""
@@ -14,7 +14,7 @@ Menu {
         return ui.compactText(card.front || "").slice(0, 80)
     }
 
-    MenuItem {
+    AppMenuItem { glyph: "cards"
         text: "View card"
         enabled: menu.cardAvailable
         onTriggered: {
@@ -23,7 +23,7 @@ Menu {
             menu.ui.openSelectedDetail()
         }
     }
-    MenuItem {
+    AppMenuItem { glyph: "edit"
         text: "Edit card"
         enabled: menu.cardAvailable
         onTriggered: {
@@ -31,8 +31,7 @@ Menu {
             menu.ui.openCardEditor(menu.cardId)
         }
     }
-    MenuSeparator {}
-    MenuItem {
+    AppMenuItem { glyph: "arrow-right"
         text: "Move card"
         enabled: menu.cardAvailable && !app.busy
         onTriggered: {
@@ -40,15 +39,8 @@ Menu {
             menu.ui.openMoveCard(menu.cardId)
         }
     }
-    MenuItem {
-        text: "Delete card"
-        enabled: menu.cardAvailable
-        onTriggered: {
-            menu.beforeAction()
-            menu.ui.confirmDelete("card", menu.cardId, menu.cardName())
-        }
-    }
-    MenuItem {
+    AppMenuSeparator {}
+    AppMenuItem { glyph: "atom"
         text: "Atomicize card"
         enabled: menu.cardAvailable
         ToolTip.visible: hovered
@@ -58,7 +50,7 @@ Menu {
             menu.ui.openAtomicize(menu.cardId)
         }
     }
-    MenuItem {
+    AppMenuItem { glyph: "empty-box"
         text: "Reset card"
         visible: app.developmentToolsEnabled
         height: visible ? implicitHeight : 0
@@ -68,6 +60,15 @@ Menu {
         onTriggered: {
             menu.beforeAction()
             menu.ui.confirmReset("card", menu.cardId, menu.cardName())
+        }
+    }
+    AppMenuSeparator {}
+    AppMenuItem { glyph: "close"; danger: true
+        text: "Delete card"
+        enabled: menu.cardAvailable
+        onTriggered: {
+            menu.beforeAction()
+            menu.ui.confirmDelete("card", menu.cardId, menu.cardName())
         }
     }
 }
