@@ -15,8 +15,20 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
-MODEL_NAME = "vosk-model-small-en-us-0.15"
-MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
+MODEL_PROFILES = {
+    "balanced-en": {
+        "name": "vosk-model-en-us-0.22-lgraph",
+        "bytes": 130557655,
+        "sha256": "d9838b4aaa82a75c4a17f5aca300eaca129aaab2a7cbf951bafbb500eb9c4334",
+        "destination": "model-balanced-en",
+    },
+    "small-en": {
+        "name": "vosk-model-small-en-us-0.15",
+        "bytes": 41205931,
+        "sha256": "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498",
+        "destination": "model",
+    },
+}
 VOSK_VERSION = "0.3.45"
 MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
@@ -47,14 +59,14 @@ def safe_member(info: zipfile.ZipInfo) -> PurePosixPath:
     return name
 
 
-def extract_model(archive: Path, destination: Path) -> None:
+def extract_model(archive: Path, destination: Path, model_name: str) -> None:
     with zipfile.ZipFile(archive) as source:
         members = source.infolist()
         if len(members) > 4096 or sum(info.file_size for info in members) > MAX_EXTRACTED_BYTES:
             raise ValueError("VOICE_ARCHIVE_TOO_LARGE: Extracted model exceeds the asset limit.")
         for info in members:
             name = safe_member(info)
-            if not name.parts or name.parts[0] != MODEL_NAME:
+            if not name.parts or name.parts[0] != model_name:
                 raise ValueError("VOICE_ARCHIVE_INVALID: Model archive has an unexpected root directory.")
             if info.is_dir():
                 continue
@@ -75,7 +87,11 @@ def run(args: argparse.Namespace) -> None:
     if sys.platform != "linux" or machine not in architectures:
         raise ValueError("VOICE_PLATFORM_UNSUPPORTED: Local test setup supports 64-bit x86 or ARM Linux.")
     target = args.directory.expanduser().resolve()
-    if (target / "model").exists() or (target / "libvosk.so").exists():
+    profile = MODEL_PROFILES[args.profile]
+    model_name = profile["name"]
+    model_url = f"https://alphacephei.com/vosk/models/{model_name}.zip"
+    model_destination = target / profile["destination"]
+    if model_destination.exists():
         raise ValueError("VOICE_ASSETS_EXIST: Choose another --directory; installed assets are preserved.")
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".install-", dir=target) as temporary:
@@ -105,16 +121,21 @@ def run(args: argparse.Namespace) -> None:
             with source.open(libraries[0]) as input_file, (staging / "libvosk.so").open("wb") as output_file:
                 shutil.copyfileobj(input_file, output_file, length=65536)
         model_zip = staging / "model.zip"
-        model_digest = download(MODEL_URL, model_zip)
+        model_digest = download(model_url, model_zip)
+        if model_zip.stat().st_size != profile["bytes"] or model_digest != profile["sha256"]:
+            raise ValueError("VOICE_MODEL_DIGEST_INVALID: Model checksum or byte size did not match the pinned release.")
         if args.model_sha256 and model_digest != args.model_sha256.lower():
             raise ValueError("VOICE_MODEL_DIGEST_INVALID: Model checksum did not match --model-sha256.")
-        extract_model(model_zip, staging / "model")
-        provenance = {"model_url": MODEL_URL, "model_sha256": model_digest,
+        extract_model(model_zip, staging / profile["destination"], model_name)
+        provenance = {"model_profile": args.profile, "model_name": model_name,
+                      "model_url": model_url, "model_bytes": profile["bytes"],
+                      "model_sha256": model_digest,
                       "library_url": release["url"], "library_sha256": wheel_digest, "version": VOSK_VERSION}
-        (staging / "model" / "libvosk.so").write_bytes((staging / "libvosk.so").read_bytes())
-        (staging / "model" / "betterflash-assets.json").write_text(json.dumps(provenance, indent=2) + "\n")
-        (staging / "model").rename(target / "model")
-    print(f"Local test model and library installed. Set Voice > Model path to {target / 'model'}")
+        selected_model = staging / profile["destination"]
+        (selected_model / "libvosk.so").write_bytes((staging / "libvosk.so").read_bytes())
+        (selected_model / "betterflash-assets.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        selected_model.rename(model_destination)
+    print(f"Local test model and library installed. Set Voice > Model path to {model_destination}")
     print(f"Model SHA-256: {model_digest}")
 
 
@@ -122,7 +143,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path("/workspace/betterflash-models/voice"))
     parser.add_argument("--vosk", action="store_true", help="explicitly download the optional local model and native library")
-    parser.add_argument("--model-sha256", default="", help="optional expected SHA-256 for the pinned model release")
+    parser.add_argument("--profile", choices=sorted(MODEL_PROFILES), default="balanced-en",
+                        help="local Vosk profile to install (default: balanced-en)")
+    parser.add_argument("--model-sha256", default="", help="additional SHA-256 check for the selected model")
     args = parser.parse_args()
     if not args.vosk:
         parser.error("pass --vosk to request local test assets; Groq needs no local model")
