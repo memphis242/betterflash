@@ -19,11 +19,17 @@ Rectangle {
     property bool summaryBusy: false
     property bool saveExternally: false
     property string mediaRoot: ""
+    property bool heatmapAvailable: false
+    property var activityAnalytics: ({})
+    property bool activityLoading: false
+    property var activityError: ({})
     property var descriptionDrafts: ({})
     signal collapseRequested()
     signal descriptionSaved(string deckId, string description)
     signal reviewRequested(string deckId)
     signal summaryRetryRequested()
+    signal heatmapRequested(string deckId)
+    signal activityRetryRequested()
 
     readonly property string deckId: String(deck && deck.id !== undefined ? deck.id : "")
     readonly property string deckName: String(deck && deck.name !== undefined ? deck.name : "Untitled deck")
@@ -344,6 +350,59 @@ Rectangle {
                         color: Theme.inkMuted
                         font.family: Theme.uiFont
                         font.pixelSize: 12
+                    }
+                }
+
+                ColumnLayout {
+                    visible: pane.heatmapAvailable
+                    Layout.fillWidth: true
+                    spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Study activity"
+                            color: Theme.inkMuted
+                            font.family: Theme.monoFont
+                            font.pixelSize: 11
+                            font.capitalization: Font.AllUppercase
+                        }
+                        GlyphButton {
+                            glyph: "calendar-page"
+                            hint: "Open the full calendar heatmap for this deck"
+                            enabled: pane.deckId.length > 0
+                            onClicked: pane.heatmapRequested(pane.deckId)
+                        }
+                    }
+                    CalendarHeatmap {
+                        visible: !pane.activityError.code
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: implicitHeight
+                        compact: true
+                        days: pane.activityAnalytics.days || []
+                        today: String(pane.activityAnalytics.today || "")
+                        firstDate: String(pane.activityAnalytics.firstDate || "")
+                    }
+                    Label {
+                        visible: pane.activityLoading
+                        Layout.fillWidth: true
+                        text: "Loading study activity..."
+                        color: Theme.inkMuted
+                        font.family: Theme.uiFont
+                        font.pixelSize: 11
+                    }
+                    ErrorBlock {
+                        visible: Boolean(pane.activityError.code)
+                        Layout.fillWidth: true
+                        code: String(pane.activityError.code || "")
+                        message: String(pane.activityError.message || "")
+                        details: String(pane.activityError.detail || "")
+                    }
+                    AppButton {
+                        visible: Boolean(pane.activityError.code)
+                        text: "Retry activity"
+                        enabled: !pane.activityLoading
+                        onClicked: pane.activityRetryRequested()
                     }
                 }
 
