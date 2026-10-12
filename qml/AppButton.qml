@@ -7,6 +7,11 @@ Button {
     property string hint: ""
     property string glyph: ""
     property real glyphSize: 17
+    property color foreground: primary ? Theme.onAccent : Theme.ink
+    property color fill: primary ? Theme.accent : Theme.transparent
+    property color hoverFill: Theme.accentSoft
+    property color outline: primary ? Theme.accent : Theme.rule
+    property color focusOutline: Theme.accent
     readonly property real glyphSpan: control.glyph.length > 0 ? control.glyphSize + 8 : 0
     implicitHeight: 38
     implicitWidth: Math.max(38, label.implicitWidth + control.glyphSpan + 26)
@@ -27,7 +32,7 @@ Button {
                 width: control.glyphSize
                 height: control.glyphSize
                 kind: control.glyph
-                stroke: control.enabled ? (control.primary ? Theme.onAccent : Theme.ink) : Theme.inkMuted
+                stroke: control.enabled ? control.foreground : Theme.inkMuted
                 anchors.verticalCenter: parent.verticalCenter
             }
             Label {
@@ -37,7 +42,7 @@ Button {
                 textFormat: Text.PlainText
                 text: control.text
                 font: control.font
-                color: control.enabled ? (control.primary ? Theme.onAccent : Theme.ink) : Theme.inkMuted
+                color: control.enabled ? control.foreground : Theme.inkMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
@@ -46,9 +51,9 @@ Button {
     }
     background: Rectangle {
         radius: 4
-        color: control.primary && control.enabled ? Theme.accent : (control.hovered || control.down ? Theme.accentSoft : Theme.transparent)
+        color: !control.enabled ? Theme.transparent : control.primary ? control.fill : control.hovered || control.down ? control.hoverFill : control.fill
         border.width: control.activeFocus ? 2 : 1
-        border.color: control.activeFocus || control.primary && control.enabled ? Theme.accent : Theme.rule
+        border.color: control.activeFocus ? control.focusOutline : control.enabled ? control.outline : Theme.rule
         opacity: control.enabled ? 1 : 0.7
     }
 }

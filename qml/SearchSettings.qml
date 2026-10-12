@@ -105,21 +105,6 @@ ColumnLayout {
                 serviceKey.text = "";
         }
     }
-    SettingsButton {
-        text: settings.search.testBusy ? "Testing..." : settings.search.provider === "local" && !settings.search.modelReady ? "Download and test" : "Test model"
-        enabled: !settings.search.testBusy
-        onClicked: if (typeof settings.search.testModel === "function") settings.search.testModel()
-    }
-    ValueRow {
-        label: "Model test"
-        value: settings.search.testStatus
-        visible: !!settings.search.testStatus
-        Layout.fillWidth: true
-    }
-    SettingsError {
-        message: settings.search.testError
-        Layout.fillWidth: true
-    }
     SettingsCombo {
         objectName: "semanticSearchProfile"
         Layout.fillWidth: true
@@ -132,10 +117,13 @@ ColumnLayout {
         ToolTip.visible: hovered
         ToolTip.text: "Choose the local semantic model profile"
     }
-    ValueRow {
-        visible: settings.search.semanticEnabled && settings.search.provider === "local"
-        label: "Model status"
-        value: settings.search.downloading ? "Downloading " + Math.round(settings.search.downloadProgress * 100) + "%" : settings.search.status || (settings.search.modelReady ? "Ready" : "Not prepared")
+    ModelStatus {
+        visible: settings.search.provider === "local"
+        state: !settings.search.semanticEnabled ? "disabled" : settings.search.downloading ? "busy"
+            : settings.search.modelReady ? settings.search.testError ? "degraded" : "ready" : "missing"
+        text: !settings.search.semanticEnabled ? "Semantic search disabled"
+            : settings.search.downloading ? "Downloading " + Math.round(settings.search.downloadProgress * 100) + "%"
+            : settings.search.modelReady ? settings.search.testError ? "Model files available; validation failed" : "Ready for offline use" : "Local model is not downloaded"
         Layout.fillWidth: true
     }
     ProgressBar {
@@ -146,13 +134,37 @@ ColumnLayout {
     Flow {
         Layout.fillWidth: true
         spacing: 10
-        SettingsButton {
+        ModelActionButton {
             width: Math.min(implicitWidth, parent.width)
             visible: settings.search.semanticEnabled && settings.search.provider === "local"
             enabled: visible
-            text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Download again" : "Download local model"
+            actionKind: "download"
+            text: settings.search.downloading ? "Cancel download" : settings.search.modelReady ? "Verify model files" : "Download local model"
+            hint: "Download and verify the selected model files for offline search. Testing is a separate action."
             onClicked: settings.search.downloading ? settings.search.cancelDownload() : settings.search.prepareModel()
         }
+        ModelActionButton {
+            width: Math.min(implicitWidth, parent.width)
+            actionKind: "test"
+            text: settings.search.testBusy ? "Testing..." : "Test model"
+            enabled: !settings.search.testBusy && (settings.search.provider === "remote" || settings.search.modelReady)
+            hint: settings.search.testBusy ? "The model validation is running"
+                : settings.search.provider === "local" && !settings.search.modelReady ? "Download the local model before testing"
+                : "Compare embeddings for related and unrelated text without changing your cards"
+            onClicked: settings.search.testModel()
+        }
+    }
+    ModelTestResult {
+        title: "Embedding model test"
+        report: settings.search.testReport
+        status: settings.search.testStatus
+        error: settings.search.testError
+        busy: settings.search.testBusy
+        Layout.fillWidth: true
+    }
+    Flow {
+        Layout.fillWidth: true
+        spacing: 10
         SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             text: settings.search.provider === "remote" ? "Remote provider" : "Local model"

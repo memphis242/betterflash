@@ -33,6 +33,29 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "download":
+            c.moveTo(9, 2); c.lineTo(9, 11)
+            c.moveTo(5, 7); c.lineTo(9, 11); c.lineTo(13, 7)
+            c.moveTo(3, 12); c.lineTo(3, 16); c.lineTo(15, 16); c.lineTo(15, 12)
+            break
+        case "ear":
+            c.moveTo(5, 7)
+            c.bezierCurveTo(5, 1, 15, 1, 15, 7)
+            c.bezierCurveTo(15, 11, 11, 10, 11, 13)
+            c.bezierCurveTo(11, 17, 5, 17, 5, 13)
+            c.moveTo(8, 7)
+            c.bezierCurveTo(8, 4, 12, 4, 12, 7)
+            c.bezierCurveTo(12, 9, 9, 8, 9, 11)
+            break
+        case "mouth-sound":
+            c.moveTo(1, 9)
+            c.bezierCurveTo(3, 8, 4, 5, 5.5, 7)
+            c.bezierCurveTo(7, 5, 8, 8, 10, 9)
+            c.bezierCurveTo(8, 14, 3, 14, 1, 9)
+            c.moveTo(1, 9); c.quadraticCurveTo(5.5, 11, 10, 9)
+            c.moveTo(12, 7); c.quadraticCurveTo(14, 9, 12, 11)
+            c.moveTo(15, 5); c.quadraticCurveTo(18, 9, 15, 13)
+            break
         case "expand-tree":
         case "collapse-tree": {
             const expand = kind === "expand-tree"
