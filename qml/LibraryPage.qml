@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtCore
+import "DeckSearch.js" as DeckSearch
 
 Item {
     id: library
@@ -11,7 +12,7 @@ Item {
     property string deckSearchText: ""
     property bool leftOpen: librarySettings.leftOpen
     property bool rightOpen: librarySettings.rightOpen
-    readonly property bool cardsVisible: rightOpen && !!ui.selectedDeck.id
+    readonly property bool cardsVisible: rightOpen
     property bool restoringTree: true
     readonly property bool effectiveLeftOpen: leftOpen && (!cardsVisible || width >= 720)
     property real splitRatio: librarySettings.splitRatio
@@ -20,16 +21,39 @@ Item {
     property bool deckSearchVisible: false
     property bool cardSearchVisible: false
     property bool restoringSearchSelection: false
-    property string searchSelectionId: ""
-    property real searchSelectionScrollY: 0
+    property string searchPageAnchorId: ""
+    property bool resetSearchPage: false
+    property int pageIndex: 0
+    property string pageAnchorId: ""
+    property bool pageChangePending: false
+    readonly property var cardPages: paginateCards()
+    readonly property int boundedPageIndex: Math.max(0, Math.min(pageIndex, cardPages.length - 1))
+    readonly property var currentPage: cardPages.length > 0 ? cardPages[boundedPageIndex] : ({ start: 0, end: 0 })
+    property var dragPageSnapshot: []
+    readonly property var pageCards: dragging && dragKind === "cards" ? dragPageSnapshot : cardsOnPage()
+    property bool dragging: false
+    property string dragKind: ""
+    property string dragDeckId: ""
+    property var dragCardIds: []
+    property point dragPosition: Qt.point(0, 0)
+    property string dropDeckId: ""
+    property string dropParentId: ""
+    property string dropMode: ""
+    property bool dropValid: false
+    property string dropHint: ""
+    property real dropLineY: 0
+    property int dropDepth: 0
+    property string hoverExpandId: ""
     property var selectedCardIds: []
     property string cardSelectionAnchorId: ""
     readonly property var searchEngine: librarySearch
     readonly property bool searchingCards: ui.cardSearchText.trim().length > 0
     readonly property var visibleCards: library.searchingCards
         ? (library.searchEngine.results || [])
-        : app.cards.filter(card => card.deckId === ui.selectedDeck.id)
+        : app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id)
     readonly property var treeRows: flattenTree()
+    ListModel { id: treeModel; dynamicRoles: true }
+    onTreeRowsChanged: synchronizeTreeModel()
 
     Settings {
         id: librarySettings
@@ -44,6 +68,7 @@ Item {
 
     Component.onCompleted: {
         library.initializeExpansion()
+        library.synchronizeTreeModel()
         library.updateCardSearch()
         Qt.callLater(function () {
             if (library.treeRows.length > 0)
@@ -88,28 +113,138 @@ Item {
             library.restoringTree = false
         })
     }
-    function hasMatchingDescendant(id, query) {
-        return childrenOf(id).some(child => String(child.name).toLowerCase().indexOf(query) >= 0 || hasMatchingDescendant(child.id, query))
-    }
     function flattenTree() {
         const rows = []
-        const query = deckSearchText.trim().toLowerCase()
-        function append(deck, depth) {
-            const children = library.childrenOf(deck.id)
-            const directMatch = !query || String(deck.name).toLowerCase().indexOf(query) >= 0
-            const descendantMatch = query && library.hasMatchingDescendant(deck.id, query)
-            if (query && !directMatch && !descendantMatch)
-                return
-            const expanded = query || !!library.expandedDecks[deck.id]
-            rows.push({ deck: deck, id: deck.id, depth: depth, expanded: expanded, hasChildren: children.length > 0 })
-            if (expanded)
-                for (const child of children)
-                    append(child, depth + 1)
+        const query = DeckSearch.normalize(deckSearchText)
+        const children = ({})
+        const matches = ({})
+        const best = ({})
+        for (const deck of app.decks) {
+            const parentId = deck.parentId || ""
+            if (!children[parentId]) children[parentId] = []
+            children[parentId].push(deck)
+            matches[deck.id] = query ? DeckSearch.match(deck.name, query) : null
         }
-        for (const root of library.childrenOf(""))
-            append(root, 0)
+        function rank(deck, ancestors) {
+            if (ancestors.indexOf(deck.id) >= 0) return 9999
+            const match = matches[deck.id]
+            let result = match ? match.tier * 100 + match.distance : 9999
+            for (const child of children[deck.id] || [])
+                result = Math.min(result, rank(child, ancestors.concat([deck.id])))
+            best[deck.id] = result
+            return result
+        }
+        for (const root of children[""] || []) rank(root, [])
+        function ordered(id) {
+            return (children[id] || []).slice().sort((a, b) =>
+                (query ? (best[a.id] || 0) - (best[b.id] || 0) : 0)
+                || String(a.name).localeCompare(String(b.name)))
+        }
+        function append(deck, depth, ancestors) {
+            if (ancestors.indexOf(deck.id) >= 0 || query && best[deck.id] === 9999) return
+            const descendants = ordered(deck.id)
+            const expanded = !!query || !!library.expandedDecks[deck.id]
+            rows.push({ deck: deck, id: deck.id, depth: depth, expanded: expanded,
+                hasChildren: descendants.length > 0, match: matches[deck.id] })
+            if (expanded)
+                for (const child of descendants) append(child, depth + 1, ancestors.concat([deck.id]))
+        }
+        for (const root of ordered("")) append(root, 0, [])
         return rows
     }
+    function synchronizeTreeModel() {
+        if (!treeModel || !treeList) return
+        const focusedId = treeList.currentIndex >= 0 && treeList.currentIndex < treeModel.count
+            ? treeModel.get(treeList.currentIndex).entry.id : ""
+        for (let index = 0; index < treeRows.length; ++index) {
+            const row = treeRows[index]
+            let found = index
+            while (found < treeModel.count && treeModel.get(found).entry.id !== row.id) ++found
+            if (found === treeModel.count) treeModel.insert(index, { entry: row })
+            else {
+                if (found !== index) treeModel.move(found, index, 1)
+                treeModel.setProperty(index, "entry", row)
+            }
+        }
+        if (treeModel.count > treeRows.length) treeModel.remove(treeRows.length, treeModel.count - treeRows.length)
+        treeList.currentIndex = treeRows.findIndex(row => row.id === focusedId)
+    }
+    function expandAllDecks(expanded) {
+        const state = ({})
+        if (expanded)
+            for (const deck of app.decks) state[deck.id] = true
+        expandedDecks = state
+    }
+    function clearDeckSelection() {
+        ui.setDeck("", true)
+        ui.selectedCardId = ""
+        selectedCardIds = []
+        cardSelectionAnchorId = ""
+        treeList.currentIndex = -1
+        rightOpen = true
+        resetPage()
+        updateCardSearch()
+    }
+    function paginateCards() {
+        const pages = []
+        const cards = visibleCards
+        const available = Math.max(82, Math.floor(cardList.height))
+        let start = 0
+        while (start < cards.length) {
+            let end = start
+            let used = 0
+            while (end < cards.length) {
+                const heading = cards[end].searchGroup && (end === start || cards[end].groupStart) ? 44 : 0
+                const cost = 82 + heading
+                if (end > start && used + cost > available) break
+                used += cost
+                ++end
+            }
+            pages.push({ start: start, end: end })
+            start = end
+        }
+        return pages
+    }
+    function cardsOnPage() {
+        const result = []
+        for (let index = currentPage.start; index < currentPage.end; ++index)
+            result.push(Object.assign({}, visibleCards[index], { libraryIndex: index,
+                groupStart: !!visibleCards[index].searchGroup && (index === currentPage.start || visibleCards[index].groupStart) }))
+        return result
+    }
+    function pageForCard(id) {
+        const index = visibleCards.findIndex(card => card.id === id)
+        return index < 0 ? -1 : cardPages.findIndex(page => index >= page.start && index < page.end)
+    }
+    function rememberPage() {
+        pageAnchorId = visibleCards[currentPage.start] ? visibleCards[currentPage.start].id : ""
+    }
+    function resetPage() {
+        pageIndex = 0
+        pageAnchorId = ""
+        Qt.callLater(function () { library.rememberPage(); library.syncCurrentCard() })
+    }
+    function syncCurrentCard() {
+        cardList.currentIndex = pageCards.findIndex(card => card.id === ui.selectedCardId)
+        cardList.contentY = 0
+    }
+    function changePage(next) {
+        pageIndex = Math.max(0, Math.min(next, cardPages.length - 1))
+        rememberPage()
+        syncCurrentCard()
+    }
+    function preservePage() {
+        if (pageChangePending) return
+        pageChangePending = true
+        Qt.callLater(function () {
+            const page = library.pageForCard(library.pageAnchorId)
+            library.pageIndex = page >= 0 ? page : library.boundedPageIndex
+            library.rememberPage()
+            library.syncCurrentCard()
+            library.pageChangePending = false
+        })
+    }
+    onCardPagesChanged: preservePage()
     function toggleDeck(id) {
         const state = Object.assign({}, expandedDecks)
         state[id] = !state[id]
@@ -125,10 +260,8 @@ Item {
         expandedDecks = state
     }
     function showDeck(id, focusCardsAfter) {
-        if (!id)
-            return
-        ui.setDeck(id, true)
-        revealDeck(id)
+        ui.setDeck(id || "", true)
+        if (id) revealDeck(id)
         rightOpen = true
         if (focusCardsAfter)
             Qt.callLater(function () { if (cardList.count > 0) cardList.forceActiveFocus() })
@@ -145,7 +278,9 @@ Item {
         const card = visibleCards[index]
         if (!card)
             return
-        cardList.currentIndex = index
+        const nextPage = pageForCard(card.id)
+        if (nextPage >= 0 && nextPage !== boundedPageIndex) changePage(nextPage)
+        cardList.currentIndex = index - currentPage.start
         ui.selectedCardId = card.id
     }
     function hydrateCardSelection() {
@@ -183,7 +318,9 @@ Item {
             cardSelectionAnchorId = card.id
         }
         selectedCardIds = ids
-        cardList.currentIndex = index
+        const nextPage = pageForCard(card.id)
+        if (nextPage >= 0 && nextPage !== boundedPageIndex) changePage(nextPage)
+        cardList.currentIndex = index - currentPage.start
         ui.selectedCardId = card.id
     }
     function openCard(card) {
@@ -193,14 +330,16 @@ Item {
         ui.openSelectedDetail()
     }
     function restoreScroll(value) {
-        cardList.contentY = Math.max(0, Math.min(Number(value) || 0, Math.max(0, cardList.contentHeight - cardList.height)))
+        const page = pageForCard(ui.selectedCardId)
+        if (page >= 0) changePage(page)
+        else syncCurrentCard()
     }
     function focusCards() {
         if (!rightOpen)
             return
         cardList.forceActiveFocus()
         if (cardList.currentIndex < 0 && cardList.count > 0)
-            cardList.currentIndex = Math.max(0, visibleCards.findIndex(card => card.id === ui.selectedCardId))
+            cardList.currentIndex = Math.max(0, pageCards.findIndex(card => card.id === ui.selectedCardId))
     }
     function focusDeckSearch() {
         leftOpen = true
@@ -216,12 +355,152 @@ Item {
     }
 
     function selectCardAfterSearch() {
-        const selectedIndex = library.visibleCards.findIndex(card => card.id === library.searchSelectionId)
-        cardList.currentIndex = selectedIndex
-        cardList.contentY = Math.max(0, Math.min(library.searchSelectionScrollY, Math.max(0, cardList.contentHeight - cardList.height)))
+        if (resetSearchPage) {
+            pageIndex = 0
+            pageAnchorId = ""
+            searchPageAnchorId = ""
+            resetSearchPage = false
+        } else if (searchPageAnchorId) pageAnchorId = searchPageAnchorId
+        preservePage()
         library.restoringSearchSelection = false
     }
 
+    function beginDrag(kind, id, position) {
+        if (app.busy) return
+        dragKind = kind
+        dragDeckId = kind === "deck" ? id : ""
+        if (kind === "deck") {
+            // ListView retains its current item outside the visible viewport during a drag.
+            treeList.currentIndex = treeRows.findIndex(row => row.id === id)
+            treeList.forceActiveFocus()
+        }
+        if (kind === "cards") {
+            dragPageSnapshot = pageCards
+            if (selectedCardIds.indexOf(id) < 0)
+                chooseCardWithModifiers(visibleCards.findIndex(card => card.id === id), Qt.NoModifier)
+            dragCardIds = selectedCardIds.slice()
+            chooseCard(visibleCards.findIndex(card => card.id === id))
+            cardList.forceActiveFocus()
+        } else dragCardIds = []
+        dragging = true
+        updateDrag(position)
+    }
+    function deckIsWithin(id, ancestorId) {
+        const visited = []
+        let current = ui.deckById(id)
+        while (current && current.id && visited.indexOf(current.id) < 0) {
+            if (current.id === ancestorId) return true
+            visited.push(current.id)
+            current = ui.deckById(current.parentId || "")
+        }
+        return false
+    }
+    function insertionLine(parentId) {
+        const moving = ui.deckById(dragDeckId)
+        const siblings = childrenOf(parentId).filter(deck => deck.id !== dragDeckId)
+        const after = siblings.find(deck => String(deck.name).localeCompare(String(moving.name)) > 0)
+        if (after) {
+            const row = treeRows.findIndex(item => item.id === after.id)
+            if (row >= 0) return row * 50
+        }
+        if (parentId) {
+            const parent = treeRows.findIndex(item => item.id === parentId)
+            if (parent >= 0) {
+                let end = parent + 1
+                while (end < treeRows.length && treeRows[end].depth > treeRows[parent].depth) ++end
+                return end * 50
+            }
+        }
+        return treeRows.length * 50
+    }
+    function updateDrag(position) {
+        dragPosition = position
+        dropValid = false
+        dropDeckId = ""
+        dropMode = ""
+        dropHint = "Drag onto a deck"
+        if (!dragging || !effectiveLeftOpen) { hoverExpandId = ""; return }
+        const point = library.mapToItem(treeList, position.x, position.y)
+        if (point.x < 0 || point.x > treeList.width || point.y < 0 || point.y > treeList.height) {
+            hoverExpandId = ""
+            return
+        }
+        const contentY = point.y + treeList.contentY
+        const index = treeList.indexAt(point.x, contentY)
+        const row = treeRows[index]
+        if (dragKind === "cards") {
+            hoverExpandId = row && row.hasChildren && !row.expanded ? row.id : ""
+            if (!row) { dropHint = "Choose a destination deck"; return }
+            dropDeckId = row.id
+            dropParentId = row.id
+            dropMode = "cards"
+            dropValid = true
+            dropHint = "Move " + dragCardIds.length + (dragCardIds.length === 1 ? " card into " : " cards into ") + row.deck.name
+            return
+        }
+        const localY = row ? contentY - index * 50 : 0
+        const inside = !!row && localY >= 12 && localY <= 38
+        dropDeckId = row ? row.id : ""
+        dropParentId = row ? (inside ? row.id : row.deck.parentId || "") : ""
+        dropMode = inside ? "child" : "sibling"
+        dropDepth = row ? (inside ? row.depth + 1 : row.depth) : 0
+        const invalid = (!!row && row.id === dragDeckId) || deckIsWithin(dropParentId, dragDeckId)
+        const sameParent = (ui.deckById(dragDeckId).parentId || "") === dropParentId
+        dropValid = !invalid && !sameParent
+        dropHint = invalid ? "A deck cannot contain itself or its ancestor"
+            : sameParent ? "Already at this level (alphabetical order)"
+            : inside ? "Inside " + row.deck.name + " (A-Z)"
+            : row ? "Alongside " + row.deck.name + " (A-Z)" : "Top-level deck (A-Z)"
+        hoverExpandId = inside && !invalid && row.hasChildren && !row.expanded ? row.id : ""
+        dropLineY = insertionLine(dropParentId)
+    }
+    function finishDrag() {
+        if (!dragging) return
+        const valid = dropValid
+        const kind = dragKind
+        const deckId = dragDeckId
+        const parentId = dropParentId
+        const ids = dragCardIds.slice()
+        cancelDrag()
+        if (!valid) return
+        if (kind === "deck") app.moveDeck(deckId, parentId)
+        else app.moveCards(ids, parentId)
+        if (parentId) {
+            const state = Object.assign({}, expandedDecks)
+            state[parentId] = true
+            expandedDecks = state
+        }
+    }
+    function cancelDrag() {
+        dragging = false
+        dropValid = false
+        dropMode = ""
+        dropHint = ""
+        hoverExpandId = ""
+    }
+    onHoverExpandIdChanged: hoverTimer.restart()
+    Timer {
+        id: hoverTimer
+        interval: 650
+        onTriggered: {
+            if (library.dragging && library.hoverExpandId && !library.expandedDecks[library.hoverExpandId]) library.toggleDeck(library.hoverExpandId)
+            if (library.dragging) library.updateDrag(library.dragPosition)
+        }
+    }
+    Timer {
+        interval: 30
+        repeat: true
+        running: library.dragging && library.effectiveLeftOpen
+        onTriggered: {
+            const point = library.mapToItem(treeList, library.dragPosition.x, library.dragPosition.y)
+            if (point.x < 0 || point.x > treeList.width) return
+            const speed = point.y < 36 ? -12 : point.y > treeList.height - 36 ? 12 : 0
+            if (speed !== 0) {
+                treeList.contentY = Math.max(0, Math.min(Math.max(0, treeList.contentHeight - treeList.height), treeList.contentY + speed))
+                library.updateDrag(library.dragPosition)
+            }
+        }
+    }
     Connections {
         target: app
         function onDecksChanged() {
@@ -232,13 +511,16 @@ Item {
         function onSelectedDeckIdChanged() {
             library.selectedCardIds = []
             library.cardSelectionAnchorId = ""
+            library.resetSearchPage = true
+            library.searchPageAnchorId = ""
+            library.resetPage()
             if (ui.selectedDeck.id) {
                 library.revealDeck(ui.selectedDeck.id)
                 Qt.callLater(library.hydrateCardSelection)
             }
         }
         function onCardsChanged() {
-            const valid = new Set(app.cards.filter(card => card.deckId === ui.selectedDeck.id).map(card => card.id))
+            const valid = new Set(app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id).map(card => card.id))
             library.selectedCardIds = library.selectedCardIds.filter(id => valid.has(id))
             if (library.cardSelectionAnchorId && !valid.has(library.cardSelectionAnchorId))
                 library.cardSelectionAnchorId = ""
@@ -249,8 +531,7 @@ Item {
         target: library.searchEngine
         function onResultsAboutToChange() {
             if (!library.restoringSearchSelection) {
-                library.searchSelectionId = ui.selectedCardId
-                library.searchSelectionScrollY = cardList.contentY
+                library.searchPageAnchorId = library.resetSearchPage ? "" : library.pageAnchorId
             }
             library.restoringSearchSelection = true
         }
@@ -262,7 +543,7 @@ Item {
         target: ui
         function onSelectedDeckChanged() { library.updateCardSearch() }
         function onPageChanged() { library.updateCardSearch() }
-        function onCardSearchTextChanged() { library.updateCardSearch() }
+        function onCardSearchTextChanged() { library.resetSearchPage = true; library.searchPageAnchorId = ""; library.resetPage(); library.updateCardSearch() }
     }
 
     RowLayout {
@@ -288,34 +569,91 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 42
-                    Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                    spacing: 8
+                    Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Decks"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
+                    GlyphButton { glyph: "expand-tree"; hint: "Expand all decks"; enabled: app.decks.length > 0 && !library.deckSearchText; onClicked: library.expandAllDecks(true) }
+                    GlyphButton { glyph: "collapse-tree"; hint: "Collapse all decks"; enabled: app.decks.length > 0 && !library.deckSearchText; onClicked: library.expandAllDecks(false) }
+                    Item { Layout.fillWidth: true }
+                    PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ToolButton {
+                        id: addDeckButton
+                        implicitWidth: 40; implicitHeight: 40; padding: 0
+                        enabled: !app.busy
+                        ToolTip.visible: hovered || activeFocus
+                        ToolTip.text: "Add a top-level deck"
+                        Accessible.name: ToolTip.text
+                        contentItem: Item { Icon { kind: "plus"; width: 21; height: 21; anchors.centerIn: parent; stroke: Theme.onAccent; lineWidth: 1.8 } }
+                        background: Rectangle { radius: width / 2; color: Theme.accent; border.width: addDeckButton.activeFocus || addDeckButton.hovered ? 2 : 0; border.color: Theme.ink }
+                        onClicked: ui.openDeckEditor("")
+                    }
+                    GlyphButton { glyph: "subdeck-add"; hint: "Add a subdeck to the selected deck"; enabled: !!ui.selectedDeck.id && !app.busy; onClicked: ui.openDeckEditor("", ui.selectedDeck.id) }
+                    Item { Layout.fillWidth: true }
                     GlyphButton { glyph: "search"; hint: "Find a deck (" + shortcuts.bindings.deckSearch + ")"; onClicked: library.focusDeckSearch() }
                     GlyphButton {
                         glyph: "more"; hint: "Deck actions"; onClicked: deckMenu.open()
                         DeckActionsMenu { id: deckMenu; ui: library.ui; deckId: library.ui.selectedDeck.id || ""; headerMode: true }
                     }
-                    PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
                 }
                 TextField {
                     id: deckSearch; objectName: "deckSearchField"; visible: library.deckSearchVisible
-                    Layout.fillWidth: true; placeholderText: "Find a deck"; text: library.deckSearchText
+                    Layout.fillWidth: true; placeholderText: "Find a deck"; maximumLength: 128; text: library.deckSearchText
                     onTextEdited: library.deckSearchText = text
                     Keys.onEscapePressed: { library.deckSearchText = ""; library.deckSearchVisible = false; treeList.forceActiveFocus() }
                 }
+                Label {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 18
+                    Layout.minimumHeight: 18
+                    Layout.maximumHeight: 18
+                    text: library.dragging ? library.dropHint : ""
+                    textFormat: Text.PlainText
+                    color: library.dropValid ? Theme.accent : Theme.inkMuted
+                    font.family: Theme.uiFont
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    ToolTip.visible: dropHintHover.hovered
+                    ToolTip.text: text
+                    HoverHandler { id: dropHintHover }
+                }
                 ListView {
                     id: treeList; objectName: "libraryDeckTree"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
-                    model: library.treeRows; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
+                    model: treeModel; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
+                    interactive: !library.dragging
+                    MouseArea {
+                        parent: treeList
+                        anchors.fill: parent
+                        z: -1
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: library.clearDeckSelection()
+                    }
+                    Rectangle {
+                        parent: treeList
+                        visible: library.dragging && library.dragKind === "deck" && library.dropMode.length > 0
+                            && library.dropLineY >= treeList.contentY && library.dropLineY <= treeList.contentY + treeList.height
+                        z: 10
+                        x: Math.min(treeList.width - 20, 8 + library.dropDepth * 20)
+                        y: Math.max(1, Math.min(treeList.height - 3, library.dropLineY - treeList.contentY - 1))
+                        width: Math.max(12, treeList.width - x - 8)
+                        height: 3
+                        color: library.dropValid ? Theme.accent : Theme.inkMuted
+                        Rectangle { width: 7; height: 7; radius: 3.5; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; color: parent.color }
+                    }
                     ScrollBar.vertical: ScrollBar {}
                     onContentYChanged: if (!library.restoringTree && library.visible && library.effectiveLeftOpen) librarySettings.treeScrollY = Math.max(0, contentY)
                     delegate: Item {
-                        id: treeRow; required property var modelData; required property int index
+                        id: treeRow; required property var entry; required property int index
+                        readonly property var modelData: entry
                         width: treeList.width; height: 50
                         function openContextMenu() { deckContextMenu.popup(treeRow, 0, height) }
                         Rectangle {
                             anchors.fill: parent; anchors.leftMargin: 4 + treeRow.modelData.depth * 20; anchors.rightMargin: 4; radius: 5
                             color: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accentSoft : (treeMouse.containsMouse ? Theme.surfaceRaised : Theme.transparent)
-                            border.width: ui.selectedDeck.id === treeRow.modelData.id || treeList.activeFocus && treeList.currentIndex === treeRow.index ? 2 : 0
-                            border.color: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accent : Theme.rule
+                            border.width: library.dragging && library.dropDeckId === treeRow.modelData.id || ui.selectedDeck.id === treeRow.modelData.id || treeList.activeFocus && treeList.currentIndex === treeRow.index ? 2 : 0
+                            border.color: library.dragging && library.dropDeckId === treeRow.modelData.id ? (library.dropValid ? Theme.accent : Theme.inkMuted) : ui.selectedDeck.id === treeRow.modelData.id ? Theme.accent : Theme.rule
                         }
                         RowLayout {
                             anchors.fill: parent; anchors.leftMargin: 10 + treeRow.modelData.depth * 20; anchors.rightMargin: 12; spacing: 9
@@ -325,8 +663,16 @@ Item {
                             }
                             Item { visible: !treeRow.modelData.hasChildren; implicitWidth: 26; implicitHeight: 30 }
                             Icon { kind: treeRow.modelData.expanded ? "folder-open" : "folder"; width: 22; height: 22; stroke: ui.selectedDeck.id === treeRow.modelData.id ? Theme.accent : Theme.inkMuted }
-                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 17; elide: Text.ElideRight }
-                            Label { visible: Number(treeRow.modelData.deck.ownCardCount || 0) > 0; text: String(treeRow.modelData.deck.ownCardCount || 0); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
+                            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: treeRow.modelData.deck.name; color: library.deckSearchText && !treeRow.modelData.match ? Theme.inkMuted : Theme.ink; font.family: Theme.contentFont; font.pixelSize: 17; elide: Text.ElideRight }
+                            Label {
+                                visible: !!treeRow.modelData.match
+                                text: treeRow.modelData.match ? treeRow.modelData.match.label : ""
+                                color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10
+                                ToolTip.visible: matchHover.hovered
+                                ToolTip.text: "Deck search match: " + text.toLowerCase()
+                                HoverHandler { id: matchHover }
+                            }
+                            Label { visible: !library.deckSearchText && Number(treeRow.modelData.deck.ownCardCount || 0) > 0; text: String(treeRow.modelData.deck.ownCardCount || 0); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                         }
                         MouseArea {
                             id: treeMouse
@@ -337,7 +683,24 @@ Item {
                             anchors.leftMargin: 42 + treeRow.modelData.depth * 20
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            property point pressPosition: Qt.point(0, 0)
+                            property bool dragged: false
+                            preventStealing: true
+                            cursorShape: library.dragging ? (library.dropValid ? Qt.DragMoveCursor : Qt.ForbiddenCursor) : Qt.ArrowCursor
+                            onPressed: function(mouse) { pressPosition = mapToItem(library, mouse.x, mouse.y); dragged = false }
+                            onPositionChanged: function(mouse) {
+                                if (!(pressedButtons & Qt.LeftButton)) return
+                                const position = mapToItem(library, mouse.x, mouse.y)
+                                if (!dragged && Math.hypot(position.x - pressPosition.x, position.y - pressPosition.y) >= Qt.styleHints.startDragDistance) {
+                                    dragged = true
+                                    library.beginDrag("deck", treeRow.modelData.id, position)
+                                }
+                                if (library.dragging) library.updateDrag(position)
+                            }
+                            onReleased: function(mouse) { if (dragged) library.finishDrag() }
+                            onCanceled: library.cancelDrag()
                             onClicked: function(mouse) {
+                                if (dragged) return
                                 if (mouse.button === Qt.RightButton) {
                                     deckContextMenu.deckId = treeRow.modelData.id
                                     deckContextMenu.popup()
@@ -354,13 +717,15 @@ Item {
                         }
                     }
                     Label {
-                        visible: treeList.count === 0 && !library.deckSearchText
+                        parent: treeList
+                        visible: treeList.count === 0
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "No decks yet"
+                        text: library.deckSearchText ? "No decks match this search." : "No decks yet"
                         color: Theme.inkMuted
                     }
                     AppButton {
+                        parent: treeList
                         visible: treeList.count === 0 && !library.deckSearchText
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.verticalCenter
@@ -370,6 +735,12 @@ Item {
                         onClicked: ui.openDeckEditor("")
                     }
                     Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Escape) {
+                            if (library.dragging) library.cancelDrag()
+                            else library.clearDeckSelection()
+                            event.accepted = true
+                            return
+                        }
                         const row = library.treeRows[currentIndex]
                         if (!row) return
                         if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) {
@@ -430,8 +801,13 @@ Item {
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: 2
                         Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
-                        Label { textFormat: Text.PlainText; text: ui.selectedDeck.name + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { textFormat: Text.PlainText; text: (ui.selectedDeck.id ? ui.selectedDeck.name : "All decks") + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
+                    PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
                     ToolButton {
                         id: addCardButton
                         implicitWidth: 40
@@ -453,7 +829,16 @@ Item {
                         onClicked: ui.openCardEditor("")
                     }
                     GlyphButton { glyph: "search"; hint: "Find a card"; onClicked: { library.cardSearchVisible = true; cardSearch.forceActiveFocus() } }
-                    PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
+                    Item { Layout.fillWidth: true }
+                    GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
+                    Label {
+                        text: library.cardPages.length > 0 ? (library.boundedPageIndex + 1) + " / " + library.cardPages.length : "0 / 0"
+                        color: Theme.ink; font.family: Theme.monoFont; font.pixelSize: 12
+                        ToolTip.visible: pageHover.hovered
+                        ToolTip.text: "Page " + (library.cardPages.length > 0 ? library.boundedPageIndex + 1 : 0) + " of " + library.cardPages.length + ". Page size fits the available height."
+                        HoverHandler { id: pageHover }
+                    }
+                    GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
                 }
                 TextField {
                     id: cardSearch; objectName: "libraryCardSearch"; Layout.fillWidth: true; visible: library.cardSearchVisible || ui.cardSearchText.length > 0
@@ -482,9 +867,9 @@ Item {
                     AppButton { text: "Retry search"; onClicked: library.searchEngine.retry() }
                 }
                 ListView {
-                    id: cardList; objectName: "libraryCardList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: library.visibleCards; currentIndex: -1; keyNavigationEnabled: true; boundsBehavior: Flickable.StopAtBounds
+                    id: cardList; objectName: "libraryCardList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: library.pageCards; currentIndex: -1; keyNavigationEnabled: false; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
-                    onContentYChanged: if (ui.page === 1 && !ui.restoringDeck && !library.restoringSearchSelection) { ui.libraryScrollY = Math.max(0, contentY); librarySettings.cardScrollY = Math.max(0, contentY) }
+                    interactive: !library.dragging && contentHeight > height
                     Component.onCompleted: Qt.callLater(function() {
                         library.restoreScroll(ui.libraryScrollY)
                         library.hydrateCardSelection()
@@ -493,6 +878,7 @@ Item {
                         id: cardRow
                         required property var modelData
                         required property int index
+                        readonly property int libraryIndex: modelData.libraryIndex
                         readonly property int headingHeight: modelData.groupStart ? 44 : 0
                         width: cardList.width
                         height: headingHeight + 82
@@ -544,24 +930,41 @@ Item {
                                 id: cardActionsMenu
                                 ui: library.ui
                                 cardId: cardRow.modelData.id
-                                onBeforeAction: library.chooseCard(cardRow.index)
+                                onBeforeAction: library.chooseCard(cardRow.libraryIndex)
                             }
                             MouseArea {
                                 id: cardMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                property point pressPosition: Qt.point(0, 0)
+                                property bool dragged: false
+                                preventStealing: true
+                                cursorShape: library.dragging ? (library.dropValid ? Qt.DragMoveCursor : Qt.ForbiddenCursor) : Qt.ArrowCursor
+                                onPressed: function(mouse) { pressPosition = mapToItem(library, mouse.x, mouse.y); dragged = false }
+                                onPositionChanged: function(mouse) {
+                                    if (!(pressedButtons & Qt.LeftButton)) return
+                                    const position = mapToItem(library, mouse.x, mouse.y)
+                                    if (!dragged && Math.hypot(position.x - pressPosition.x, position.y - pressPosition.y) >= Qt.styleHints.startDragDistance) {
+                                        dragged = true
+                                        library.beginDrag("cards", cardRow.modelData.id, position)
+                                    }
+                                    if (library.dragging) library.updateDrag(position)
+                                }
+                                onReleased: function(mouse) { if (dragged) library.finishDrag() }
+                                onCanceled: library.cancelDrag()
                                 onClicked: function(mouse) {
+                                    if (dragged) return
                                     cardList.forceActiveFocus()
                                     if (mouse.button === Qt.RightButton) {
                                         cardActionsMenu.cardId = cardRow.modelData.id
                                         cardActionsMenu.popup()
                                     } else {
-                                        library.chooseCardWithModifiers(cardRow.index, mouse.modifiers)
+                                        library.chooseCardWithModifiers(cardRow.libraryIndex, mouse.modifiers)
                                     }
                                 }
                                 onDoubleClicked: function(mouse) {
-                                    if (mouse.button === Qt.LeftButton)
+                                    if (!dragged && mouse.button === Qt.LeftButton)
                                         library.openCard(cardRow.modelData)
                                 }
                             }
@@ -570,6 +973,16 @@ Item {
                                 Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
                                 RowLayout {
                                     Layout.fillWidth: true
+                                    Label {
+                                        visible: !ui.selectedDeck.id
+                                        textFormat: Text.PlainText
+                                        text: ui.deckById(cardRow.modelData.deckId).name || ""
+                                        color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11
+                                        elide: Text.ElideRight; Layout.maximumWidth: cardRow.width * 0.45
+                                        ToolTip.visible: deckNameHover.hovered
+                                        ToolTip.text: text
+                                        HoverHandler { id: deckNameHover }
+                                    }
                                     Label {
                                         text: cardRow.modelData.kind === "reverse" ? "Both directions" : cardRow.modelData.kind === "cloze" ? "Cloze" : "Basic"
                                         color: Theme.inkMuted
@@ -597,30 +1010,42 @@ Item {
                         }
                     }
                     Keys.onPressed: function(event) {
-                        if (!visibleCards[currentIndex])
+                        if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                            library.changePage(library.boundedPageIndex + (event.key === Qt.Key_PageUp ? -1 : 1))
+                            if (cardList.count > 0) cardList.currentIndex = 0
+                            event.accepted = true
                             return
+                        }
+                        if (event.key === Qt.Key_Escape && library.dragging) {
+                            library.cancelDrag(); event.accepted = true; return
+                        }
+                        const card = library.pageCards[currentIndex]
+                        if (!card) {
+                            if ((event.key === Qt.Key_Down || event.key === Qt.Key_Up) && count > 0) {
+                                library.chooseCardWithModifiers(library.currentPage.start, event.modifiers)
+                                event.accepted = true
+                            }
+                            return
+                        }
                         if (event.key === Qt.Key_Menu || event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) {
                             if (currentItem) currentItem.openContextMenu()
                             event.accepted = true
                         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier))
-                                library.chooseCardWithModifiers(currentIndex, event.modifiers)
-                            else
-                                library.openCard(visibleCards[currentIndex])
+                                library.chooseCardWithModifiers(card.libraryIndex, event.modifiers)
+                            else library.openCard(card)
                             event.accepted = true
                         } else if (event.key === Qt.Key_Space) {
-                            library.chooseCardWithModifiers(currentIndex, event.modifiers)
+                            library.chooseCardWithModifiers(card.libraryIndex, event.modifiers)
                             event.accepted = true
                         } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
-                            const next = event.key === Qt.Key_Up ? Math.max(0, currentIndex - 1) : Math.min(count - 1, currentIndex + 1)
-                            currentIndex = next
-                            ui.selectedCardId = visibleCards[next].id
-                            if (!(event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)))
-                                library.chooseCardWithModifiers(next, event.modifiers)
+                            const next = Math.max(0, Math.min(library.visibleCards.length - 1, card.libraryIndex + (event.key === Qt.Key_Up ? -1 : 1)))
+                            if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) library.chooseCard(next)
+                            else library.chooseCardWithModifiers(next, event.modifiers)
                             event.accepted = true
                         }
                     }
-                    Label { visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : "This deck has no cards yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
+                    Label { parent: cardList; visible: cardList.count === 0 && (!library.searchEngine.busy || !library.searchingCards); anchors.centerIn: parent; text: ui.cardSearchText ? "No cards match this search." : ui.selectedDeck.id ? "This deck has no cards yet." : "No cards in the library yet."; color: Theme.inkMuted; wrapMode: Text.Wrap }
                 }
             }
         }
@@ -631,7 +1056,7 @@ Item {
         }
         Item {
             id: reopenCards
-            visible: !library.cardsVisible && !!ui.selectedDeck.id
+            visible: !library.cardsVisible
             Layout.preferredWidth: 56
             Layout.minimumWidth: 56
             Layout.maximumWidth: 56
@@ -646,6 +1071,26 @@ Item {
                 hint: "Open card pane"
                 onClicked: library.rightOpen = true
             }
+        }
+    }
+    Rectangle {
+        visible: library.dragging
+        z: 100
+        x: Math.max(0, Math.min(library.width - width, library.dragPosition.x + 18))
+        y: Math.max(0, Math.min(library.height - height, library.dragPosition.y + 26))
+        width: Math.min(260, dragLabel.implicitWidth + 28)
+        height: 38
+        radius: 8
+        color: Theme.surfaceRaised
+        border.width: 1
+        border.color: Theme.rule
+        Label {
+            id: dragLabel
+            anchors.fill: parent; anchors.margins: 12
+            verticalAlignment: Text.AlignVCenter
+            textFormat: Text.PlainText
+            text: library.dragKind === "deck" ? (library.ui.deckById(library.dragDeckId).name || "Deck") : library.dragCardIds.length + (library.dragCardIds.length === 1 ? " card" : " cards")
+            color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 12; elide: Text.ElideRight
         }
     }
 }
