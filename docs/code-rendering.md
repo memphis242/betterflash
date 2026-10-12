@@ -88,6 +88,8 @@ at the user's request. Android rendering and packaging still require a build
 with an Android Qt kit and device verification.
 
 When cross-compiling, provide `-DKATEHIGHLIGHTINGINDEXER_EXECUTABLE=/absolute/path/to/desktop-build/bin/katehighlightingindexer`.
+The Android build script supplies this from the same worktree's desktop build,
+or from the `KATEHIGHLIGHTINGINDEXER_EXECUTABLE` environment override.
 The desktop build creates this native build-time indexer from the same pinned
 KDE version. Requiring that explicit host tool avoids accidentally trying to run
 an Android executable during source generation.

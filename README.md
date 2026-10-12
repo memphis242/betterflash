@@ -22,8 +22,10 @@ sudo dnf install cmake ninja-build gcc-c++ \
 ./scripts/run-desktop.sh
 ```
 
-The first build downloads two small, pinned source dependencies for native math
-rendering: MicroTeX and tinyxml2. Neither a browser engine nor Electron is used.
+Qt 6.7 or later is required. The first build downloads pinned dependencies for
+native math rendering (MicroTeX and tinyxml2), code highlighting (KDE Syntax
+Highlighting and Extra CMake Modules), and local semantic search (ONNX Runtime).
+Neither a browser engine nor Electron is used.
 Build output lives on `/workspace`, separate from the source checkout. Set
 `BETTERFLASH_BUILD_DIR` to choose another build directory.
 The run script updates that build before launching, so source changes in this
@@ -88,6 +90,29 @@ The Library starts with a folder tree of decks. Select a deck to open its card
 overview on the right, then double-click a card (or press Enter) for its front,
 back, review statistics and a scrollable history timeline. The plus icon in the
 card pane creates a card. Both panes can collapse and their divider is resizable.
+
+Deck toolbar controls add root decks or subdecks, expand or collapse the whole
+tree, and search deck names with exact, prefix and spelling matches. Click blank
+space in the deck tree to browse and search the entire library; each card then
+shows its deck. Card pages fit the available window height, with navigation at
+the top of the Cards pane. Ctrl-click adds individual selections and Shift-click
+selects a contiguous range.
+
+Drag a deck onto a row's center to make it a child, or near the row's edge to
+place it alongside that deck. An indented insertion line shows the destination;
+sibling decks remain alphabetically ordered. Drag selected cards onto a deck to
+move them, or choose **Move card** from the shared card menu and type or select
+the destination. Moves preserve review schedules and history.
+
+Settings > Code rendering provides separate dark and light code themes. Fenced
+blocks have one continuous background; inline code has distinct styling.
+Recognized language identifiers select native syntax highlighting. C and C++
+also use an available `clangd` language server for semantic highlighting.
+See [code rendering](docs/code-rendering.md) for configuration and current limits.
+
+Compare three shared menu styles with `./scripts/run-desktop.sh --menu-designs`.
+The gallery includes card and deck actions, light/dark modes, and menus opened
+from a right-click or three-dot button. Actions in this gallery are previews.
 
 Find a card now presents exact, prefix and substring matches first, followed by
 typo-tolerant matches and related meanings. Semantic retrieval is enabled by

@@ -11,6 +11,8 @@ JAVA_HOME (full JDK 21 or later), and ANDROID_OPENSSL_LIB_DIR (arm64 libraries
 libcrypto_3.so and libssl_3.so). --check only reports missing prerequisites.
 
 BETTERFLASH_ANDROID_BUILD_DIR selects a persistent build location under /workspace.
+Build the desktop target first for its native syntax indexer. An optional
+KATEHIGHLIGHTINGINDEXER_EXECUTABLE selects that tool by absolute path.
 The default build is a debug APK. No device deployment or signing is performed.
 HELP
 }
@@ -31,6 +33,8 @@ android_project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 android_path_digest="$(printf '%s' "$android_project_dir" | sha256sum)"
 android_path_digest="${android_path_digest%% *}"
 android_build_dir="${BETTERFLASH_ANDROID_BUILD_DIR:-/workspace/betterflash-build/android-${android_project_dir##*/}-${android_path_digest:0:12}}"
+android_desktop_build_dir="${BETTERFLASH_BUILD_DIR:-/workspace/betterflash-build/${android_path_digest:0:12}}"
+android_highlighting_indexer="${KATEHIGHLIGHTINGINDEXER_EXECUTABLE:-${android_desktop_build_dir}/bin/katehighlightingindexer}"
 
 android_missing=0
 missing() {
@@ -127,6 +131,10 @@ if [[ -z "${ANDROID_OPENSSL_LIB_DIR:-}" || ! -f "${ANDROID_OPENSSL_LIB_DIR}/libc
     missing 'ANDROID_OPENSSL_MISSING: Set ANDROID_OPENSSL_LIB_DIR to arm64-v8a libcrypto_3.so and libssl_3.so for HTTPS. See docs/android.md.'
 fi
 
+if [[ "$android_highlighting_indexer" != /* || ! -x "$android_highlighting_indexer" ]]; then
+    missing 'ANDROID_SYNTAX_INDEXER_MISSING: Run scripts/build-desktop.sh in this worktree first, or set KATEHIGHLIGHTINGINDEXER_EXECUTABLE to the absolute path of its bin/katehighlightingindexer.'
+fi
+
 if (( android_missing > 0 )); then
     printf 'ANDROID_ENVIRONMENT_INCOMPLETE: %d prerequisites need attention. See docs/android.md.\n' "$android_missing" >&2
     exit 2
@@ -143,6 +151,7 @@ cmake -S "$android_project_dir" -B "$android_build_dir" -G Ninja \
     -DANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}" -DANDROID_NDK="${ANDROID_NDK_ROOT}" \
     -DANDROID_PLATFORM=android-28 -DANDROID_ABI=arm64-v8a \
     -DBETTERFLASH_ANDROID_OPENSSL_LIB_DIR="${ANDROID_OPENSSL_LIB_DIR}" \
+    -DKATEHIGHLIGHTINGINDEXER_EXECUTABLE="$android_highlighting_indexer" \
     -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE="$android_build_type"
 cmake --build "$android_build_dir" --target apk --parallel "$(getconf _NPROCESSORS_ONLN)"
 printf 'Android package build finished. APK output directory: %s/android-build/build/outputs/apk\n' "$android_build_dir"

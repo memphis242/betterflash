@@ -29,11 +29,18 @@ export ANDROID_SDK_ROOT=/path/to/Android/Sdk
 export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
 export JAVA_HOME=/path/to/full/jdk
 export ANDROID_OPENSSL_LIB_DIR=/path/to/openssl/arm64-v8a
+./scripts/build-desktop.sh
 ./scripts/build-android.sh --check
 ./scripts/build-android.sh --debug
 ```
 
 The script derives its persistent build directory under `/workspace/betterflash-build` from the complete worktree path and a SHA-256 path prefix, sets native API 28, and requests Qt's `apk` target with parallel compilation. `BETTERFLASH_ANDROID_BUILD_DIR` overrides the build location; an existing CMake cache must point at this worktree. `--release` prepares a release build; device deployment and signing are separate actions. With Fedora's system host Qt, `QT_HOST_ROOT=/usr` is accepted when its version matches the Android kit.
+
+Code highlighting shares the native lexer and themes with desktop; external
+language servers are disabled on Android. Its build needs the desktop build's
+`bin/katehighlightingindexer` to generate bundled language data. The script finds
+this tool in the same worktree's desktop build, honoring `BETTERFLASH_BUILD_DIR`.
+Set `KATEHIGHLIGHTINGINDEXER_EXECUTABLE` to an absolute path to override it.
 
 An Android APK has not been built or tested yet because the Android kit, SDK, NDK, full JDK, and arm64 OpenSSL assets are missing from this machine. After installing them, the next checks are package startup, phone and tablet layouts, image import, voice permission denial/retry, Bluetooth audio, provider cancellation during lifecycle changes, and two-device synchronization.
 
