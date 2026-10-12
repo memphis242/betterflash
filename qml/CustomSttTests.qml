@@ -7,9 +7,26 @@ ColumnLayout {
     id: root
     required property var voice
     readonly property var tests: voice.customSttTests
+    property var expectedDrafts: ({})
     Layout.fillWidth: true
     spacing: 10
     onVisibleChanged: if (!visible && tests.recording) tests.stopRecording()
+
+    function expectedFor(entry) {
+        const key = String(entry.id)
+        return Object.prototype.hasOwnProperty.call(expectedDrafts, key)
+            ? expectedDrafts[key] : String(entry.expected || "")
+    }
+    function rememberExpected(id, value) {
+        const next = Object.assign({}, expectedDrafts)
+        next[String(id)] = String(value)
+        expectedDrafts = next
+    }
+    function commitDrafts() {
+        for (const entry of tests.entries)
+            if (Object.prototype.hasOwnProperty.call(expectedDrafts, String(entry.id)))
+                tests.setExpected(entry.id, expectedDrafts[String(entry.id)])
+    }
 
     FileDialog {
         id: recordingPicker
@@ -120,12 +137,17 @@ ColumnLayout {
                                 font.family: Theme.monoFont
                                 font.pixelSize: 13
                             }
-                            TextField {
+                            TextArea {
                                 Layout.fillWidth: true
-                                text: modelData.expected || ""
+                                Layout.preferredHeight: 58
+                                text: root.expectedFor(modelData)
                                 placeholderText: "Expected transcript"
                                 font.pixelSize: 15
-                                onEditingFinished: tests.setExpected(modelData.id, text)
+                                wrapMode: TextArea.Wrap
+                                selectByMouse: true
+                                enabled: !tests.busy && !tests.recording
+                                onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
+                                onActiveFocusChanged: if (!activeFocus) tests.setExpected(modelData.id, text)
                                 Accessible.name: "Expected transcript for recording " + (index + 1)
                             }
                             Label {
@@ -137,7 +159,8 @@ ColumnLayout {
                                 font.pixelSize: 14
                             }
                             Label {
-                                visible: modelData.status === "Passed" || modelData.status === "Failed"
+                                visible: Number.isFinite(Number(modelData.wordErrorRate))
+                                    || Number.isFinite(Number(modelData.accuracy))
                                 Layout.fillWidth: true
                                 text: {
                                     const accuracy = Number(modelData.accuracy)
@@ -155,8 +178,10 @@ ColumnLayout {
                                 color: Theme.inkMuted
                                 font.family: Theme.monoFont
                                 font.pixelSize: 13
-                                ToolTip.visible: hovered
+                                wrapMode: Text.Wrap
+                                ToolTip.visible: metricsHover.hovered
                                 ToolTip.text: "Accuracy compares expected and transcribed words. Word error rate is (substitutions + deletions + insertions) divided by expected words."
+                                HoverHandler { id: metricsHover }
                             }
                             Label {
                                 visible: Boolean(modelData.error)
@@ -175,7 +200,7 @@ ColumnLayout {
                 AppButton {
                     text: tests.recording ? "Stop recording" : "Record new sample"
                     glyph: tests.recording ? "stop" : "mic"
-                    enabled: !tests.busy
+                    enabled: !tests.busy && (tests.recording || tests.entries.length < 5)
                     hint: tests.recording ? "Stop recording and add the sample" : "Record a sample using the system microphone"
                     onClicked: tests.recording ? tests.stopRecording() : tests.startRecording()
                 }
@@ -185,7 +210,10 @@ ColumnLayout {
                     actionKind: "test"
                     enabled: tests.canRun && !tests.recording
                     hint: enabled ? "Transcribe every custom recording" : "Add recordings with expected transcripts first"
-                    onClicked: tests.runTests()
+                    onClicked: {
+                        root.commitDrafts()
+                        tests.runTests()
+                    }
                 }
                 AppButton {
                     text: "Cancel"
@@ -193,6 +221,22 @@ ColumnLayout {
                     enabled: tests.busy
                     onClicked: tests.cancelTests()
                 }
+            }
+            Label {
+                visible: Boolean(tests.status) || tests.busy
+                Layout.fillWidth: true
+                text: tests.busy ? (tests.status || "Testing custom recordings...") : (tests.status || "")
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                font.pixelSize: 14
+            }
+            Label {
+                visible: tests.busy && voice.sttProvider === "groq"
+                Layout.fillWidth: true
+                text: "Groq will upload each selected recording for transcription."
+                color: Theme.warning
+                wrapMode: Text.Wrap
+                font.pixelSize: 13
             }
             Label {
                 visible: Boolean(tests.error)

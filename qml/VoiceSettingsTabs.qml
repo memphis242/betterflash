@@ -55,6 +55,10 @@ Item {
                 Accessible.name: modelData.title
                 Accessible.description: modelData.hint
                 onClicked: root.select(index)
+                Keys.onLeftPressed: root.select(index - 1)
+                Keys.onRightPressed: root.select(index + 1)
+                Keys.onHomePressed: root.select(0)
+                Keys.onEndPressed: root.select(1)
                 ToolTip.visible: hovered
                 ToolTip.text: modelData.hint
 
@@ -64,7 +68,7 @@ Item {
                         kind: modelData.icon
                         Layout.preferredWidth: root.styleIndex === 2 ? 27 : 23
                         Layout.preferredHeight: Layout.preferredWidth
-                        stroke: tab.checked ? Theme.accent : Theme.inkMuted
+                        stroke: tab.checked && root.styleIndex === 1 ? Theme.onAccent : tab.checked ? Theme.accent : Theme.inkMuted
                     }
                     Label {
                         Layout.fillWidth: true
@@ -83,10 +87,12 @@ Item {
                     color: root.styleIndex === 1
                         ? (selected ? Theme.accent : Theme.surfaceRaised)
                         : selected ? Theme.accentSoft : Theme.transparent
-                    border.color: root.styleIndex === 2
+                    border.color: tab.activeFocus
+                        ? Theme.accent
+                        : root.styleIndex === 2
                         ? (selected ? Theme.accent : Theme.rule)
                         : root.styleIndex === 1 ? Theme.rule : selected ? Theme.accent : Theme.rule
-                    border.width: root.styleIndex === 2 || root.styleIndex === 1 || selected ? 1 : 0
+                    border.width: tab.activeFocus || root.styleIndex === 2 || root.styleIndex === 1 || selected ? 1 : 0
                     Rectangle {
                         visible: root.styleIndex === 0
                         anchors.left: parent.left

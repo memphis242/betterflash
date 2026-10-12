@@ -12,7 +12,7 @@ ApplicationWindow {
         { number: "03", name: "Voice rail", description: "Large icon-led tabs that make the two voice directions unmistakable." }
     ]
     width: 1040
-    height: 760
+    height: 800
     minimumWidth: 700
     minimumHeight: 560
     visible: true
@@ -35,12 +35,21 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.margins: 30
         spacing: 18
-        Label {
-            text: "Voice settings tab studies"
-            color: Theme.ink
-            font.family: Theme.uiFont
-            font.pixelSize: 26
-            font.bold: true
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: "Voice settings tab studies"
+                color: Theme.ink
+                font.family: Theme.uiFont
+                font.pixelSize: 26
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            AppButton {
+                glyph: Theme.dark ? "sun" : "moon"
+                hint: Theme.dark ? "Switch to light theme" : "Switch to dark theme"
+                onClicked: Theme.toggle()
+            }
         }
         Label {
             text: "Choose a treatment that makes speech recognition and speech output immediately discoverable."
@@ -54,7 +63,7 @@ ApplicationWindow {
             Layout.fillHeight: true
             clip: true
             ColumnLayout {
-                width: Math.max(parent.width, 660)
+                width: Math.max(1, root.width - 60)
                 spacing: 16
                 Repeater {
                     model: root.choices
@@ -62,7 +71,7 @@ ApplicationWindow {
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true
-                        implicitHeight: 205
+                        implicitHeight: 182
                         color: Theme.surface
                         border.color: root.selectedStyle === index ? Theme.accent : Theme.rule
                         border.width: root.selectedStyle === index ? 2 : 1
@@ -94,6 +103,7 @@ ApplicationWindow {
                                 font.pixelSize: 14
                             }
                             VoiceSettingsTabs {
+                                id: previewTabs
                                 Layout.fillWidth: true
                                 styleIndex: index
                                 property int previewIndex: 0
@@ -102,7 +112,7 @@ ApplicationWindow {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: previewIndex === 0
+                                text: previewTabs.previewIndex === 0
                                     ? "Recognition section: provider, local model, and microphone checks"
                                     : "Output section: voice profile, playback engine, and speech checks"
                                 color: Theme.inkMuted
