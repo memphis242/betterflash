@@ -59,6 +59,9 @@ struct Review {
     double responseSeconds = 0.0;
     QString reviewedAt;
     QString due;
+    QString sessionId;
+    QString sessionDeckName;
+    QString sessionStartedAt;
 };
 struct DeletedRecord {
     QString type;

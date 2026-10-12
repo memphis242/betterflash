@@ -75,6 +75,7 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             if (!previousSchedule) {detail=previousSchedule.error();return false;}
             if (review->id!=previousReview->id||review->cardId!=previousReview->cardId||review->variantId!=previousReview->variantId
                 ||review->deckName!=previousReview->deckName||review->reviewedAt!=previousReview->reviewedAt||review->responseSeconds!=previousReview->responseSeconds
+                ||review->sessionId!=previousReview->sessionId||review->sessionDeckName!=previousReview->sessionDeckName||review->sessionStartedAt!=previousReview->sessionStartedAt
                 ||schedule->id!=previousSchedule->id||schedule->cardId!=previousSchedule->cardId||schedule->key!=previousSchedule->key
                 ||schedule->reviewCount!=previousSchedule->reviewCount||schedule->reviewCount<1||previousReview->due!=previousSchedule->due) {
                 detail="A correction must preserve the review identity, time, response duration, and review count.";return false;
