@@ -41,7 +41,8 @@ ColumnLayout {
     readonly property bool localStt: voice.sttProvider !== "groq"
     readonly property bool localTts: voice.ttsProvider !== "system"
     readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
-    readonly property string ttsState: voice.ttsModelDownloading ? "busy" : !localTts ? "disabled" : voice.ttsReady && !voice.ttsTestError ? "ready" : voice.ttsReady ? "degraded" : "missing"
+    readonly property string ttsState: localTts && voice.ttsModelDownloading ? "busy"
+        : !voice.ttsReady ? "missing" : voice.ttsTestError ? "degraded" : "ready"
 
     SettingsSwitch {
         Layout.fillWidth: true
