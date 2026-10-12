@@ -219,7 +219,7 @@ Dialog {
                 }
                 CalendarTrace {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 340
+                    Layout.preferredHeight: 362
                     historyKey: detail.cardId
                     historyStart: detail.summary.firstRecordedAt || ""
                     events: detail.timelineEvents

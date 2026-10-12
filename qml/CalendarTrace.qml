@@ -14,7 +14,7 @@ Item {
     property bool canLoadEarlier: true
     signal loadOlderRequested()
 
-    implicitHeight: 320
+    implicitHeight: 342
     height: implicitHeight
     clip: true
     focus: true
@@ -25,7 +25,7 @@ Item {
     ToolTip.text: readoutText()
     ToolTip.delay: 350
 
-    readonly property int plotTop: 92
+    readonly property int plotTop: markerKey.y + markerKey.height + 20
     readonly property int plotBottom: Math.max(plotTop + 72, height - 76)
     readonly property int plotHeight: Math.max(1, plotBottom - plotTop)
     readonly property int plotLeft: 48
@@ -36,6 +36,8 @@ Item {
     readonly property var zoomSpans: [dayMs, dayMs * 3, dayMs * 7, dayMs * 31, dayMs * 365]
     readonly property var outcomeColors: [Theme.recallMissed, Theme.recallPartial,
         Theme.recallHard, Theme.recallGood, Theme.recallEasy]
+    readonly property color todayMarkerColor: Theme.accent
+    readonly property color dueMarkerColor: Theme.timelineDue
 
     property int zoomIndex: 3
     property real domainStartMs: 0
@@ -510,6 +512,44 @@ Item {
         }
     }
 
+    Flow {
+        id: markerKey
+        x: 18
+        y: 76
+        width: Math.max(0, trace.width - 36)
+        spacing: 20
+        Repeater {
+            model: [
+                {label: "Today", color: trace.todayMarkerColor,
+                    hint: "Today's position on the timeline."},
+                {label: "Review due", color: trace.dueMarkerColor,
+                    hint: "Scheduled review date. An overdue review appears before today."}
+            ]
+            delegate: Row {
+                required property var modelData
+                spacing: 8
+                height: 18
+                Rectangle {
+                    width: 2
+                    height: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: modelData.color
+                }
+                Label {
+                    text: modelData.label
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.inkMuted
+                    font.family: Theme.monoFont
+                    font.pixelSize: 12
+                }
+                HoverHandler { id: keyHover }
+                ToolTip.visible: keyHover.hovered
+                ToolTip.text: modelData.hint
+                ToolTip.delay: 350
+            }
+        }
+    }
+
     Canvas {
         id: plot
         x: 0
@@ -627,7 +667,7 @@ Item {
                     ctx.fill()
                     if (focused) { ctx.strokeStyle = Theme.ink; ctx.stroke() }
                 } else if (kind === "due" || kind === "now") {
-                    ctx.strokeStyle = kind === "due" ? Theme.timelineDue : Theme.accent
+                    ctx.strokeStyle = kind === "due" ? trace.dueMarkerColor : trace.todayMarkerColor
                     ctx.lineWidth = focused ? 3 : 2
                     ctx.beginPath()
                     ctx.moveTo(point.x, trace.plotTop - 5)
