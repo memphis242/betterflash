@@ -96,8 +96,15 @@ SearchController::SearchController(AppController *app, Summarizer *ai, const QSt
     }
     connect(m_app, &AppController::cardsChanged, this, [this] { restartAll(true); });
     connect(m_app, &AppController::decksChanged, this, [this] { restartAll(true); });
-    connect(m_ai, &Summarizer::keyChanged, this, [this] { emit changed(); if (m_reuseKey && m_provider == QStringLiteral("remote")) restartAll(); });
-    connect(m_ai, &Summarizer::configurationChanged, this, [this] { if (m_reuseKey && m_provider == QStringLiteral("remote")) restartAll(); });
+    connect(m_ai, &Summarizer::actualCredentialChanged, this, [this] {
+        if (m_reuseKey && m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); restartAll(); }
+    });
+    connect(m_ai, &Summarizer::keyChanged, this, [this] {
+        emit changed();
+    });
+    connect(m_ai, &Summarizer::configurationChanged, this, [this] {
+        if (m_reuseKey && m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); restartAll(); }
+    });
 }
 SearchController::~SearchController() {
     for (int channel = 0; channel < int(m_channels.size()); ++channel) {
@@ -142,10 +149,19 @@ void SearchController::configureCredentials() {
     const QUrl url(m_endpoint);
     const QString scope = url.scheme() + QStringLiteral("://") + url.host() + QLatin1Char(':') + QString::number(url.port(url.scheme() == QStringLiteral("https") ? 443 : 80));
     m_credentials = new SecretStore(QStringLiteral("embeddings-") + digest(scope).left(24), {}, this);
-    connect(m_credentials, &SecretStore::changed, this, [this] { emit changed(); if (m_provider == QStringLiteral("remote")) restartAll(); });
+    m_lastCredentialKey = m_credentials->key();
+    connect(m_credentials, &SecretStore::changed, this, [this] {
+        const QString key = m_credentials->key();
+        if (key != m_lastCredentialKey) {
+            m_lastCredentialKey = key;
+            if (m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); }
+        }
+        emit changed(); if (m_provider == QStringLiteral("remote")) restartAll();
+    });
 }
 void SearchController::setSemanticEnabled(bool enabled) {
     if (m_enabled == enabled) return;
+    cancelTest(); resetTestReport();
     m_enabled = enabled; m_settings.setValue(QStringLiteral("search/semanticEnabled"), enabled);
     if (!enabled) stopDownload();
     restartAll(); emit changed();
@@ -179,7 +195,10 @@ bool SearchController::setRemoteConfiguration(const QString &endpoint, const QSt
     restartAll(); emit changed();
     return true;
 }
-void SearchController::clearApiKey() { m_credentials->clear(); }
+void SearchController::clearApiKey() {
+    if (m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); }
+    m_credentials->clear();
+}
 void SearchController::rebuildIndex() {
     restartAll(true);
     for (struct QueryState &search : m_channels) search.debounce.stop();

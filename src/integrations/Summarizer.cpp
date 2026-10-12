@@ -245,9 +245,20 @@ void Summarizer::configureCredentials() {
     const QString scope = QString::fromLatin1(QCryptographicHash::hash(host.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
     m_credentials = new SecretStore(QStringLiteral("llm-") + scope,
         host == QStringLiteral("api.groq.com") ? QStringLiteral("GROQ_API_KEY") : QStringLiteral("BETTERFLASH_LLM_API_KEY"), this);
-    connect(m_credentials, &SecretStore::changed, this, &Summarizer::keyChanged);
+    m_lastKey = m_credentials->key();
+    connect(m_credentials, &SecretStore::changed, this, [this] {
+        const QString key = m_credentials->key();
+        if (key != m_lastKey) {
+            m_lastKey = key;
+            emit actualCredentialChanged();
+            if (m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); }
+        }
+        emit keyChanged();
+    });
     emit keyChanged();
 }
+void Summarizer::setApiKey(const QString &key) { m_credentials->setKey(key); }
+void Summarizer::clearApiKey() { m_credentials->clear(); }
 void Summarizer::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();
     if (value == m_endpoint) return;

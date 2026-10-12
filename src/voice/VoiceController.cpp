@@ -74,6 +74,11 @@ VoiceController::VoiceController(QObject *parent)
         const QString key = m_secret->key();
         if (key != m_lastKey) {
             m_lastKey = key;
+            if (m_sttProvider == QStringLiteral("groq")) {
+                if (m_sttTestBusy)
+                    finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider key changed."));
+                resetSttTestReport();
+            }
             if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
         }
     });
