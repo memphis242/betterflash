@@ -55,8 +55,10 @@ bool localModelReady(const QString &modelPath) {
             || !qEnvironmentVariableIsEmpty("BETTERFLASH_VOSK_LIBRARY");
     }
     if (modelInfo.isFile() && modelInfo.suffix().compare(QStringLiteral("bin"), Qt::CaseInsensitive) == 0) {
-        return !qEnvironmentVariableIsEmpty("BETTERFLASH_WHISPER_EXECUTABLE")
-            || QFileInfo::exists(QCoreApplication::applicationDirPath() + QStringLiteral("/betterflash-whisper"));
+        const QFileInfo environmentExecutable(qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE"));
+        const QFileInfo bundledExecutable(QCoreApplication::applicationDirPath() + QStringLiteral("/betterflash-whisper"));
+        return (environmentExecutable.isFile() && environmentExecutable.isExecutable())
+            || (bundledExecutable.isFile() && bundledExecutable.isExecutable());
     }
     return false;
 }
