@@ -57,6 +57,7 @@ private:
 
     void finish(quint64 id, std::expected<QString, struct ProviderError> result);
     void failImmediate(quint64 id, const ProviderError &error);
+    void clearErrorIfReady();
     [[nodiscard]] QJsonObject buildPayload(const QString &raw) const;
     [[nodiscard]] std::expected<QString, struct ProviderError> validateOutput(const QString &raw,
         const QString &modelOutput) const;
@@ -72,4 +73,5 @@ private:
     QString m_vocabulary;
     QString m_status;
     QString m_error;
+    QString m_credentialVersion;
 };
