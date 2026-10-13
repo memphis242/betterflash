@@ -167,6 +167,8 @@ ColumnLayout {
                                         }
                                         TextArea {
                                             id: expectedText
+                                            property bool dismissOnOutsideTap: true
+                                            property Item editorViewport: expectedViewport
                                             width: expectedViewport.availableWidth
                                             implicitWidth: 0
                                             height: Math.max(74, implicitHeight)
