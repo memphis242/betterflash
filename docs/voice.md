@@ -104,6 +104,20 @@ normalized to mono 16-bit PCM at 16 kHz, bounded to 60 seconds, and stored in
 the per-user application data directory. They are independent of cards,
 sync, backups, and model downloads.
 
+The application header shows when the microphone is listening, including
+voice review and custom recording. During a custom recording it offers pause,
+resume, and stop/save controls that remain visible when the slot is scrolled
+out of view. The active slot shows the same controls, captured duration, and
+recent microphone amplitude. Pausing suspends input, excludes paused audio from
+the saved sample, and freezes the activity history. The meter displays measured
+PCM amplitude rather than an animated placeholder.
+
+Expected transcripts and recognition vocabulary use labeled, bounded textboxes
+with visible focus styling. Expected transcripts remain selectable but become
+read-only during capture or testing. Empty slots say **Need recording**. The
+recognition/output tabs stay above the scrolling settings content and restore
+each tab's own scroll position.
+
 Each result retains the raw transcript and reports word error rate, accuracy,
 substitutions, deletions, and insertions. A completed result can therefore be
 useful even when it is not an exact match. Changing the selected provider,

@@ -785,13 +785,13 @@ ApplicationWindow {
             }
             Label {
                 textFormat: Text.PlainText
-                visible: window.width >= 700 && !microphoneStatus.visible
+                visible: window.width >= 700
                 text: app.statusMessage
                 color: Theme.inkMuted
                 font.family: Theme.monoFont
                 font.pixelSize: 11
                 elide: Text.ElideRight
-                Layout.maximumWidth: Math.min(360, window.width * 0.3)
+                Layout.maximumWidth: Math.min(360, window.width * (microphoneStatus.visible ? 0.18 : 0.3))
             }
             MicrophoneStatus {
                 id: microphoneStatus

@@ -538,7 +538,8 @@ void CustomSttTests::stopRecording() {
     m_recordingId.clear();
     resetRecordingMetrics();
     notifyEntries();
-    setState(false, QStringLiteral("Add an expected transcript before running the test."));
+    setState(false, entry->expected.isEmpty() ? QStringLiteral("Add an expected transcript before running the test.")
+        : QStringLiteral("Recording updated. Ready to test."));
 }
 
 void CustomSttTests::pauseRecording() {
