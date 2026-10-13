@@ -134,7 +134,11 @@ ColumnLayout {
                     onClicked: voice.testSttModel()
                 }
             }
-            Label { text: "Recognition vocabulary"; color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true }
+            Label {
+                text: "Recognition vocabulary"
+                color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true
+                Layout.topMargin: 12
+            }
             TextArea {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
@@ -159,16 +163,24 @@ ColumnLayout {
                 onTextChanged: if (activeFocus) voice.recognitionVocabulary = text
                 ToolTip.visible: hovered
                 ToolTip.text: "Terms are supplied as context to local Whisper so project and technical abbreviations are more likely to be recognized"
+                Layout.bottomMargin: 12
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Correct transcripts with local language model"; color: Theme.ink; font.pixelSize: 16; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                Layout.topMargin: 6
+                Layout.bottomMargin: 12
+                spacing: 10
+                Icon { kind: "check"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
+                Label { text: "Correct transcripts with local language model"; color: Theme.ink; font.pixelSize: 16; wrapMode: Text.Wrap; Layout.maximumWidth: Math.max(180, root.width - 100) }
                 SettingsSwitch {
                     checked: voice.transcriptCorrector.enabled
                     onToggled: voice.transcriptCorrector.enabled = checked
+                    Layout.leftMargin: 2
+                    Layout.rightMargin: 8
                     ToolTip.visible: hovered
                     ToolTip.text: "After speech recognition, use the selected local language model to repair grammar and likely technical abbreviations"
                 }
+                Item { Layout.fillWidth: true }
             }
             ModelStatus {
                 Layout.fillWidth: true

@@ -81,9 +81,11 @@ ColumnLayout {
                             RowLayout {
                                 id: fields
                                 Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
                                 spacing: 10
                                 ColumnLayout {
-                                    Layout.preferredWidth: 170; Layout.alignment: Qt.AlignTop
+                                    Layout.minimumWidth: 184; Layout.preferredWidth: 184; Layout.maximumWidth: 184
+                                    Layout.alignment: Qt.AlignVCenter
                                     Label { text: "Slot " + (index + 1); color: Theme.ink; font.pixelSize: 15; font.bold: true }
                                     AppButton {
                                         text: modelData.hasRecording ? "Update recording" : "Add recording"
@@ -114,51 +116,87 @@ ColumnLayout {
                                             onClicked: tests.stopRecording()
                                         }
                                     }
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.alignment: Qt.AlignTop
-                                    spacing: 4
                                     Label {
+                                        Layout.fillWidth: true
+                                        text: tests.recording && tests.currentRecordingId === modelData.id
+                                            ? (tests.recordingPaused ? "Recording paused" : "Recording")
+                                            : modelData.hasRecording ? (modelData.status || "Ready") : "Need recording"
+                                        color: tests.recording && tests.currentRecordingId === modelData.id
+                                            ? (tests.recordingPaused ? Theme.warning : Theme.success)
+                                            : modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted
+                                        font.pixelSize: 13
+                                    }
+                                }
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    Layout.preferredWidth: 0
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.preferredHeight: 112
+                                    Layout.minimumHeight: 112
+                                    Layout.maximumHeight: 112
+                                    Label {
+                                        id: expectedLabel
+                                        anchors.top: parent.top
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        height: 20
                                         text: "Expected transcription"
                                         color: Theme.inkMuted; font.pixelSize: 12
                                         horizontalAlignment: Text.AlignHCenter
-                                        Layout.fillWidth: true
                                     }
-                                    TextArea {
-                                        Layout.fillWidth: true; Layout.preferredHeight: 74
-                                        text: root.expectedFor(modelData); placeholderText: "Enter the expected words"
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                        font.pixelSize: 15; wrapMode: TextArea.Wrap; selectByMouse: true
-                                        readOnly: tests.busy || tests.recording
-                                        color: readOnly ? Theme.inkMuted : Theme.ink
-                                        placeholderTextColor: Theme.inkMuted
+                                    ScrollView {
+                                        id: expectedViewport
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: expectedLabel.bottom
+                                        height: 74
+                                        contentWidth: availableWidth
+                                        clip: true
+                                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
                                         background: Rectangle {
                                             radius: 6
-                                            color: parent.readOnly ? Theme.canvas : parent.activeFocus ? Theme.surface : Theme.surfaceRaised
-                                            border.color: parent.activeFocus && !parent.readOnly ? Theme.accent : Theme.rule
-                                            border.width: parent.activeFocus ? 2 : 1
+                                            color: expectedText.readOnly ? Theme.canvas : expectedText.activeFocus ? Theme.surface : Theme.surfaceRaised
+                                            border.color: expectedText.activeFocus && !expectedText.readOnly ? Theme.accent : Theme.rule
+                                            border.width: expectedText.activeFocus ? 2 : 1
                                         }
-                                        cursorVisible: activeFocus && !readOnly
-                                        HoverHandler { cursorShape: Qt.IBeamCursor }
-                                        onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
-                                        onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
-                                        Accessible.name: "Expected transcription for slot " + (index + 1)
-                                        ToolTip.visible: hovered && !activeFocus
-                                        ToolTip.text: readOnly ? "Expected transcription is locked while recording or testing" : "Click to edit the expected transcription"
+                                        TextArea {
+                                            id: expectedText
+                                            width: expectedViewport.availableWidth
+                                            implicitWidth: 0
+                                            height: Math.max(74, implicitHeight)
+                                            text: root.expectedFor(modelData); placeholderText: "Enter the expected words"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 15; wrapMode: TextEdit.Wrap; selectByMouse: true
+                                            readOnly: tests.busy || tests.recording
+                                            color: readOnly ? Theme.inkMuted : Theme.ink
+                                            placeholderTextColor: Theme.inkMuted
+                                            background: Item {}
+                                            cursorVisible: activeFocus && !readOnly
+                                            HoverHandler { cursorShape: Qt.IBeamCursor }
+                                            onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
+                                            onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
+                                            Accessible.name: "Expected transcription for slot " + (index + 1)
+                                            ToolTip.visible: hovered && !activeFocus
+                                            ToolTip.text: readOnly ? "Expected transcription is locked while recording or testing" : "Click to edit the expected transcription"
+                                        }
                                     }
                                 }
-                                ColumnLayout {
-                                Layout.preferredWidth: 145; Layout.alignment: Qt.AlignTop
-                                ModelActionButton {
-                                    text: "Test slot"
-                                    actionKind: "test"
-                                    enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy
-                                    hint: "Transcribe only this recording"
-                                    onClicked: { root.commitDraft(modelData.id); tests.runTest(modelData.id) }
+                                Item {
+                                    Layout.minimumWidth: 184; Layout.preferredWidth: 184; Layout.maximumWidth: 184
+                                    Layout.alignment: Qt.AlignVCenter
+                                    implicitHeight: 112
+                                    ModelActionButton {
+                                        anchors.centerIn: parent
+                                        text: "Test slot"
+                                        actionKind: "test"
+                                        enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy
+                                        hint: "Transcribe only this recording"
+                                        onClicked: { root.commitDraft(modelData.id); tests.runTest(modelData.id) }
+                                    }
                                 }
-                            }
                             }
                             Label {
                                 visible: tests.recording && tests.currentRecordingId === modelData.id
@@ -195,15 +233,7 @@ ColumnLayout {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                Label {
-                                    text: tests.recording && tests.currentRecordingId === modelData.id
-                                        ? (tests.recordingPaused ? "Recording paused" : "Recording")
-                                        : modelData.hasRecording ? (modelData.status || "Ready") : "Need recording"
-                                    color: tests.recording && tests.currentRecordingId === modelData.id
-                                        ? (tests.recordingPaused ? Theme.warning : Theme.success)
-                                        : modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted
-                                    font.pixelSize: 13
-                                }
+                                visible: Boolean(modelData.rawTranscript || modelData.transcript || modelData.correctedTranscript || modelData.correctionStatus || modelData.correctionError || Number(modelData.wordErrorRate) >= 0 || Number(modelData.correctedWordErrorRate) >= 0)
                                 Label { visible: Boolean(modelData.rawTranscript || modelData.transcript); text: "Raw output: " + (modelData.rawTranscript || modelData.transcript || ""); color: Theme.inkMuted; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctedTranscript); text: "Corrected output: " + modelData.correctedTranscript; color: Theme.ink; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctionStatus); text: "Correction " + modelData.correctionStatus; color: modelData.correctionStatus === "Applied" ? Theme.success : Theme.inkMuted; font.pixelSize: 12 }
