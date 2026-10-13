@@ -176,17 +176,19 @@ bool CustomSttTests::canRun() const {
     return found;
 }
 
-void CustomSttTests::setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary) {
+void CustomSttTests::setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary, QString acceleration) {
     provider = provider.trimmed().toLower();
     modelPath = modelPath.trimmed();
     model = model.trimmed();
     apiKey = apiKey.trimmed();
     vocabulary = vocabulary.trimmed();
-    if (m_provider == provider && m_modelPath == modelPath && m_model == model && m_apiKey == apiKey && m_vocabulary == vocabulary) return;
+    acceleration = acceleration.trimmed().toLower();
+    if (acceleration.isEmpty()) acceleration = QStringLiteral("automatic");
+    if (m_provider == provider && m_modelPath == modelPath && m_model == model && m_apiKey == apiKey && m_vocabulary == vocabulary && m_acceleration == acceleration) return;
     if (m_busy) cancelTests();
     const QString nextCredentialHash = QString::fromLatin1(QCryptographicHash::hash(apiKey.toUtf8(), QCryptographicHash::Sha256).toHex());
     const QString correctorConfiguration = m_corrector ? m_corrector->configuration() : QStringLiteral("correction-unconfigured");
-    const QString nextConfiguration = provider + QLatin1Char('|') + modelPath + QLatin1Char('|') + model + QLatin1Char('|') + vocabulary + QLatin1Char('|') + correctorConfiguration;
+    const QString nextConfiguration = provider + QLatin1Char('|') + modelPath + QLatin1Char('|') + model + QLatin1Char('|') + vocabulary + QLatin1Char('|') + acceleration + QLatin1Char('|') + correctorConfiguration;
     bool resultsChanged = false;
     for (struct Entry &entry : m_entries) {
         if (!entry.resultConfiguration.isEmpty() && (entry.resultConfiguration != nextConfiguration || entry.resultCredentialHash != nextCredentialHash)) {
@@ -211,6 +213,7 @@ void CustomSttTests::setConfiguration(QString provider, QString modelPath, QStri
     m_model = std::move(model);
     m_apiKey = std::move(apiKey);
     m_vocabulary = std::move(vocabulary);
+    m_acceleration = std::move(acceleration);
     persist();
     if (resultsChanged) emit entriesChanged();
     emit stateChanged();
@@ -654,6 +657,7 @@ void CustomSttTests::startNext(const quint64 generation) {
     worker->setSttModel(m_model);
     worker->setApiKey(m_apiKey);
     worker->setRecognitionVocabulary(m_vocabulary);
+    worker->setAcceleration(m_acceleration);
     worker->setRuntimePath(QDir::cleanPath(QDir(m_modelPath).filePath(QStringLiteral("../runtime"))));
     worker->setOpenTranscriptionTest(true);
     const QString id = entry->id;
@@ -705,7 +709,7 @@ void CustomSttTests::finishCurrent(const quint64 generation, const quint64 worke
         entry->status = workerError.isEmpty() && entry->wordErrorRate == 0.0 ? QStringLiteral("Passed") : QStringLiteral("Completed");
     }
     const QString correctionConfiguration = m_corrector ? m_corrector->configuration() : QStringLiteral("correction-unconfigured");
-    entry->resultConfiguration = m_provider + QLatin1Char('|') + m_modelPath + QLatin1Char('|') + m_model + QLatin1Char('|') + m_vocabulary + QLatin1Char('|') + correctionConfiguration;
+    entry->resultConfiguration = m_provider + QLatin1Char('|') + m_modelPath + QLatin1Char('|') + m_model + QLatin1Char('|') + m_vocabulary + QLatin1Char('|') + m_acceleration + QLatin1Char('|') + correctionConfiguration;
     entry->resultCredentialHash = QString::fromLatin1(QCryptographicHash::hash(m_apiKey.toUtf8(), QCryptographicHash::Sha256).toHex());
     retireWorker();
     notifyEntries();
