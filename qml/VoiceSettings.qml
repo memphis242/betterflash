@@ -44,14 +44,6 @@ ColumnLayout {
     readonly property string ttsState: localTts && voice.ttsModelDownloading ? "busy"
         : !voice.ttsReady ? "missing" : voice.ttsTestError ? "degraded" : "ready"
 
-    VoiceSettingsTabs {
-        id: voiceTabs
-        Layout.fillWidth: true
-        currentIndex: root.tabIndex
-        onTabSelected: root.tabIndex = index
-        styleIndex: 0
-    }
-
     ColumnLayout {
         Layout.fillWidth: true
 
@@ -149,6 +141,19 @@ ColumnLayout {
                 text: voice.recognitionVocabulary
                 placeholderText: "Optional terms, one per line or separated by commas"
                 wrapMode: TextEdit.Wrap
+                font.pixelSize: 16
+                leftPadding: 12
+                rightPadding: 12
+                topPadding: 10
+                bottomPadding: 10
+                color: Theme.ink
+                placeholderTextColor: Theme.inkMuted
+                background: Rectangle {
+                    radius: 6
+                    color: Theme.editorField
+                    border.color: parent.activeFocus ? Theme.accent : Theme.rule
+                    border.width: parent.activeFocus ? 2 : 1
+                }
                 onTextChanged: if (activeFocus) voice.recognitionVocabulary = text
                 ToolTip.visible: hovered
                 ToolTip.text: "Terms are supplied as context to local Whisper so project and technical abbreviations are more likely to be recognized"

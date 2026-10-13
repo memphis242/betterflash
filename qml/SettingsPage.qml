@@ -27,6 +27,7 @@ Item {
     readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search", "Code rendering"]
     readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice review", "Language model", "Device sync", "Collection data", "Library search", "Code rendering"]
     property var sectionScrollPositions: ({})
+    property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
     property string aiModelDraft: ai.model
     property string voiceKeyDraft: ""
@@ -64,6 +65,19 @@ Item {
                 return;
             const viewport = settingsScroll.contentItem;
             viewport.contentY = Math.max(0, Math.min(settingsPage.sectionScrollPositions[index] || 0, viewport.contentHeight - viewport.height));
+        });
+    }
+
+    function selectVoiceTab(index) {
+        const next = Math.max(0, Math.min(1, index));
+        const positions = Object.assign({}, voiceTabScrollPositions);
+        positions[voiceTabIndex] = settingsScroll.contentItem.contentY;
+        voiceTabScrollPositions = positions;
+        voiceTabIndex = next;
+        Qt.callLater(function () {
+            const viewport = settingsScroll.contentItem;
+            const saved = Number(settingsPage.voiceTabScrollPositions[next] || 0);
+            viewport.contentY = Math.max(0, Math.min(saved, Math.max(0, viewport.contentHeight - viewport.height)));
         });
     }
 
@@ -224,6 +238,17 @@ Item {
                     Layout.maximumWidth: Math.max(76, settingsContent.width * 0.45)
                     onClicked: shortcuts.reset()
                 }
+            }
+            VoiceSettingsTabs {
+                id: voiceTabs
+                visible: settingsPage.section === 2
+                Layout.fillWidth: true
+                currentIndex: settingsPage.voiceTabIndex
+                onTabSelected: settingsPage.selectVoiceTab(index)
+                styleIndex: 0
+                // Keep the voice mode selector in the settings chrome while the
+                // selected mode's content scrolls independently below it.
+                z: 2
             }
             ScrollView {
                 id: settingsScroll

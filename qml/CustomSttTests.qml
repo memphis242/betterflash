@@ -58,6 +58,30 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Label { text: "Custom tests"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 18; font.bold: true }
                 Label { text: "Five recording slots"; color: Theme.inkMuted; font.pixelSize: 14; Layout.fillWidth: true }
+                Rectangle {
+                    id: listeningStatus
+                    visible: tests.recording
+                    implicitWidth: listeningLabel.implicitWidth + 32
+                    implicitHeight: 30
+                    radius: 15
+                    color: Theme.surfaceRaised
+                    border.color: tests.recordingPaused ? Theme.warning : Theme.success
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 9; anchors.rightMargin: 9
+                        spacing: 6
+                        Rectangle { width: 8; height: 8; radius: 4; color: tests.recordingPaused ? Theme.warning : Theme.success }
+                        Label {
+                            id: listeningLabel
+                            text: tests.recordingPaused ? "Microphone paused" : "Microphone listening"
+                            color: tests.recordingPaused ? Theme.warning : Theme.success
+                            font.pixelSize: 12; font.bold: true
+                        }
+                    }
+                    HoverHandler { id: listeningHover }
+                    ToolTip.visible: listeningHover.hovered
+                    ToolTip.text: tests.recordingPaused ? "Recording is paused. Resume or stop to save this slot." : "The microphone is active for this slot."
+                }
             }
             Label {
                 Layout.fillWidth: true
@@ -83,30 +107,75 @@ ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 10
                                 ColumnLayout {
-                                Layout.preferredWidth: 150; Layout.alignment: Qt.AlignTop
-                                Label { text: "Slot " + (index + 1); color: Theme.ink; font.pixelSize: 15; font.bold: true }
-                                AppButton {
-                                    text: modelData.hasRecording ? "Update recording" : "Add recording"
-                                    glyph: "mic"; glyphSize: 16; enabled: !tests.busy && !voice.modelTestBusy
-                                    hint: "Import a WAV or record this slot with the microphone"
-                                    onClicked: updateMenu.open()
-                                    AppMenu {
-                                        id: updateMenu
-                                        AppMenuItem { glyph: "folder"; text: "Import WAV"; onTriggered: { root.importSlotId = modelData.id; recordingPicker.open() } }
-                                        AppMenuItem { glyph: tests.recording && tests.currentRecordingId === modelData.id ? "stop" : "mic"; text: tests.recording && tests.currentRecordingId === modelData.id ? "Stop recording" : "Record microphone"; enabled: !tests.recording || tests.currentRecordingId === modelData.id; onTriggered: tests.recording ? tests.stopRecording() : tests.startRecordingForSlot(modelData.id) }
-                                        AppMenuItem { glyph: "empty-box"; text: "Clear recording"; enabled: modelData.hasRecording && !tests.recording; onTriggered: tests.removeRecording(modelData.id) }
+                                    Layout.preferredWidth: 170; Layout.alignment: Qt.AlignTop
+                                    Label { text: "Slot " + (index + 1); color: Theme.ink; font.pixelSize: 15; font.bold: true }
+                                    AppButton {
+                                        text: modelData.hasRecording ? "Update recording" : "Add recording"
+                                        glyph: "mic"; glyphSize: 16
+                                        enabled: !tests.busy && !tests.recording && !voice.modelTestBusy
+                                        hint: "Import a WAV or record this slot with the microphone"
+                                        onClicked: updateMenu.open()
+                                        AppMenu {
+                                            id: updateMenu
+                                            AppMenuItem { glyph: "folder"; text: "Import WAV"; enabled: !tests.recording; onTriggered: { root.commitAllDrafts(); root.importSlotId = modelData.id; recordingPicker.open() } }
+                                            AppMenuItem { glyph: "mic"; text: "Record microphone"; enabled: !tests.recording; onTriggered: { root.commitAllDrafts(); tests.startRecordingForSlot(modelData.id) } }
+                                            AppMenuItem { glyph: "empty-box"; text: "Clear recording"; enabled: modelData.hasRecording && !tests.recording; onTriggered: tests.removeRecording(modelData.id) }
+                                        }
+                                    }
+                                    Label { Layout.fillWidth: true; text: modelData.hasRecording ? ((modelData.label || "Recording") + (Number(modelData.duration) > 0 ? "  " + Number(modelData.duration).toFixed(1) + " s" : "")) : "Empty slot"; color: Theme.inkMuted; elide: Text.ElideMiddle; font.family: Theme.monoFont; font.pixelSize: 12 }
+                                    RowLayout {
+                                        visible: tests.recording && tests.currentRecordingId === modelData.id
+                                        Layout.fillWidth: true
+                                        GlyphButton {
+                                            glyph: tests.recordingPaused ? "play" : "pause"
+                                            glyphSize: 17
+                                            hint: tests.recordingPaused ? "Resume microphone capture" : "Pause microphone capture"
+                                            onClicked: tests.recordingPaused ? tests.resumeRecording() : tests.pauseRecording()
+                                        }
+                                        Label {
+                                            text: tests.recordingPaused ? "Resume" : "Pause"
+                                            color: Theme.inkMuted; font.pixelSize: 12
+                                        }
+                                        GlyphButton {
+                                            glyph: "stop"; glyphSize: 17
+                                            hint: "Stop recording and save this slot"
+                                            onClicked: tests.stopRecording()
+                                        }
+                                        Label { text: "Stop and save"; color: Theme.inkMuted; font.pixelSize: 12 }
                                     }
                                 }
-                                Label { Layout.fillWidth: true; text: modelData.hasRecording ? ((modelData.label || "Recording") + (Number(modelData.duration) > 0 ? "  " + Number(modelData.duration).toFixed(1) + " s" : "")) : "Empty slot"; color: Theme.inkMuted; elide: Text.ElideMiddle; font.family: Theme.monoFont; font.pixelSize: 12 }
-                            }
-                                TextArea {
-                                Layout.fillWidth: true; Layout.preferredHeight: 58
-                                text: root.expectedFor(modelData); placeholderText: "Expected transcription"
-                                font.pixelSize: 15; wrapMode: TextArea.Wrap; selectByMouse: true; enabled: !tests.busy && !tests.recording
-                                onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
-                                onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
-                                Accessible.name: "Expected transcription for slot " + (index + 1)
-                            }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignTop
+                                    spacing: 4
+                                    Label {
+                                        text: "Expected transcription"
+                                        color: Theme.inkMuted; font.pixelSize: 12
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                    }
+                                    TextArea {
+                                        Layout.fillWidth: true; Layout.preferredHeight: 74
+                                        text: root.expectedFor(modelData); placeholderText: "Enter the expected words"
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        font.pixelSize: 15; wrapMode: TextArea.Wrap; selectByMouse: true
+                                        readOnly: tests.busy || tests.recording
+                                        color: readOnly ? Theme.inkMuted : Theme.ink
+                                        placeholderTextColor: Theme.inkMuted
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: parent.activeFocus ? Theme.surface : Theme.editorField
+                                            border.color: parent.activeFocus ? Theme.accent : Theme.rule
+                                            border.width: parent.activeFocus ? 2 : 1
+                                        }
+                                        onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
+                                        onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
+                                        Accessible.name: "Expected transcription for slot " + (index + 1)
+                                        ToolTip.visible: hovered && !activeFocus
+                                        ToolTip.text: readOnly ? "Expected transcription is locked while recording or testing" : "Click to edit the expected transcription"
+                                    }
+                                }
                                 ColumnLayout {
                                 Layout.preferredWidth: 145; Layout.alignment: Qt.AlignTop
                                 ModelActionButton {
@@ -118,10 +187,35 @@ ColumnLayout {
                                 }
                             }
                             }
+                            Label {
+                                visible: tests.recording && tests.currentRecordingId === modelData.id
+                                Layout.fillWidth: true
+                                text: "Recording activity  " + Number(tests.recordingDuration).toFixed(1) + " s"
+                                color: tests.recordingPaused ? Theme.warning : Theme.success
+                                font.family: Theme.monoFont; font.pixelSize: 12
+                            }
+                            Row {
+                                visible: tests.recording && tests.currentRecordingId === modelData.id
+                                Layout.fillWidth: true
+                                height: 34
+                                spacing: 2
+                                Repeater {
+                                    model: tests.recordingActivity
+                                    delegate: Rectangle {
+                                        required property real modelData
+                                        width: Math.max(2, (parent.width - (tests.recordingActivity.length - 1) * 2) / Math.max(1, tests.recordingActivity.length))
+                                        height: Math.max(3, Math.min(30, Math.sqrt(Math.max(0, modelData)) * 30))
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        radius: 2
+                                        color: modelData > 0.03 ? (tests.recordingPaused ? Theme.warning : Theme.success) : Theme.rule
+                                        opacity: tests.recordingPaused ? 0.65 : 0.9
+                                    }
+                                }
+                            }
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                Label { text: modelData.status || "Ready"; color: modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted; font.pixelSize: 13 }
+                                Label { text: modelData.hasRecording ? (modelData.status || "Ready") : "Need recording"; color: modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted; font.pixelSize: 13 }
                                 Label { visible: Boolean(modelData.rawTranscript || modelData.transcript); text: "Raw output: " + (modelData.rawTranscript || modelData.transcript || ""); color: Theme.inkMuted; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctedTranscript); text: "Corrected output: " + modelData.correctedTranscript; color: Theme.ink; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctionStatus); text: "Correction " + modelData.correctionStatus; color: modelData.correctionStatus === "Applied" ? Theme.success : Theme.inkMuted; font.pixelSize: 12 }
