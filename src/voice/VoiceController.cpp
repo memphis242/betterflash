@@ -915,7 +915,7 @@ void VoiceController::processTranscript(const QString &transcript) {
     const struct VoiceWorker::ParsedUtterance parsed = VoiceWorker::parseUtterance(text);
     if (parsed.isCommand) emit commandRecognized(parsed.command, parsed.argument);
     else if (m_corrector->enabled() && !m_corrector->ready()) {
-        setError(QStringLiteral("TRANSCRIPT_CORRECTION_NOT_READY"), QStringLiteral("Local transcript correction is enabled but unavailable. Prepare the selected local language model, then try again."));
+        setError(QStringLiteral("TRANSCRIPT_CORRECTION_NOT_READY"), QStringLiteral("Transcript correction is enabled but unavailable. Configure the selected language model in Language model settings, then try again."));
         emit answerRecognized(text);
     } else if (m_corrector->enabled() && m_corrector->ready()) {
         cancelTranscriptCorrection();

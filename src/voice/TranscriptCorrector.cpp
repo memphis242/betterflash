@@ -39,16 +39,32 @@ TranscriptCorrector::~TranscriptCorrector() {
 }
 
 bool TranscriptCorrector::ready() const {
-    return m_enabled && m_summarizer != nullptr
-        && m_summarizer->provider() == QStringLiteral("local")
-        && m_summarizer->localModelReady() && !m_summarizer->testBusy();
+    if (!m_enabled || !m_summarizer || m_summarizer->testBusy()) return false;
+    if (m_summarizer->provider() == QStringLiteral("local")) return m_summarizer->localModelReady();
+    if (m_summarizer->provider() == QStringLiteral("remote")) return m_summarizer->configuredRequest().has_value();
+    return false;
 }
 
 QString TranscriptCorrector::configuration() const {
     const QString profile = m_summarizer ? m_summarizer->resolvedProfile() : QStringLiteral("unconfigured");
-    const QString fingerprintInput = QStringLiteral("enabled=%1\nprovider=local\nprofile=%2\nacceleration=%3\nvocabulary=%4")
-        .arg(m_enabled ? QStringLiteral("true") : QStringLiteral("false"), profile,
-            m_summarizer ? m_summarizer->acceleration() : QStringLiteral("unconfigured"), m_vocabulary);
+    const QString provider = m_summarizer ? m_summarizer->provider() : QStringLiteral("unconfigured");
+    QString providerConfiguration = QStringLiteral("local");
+    QString credentialIdentity = QStringLiteral("none");
+    if (provider == QStringLiteral("remote") && m_summarizer) {
+        const auto request = m_summarizer->configuredRequest();
+        if (request) {
+            providerConfiguration = request->url().toString();
+            credentialIdentity = QString::fromLatin1(QCryptographicHash::hash(
+                request->rawHeader("Authorization"), QCryptographicHash::Sha256).toHex());
+        } else {
+            providerConfiguration = QStringLiteral("invalid");
+        }
+    }
+    const QString fingerprintInput = QStringLiteral("enabled=%1\nprovider=%2\nprofile=%3\nacceleration=%4\nmodel=%5\nconfiguration=%6\ncredential=%7\nvocabulary=%8")
+        .arg(m_enabled ? QStringLiteral("true") : QStringLiteral("false"), provider, profile,
+            m_summarizer ? m_summarizer->acceleration() : QStringLiteral("unconfigured"),
+            m_summarizer ? m_summarizer->model() : QStringLiteral("unconfigured"), providerConfiguration,
+            credentialIdentity, m_vocabulary);
     const QString fingerprint = QString::fromLatin1(QCryptographicHash::hash(
         fingerprintInput.toUtf8(), QCryptographicHash::Sha256).toHex());
     return QStringLiteral("sha256:%1").arg(fingerprint);
@@ -60,8 +76,8 @@ void TranscriptCorrector::setEnabled(bool enabled) {
     m_enabled = enabled;
     m_settings.setValue(QStringLiteral("voice/transcriptCorrection"), enabled);
     m_error.clear();
-    m_status = enabled ? QStringLiteral("Local transcript correction enabled")
-                       : QStringLiteral("Local transcript correction disabled");
+    m_status = enabled ? QStringLiteral("Transcript correction enabled")
+                       : QStringLiteral("Transcript correction disabled");
     emit configurationChanged();
     emit changed();
     emit readyChanged();
@@ -102,6 +118,14 @@ void TranscriptCorrector::attachSummarizer(Summarizer *summarizer) {
         m_summarizerConnections.append(connect(m_summarizer, &Summarizer::testChanged, this, [this] {
             emit readyChanged();
         }));
+        m_summarizerConnections.append(connect(m_summarizer, &Summarizer::actualCredentialChanged, this, [this] {
+            cancelAll();
+            emit configurationChanged();
+            emit readyChanged();
+        }));
+        m_summarizerConnections.append(connect(m_summarizer, &Summarizer::keyChanged, this, [this] {
+            emit readyChanged();
+        }));
     }
     emit configurationChanged();
     emit readyChanged();
@@ -120,15 +144,25 @@ quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Compl
         failImmediate(id, ProviderError{code, message});
     };
     if (!m_enabled) {
-        finishError(QStringLiteral("TRANSCRIPT_CORRECTION_DISABLED"), QStringLiteral("Enable local transcript correction before starting it."));
+        finishError(QStringLiteral("TRANSCRIPT_CORRECTION_DISABLED"), QStringLiteral("Enable transcript correction before starting it."));
         return id;
     }
-    if (!m_summarizer || m_summarizer->provider() != QStringLiteral("local")) {
-        finishError(QStringLiteral("TRANSCRIPT_CORRECTION_LOCAL_ONLY"), QStringLiteral("Transcript correction requires the local language model."));
+    if (!m_summarizer) {
+        finishError(QStringLiteral("TRANSCRIPT_CORRECTION_UNAVAILABLE"), QStringLiteral("Configure a language model before correcting a transcript."));
         return id;
     }
-    if (!m_summarizer->localModelReady()) {
+    if (m_summarizer->provider() == QStringLiteral("local") && !m_summarizer->localModelReady()) {
         finishError(QStringLiteral("TRANSCRIPT_CORRECTION_MODEL_MISSING"), QStringLiteral("Prepare the selected local language model before correcting a transcript."));
+        return id;
+    }
+    if (m_summarizer->provider() == QStringLiteral("remote")) {
+        const auto request = m_summarizer->configuredRequest();
+        if (!request) {
+            finishError(request.error().code, request.error().message);
+            return id;
+        }
+    } else if (m_summarizer->provider() != QStringLiteral("local")) {
+        finishError(QStringLiteral("TRANSCRIPT_CORRECTION_PROVIDER"), QStringLiteral("Configure a supported language model provider before correcting a transcript."));
         return id;
     }
     if (m_summarizer->testBusy()) {
@@ -148,7 +182,7 @@ quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Compl
     auto foundJob = m_jobs.find(id);
     Q_ASSERT(foundJob != m_jobs.end());
     foundJob->raw = value;
-    m_status = QStringLiteral("Correcting transcript locally");
+    m_status = QStringLiteral("Correcting transcript");
     m_error.clear();
     emit changed();
 
@@ -168,7 +202,7 @@ quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Compl
         if (timedOut == m_jobs.end()) return;
         const quint64 pending = timedOut->summarizerId;
         if (m_summarizer && pending != 0) m_summarizer->cancelCompletion(pending);
-        finish(id, std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_TIMED_OUT"), QStringLiteral("The local language model did not finish transcript correction within 45 seconds.")}));
+        finish(id, std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_TIMED_OUT"), QStringLiteral("The configured language model did not finish transcript correction within 45 seconds.")}));
     });
     return id;
 }
@@ -228,20 +262,23 @@ QJsonObject TranscriptCorrector::buildPayload(const QString &raw) const {
         QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), userData}}
     };
     const QJsonObject schema{{QStringLiteral("type"), QStringLiteral("json_object")}};
-    return QJsonObject{{QStringLiteral("temperature"), 0.0}, {QStringLiteral("max_tokens"), 1024},
+    QJsonObject payload{{QStringLiteral("temperature"), 0.0}, {QStringLiteral("max_tokens"), 1024},
         {QStringLiteral("messages"), messages}, {QStringLiteral("response_format"), schema}};
+    if (m_summarizer && m_summarizer->provider() == QStringLiteral("remote"))
+        payload.insert(QStringLiteral("model"), m_summarizer->model());
+    return payload;
 }
 
 std::expected<QString, struct ProviderError> TranscriptCorrector::validateOutput(const QString &raw, const QString &modelOutput) const {
-    if (modelOutput.size() > kMaxCorrectedCharacters) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_OUTPUT_LIMIT"), QStringLiteral("The local model returned more than the 16384 character limit.")});
+    if (modelOutput.size() > kMaxCorrectedCharacters) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_OUTPUT_LIMIT"), QStringLiteral("The language model returned more than the 16384 character limit.")});
     QJsonParseError parseError{};
     const QJsonDocument document = QJsonDocument::fromJson(modelOutput.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_JSON"), QStringLiteral("The local model did not return a JSON object.")});
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_JSON"), QStringLiteral("The language model did not return a JSON object.")});
     const QJsonObject object = document.object();
-    if (object.size() != 1 || !object.contains(QStringLiteral("transcript")) || !object.value(QStringLiteral("transcript")).isString()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_SCHEMA"), QStringLiteral("The local model returned an unexpected correction shape.")});
+    if (object.size() != 1 || !object.contains(QStringLiteral("transcript")) || !object.value(QStringLiteral("transcript")).isString()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_SCHEMA"), QStringLiteral("The language model returned an unexpected correction shape.")});
     const QString corrected = object.value(QStringLiteral("transcript")).toString().trimmed();
-    if (corrected.isEmpty()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_EMPTY_OUTPUT"), QStringLiteral("The local model returned an empty transcript.")});
-    if (!preservesNumbers(raw, corrected)) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_NUMBERS"), QStringLiteral("The local model changed numeric content, so its correction was rejected.")});
+    if (corrected.isEmpty()) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_EMPTY_OUTPUT"), QStringLiteral("The language model returned an empty transcript.")});
+    if (!preservesNumbers(raw, corrected)) return std::unexpected(ProviderError{QStringLiteral("TRANSCRIPT_CORRECTION_NUMBERS"), QStringLiteral("The language model changed numeric content, so its correction was rejected.")});
     return corrected;
 }
 
