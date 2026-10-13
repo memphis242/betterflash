@@ -58,30 +58,6 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Label { text: "Custom tests"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 18; font.bold: true }
                 Label { text: "Five recording slots"; color: Theme.inkMuted; font.pixelSize: 14; Layout.fillWidth: true }
-                Rectangle {
-                    id: listeningStatus
-                    visible: tests.recording
-                    implicitWidth: listeningLabel.implicitWidth + 32
-                    implicitHeight: 30
-                    radius: 15
-                    color: Theme.surfaceRaised
-                    border.color: tests.recordingPaused ? Theme.warning : Theme.success
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 9; anchors.rightMargin: 9
-                        spacing: 6
-                        Rectangle { width: 8; height: 8; radius: 4; color: tests.recordingPaused ? Theme.warning : Theme.success }
-                        Label {
-                            id: listeningLabel
-                            text: tests.recordingPaused ? "Microphone paused" : "Microphone listening"
-                            color: tests.recordingPaused ? Theme.warning : Theme.success
-                            font.pixelSize: 12; font.bold: true
-                        }
-                    }
-                    HoverHandler { id: listeningHover }
-                    ToolTip.visible: listeningHover.hovered
-                    ToolTip.text: tests.recordingPaused ? "Recording is paused. Resume or stop to save this slot." : "The microphone is active for this slot."
-                }
             }
             Label {
                 Layout.fillWidth: true
@@ -132,16 +108,11 @@ ColumnLayout {
                                             hint: tests.recordingPaused ? "Resume microphone capture" : "Pause microphone capture"
                                             onClicked: tests.recordingPaused ? tests.resumeRecording() : tests.pauseRecording()
                                         }
-                                        Label {
-                                            text: tests.recordingPaused ? "Resume" : "Pause"
-                                            color: Theme.inkMuted; font.pixelSize: 12
-                                        }
                                         GlyphButton {
                                             glyph: "stop"; glyphSize: 17
                                             hint: "Stop recording and save this slot"
                                             onClicked: tests.stopRecording()
                                         }
-                                        Label { text: "Stop and save"; color: Theme.inkMuted; font.pixelSize: 12 }
                                     }
                                 }
                                 ColumnLayout {
@@ -165,10 +136,12 @@ ColumnLayout {
                                         placeholderTextColor: Theme.inkMuted
                                         background: Rectangle {
                                             radius: 6
-                                            color: parent.activeFocus ? Theme.surface : Theme.editorField
-                                            border.color: parent.activeFocus ? Theme.accent : Theme.rule
+                                            color: parent.readOnly ? Theme.canvas : parent.activeFocus ? Theme.surface : Theme.surfaceRaised
+                                            border.color: parent.activeFocus && !parent.readOnly ? Theme.accent : Theme.rule
                                             border.width: parent.activeFocus ? 2 : 1
                                         }
+                                        cursorVisible: activeFocus && !readOnly
+                                        HoverHandler { cursorShape: Qt.IBeamCursor }
                                         onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
                                         onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
                                         Accessible.name: "Expected transcription for slot " + (index + 1)
@@ -197,13 +170,20 @@ ColumnLayout {
                             Row {
                                 visible: tests.recording && tests.currentRecordingId === modelData.id
                                 Layout.fillWidth: true
+                                Layout.minimumHeight: 34
+                                Layout.preferredHeight: 34
+                                Layout.maximumHeight: 34
                                 height: 34
                                 spacing: 2
+                                clip: true
+                                HoverHandler { id: meterHover; cursorShape: Qt.ArrowCursor }
+                                ToolTip.visible: meterHover.hovered
+                                ToolTip.text: "Recent microphone amplitude; height uses a square-root scale for quiet speech."
                                 Repeater {
                                     model: tests.recordingActivity
                                     delegate: Rectangle {
                                         required property real modelData
-                                        width: Math.max(2, (parent.width - (tests.recordingActivity.length - 1) * 2) / Math.max(1, tests.recordingActivity.length))
+                                        width: Math.max(1, (parent.width - 47 * 2) / 48)
                                         height: Math.max(3, Math.min(30, Math.sqrt(Math.max(0, modelData)) * 30))
                                         anchors.verticalCenter: parent.verticalCenter
                                         radius: 2
@@ -215,7 +195,15 @@ ColumnLayout {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 3
-                                Label { text: modelData.hasRecording ? (modelData.status || "Ready") : "Need recording"; color: modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted; font.pixelSize: 13 }
+                                Label {
+                                    text: tests.recording && tests.currentRecordingId === modelData.id
+                                        ? (tests.recordingPaused ? "Recording paused" : "Recording")
+                                        : modelData.hasRecording ? (modelData.status || "Ready") : "Need recording"
+                                    color: tests.recording && tests.currentRecordingId === modelData.id
+                                        ? (tests.recordingPaused ? Theme.warning : Theme.success)
+                                        : modelData.status === "Passed" ? Theme.success : modelData.status === "Failed" ? Theme.error : Theme.inkMuted
+                                    font.pixelSize: 13
+                                }
                                 Label { visible: Boolean(modelData.rawTranscript || modelData.transcript); text: "Raw output: " + (modelData.rawTranscript || modelData.transcript || ""); color: Theme.inkMuted; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctedTranscript); text: "Corrected output: " + modelData.correctedTranscript; color: Theme.ink; wrapMode: Text.Wrap; font.pixelSize: 13; Layout.fillWidth: true }
                                 Label { visible: Boolean(modelData.correctionStatus); text: "Correction " + modelData.correctionStatus; color: modelData.correctionStatus === "Applied" ? Theme.success : Theme.inkMuted; font.pixelSize: 12 }
