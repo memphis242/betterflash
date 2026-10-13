@@ -2,6 +2,7 @@
 
 #include "VoiceWorker.h"
 #include "CustomSttTests.h"
+#include "TranscriptCorrector.h"
 #include "LocalTtsWorker.h"
 #include "integrations/SecretStore.h"
 #include "models/ModelDownload.h"
@@ -30,12 +31,12 @@
 #endif
 
 namespace {
-constexpr int kCurrentSttProfileVersion = 2;
+constexpr int kCurrentSttProfileVersion = 3;
 
 QString managedSttModelDirectory(const QString &root, const QString &profile) {
-    Q_ASSERT(profile == QStringLiteral("small-en") || profile == QStringLiteral("balanced-en"));
-    return QDir(root).filePath(profile == QStringLiteral("balanced-en")
-        ? QStringLiteral("model-balanced-en") : QStringLiteral("model"));
+    Q_ASSERT(profile == QStringLiteral("small-en") || profile == QStringLiteral("balanced-en") || profile == QStringLiteral("whisper-turbo"));
+    if (profile == QStringLiteral("whisper-turbo")) return QDir(root).filePath(QStringLiteral("whisper/ggml-large-v3-turbo-q8_0.bin"));
+    return QDir(root).filePath(profile == QStringLiteral("balanced-en") ? QStringLiteral("model-balanced-en") : QStringLiteral("model"));
 }
 
 QStringList validationWords(const QString &text) {
@@ -78,7 +79,7 @@ void validationScore(const QString &expected, const QString &actual, int *substi
 
 VoiceController::VoiceController(QObject *parent)
     : QObject(parent), m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)),
-      m_speech(nullptr), m_customSttTests(new CustomSttTests(this)) {
+      m_speech(nullptr), m_customSttTests(new CustomSttTests(this)), m_corrector(new TranscriptCorrector(this)) {
     m_localDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("models/voice"));
     m_sttDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("stt")), this);
     m_ttsDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("tts")), this);
@@ -97,12 +98,13 @@ VoiceController::VoiceController(QObject *parent)
 #else
         false;
 #endif
-    m_sttProfile = desktop ? QStringLiteral("balanced-en") : QStringLiteral("small-en");
+    m_sttProfile = desktop ? QStringLiteral("whisper-turbo") : QStringLiteral("small-en");
     if (storedProfileVersion >= kCurrentSttProfileVersion
-        && (storedProfile == QStringLiteral("small-en") || storedProfile == QStringLiteral("balanced-en")))
+        && (storedProfile == QStringLiteral("small-en") || storedProfile == QStringLiteral("balanced-en") || storedProfile == QStringLiteral("whisper-turbo")))
         m_sttProfile = storedProfile;
     const QString oldManagedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model"));
-    const bool oldManagedDefault = storedModelPath.isEmpty() || storedModelPath == oldManagedPath;
+    const QString balancedManagedPath = QDir(m_sttDownload->directory()).filePath(QStringLiteral("model-balanced-en"));
+    const bool oldManagedDefault = storedModelPath.isEmpty() || storedModelPath == oldManagedPath || storedModelPath == balancedManagedPath;
     if (!desktop && storedProfileVersion < kCurrentSttProfileVersion)
         m_sttProfile = QStringLiteral("small-en");
     if (storedModelPath.isEmpty() || (desktop && storedProfileVersion < kCurrentSttProfileVersion && oldManagedDefault))
@@ -114,6 +116,7 @@ VoiceController::VoiceController(QObject *parent)
     const QString model = settings.value(QStringLiteral("sttModel"), m_sttModel).toString().trimmed();
     static const QRegularExpression validModel(QStringLiteral(R"(^[A-Za-z0-9._:-]{1,128}$)"));
     if (validModel.match(model).hasMatch()) m_sttModel = model;
+    m_recognitionVocabulary = settings.value(QStringLiteral("recognitionVocabulary")).toString().trimmed().left(4096);
     const QString ttsProvider = settings.value(QStringLiteral("ttsProvider"), m_ttsProvider).toString().trimmed().toLower();
     if (ttsProvider == QStringLiteral("local") || ttsProvider == QStringLiteral("system")) m_ttsProvider = ttsProvider;
     const QString ttsProfile = settings.value(QStringLiteral("ttsProfile"), m_ttsProfile).toString().trimmed();
@@ -140,7 +143,7 @@ VoiceController::VoiceController(QObject *parent)
         });
     }
     m_lastKey = m_secret->key();
-    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     connect(m_customSttTests, &CustomSttTests::stateChanged, this, [this] {
         const bool active = m_customSttTests->busy() || m_customSttTests->recording();
         if (active && !m_customVoiceSuspended) {
@@ -162,7 +165,7 @@ VoiceController::VoiceController(QObject *parent)
         const QString key = m_secret->key();
         if (key != m_lastKey) {
             m_lastKey = key;
-            m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, key);
+            m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, key, m_recognitionVocabulary);
             if (m_sttProvider == QStringLiteral("groq")) {
                 if (m_sttTestBusy)
                     finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech provider key changed."));
@@ -197,6 +200,17 @@ VoiceController::~VoiceController() {
 bool VoiceController::hasApiKey() const { return m_secret->hasKey(); }
 QString VoiceController::keyStorageStatus() const { return m_secret->status(); }
 QObject *VoiceController::customSttTests() const { return m_customSttTests; }
+QObject *VoiceController::transcriptCorrector() const { return m_corrector; }
+
+void VoiceController::attachLanguageModel(Summarizer *summarizer) { m_corrector->attachSummarizer(summarizer); }
+
+void VoiceController::cancelTranscriptCorrection() {
+    const quint64 job = m_correctionJob;
+    ++m_correctionGeneration;
+    m_correctionJob = 0;
+    m_correctionPending = false;
+    if (job != 0) m_corrector->cancel(job);
+}
 
 void VoiceController::persistConfiguration() const {
     QSettings settings;
@@ -205,12 +219,14 @@ void VoiceController::persistConfiguration() const {
     settings.setValue(QStringLiteral("provider"), m_sttProvider);
     settings.setValue(QStringLiteral("sttModel"), m_sttModel);
     settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
+    settings.setValue(QStringLiteral("recognitionVocabulary"), m_recognitionVocabulary);
     settings.setValue(QStringLiteral("sttProfileVersion"), kCurrentSttProfileVersion);
     settings.setValue(QStringLiteral("ttsProvider"), m_ttsProvider);
     settings.setValue(QStringLiteral("ttsProfile"), m_ttsProfile);
 }
 
 void VoiceController::setModelPath(const QString &path) {
+    cancelTranscriptCorrection();
     const QString value = path.trimmed();
     if (m_modelPath == value) return;
     if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech model path changed."));
@@ -219,11 +235,12 @@ void VoiceController::setModelPath(const QString &path) {
     persistConfiguration();
     emit modelPathChanged();
     emit modelReadinessChanged();
-    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }
 
 void VoiceController::setSttProvider(const QString &provider) {
+    cancelTranscriptCorrection();
     QString value = provider.trimmed().toLower();
     if (value == QStringLiteral("local test")) value = QStringLiteral("local");
     if (value != QStringLiteral("groq") && value != QStringLiteral("local")) {
@@ -237,11 +254,12 @@ void VoiceController::setSttProvider(const QString &provider) {
     persistConfiguration();
     emit sttProviderChanged();
     emit modelReadinessChanged();
-    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     if (m_enabled) restartWorker();
 }
 
 void VoiceController::setSttModel(const QString &model) {
+    cancelTranscriptCorrection();
     const QString value = model.trimmed();
     static const QRegularExpression validModel(QStringLiteral(R"(^[A-Za-z0-9._:-]{1,128}$)"));
     if (!validModel.match(value).hasMatch()) {
@@ -254,13 +272,14 @@ void VoiceController::setSttModel(const QString &model) {
     resetSttTestReport();
     persistConfiguration();
     emit sttModelChanged();
-    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
 }
 
 void VoiceController::setSttProfile(const QString &profile) {
+    cancelTranscriptCorrection();
     const QString value = profile.trimmed();
-    if (value != QStringLiteral("small-en") && value != QStringLiteral("balanced-en")) {
+    if (value != QStringLiteral("small-en") && value != QStringLiteral("balanced-en") && value != QStringLiteral("whisper-turbo")) {
         setError(QStringLiteral("VOICE_PROFILE_INVALID"), QStringLiteral("Choose a supported English recognition profile."));
         return;
     }
@@ -276,8 +295,19 @@ void VoiceController::setSttProfile(const QString &profile) {
     configureSttDownloads();
     persistConfiguration();
     emit sttProfileChanged();
-    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key());
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     emit modelReadinessChanged();
+    if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
+}
+
+void VoiceController::setRecognitionVocabulary(const QString &vocabulary) {
+    cancelTranscriptCorrection();
+    const QString value = vocabulary.trimmed().left(4096);
+    if (m_recognitionVocabulary == value) return;
+    m_recognitionVocabulary = value;
+    persistConfiguration();
+    emit recognitionVocabularyChanged();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary);
     if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }
 
@@ -354,6 +384,16 @@ void VoiceController::configureDownloads(const bool onlyTts) {
 
 void VoiceController::configureSttDownloads() {
 #if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
+    if (m_sttProfile == QStringLiteral("whisper-turbo")) {
+        const struct ModelDownloadAsset model{
+            QUrl(QStringLiteral("https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q8_0.bin")),
+            QStringLiteral("whisper/ggml-large-v3-turbo-q8_0.bin"), 874188075,
+            QByteArrayLiteral("317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1"), {}, {}};
+        const QSignalBlocker suppressCanceledDownloadSignals(m_sttDownload);
+        m_sttDownload->configure({model});
+        emit modelReadinessChanged();
+        return;
+    }
     const bool balanced = m_sttProfile == QStringLiteral("balanced-en");
     const struct ModelDownloadAsset model{
         QUrl(balanced ? QStringLiteral("https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip")
@@ -382,6 +422,13 @@ void VoiceController::configureSttDownloads() {
 bool VoiceController::sttModelReady() const {
     if (m_sttProvider == QStringLiteral("groq")) return m_secret->hasKey();
     if (m_modelPath == managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile) && !m_sttDownload->ready()) return false;
+    if (m_modelPath.endsWith(QStringLiteral(".bin"), Qt::CaseInsensitive)) {
+        const QString runner = qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed().isEmpty()
+            ? QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("betterflash-whisper"))
+            : qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed();
+        return (m_modelPath != managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile) || m_sttDownload->ready())
+            && QFileInfo(m_modelPath).isFile() && QFileInfo(runner).isExecutable();
+    }
     const QDir modelDirectory(m_modelPath);
     if (!modelDirectory.exists()) return false;
     const QStringList libraryCandidates = {qEnvironmentVariable("BETTERFLASH_VOSK_LIBRARY"),
@@ -401,6 +448,7 @@ QString VoiceController::sttModelStatus() const {
     const QString managedPath = managedSttModelDirectory(m_sttDownload->directory(), m_sttProfile);
     if (sttModelReady()) {
         if (m_modelPath != managedPath) return QStringLiteral("Custom speech recognition model is ready for offline use");
+        if (m_sttProfile == QStringLiteral("whisper-turbo")) return QStringLiteral("Whisper large v3 turbo is ready for offline use");
         return m_sttProfile == QStringLiteral("balanced-en")
             ? QStringLiteral("Vosk English 0.22 balanced recognition is ready for offline use")
             : QStringLiteral("Vosk small English recognition is ready for offline use");
@@ -525,6 +573,7 @@ void VoiceController::beginSttTest() {
     worker->setSttModel(m_sttModel);
     worker->setRuntimePath(QDir(m_sttDownload->directory()).filePath(QStringLiteral("runtime")));
     worker->setApiKey(m_secret->key());
+    worker->setRecognitionVocabulary(m_recognitionVocabulary);
     worker->moveToThread(thread);
     m_testWorker = worker;
     m_testThread = thread;
@@ -633,6 +682,7 @@ void VoiceController::setApiKey(const QString &key) { m_secret->setKey(key); }
 void VoiceController::clearApiKey() { m_secret->clear(); }
 
 void VoiceController::setEnabled(const bool enabled) {
+    if (!enabled) cancelTranscriptCorrection();
     if (m_enabled == enabled) return;
     if (enabled && m_sttProvider == QStringLiteral("groq") && !m_secret->hasKey()) {
         setError(QStringLiteral("GROQ_KEY_MISSING"), QStringLiteral("Add a Groq API key in Voice settings before enabling speech recognition."));
@@ -687,6 +737,7 @@ void VoiceController::beginWorker() {
     worker->setProvider(m_sttProvider);
     worker->setSttModel(m_sttModel);
     worker->setRuntimePath(QDir(m_sttDownload->directory()).filePath(QStringLiteral("runtime")));
+    worker->setRecognitionVocabulary(m_recognitionVocabulary);
     worker->setApiKey(m_secret->key());
     worker->moveToThread(thread);
     m_worker = worker;
@@ -729,6 +780,7 @@ void VoiceController::beginWorker() {
 }
 
 void VoiceController::retireWorker() {
+    cancelTranscriptCorrection();
     ++m_workerGeneration;
     ++m_captureEpoch;
     const QPointer<VoiceWorker> worker = m_worker;
@@ -767,6 +819,7 @@ void VoiceController::updateCapture() {
 }
 
 void VoiceController::cancelPendingRecognition() {
+    cancelTranscriptCorrection();
     ++m_captureEpoch;
     m_processing = false;
     setListeningState(false);
@@ -780,6 +833,7 @@ void VoiceController::startListening() {
 }
 
 void VoiceController::stopListening() {
+    cancelTranscriptCorrection();
     m_wantsListening = false;
     ++m_captureEpoch;
     m_processing = false;
@@ -796,15 +850,41 @@ void VoiceController::processTranscript(const QString &transcript) {
         setError(QStringLiteral("VOICE_TRANSCRIPT_TOO_LONG"), QStringLiteral("That transcript is too long. Answer in a shorter utterance."));
         return;
     }
+    m_lastRawTranscript = text;
+    emit lastRawTranscriptChanged();
     m_lastTranscript = text;
     emit lastTranscriptChanged();
     const struct VoiceWorker::ParsedUtterance parsed = VoiceWorker::parseUtterance(text);
     if (parsed.isCommand) emit commandRecognized(parsed.command, parsed.argument);
-    else emit answerRecognized(text);
+    else if (m_corrector->enabled() && m_corrector->ready()) {
+        cancelTranscriptCorrection();
+        ++m_captureEpoch;
+        m_correctionEpoch = m_captureEpoch;
+        m_correctionPending = true;
+        m_processing = true;
+        updateCapture();
+        const quint64 generation = m_correctionGeneration;
+        m_correctionJob = m_corrector->correct(text, this, [this, generation, text](std::expected<QString, struct ProviderError> result) {
+            if (!m_correctionPending || generation != m_correctionGeneration) return;
+            m_correctionPending = false;
+            m_correctionJob = 0;
+            m_processing = false;
+            if (result) {
+                m_lastTranscript = *result;
+                emit lastTranscriptChanged();
+                emit answerRecognized(*result);
+            } else {
+                setError(result.error().code, result.error().message);
+                emit answerRecognized(text);
+            }
+            updateCapture();
+        });
+    } else emit answerRecognized(text);
 }
 
 void VoiceController::speak(const QString &text) {
     if (!m_enabled || m_modelTestBusy || text.trimmed().isEmpty()) return;
+    cancelTranscriptCorrection();
     stopSpeaking();
     m_echoTail = false;
     m_pendingSpeech = text.trimmed();

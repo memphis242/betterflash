@@ -20,6 +20,8 @@ class ModelDownload;
 class QAudioSink;
 class QBuffer;
 class CustomSttTests;
+class Summarizer;
+class TranscriptCorrector;
 
 class VoiceController final : public QObject {
     Q_OBJECT
@@ -29,12 +31,15 @@ class VoiceController final : public QObject {
     Q_PROPERTY(bool speaking READ speaking NOTIFY speakingChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString lastTranscript READ lastTranscript NOTIFY lastTranscriptChanged)
+    Q_PROPERTY(QString lastRawTranscript READ lastRawTranscript NOTIFY lastRawTranscriptChanged)
+    Q_PROPERTY(QObject *transcriptCorrector READ transcriptCorrector CONSTANT)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString modelPath READ modelPath WRITE setModelPath NOTIFY modelPathChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY hasApiKeyChanged)
     Q_PROPERTY(QString sttProvider READ sttProvider WRITE setSttProvider NOTIFY sttProviderChanged)
     Q_PROPERTY(QString sttModel READ sttModel WRITE setSttModel NOTIFY sttModelChanged)
     Q_PROPERTY(QString sttProfile READ sttProfile WRITE setSttProfile NOTIFY sttProfileChanged)
+    Q_PROPERTY(QString recognitionVocabulary READ recognitionVocabulary WRITE setRecognitionVocabulary NOTIFY recognitionVocabularyChanged)
     Q_PROPERTY(bool sttModelReady READ sttModelReady NOTIFY modelReadinessChanged)
     Q_PROPERTY(bool sttModelDownloading READ sttModelDownloading NOTIFY modelReadinessChanged)
     Q_PROPERTY(QString sttModelStatus READ sttModelStatus NOTIFY modelReadinessChanged)
@@ -68,12 +73,15 @@ public:
     [[nodiscard]] bool speaking() const { return m_speaking; }
     [[nodiscard]] QString status() const { return m_status; }
     [[nodiscard]] QString lastTranscript() const { return m_lastTranscript; }
+    [[nodiscard]] QString lastRawTranscript() const { return m_lastRawTranscript; }
+    [[nodiscard]] QObject *transcriptCorrector() const;
     [[nodiscard]] QString lastError() const { return m_lastError; }
     [[nodiscard]] QString modelPath() const { return m_modelPath; }
     [[nodiscard]] bool hasApiKey() const;
     [[nodiscard]] QString sttProvider() const { return m_sttProvider; }
     [[nodiscard]] QString sttModel() const { return m_sttModel; }
     [[nodiscard]] QString sttProfile() const { return m_sttProfile; }
+    [[nodiscard]] QString recognitionVocabulary() const { return m_recognitionVocabulary; }
     [[nodiscard]] bool sttModelReady() const;
     [[nodiscard]] bool sttModelDownloading() const;
     [[nodiscard]] double sttModelProgress() const;
@@ -103,6 +111,7 @@ public:
     void setSttProvider(const QString &provider);
     void setSttModel(const QString &model);
     void setSttProfile(const QString &profile);
+    void setRecognitionVocabulary(const QString &vocabulary);
     void setTtsProvider(const QString &provider);
     void setTtsProfile(const QString &profile);
     Q_INVOKABLE void testSttModel();
@@ -119,6 +128,7 @@ public:
     Q_INVOKABLE void processTranscript(const QString &transcript);
     Q_INVOKABLE void setApiKey(const QString &key);
     Q_INVOKABLE void clearApiKey();
+    void attachLanguageModel(Summarizer *summarizer);
 
 signals:
     void enabledChanged();
@@ -127,12 +137,14 @@ signals:
     void speakingChanged();
     void statusChanged();
     void lastTranscriptChanged();
+    void lastRawTranscriptChanged();
     void lastErrorChanged();
     void modelPathChanged();
     void hasApiKeyChanged();
     void sttProviderChanged();
     void sttModelChanged();
     void sttProfileChanged();
+    void recognitionVocabularyChanged();
     void ttsProviderChanged();
     void ttsProfileChanged();
     void modelReadinessChanged();
@@ -171,6 +183,7 @@ private:
     void beginLocalSpeech();
     void retireTtsWorker();
     void startLocalPlayback(const QByteArray &pcm, quint64 request, double seconds);
+    void cancelTranscriptCorrection();
 
     bool m_enabled = false;
     bool m_ready = false;
@@ -188,11 +201,13 @@ private:
     quint64 m_speechGeneration = 0;
     QString m_status = QStringLiteral("Voice disabled");
     QString m_lastTranscript;
+    QString m_lastRawTranscript;
     QString m_lastError;
     QString m_modelPath;
     QString m_sttProvider = QStringLiteral("local");
     QString m_sttModel = QStringLiteral("whisper-large-v3-turbo");
-    QString m_sttProfile = QStringLiteral("small-en");
+    QString m_sttProfile = QStringLiteral("whisper-turbo");
+    QString m_recognitionVocabulary;
     QString m_ttsProvider = QStringLiteral("local");
     QString m_ttsProfile = QStringLiteral("ljspeech-medium");
     bool m_modelTestBusy = false;
@@ -228,6 +243,11 @@ private:
     SecretStore *const m_secret;
     QTextToSpeech *m_speech = nullptr;
     CustomSttTests *const m_customSttTests;
+    TranscriptCorrector *const m_corrector;
+    quint64 m_correctionGeneration = 0;
+    quint64 m_correctionJob = 0;
+    quint64 m_correctionEpoch = 0;
+    bool m_correctionPending = false;
     bool m_customVoiceSuspended = false;
     QPointer<VoiceWorker> m_worker;
     QPointer<QThread> m_workerThread;

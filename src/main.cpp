@@ -195,6 +195,7 @@ int main(int argc, char **argv) {
     Atomicizer atomic(&app, &ai);
     SyncController sync(&app, media.rootPath());
     VoiceController voice;
+    voice.attachLanguageModel(&ai);
 #ifdef Q_OS_ANDROID
     QObject::connect(&application, &QGuiApplication::applicationStateChanged, &voice,
         [&voice](Qt::ApplicationState state) {
