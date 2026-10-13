@@ -80,14 +80,17 @@ ColumnLayout {
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 9; spacing: 10
                             RowLayout {
                                 id: fields
+                                readonly property real sideWidth: Math.min(184, Math.max(0, (width - spacing * 2) / 4))
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
                                 spacing: 10
                                 ColumnLayout {
-                                    Layout.minimumWidth: 184; Layout.preferredWidth: 184; Layout.maximumWidth: 184
+                                    Layout.minimumWidth: fields.sideWidth; Layout.preferredWidth: fields.sideWidth; Layout.maximumWidth: fields.sideWidth
                                     Layout.alignment: Qt.AlignVCenter
                                     Label { text: "Slot " + (index + 1); color: Theme.ink; font.pixelSize: 15; font.bold: true }
                                     AppButton {
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: modelData.hasRecording ? "Update recording" : "Add recording"
                                         glyph: "mic"; glyphSize: 16
                                         enabled: !tests.busy && !tests.recording && !voice.modelTestBusy
@@ -137,10 +140,11 @@ ColumnLayout {
                                     Layout.maximumHeight: 112
                                     Label {
                                         id: expectedLabel
-                                        anchors.top: parent.top
+                                        anchors.bottom: expectedViewport.top
+                                        anchors.bottomMargin: 4
                                         anchors.left: parent.left
                                         anchors.right: parent.right
-                                        height: 20
+                                        height: 15
                                         text: "Expected transcription"
                                         color: Theme.inkMuted; font.pixelSize: 12
                                         horizontalAlignment: Text.AlignHCenter
@@ -149,7 +153,7 @@ ColumnLayout {
                                         id: expectedViewport
                                         anchors.left: parent.left
                                         anchors.right: parent.right
-                                        anchors.top: expectedLabel.bottom
+                                        anchors.verticalCenter: parent.verticalCenter
                                         height: 74
                                         contentWidth: availableWidth
                                         clip: true
@@ -185,11 +189,12 @@ ColumnLayout {
                                     }
                                 }
                                 Item {
-                                    Layout.minimumWidth: 184; Layout.preferredWidth: 184; Layout.maximumWidth: 184
+                                    Layout.minimumWidth: fields.sideWidth; Layout.preferredWidth: fields.sideWidth; Layout.maximumWidth: fields.sideWidth
                                     Layout.alignment: Qt.AlignVCenter
                                     implicitHeight: 112
                                     ModelActionButton {
                                         anchors.centerIn: parent
+                                        width: Math.min(implicitWidth, parent.width)
                                         text: "Test slot"
                                         actionKind: "test"
                                         enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy

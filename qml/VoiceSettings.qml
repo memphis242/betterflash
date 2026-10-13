@@ -167,7 +167,7 @@ ColumnLayout {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Layout.topMargin: 6
+                Layout.topMargin: 12
                 Layout.bottomMargin: 12
                 spacing: 10
                 Icon { kind: "check"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
@@ -175,8 +175,10 @@ ColumnLayout {
                 SettingsSwitch {
                     checked: voice.transcriptCorrector.enabled
                     onToggled: voice.transcriptCorrector.enabled = checked
-                    Layout.leftMargin: 2
-                    Layout.rightMargin: 8
+                    Layout.leftMargin: 8
+                    Layout.rightMargin: 12
+                    Layout.topMargin: 8
+                    Layout.bottomMargin: 8
                     ToolTip.visible: hovered
                     ToolTip.text: "After speech recognition, use the selected local language model to repair grammar and likely technical abbreviations"
                 }
