@@ -227,23 +227,7 @@ QJsonObject TranscriptCorrector::buildPayload(const QString &raw) const {
         QJsonObject{{QStringLiteral("role"), QStringLiteral("system")}, {QStringLiteral("content"), system}},
         QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), userData}}
     };
-    const QJsonObject schemaBody{
-        {QStringLiteral("type"), QStringLiteral("object")},
-        {QStringLiteral("properties"), QJsonObject{
-            {QStringLiteral("transcript"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}
-        }},
-        {QStringLiteral("required"), QJsonArray{QStringLiteral("transcript")}},
-        {QStringLiteral("additionalProperties"), false}
-    };
-    const QJsonObject schemaDefinition{
-        {QStringLiteral("name"), QStringLiteral("transcript_correction")},
-        {QStringLiteral("strict"), true},
-        {QStringLiteral("schema"), schemaBody}
-    };
-    const QJsonObject schema{
-        {QStringLiteral("type"), QStringLiteral("json_schema")},
-        {QStringLiteral("json_schema"), schemaDefinition}
-    };
+    const QJsonObject schema{{QStringLiteral("type"), QStringLiteral("json_object")}};
     return QJsonObject{{QStringLiteral("temperature"), 0.0}, {QStringLiteral("max_tokens"), 1024},
         {QStringLiteral("messages"), messages}, {QStringLiteral("response_format"), schema}};
 }
