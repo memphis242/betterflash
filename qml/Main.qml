@@ -735,9 +735,24 @@ ApplicationWindow {
         }
     }
 
+    function dismissVoiceEditor(scenePosition) {
+        const editor = window.activeFocusItem
+        if (!editor || editor.dismissOnOutsideTap !== true)
+            return
+        const viewport = editor.editorViewport || editor
+        const position = viewport.mapFromItem(null, scenePosition.x, scenePosition.y)
+        if (!viewport.contains(position))
+            editor.focus = false
+    }
+
     header: ToolBar {
         objectName: "globalHeader"
         height: 76
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            gesturePolicy: TapHandler.DragThreshold
+            onTapped: eventPoint => window.dismissVoiceEditor(eventPoint.scenePosition)
+        }
         background: Rectangle {
             color: Theme.canvas
             Rectangle {
@@ -818,6 +833,11 @@ ApplicationWindow {
         objectName: "mainContent"
         anchors.fill: parent
         spacing: 0
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            gesturePolicy: TapHandler.DragThreshold
+            onTapped: eventPoint => window.dismissVoiceEditor(eventPoint.scenePosition)
+        }
         SidebarNavigation {
             id: navigation
             objectName: "sideNavigation"
