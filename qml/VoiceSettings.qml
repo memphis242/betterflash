@@ -93,11 +93,21 @@ ColumnLayout {
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
-                model: ["Whisper large v3 turbo / abbreviation-aware (874 MB download)", "Vosk English 0.22 / balanced (131 MB download)", "Vosk small English 0.15 / compact (41 MB download)"]
+                model: ["Whisper large v3 turbo / desktop (874 MB download)", "Vosk English 0.22 / balanced (131 MB download)", "Vosk small English 0.15 / compact (41 MB download)"]
                 currentIndex: voice.sttProfile === "whisper-turbo" ? 0 : voice.sttProfile === "small-en" ? 2 : 1
                 onActivated: voice.sttProfile = ["whisper-turbo", "balanced-en", "small-en"][currentIndex]
                 ToolTip.visible: hovered
-                ToolTip.text: "Choose balanced desktop recognition or the compact profile intended for Android"
+                ToolTip.text: "Choose the desktop Whisper profile, balanced Vosk recognition, or the compact profile intended for Android"
+            }
+            Label { text: "Speech recognition acceleration"; color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true; visible: sttProvider.currentIndex === 0 }
+            SettingsCombo {
+                Layout.fillWidth: true
+                visible: sttProvider.currentIndex === 0
+                model: ["Automatic (GPU when available, CPU fallback)", "CPU"]
+                currentIndex: voice.sttAcceleration === "cpu" ? 1 : 0
+                onActivated: voice.sttAcceleration = currentIndex === 1 ? "cpu" : "automatic"
+                ToolTip.visible: hovered
+                ToolTip.text: "Automatic uses a Vulkan GPU when the desktop helper supports it and retries on CPU if GPU inference cannot run"
             }
             ModelStatus {
                 visible: sttProvider.currentIndex === 0

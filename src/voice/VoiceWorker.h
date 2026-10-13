@@ -35,6 +35,7 @@ public:
     void setRuntimePath(const QString &path) { m_runtimePath = path; }
     void setOpenTranscriptionTest(const bool open) { m_openTranscriptionTest = open; }
     void setRecognitionVocabulary(QString vocabulary) { m_recognitionVocabulary = std::move(vocabulary); }
+    void setWhisperAcceleration(QString acceleration) { m_whisperAcceleration = std::move(acceleration); }
 
 public slots:
     void initialize();
@@ -91,6 +92,7 @@ private:
     bool m_testAnswered = false;
     bool m_openTranscriptionTest = false;
     QString m_recognitionVocabulary;
+    QString m_whisperAcceleration = QStringLiteral("automatic");
 
     using ModelNew = void *(*)(const char *);
     using ModelFree = void (*)(void *);

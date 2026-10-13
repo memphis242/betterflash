@@ -16,8 +16,8 @@ constexpr qsizetype kMaximumResponseBytes = 65536;
 constexpr int kTimeoutMs = 45000;
 }
 
-WhisperTranscriber::WhisperTranscriber(QString modelPath, QString vocabulary, QObject *parent)
-    : QObject(parent), m_modelPath(std::move(modelPath)), m_vocabulary(std::move(vocabulary)) {}
+WhisperTranscriber::WhisperTranscriber(QString modelPath, QString vocabulary, QString acceleration, QObject *parent)
+    : QObject(parent), m_modelPath(std::move(modelPath)), m_vocabulary(std::move(vocabulary)), m_acceleration(std::move(acceleration)) {}
 
 WhisperTranscriber::~WhisperTranscriber() { cancel(); }
 
@@ -90,7 +90,8 @@ void WhisperTranscriber::submit(const QByteArray &pcm, const quint64 epoch) {
             finish(generation, epoch);
         }
     });
-    QJsonObject request{{QStringLiteral("modelPath"), m_modelPath}, {QStringLiteral("audioPath"), file->fileName()}, {QStringLiteral("vocabulary"), m_vocabulary}};
+    QJsonObject request{{QStringLiteral("modelPath"), m_modelPath}, {QStringLiteral("audioPath"), file->fileName()},
+        {QStringLiteral("vocabulary"), m_vocabulary}, {QStringLiteral("acceleration"), m_acceleration}};
     const QByteArray requestJson = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
     connect(process, &QProcess::started, this, [process, requestJson] {
         process->write(requestJson);
