@@ -150,10 +150,12 @@ ColumnLayout {
                 placeholderTextColor: Theme.inkMuted
                 background: Rectangle {
                     radius: 6
-                    color: Theme.editorField
+                    color: Theme.surfaceRaised
                     border.color: parent.activeFocus ? Theme.accent : Theme.rule
                     border.width: parent.activeFocus ? 2 : 1
                 }
+                cursorVisible: activeFocus
+                HoverHandler { cursorShape: Qt.IBeamCursor }
                 onTextChanged: if (activeFocus) voice.recognitionVocabulary = text
                 ToolTip.visible: hovered
                 ToolTip.text: "Terms are supplied as context to local Whisper so project and technical abbreviations are more likely to be recognized"
