@@ -11,6 +11,7 @@ class QAudioSource;
 class QIODevice;
 class QThread;
 class VoiceWorker;
+class TranscriptCorrector;
 
 class CustomSttTests final : public QObject {
     Q_OBJECT
@@ -33,7 +34,8 @@ public:
     [[nodiscard]] bool canRun() const;
     [[nodiscard]] QString currentRecordingId() const { return m_recordingId; }
 
-    void setConfiguration(QString provider, QString modelPath, QString model, QString apiKey);
+    void setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary = {});
+    void setTranscriptCorrector(TranscriptCorrector *corrector);
 
     Q_INVOKABLE void addRecording(const QUrl &source);
     Q_INVOKABLE void replaceRecording(const QString &id, const QUrl &source);
@@ -58,6 +60,10 @@ private:
         QString path;
         QString expected;
         QString transcript;
+        QString rawTranscript;
+        QString correctedTranscript;
+        QString correctionStatus;
+        QString correctionError;
         QString status = QStringLiteral("Ready");
         QString error;
         double duration = 0.0;
@@ -65,6 +71,10 @@ private:
         int substitutions = 0;
         int deletions = 0;
         int insertions = 0;
+        double correctedWordErrorRate = -1.0;
+        int correctedSubstitutions = 0;
+        int correctedDeletions = 0;
+        int correctedInsertions = 0;
         QString resultConfiguration;
         QString resultCredentialHash;
     };
@@ -84,11 +94,14 @@ private:
 
     QVector<struct Entry> m_entries;
     QVector<QString> m_queue;
+    QPointer<TranscriptCorrector> m_corrector;
+    QMetaObject::Connection m_correctorConfigurationConnection;
     QString m_directory;
     QString m_provider = QStringLiteral("local");
     QString m_modelPath;
     QString m_model = QStringLiteral("whisper-large-v3-turbo");
     QString m_apiKey;
+    QString m_vocabulary;
     bool m_busy = false;
     bool m_recording = false;
     QString m_status = QStringLiteral("Add a recording to begin.");
@@ -98,6 +111,8 @@ private:
     quint64 m_generation = 0;
     quint64 m_workerGeneration = 0;
     quint64 m_nextWorkerGeneration = 0;
+    quint64 m_correctionGeneration = 0;
+    quint64 m_correctionJob = 0;
     QPointer<VoiceWorker> m_worker;
     QPointer<QThread> m_thread;
     QVector<QPointer<QThread>> m_threads;

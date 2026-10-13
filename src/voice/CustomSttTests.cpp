@@ -2,6 +2,7 @@
 
 #include "VoiceAudio.h"
 #include "VoiceWorker.h"
+#include "TranscriptCorrector.h"
 
 #include <QAudioFormat>
 #include <QAudioSource>
@@ -143,11 +144,17 @@ QVariantList CustomSttTests::entries() const {
     for (const struct Entry &entry : m_entries) {
         QVariantMap item{{QStringLiteral("id"), entry.id}, {QStringLiteral("label"), entry.label},
             {QStringLiteral("expected"), entry.expected}, {QStringLiteral("transcript"), entry.transcript},
+            {QStringLiteral("rawTranscript"), entry.rawTranscript}, {QStringLiteral("correctedTranscript"), entry.correctedTranscript},
+            {QStringLiteral("correctionStatus"), entry.correctionStatus}, {QStringLiteral("correctionError"), entry.correctionError},
             {QStringLiteral("status"), entry.status}, {QStringLiteral("error"), entry.error},
             {QStringLiteral("duration"), entry.duration}, {QStringLiteral("wordErrorRate"), entry.wordErrorRate},
             {QStringLiteral("accuracy"), entry.wordErrorRate < 0.0 ? -1.0 : std::max(0.0, 1.0 - entry.wordErrorRate)},
             {QStringLiteral("substitutions"), entry.substitutions}, {QStringLiteral("deletions"), entry.deletions},
             {QStringLiteral("insertions"), entry.insertions}, {QStringLiteral("source"), entry.path},
+            {QStringLiteral("correctedWordErrorRate"), entry.correctedWordErrorRate},
+            {QStringLiteral("correctedAccuracy"), entry.correctedWordErrorRate < 0.0 ? -1.0 : std::max(0.0, 1.0 - entry.correctedWordErrorRate)},
+            {QStringLiteral("correctedSubstitutions"), entry.correctedSubstitutions}, {QStringLiteral("correctedDeletions"), entry.correctedDeletions},
+            {QStringLiteral("correctedInsertions"), entry.correctedInsertions},
             {QStringLiteral("hasRecording"), !entry.path.isEmpty()}};
         result.append(item);
     }
@@ -167,24 +174,32 @@ bool CustomSttTests::canRun() const {
     return found;
 }
 
-void CustomSttTests::setConfiguration(QString provider, QString modelPath, QString model, QString apiKey) {
+void CustomSttTests::setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary) {
     provider = provider.trimmed().toLower();
     modelPath = modelPath.trimmed();
     model = model.trimmed();
     apiKey = apiKey.trimmed();
-    if (m_provider == provider && m_modelPath == modelPath && m_model == model && m_apiKey == apiKey) return;
+    vocabulary = vocabulary.trimmed();
+    if (m_provider == provider && m_modelPath == modelPath && m_model == model && m_apiKey == apiKey && m_vocabulary == vocabulary) return;
     if (m_busy) cancelTests();
-    const QString nextConfiguration = provider + QLatin1Char('|') + modelPath + QLatin1Char('|') + model;
     const QString nextCredentialHash = QString::fromLatin1(QCryptographicHash::hash(apiKey.toUtf8(), QCryptographicHash::Sha256).toHex());
+    const QString correctorConfiguration = m_corrector ? m_corrector->configuration() : QStringLiteral("correction-unconfigured");
+    const QString nextConfiguration = provider + QLatin1Char('|') + modelPath + QLatin1Char('|') + model + QLatin1Char('|') + vocabulary + QLatin1Char('|') + correctorConfiguration;
     bool resultsChanged = false;
     for (struct Entry &entry : m_entries) {
         if (!entry.resultConfiguration.isEmpty() && (entry.resultConfiguration != nextConfiguration || entry.resultCredentialHash != nextCredentialHash)) {
             resultsChanged = true;
             entry.transcript.clear();
+            entry.rawTranscript.clear();
+            entry.correctedTranscript.clear();
+            entry.correctionStatus.clear();
+            entry.correctionError.clear();
             entry.status = entry.expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
             entry.error.clear();
             entry.wordErrorRate = -1.0;
             entry.substitutions = entry.deletions = entry.insertions = 0;
+            entry.correctedWordErrorRate = -1.0;
+            entry.correctedSubstitutions = entry.correctedDeletions = entry.correctedInsertions = 0;
             entry.resultConfiguration.clear();
             entry.resultCredentialHash.clear();
         }
@@ -193,8 +208,56 @@ void CustomSttTests::setConfiguration(QString provider, QString modelPath, QStri
     m_modelPath = std::move(modelPath);
     m_model = std::move(model);
     m_apiKey = std::move(apiKey);
+    m_vocabulary = std::move(vocabulary);
     persist();
     if (resultsChanged) emit entriesChanged();
+    emit stateChanged();
+}
+
+void CustomSttTests::setTranscriptCorrector(TranscriptCorrector *corrector) {
+    if (m_corrector == corrector) return;
+    if (m_busy) cancelTests();
+    disconnect(m_correctorConfigurationConnection);
+    ++m_correctionGeneration;
+    if (m_corrector && m_correctionJob != 0) m_corrector->cancel(m_correctionJob);
+    m_correctionJob = 0;
+    m_corrector = corrector;
+    if (m_corrector) {
+        m_correctorConfigurationConnection = connect(m_corrector, &TranscriptCorrector::configurationChanged, this, [this] {
+            if (m_busy) cancelTests();
+            bool invalidated = false;
+            for (struct Entry &entry : m_entries) {
+                if (entry.resultConfiguration.isEmpty()) continue;
+                entry.transcript.clear(); entry.rawTranscript.clear(); entry.correctedTranscript.clear();
+                entry.correctionStatus.clear(); entry.correctionError.clear(); entry.wordErrorRate = -1.0;
+                entry.substitutions = entry.deletions = entry.insertions = 0; entry.correctedWordErrorRate = -1.0;
+                entry.correctedSubstitutions = entry.correctedDeletions = entry.correctedInsertions = 0;
+                entry.resultConfiguration.clear(); entry.resultCredentialHash.clear();
+                entry.status = entry.expected.isEmpty() ? QStringLiteral("Needs expected transcript") : entry.path.isEmpty() ? QStringLiteral("Needs recording") : QStringLiteral("Ready");
+                invalidated = true;
+            }
+            if (invalidated) { persist(); emit entriesChanged(); }
+            emit stateChanged();
+        });
+    }
+    bool invalidated = false;
+    for (struct Entry &entry : m_entries) {
+        if (entry.resultConfiguration.isEmpty()) continue;
+        entry.transcript.clear();
+        entry.rawTranscript.clear();
+        entry.correctedTranscript.clear();
+        entry.correctionStatus.clear();
+        entry.correctionError.clear();
+        entry.wordErrorRate = -1.0;
+        entry.substitutions = entry.deletions = entry.insertions = 0;
+        entry.correctedWordErrorRate = -1.0;
+        entry.correctedSubstitutions = entry.correctedDeletions = entry.correctedInsertions = 0;
+        entry.resultConfiguration.clear();
+        entry.resultCredentialHash.clear();
+        entry.status = entry.expected.isEmpty() ? QStringLiteral("Needs expected transcript") : entry.path.isEmpty() ? QStringLiteral("Needs recording") : QStringLiteral("Ready");
+        invalidated = true;
+    }
+    if (invalidated) { persist(); emit entriesChanged(); }
     emit stateChanged();
 }
 
@@ -224,10 +287,16 @@ void CustomSttTests::replaceRecording(const QString &id, const QUrl &source) {
     entry->path = path;
     entry->duration = duration;
     entry->transcript.clear();
+    entry->rawTranscript.clear();
+    entry->correctedTranscript.clear();
+    entry->correctionStatus.clear();
+    entry->correctionError.clear();
     entry->error.clear();
     entry->status = entry->expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
     entry->wordErrorRate = -1.0;
     entry->substitutions = entry->deletions = entry->insertions = 0;
+    entry->correctedWordErrorRate = -1.0;
+    entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
     entry->resultConfiguration.clear();
     entry->resultCredentialHash.clear();
     if (!persist()) { *entry = previous; QFile::remove(path); setState(false, QStringLiteral("Recording import failed."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
@@ -248,10 +317,16 @@ void CustomSttTests::setExpected(const QString &id, const QString &text) {
     if (entry->expected == value) return;
     entry->expected = value;
     entry->transcript.clear();
+    entry->rawTranscript.clear();
+    entry->correctedTranscript.clear();
+    entry->correctionStatus.clear();
+    entry->correctionError.clear();
     entry->status = value.isEmpty() ? QStringLiteral("Needs expected transcript") : entry->path.isEmpty() ? QStringLiteral("Needs recording") : QStringLiteral("Ready");
     entry->error.clear();
     entry->wordErrorRate = -1.0;
     entry->substitutions = entry->deletions = entry->insertions = 0;
+    entry->correctedWordErrorRate = -1.0;
+    entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
     entry->resultConfiguration.clear();
     persist();
     notifyEntries();
@@ -278,10 +353,16 @@ void CustomSttTests::removeRecording(const QString &id) {
     entry->label.clear();
     entry->duration = 0.0;
     entry->transcript.clear();
+    entry->rawTranscript.clear();
+    entry->correctedTranscript.clear();
+    entry->correctionStatus.clear();
+    entry->correctionError.clear();
     entry->error.clear();
     entry->status = entry->expected.isEmpty() ? QStringLiteral("Ready") : QStringLiteral("Needs recording");
     entry->wordErrorRate = -1.0;
     entry->substitutions = entry->deletions = entry->insertions = 0;
+    entry->correctedWordErrorRate = -1.0;
+    entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
     entry->resultConfiguration.clear();
     entry->resultCredentialHash.clear();
     if (!persist()) { *entry = previous; setState(false, QStringLiteral("Recording removal failed."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
@@ -315,7 +396,8 @@ void CustomSttTests::runTest(const QString &id) {
     const QVector<struct Entry> savedEntries = m_entries;
     m_busy = true;
     m_current = -1;
-    for (const QString &queuedId : std::as_const(m_queue)) if (struct Entry *const entry = find(queuedId)) { entry->transcript.clear(); entry->error.clear(); entry->status = QStringLiteral("Queued"); entry->wordErrorRate = -1.0; entry->substitutions = entry->deletions = entry->insertions = 0; entry->resultConfiguration.clear(); entry->resultCredentialHash.clear(); }
+    for (const QString &queuedId : std::as_const(m_queue)) if (struct Entry *const entry = find(queuedId)) {
+        entry->transcript.clear(); entry->rawTranscript.clear(); entry->correctedTranscript.clear(); entry->correctionStatus.clear(); entry->correctionError.clear(); entry->error.clear(); entry->status = QStringLiteral("Queued"); entry->wordErrorRate = -1.0; entry->substitutions = entry->deletions = entry->insertions = 0; entry->correctedWordErrorRate = -1.0; entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0; entry->resultConfiguration.clear(); entry->resultCredentialHash.clear(); }
     if (!persist()) {
         m_entries = savedEntries;
         m_busy = false;
@@ -332,6 +414,9 @@ void CustomSttTests::cancelTests() {
     if (!m_busy && !m_recording) return;
     if (m_recording) stopRecording();
     ++m_generation;
+    ++m_correctionGeneration;
+    if (m_corrector && m_correctionJob != 0) m_corrector->cancel(m_correctionJob);
+    m_correctionJob = 0;
     m_busy = false;
     retireWorker();
     for (struct Entry &entry : m_entries) if (entry.status == QStringLiteral("Queued") || entry.status == QStringLiteral("Running")) entry.status = QStringLiteral("Canceled");
@@ -396,8 +481,10 @@ void CustomSttTests::stopRecording() {
     entry->path = path;
     entry->label = QStringLiteral("Microphone recording %1").arg(static_cast<int>(std::distance(m_entries.data(), entry)) + 1);
     entry->duration = static_cast<double>(m_recordedPcm.size()) / (VoiceUtteranceBuffer::SampleRate * 2.0);
-    entry->transcript.clear(); entry->error.clear(); entry->wordErrorRate = -1.0;
+    entry->transcript.clear(); entry->rawTranscript.clear(); entry->correctedTranscript.clear(); entry->correctionStatus.clear(); entry->correctionError.clear(); entry->error.clear(); entry->wordErrorRate = -1.0;
     entry->substitutions = entry->deletions = entry->insertions = 0;
+    entry->correctedWordErrorRate = -1.0;
+    entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
     entry->status = entry->expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
     entry->resultConfiguration.clear(); entry->resultCredentialHash.clear();
     delete m_audioSource;
@@ -423,15 +510,24 @@ void CustomSttTests::load() {
         entry.label = settings.value(id + QStringLiteral("/label")).toString();
         entry.path = settings.value(id + QStringLiteral("/path")).toString();
         entry.expected = settings.value(id + QStringLiteral("/expected")).toString();
+        entry.rawTranscript = settings.value(id + QStringLiteral("/rawTranscript"), settings.value(id + QStringLiteral("/transcript"))).toString();
+        entry.transcript = entry.rawTranscript;
+        entry.correctedTranscript = settings.value(id + QStringLiteral("/correctedTranscript")).toString();
+        entry.correctionStatus = settings.value(id + QStringLiteral("/correctionStatus")).toString();
+        entry.correctionError = settings.value(id + QStringLiteral("/correctionError")).toString();
         if (!entry.path.isEmpty() && (!managedPath(m_directory, entry.path) || !QFileInfo::exists(entry.path))) entry.path.clear();
         entry.duration = settings.value(id + QStringLiteral("/duration")).toDouble();
         entry.status = entry.expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
-        entry.transcript = settings.value(id + QStringLiteral("/transcript")).toString();
+        entry.transcript = entry.rawTranscript;
         entry.error = settings.value(id + QStringLiteral("/error")).toString();
         entry.wordErrorRate = settings.value(id + QStringLiteral("/wer"), -1.0).toDouble();
         entry.substitutions = settings.value(id + QStringLiteral("/substitutions")).toInt();
         entry.deletions = settings.value(id + QStringLiteral("/deletions")).toInt();
         entry.insertions = settings.value(id + QStringLiteral("/insertions")).toInt();
+        entry.correctedWordErrorRate = settings.value(id + QStringLiteral("/correctedWer"), -1.0).toDouble();
+        entry.correctedSubstitutions = settings.value(id + QStringLiteral("/correctedSubstitutions")).toInt();
+        entry.correctedDeletions = settings.value(id + QStringLiteral("/correctedDeletions")).toInt();
+        entry.correctedInsertions = settings.value(id + QStringLiteral("/correctedInsertions")).toInt();
         entry.resultConfiguration = settings.value(id + QStringLiteral("/resultConfiguration")).toString();
         entry.resultCredentialHash = settings.value(id + QStringLiteral("/resultCredentialHash")).toString();
         if (!entry.transcript.isEmpty() && !entry.resultConfiguration.isEmpty()) entry.status = settings.value(id + QStringLiteral("/status"), QStringLiteral("Completed")).toString();
@@ -441,10 +537,16 @@ void CustomSttTests::load() {
             entry.label.clear();
             entry.duration = 0.0;
             entry.transcript.clear();
+            entry.rawTranscript.clear();
+            entry.correctedTranscript.clear();
+            entry.correctionStatus.clear();
+            entry.correctionError.clear();
             entry.error.clear();
             entry.status = entry.expected.isEmpty() ? QStringLiteral("Ready") : QStringLiteral("Needs recording");
             entry.wordErrorRate = -1.0;
             entry.substitutions = entry.deletions = entry.insertions = 0;
+            entry.correctedWordErrorRate = -1.0;
+            entry.correctedSubstitutions = entry.correctedDeletions = entry.correctedInsertions = 0;
             entry.resultConfiguration.clear();
             entry.resultCredentialHash.clear();
         }
@@ -471,12 +573,20 @@ bool CustomSttTests::persist() {
         settings.setValue(entry.id + QStringLiteral("/expected"), entry.expected);
         settings.setValue(entry.id + QStringLiteral("/duration"), entry.duration);
         settings.setValue(entry.id + QStringLiteral("/transcript"), entry.transcript);
+        settings.setValue(entry.id + QStringLiteral("/rawTranscript"), entry.rawTranscript);
+        settings.setValue(entry.id + QStringLiteral("/correctedTranscript"), entry.correctedTranscript);
+        settings.setValue(entry.id + QStringLiteral("/correctionStatus"), entry.correctionStatus);
+        settings.setValue(entry.id + QStringLiteral("/correctionError"), entry.correctionError);
         settings.setValue(entry.id + QStringLiteral("/status"), entry.status);
         settings.setValue(entry.id + QStringLiteral("/error"), entry.error);
         settings.setValue(entry.id + QStringLiteral("/wer"), entry.wordErrorRate);
         settings.setValue(entry.id + QStringLiteral("/substitutions"), entry.substitutions);
         settings.setValue(entry.id + QStringLiteral("/deletions"), entry.deletions);
         settings.setValue(entry.id + QStringLiteral("/insertions"), entry.insertions);
+        settings.setValue(entry.id + QStringLiteral("/correctedWer"), entry.correctedWordErrorRate);
+        settings.setValue(entry.id + QStringLiteral("/correctedSubstitutions"), entry.correctedSubstitutions);
+        settings.setValue(entry.id + QStringLiteral("/correctedDeletions"), entry.correctedDeletions);
+        settings.setValue(entry.id + QStringLiteral("/correctedInsertions"), entry.correctedInsertions);
         settings.setValue(entry.id + QStringLiteral("/resultConfiguration"), entry.resultConfiguration);
         settings.setValue(entry.id + QStringLiteral("/resultCredentialHash"), entry.resultCredentialHash);
     }
@@ -541,6 +651,7 @@ void CustomSttTests::startNext(const quint64 generation) {
     worker->setProvider(m_provider);
     worker->setSttModel(m_model);
     worker->setApiKey(m_apiKey);
+    worker->setRecognitionVocabulary(m_vocabulary);
     worker->setRuntimePath(QDir::cleanPath(QDir(m_modelPath).filePath(QStringLiteral("../runtime"))));
     worker->setOpenTranscriptionTest(true);
     const QString id = entry->id;
@@ -577,15 +688,54 @@ void CustomSttTests::finishCurrent(const quint64 generation, const quint64 worke
     m_workerGeneration = 0;
     const QString boundedTranscript = transcript.left(16384);
     entry->transcript = boundedTranscript;
+    entry->rawTranscript = boundedTranscript;
+    entry->correctedTranscript.clear();
+    entry->correctionStatus.clear();
+    entry->correctionError.clear();
     entry->error = workerError;
-    if (boundedTranscript.isEmpty()) { entry->status = QStringLiteral("Failed"); entry->wordErrorRate = -1.0; }
-    else { score(entry->expected, boundedTranscript, &entry->substitutions, &entry->deletions, &entry->insertions, &entry->wordErrorRate); entry->status = workerError.isEmpty() && entry->wordErrorRate == 0.0 ? QStringLiteral("Passed") : QStringLiteral("Completed"); }
-    entry->resultConfiguration = m_provider + QLatin1Char('|') + m_modelPath + QLatin1Char('|') + m_model;
+    entry->correctedWordErrorRate = -1.0;
+    entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
+    if (boundedTranscript.isEmpty()) {
+        entry->status = QStringLiteral("Failed");
+        entry->wordErrorRate = -1.0;
+    } else {
+        score(entry->expected, boundedTranscript, &entry->substitutions, &entry->deletions, &entry->insertions, &entry->wordErrorRate);
+        entry->status = workerError.isEmpty() && entry->wordErrorRate == 0.0 ? QStringLiteral("Passed") : QStringLiteral("Completed");
+    }
+    const QString correctionConfiguration = m_corrector ? m_corrector->configuration() : QStringLiteral("correction-unconfigured");
+    entry->resultConfiguration = m_provider + QLatin1Char('|') + m_modelPath + QLatin1Char('|') + m_model + QLatin1Char('|') + m_vocabulary + QLatin1Char('|') + correctionConfiguration;
     entry->resultCredentialHash = QString::fromLatin1(QCryptographicHash::hash(m_apiKey.toUtf8(), QCryptographicHash::Sha256).toHex());
-    persist();
     retireWorker();
     notifyEntries();
-    QTimer::singleShot(0, this, [this, generation] { if (m_busy && generation == m_generation) startNext(generation); });
+    if (boundedTranscript.isEmpty() || !workerError.isEmpty() || !m_corrector || !m_corrector->enabled()) {
+        entry->correctionStatus = !m_corrector || !m_corrector->enabled() ? QStringLiteral("Disabled") : QStringLiteral("Skipped");
+        persist();
+        QTimer::singleShot(0, this, [this, generation] { if (m_busy && generation == m_generation) startNext(generation); });
+        return;
+    }
+    entry->correctionStatus = QStringLiteral("Running");
+    persist();
+    const quint64 correctionGeneration = ++m_correctionGeneration;
+    m_correctionJob = m_corrector->correct(boundedTranscript, this,
+        [this, generation, correctionGeneration, id](std::expected<QString, struct ProviderError> result) {
+            if (!m_busy || generation != m_generation || correctionGeneration != m_correctionGeneration
+                || m_current < 0 || m_current >= m_queue.size() || m_queue.at(m_current) != id) return;
+            struct Entry *const current = find(id);
+            if (!current) return;
+            m_correctionJob = 0;
+            if (result) {
+                current->correctedTranscript = result.value().left(16384);
+                score(current->expected, current->correctedTranscript, &current->correctedSubstitutions,
+                    &current->correctedDeletions, &current->correctedInsertions, &current->correctedWordErrorRate);
+                current->correctionStatus = QStringLiteral("Applied");
+            } else {
+                current->correctionStatus = QStringLiteral("Failed");
+                current->correctionError = result.error().code + QStringLiteral(": ") + result.error().message;
+            }
+            persist();
+            notifyEntries();
+            QTimer::singleShot(0, this, [this, generation] { if (m_busy && generation == m_generation) startNext(generation); });
+        });
 }
 
 void CustomSttTests::retireWorker() {
