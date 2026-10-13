@@ -103,7 +103,7 @@ ColumnLayout {
                                             AppMenuItem { glyph: "empty-box"; text: "Clear recording"; enabled: modelData.hasRecording && !tests.recording; onTriggered: tests.removeRecording(modelData.id) }
                                         }
                                     }
-                                    Label { Layout.fillWidth: true; text: modelData.hasRecording ? ((modelData.label || "Recording") + (Number(modelData.duration) > 0 ? "  " + Number(modelData.duration).toFixed(1) + " s" : "")) : "Empty slot"; color: Theme.inkMuted; elide: Text.ElideMiddle; font.family: Theme.monoFont; font.pixelSize: 12 }
+                                    Label { Layout.fillWidth: true; text: modelData.hasRecording ? ("Recording" + (Number(modelData.duration) > 0 ? "  " + Number(modelData.duration).toFixed(1) + " s" : "")) : "Empty slot"; color: Theme.inkMuted; elide: Text.ElideMiddle; font.family: Theme.monoFont; font.pixelSize: 12 }
                                     RowLayout {
                                         visible: tests.recording && tests.currentRecordingId === modelData.id
                                         Layout.fillWidth: true
