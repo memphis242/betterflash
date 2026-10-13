@@ -87,8 +87,8 @@ recognition uploads audio; remote language and embedding requests send their
 input text. System speech output delegates to Qt's installed speech engine.
 Whisper Turbo Q8_0 with beam decoding took about 3.6 seconds including loading
 on the development CPU for a 7.8-second acronym recording. This is one sample,
-not a cross-device latency guarantee. Optional local language-model transcript
-correction adds a separate inference operation; raw and corrected custom test
+not a cross-device latency guarantee. Optional language-model transcript correction adds a separate inference
+operation using the selected local or cloud provider; raw and corrected custom test
 results are displayed independently.
 
 ## Resource policy

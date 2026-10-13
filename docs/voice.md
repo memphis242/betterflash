@@ -126,7 +126,7 @@ cancels an active set and invalidates its earlier scores. Custom testing does no
 download model files automatically and shares the normal speech worker so it
 does not keep another recognition model loaded.
 
-### Vocabulary and local transcript correction
+### Vocabulary and transcript correction
 
 **Recognition vocabulary** supplies optional project terms to local Whisper.
 It is context rather than a restricted dictionary, and can make recognition
@@ -134,11 +134,15 @@ worse as well as better. Leave it empty for an unprompted comparison. The
 built-in fixture and custom expected transcript are never provided to the
 recognizer or correction model.
 
-**Correct transcripts with local language model** is optional and off by
-default. It uses the already selected, downloaded local language model after
-recognition, with no cloud fallback or automatic model download. It requests
-conservative grammar, spelling and acronym corrections using the optional
-vocabulary. Raw text is retained; invalid structured output or changed numeric
+**Correct transcripts with language model** is optional and off by default.
+It uses the provider selected in Language model settings. Local correction
+requires the already downloaded model and never downloads weights during
+correction. Cloud correction uses the configured endpoint, model identifier,
+and provider key; it sends the raw transcript and optional vocabulary as text.
+It never sends the expected test transcript, card answers, or audio to the
+language model. There is no automatic fallback between local and cloud
+providers. It requests conservative grammar, spelling and acronym corrections
+using the optional vocabulary. Raw text is retained; invalid structured output or changed numeric
 values is rejected with a visible error and the raw transcript is preserved.
 Commands are interpreted from raw speech and bypass correction. Correction
 output is treated as answer text and cannot create a review command.
