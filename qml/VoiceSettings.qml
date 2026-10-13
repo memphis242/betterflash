@@ -93,9 +93,9 @@ ColumnLayout {
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
-                model: ["Vosk English 0.22 / balanced (131 MB download)", "Vosk small English 0.15 / compact (41 MB download)"]
-                currentIndex: voice.sttProfile === "small-en" ? 1 : 0
-                onActivated: voice.sttProfile = currentIndex === 0 ? "balanced-en" : "small-en"
+                model: ["Whisper large v3 turbo / abbreviation-aware (874 MB download)", "Vosk English 0.22 / balanced (131 MB download)", "Vosk small English 0.15 / compact (41 MB download)"]
+                currentIndex: voice.sttProfile === "whisper-turbo" ? 0 : voice.sttProfile === "small-en" ? 2 : 1
+                onActivated: voice.sttProfile = ["whisper-turbo", "balanced-en", "small-en"][currentIndex]
                 ToolTip.visible: hovered
                 ToolTip.text: "Choose balanced desktop recognition or the compact profile intended for Android"
             }
@@ -131,6 +131,33 @@ ColumnLayout {
                     hint: enabled ? "Run a short speech recognition check" : "Download the local model before testing"
                     onClicked: voice.testSttModel()
                 }
+            }
+            Label { text: "Recognition vocabulary"; color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true }
+            TextArea {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 84
+                text: voice.recognitionVocabulary
+                placeholderText: "Optional terms, one per line or separated by commas"
+                wrapMode: TextEdit.Wrap
+                onTextChanged: if (activeFocus) voice.recognitionVocabulary = text
+                ToolTip.visible: hovered
+                ToolTip.text: "Terms are supplied as context to local Whisper so project and technical abbreviations are more likely to be recognized"
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Correct transcripts with local language model"; color: Theme.ink; font.pixelSize: 16; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                SettingsSwitch {
+                    checked: voice.transcriptCorrector.enabled
+                    onToggled: voice.transcriptCorrector.enabled = checked
+                    ToolTip.visible: hovered
+                    ToolTip.text: "After speech recognition, use the selected local language model to repair grammar and likely technical abbreviations"
+                }
+            }
+            ModelStatus {
+                Layout.fillWidth: true
+                visible: voice.transcriptCorrector.enabled
+                state: voice.transcriptCorrector.ready ? "ready" : voice.transcriptCorrector.error ? "degraded" : "missing"
+                text: voice.transcriptCorrector.ready ? "Local transcript correction is ready" : voice.transcriptCorrector.error ? voice.transcriptCorrector.error : "Prepare the selected local language model to enable transcript correction"
             }
             ModelTestResult {
                 Layout.fillWidth: true

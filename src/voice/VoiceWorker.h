@@ -6,12 +6,14 @@
 #include <QPointer>
 #include <QString>
 #include <QVariant>
+#include <utility>
 
 class QAudioSource;
 class QIODevice;
 class QLibrary;
 class QNetworkRequest;
 class VoiceTranscriber;
+class WhisperTranscriber;
 
 class VoiceWorker final : public QObject {
     Q_OBJECT
@@ -32,6 +34,7 @@ public:
     void setSttModel(const QString &model) { m_sttModel = model; }
     void setRuntimePath(const QString &path) { m_runtimePath = path; }
     void setOpenTranscriptionTest(const bool open) { m_openTranscriptionTest = open; }
+    void setRecognitionVocabulary(QString vocabulary) { m_recognitionVocabulary = std::move(vocabulary); }
 
 public slots:
     void initialize();
@@ -60,6 +63,7 @@ private:
     void cancelRequest();
     void resumeCapture(quint64 epoch);
     void processLocalResult(const QByteArray &json);
+    [[nodiscard]] bool usesWhisper() const;
     void reportError(const QString &code, const QString &message, bool fatal);
 
     QString m_modelPath;
@@ -73,6 +77,7 @@ private:
     QIODevice *m_audioDevice = nullptr;
     QLibrary *m_library = nullptr;
     VoiceTranscriber *m_transcriber = nullptr;
+    WhisperTranscriber *m_whisper = nullptr;
     VoicePcmConverter m_converter;
     VoiceUtteranceBuffer m_utterance;
     quint64 m_captureEpoch = 0;
@@ -85,6 +90,7 @@ private:
     bool m_testSubmitted = false;
     bool m_testAnswered = false;
     bool m_openTranscriptionTest = false;
+    QString m_recognitionVocabulary;
 
     using ModelNew = void *(*)(const char *);
     using ModelFree = void (*)(void *);

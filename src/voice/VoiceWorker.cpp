@@ -1,5 +1,6 @@
 #include "VoiceWorker.h"
 #include "VoiceTranscriber.h"
+#include "WhisperTranscriber.h"
 
 #include <QAudioDevice>
 #include <QAudioSource>
@@ -51,12 +52,27 @@ std::optional<int> spokenNumber(QString text) {
     if (last < 1 || last > 9) return std::nullopt;
     return (static_cast<int>(ten) + 2) * 10 + static_cast<int>(last);
 }
+
+bool validationDigitsMatch(QString text) {
+    text = text.toCaseFolded();
+    static const QStringList words = {QStringLiteral("zero"), QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("three"),
+        QStringLiteral("four"), QStringLiteral("five"), QStringLiteral("six"), QStringLiteral("seven"), QStringLiteral("eight"), QStringLiteral("nine")};
+    for (int i = 0; i < words.size(); ++i)
+        text.replace(QRegularExpression(QStringLiteral("\\b%1\\b").arg(words.at(i))), QString::number(i));
+    text.replace(QRegularExpression(QStringLiteral("\\boh\\b")), QStringLiteral("0"));
+    text.remove(QRegularExpression(QStringLiteral("[.,!?;:'\\\"-]")));
+    if (text.contains(QRegularExpression(QStringLiteral("[A-Za-z]")))) return false;
+    text.remove(QRegularExpression(QStringLiteral("\\s+")));
+    return text == QStringLiteral("100019021001803");
+}
 }
 
 VoiceWorker::VoiceWorker(QString modelPath, QObject *parent)
     : QObject(parent), m_modelPath(std::move(modelPath)) {}
 
 VoiceWorker::~VoiceWorker() { shutdown(); }
+
+bool VoiceWorker::usesWhisper() const { return m_provider == QStringLiteral("local") && m_modelPath.endsWith(QStringLiteral(".bin"), Qt::CaseInsensitive); }
 
 struct VoiceWorker::ParsedUtterance VoiceWorker::parseUtterance(const QString &utterance) {
     QString original = utterance.trimmed().simplified();
@@ -146,7 +162,28 @@ void VoiceWorker::initialize() {
             resumeCapture(epoch);
         });
     } else if (m_provider == QStringLiteral("local")) {
-        if (!loadLocalModel()) return;
+        if (usesWhisper()) {
+            const QString executable = qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed().isEmpty()
+                ? QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("betterflash-whisper"))
+                : qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed();
+            if (!QFileInfo(m_modelPath).isFile() || !QFileInfo(executable).isExecutable()) {
+                reportError(QStringLiteral("VOICE_WHISPER_RUNTIME"), QStringLiteral("The local Whisper model or runtime is unavailable."), true);
+                return;
+            }
+            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, this);
+            connect(m_whisper, &WhisperTranscriber::transcriptReady, this, [this](const QString &text, const quint64 epoch) {
+                if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, epoch);
+            });
+            connect(m_whisper, &WhisperTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
+                if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportError(code, message, fatal);
+            });
+            connect(m_whisper, &WhisperTranscriber::finished, this, [this](const quint64 epoch) {
+                if (epoch != m_captureEpoch || !m_requestedListening || m_shuttingDown) return;
+                m_processing = false;
+                emit processingChanged(false, epoch);
+                resumeCapture(epoch);
+            });
+        } else if (!loadLocalModel()) return;
     } else {
         reportError(QStringLiteral("VOICE_PROVIDER_INVALID"), QStringLiteral("Choose local speech recognition or Groq."), true);
         return;
@@ -183,7 +220,29 @@ void VoiceWorker::initializeForTest() {
     if (m_initialized || m_shuttingDown) return;
     m_testMode = true;
     if (m_provider == QStringLiteral("local")) {
-        if (!loadLocalModel()) return;
+        if (usesWhisper()) {
+            const QString executable = qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed().isEmpty()
+                ? QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("betterflash-whisper"))
+                : qEnvironmentVariable("BETTERFLASH_WHISPER_EXECUTABLE").trimmed();
+            if (!QFileInfo(m_modelPath).isFile() || !QFileInfo(executable).isExecutable()) {
+                emit testFinished({}, false, QStringLiteral("VOICE_WHISPER_RUNTIME: The local Whisper model or runtime is unavailable."));
+                return;
+            }
+            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, this);
+            connect(m_whisper, &WhisperTranscriber::transcriptReady, this, [this](const QString &text, const quint64) {
+                if (!m_testMode || m_shuttingDown || m_testAnswered) return;
+                m_testAnswered = true;
+                emit testFinished(text, m_openTranscriptionTest || validationDigitsMatch(text), {});
+            });
+            connect(m_whisper, &WhisperTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool, const quint64) {
+                if (m_shuttingDown || m_testAnswered) return;
+                m_testAnswered = true;
+                emit testFinished({}, false, code + QStringLiteral(": ") + message);
+            });
+            connect(m_whisper, &WhisperTranscriber::finished, this, [this](const quint64) {
+                if (!m_shuttingDown && !m_testAnswered) { m_testAnswered = true; emit testFinished({}, false, QStringLiteral("The local Whisper runtime returned no transcript.")); }
+            });
+        } else if (!loadLocalModel()) return;
     } else if (m_provider == QStringLiteral("groq")) {
         if (m_apiKey.isEmpty()) { emit testFinished({}, false, QStringLiteral("Add a Groq API key before testing cloud speech recognition.")); return; }
         m_transcriber = new VoiceTranscriber(m_apiKey, m_sttModel, this);
@@ -236,6 +295,7 @@ void VoiceWorker::testAudio(const QByteArray &wav) {
     QByteArray pcm; int sampleRate = 0;
     if (!m_initialized || !decodeWav(wav, &pcm, &sampleRate) || sampleRate != VoiceUtteranceBuffer::SampleRate) { emit testFinished({}, false, QStringLiteral("The validation audio must be mono 16-bit PCM at 16000 Hz.")); return; }
     if (m_provider == QStringLiteral("groq")) { m_transcriber->submit(pcm, 0); return; }
+    if (usesWhisper()) { m_whisper->submit(pcm, 0); return; }
     if (!m_recognizer || !m_acceptWaveform || !m_result || !m_finalResult) { emit testFinished({}, false, QStringLiteral("The local speech recognizer is unavailable.")); return; }
     m_recognizerReset(m_recognizer);
     QStringList parts;
@@ -342,7 +402,7 @@ void VoiceWorker::readAudio() {
     if (bytes.isEmpty()) return;
     const QByteArray pcm = m_converter.convert(bytes);
     if (pcm.isEmpty()) return;
-    if (m_provider == QStringLiteral("groq")) {
+    if (m_provider == QStringLiteral("groq") || usesWhisper()) {
         const auto recording = m_utterance.append(pcm);
         if (recording) submitRecording(*recording);
         return;
@@ -354,11 +414,12 @@ void VoiceWorker::readAudio() {
 
 void VoiceWorker::submitRecording(const QByteArray &pcm) {
     if (!m_initialized || !m_requestedListening || m_shuttingDown || pcm.isEmpty()) return;
-    Q_ASSERT(m_provider == QStringLiteral("groq") && m_transcriber && !m_transcriber->busy());
+    Q_ASSERT((m_provider == QStringLiteral("groq") && m_transcriber) || (usesWhisper() && m_whisper));
     m_processing = true;
     stopCapture();
     emit processingChanged(true, m_captureEpoch);
-    m_transcriber->submit(pcm, m_captureEpoch);
+    if (usesWhisper()) m_whisper->submit(pcm, m_captureEpoch);
+    else m_transcriber->submit(pcm, m_captureEpoch);
 }
 
 void VoiceWorker::resumeCapture(const quint64 epoch) {
@@ -389,6 +450,7 @@ void VoiceWorker::setListening(const bool listening, const quint64 epoch) {
 
 void VoiceWorker::cancelRequest() {
     if (m_transcriber) m_transcriber->cancel();
+    if (m_whisper) m_whisper->cancel();
     if (m_processing) {
         m_processing = false;
         emit processingChanged(false, m_captureEpoch);
@@ -423,6 +485,7 @@ void VoiceWorker::shutdown() {
         delete m_library;
         m_library = nullptr;
     }
+    if (m_whisper) { m_whisper->deleteLater(); m_whisper = nullptr; }
     m_apiKey.clear();
     m_initialized = false;
 }
