@@ -34,6 +34,10 @@ automatic agent co-author attribution, or a remote session label.
 
 ## GUI interaction preferences
 
+- Editable text fields are visibly bounded in their idle state, with a
+  persistent label, distinct background or border, internal padding, and an
+  I-beam cursor. Focus strengthens the outline; read-only states remain legible
+  and visibly different. Hover is never required to discover an editable field.
 - Default to editing existing text in place. The text area shows an I-beam
   cursor, and double-clicking turns that same area into an editor. Apply this
   to deck descriptions and comparable text fields throughout the application.

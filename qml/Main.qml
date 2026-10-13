@@ -35,6 +35,7 @@ ApplicationWindow {
 
     readonly property int gutter: width < 600 ? 12 : 24
     readonly property int collapsedNavigationWidth: 96
+    readonly property var voiceController: voice
     property int page: preferences.page
     property bool navCollapsed: preferences.navCollapsed
     property string deckBrowserParentId: preferences.deckBrowserParentId
@@ -784,13 +785,19 @@ ApplicationWindow {
             }
             Label {
                 textFormat: Text.PlainText
-                visible: window.width >= 700
+                visible: window.width >= 700 && !microphoneStatus.visible
                 text: app.statusMessage
                 color: Theme.inkMuted
                 font.family: Theme.monoFont
                 font.pixelSize: 11
                 elide: Text.ElideRight
                 Layout.maximumWidth: Math.min(360, window.width * 0.3)
+            }
+            MicrophoneStatus {
+                id: microphoneStatus
+                objectName: "microphoneStatus"
+                voice: window.voiceController
+                compact: window.width < 700
             }
             GlyphButton {
                 objectName: "commandPaletteButton"

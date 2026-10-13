@@ -439,6 +439,9 @@ Canvas {
             c.moveTo(9, 6)
             c.arc(9, 9, 3, -Math.PI / 2, Math.PI * 1.5)
             break
+        case "stop":
+            roundedRect(4, 4, 10, 10, 1)
+            break
         case "pause":
             c.moveTo(6, 4)
             c.lineTo(6, 14)
