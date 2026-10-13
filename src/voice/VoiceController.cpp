@@ -934,7 +934,7 @@ void VoiceController::processTranscript(const QString &transcript) {
                 m_lastTranscript = *result;
                 emit lastTranscriptChanged();
                 emit answerRecognized(*result);
-            } else {
+            } else if (result.error().code != QStringLiteral("TRANSCRIPT_CORRECTION_CANCELED")) {
                 setError(result.error().code, result.error().message);
                 emit answerRecognized(text);
             }
