@@ -20,6 +20,7 @@ class CustomSttTests final : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
     Q_PROPERTY(QString error READ error NOTIFY stateChanged)
     Q_PROPERTY(bool canRun READ canRun NOTIFY stateChanged)
+    Q_PROPERTY(QString currentRecordingId READ currentRecordingId NOTIFY stateChanged)
 public:
     explicit CustomSttTests(QObject *parent = nullptr);
     ~CustomSttTests() override;
@@ -30,16 +31,20 @@ public:
     [[nodiscard]] QString status() const { return m_status; }
     [[nodiscard]] QString error() const { return m_error; }
     [[nodiscard]] bool canRun() const;
+    [[nodiscard]] QString currentRecordingId() const { return m_recordingId; }
 
     void setConfiguration(QString provider, QString modelPath, QString model, QString apiKey);
 
     Q_INVOKABLE void addRecording(const QUrl &source);
+    Q_INVOKABLE void replaceRecording(const QString &id, const QUrl &source);
     Q_INVOKABLE void setExpected(const QString &id, const QString &text);
     Q_INVOKABLE void setLabel(const QString &id, const QString &text);
     Q_INVOKABLE void removeRecording(const QString &id);
     Q_INVOKABLE void runTests();
+    Q_INVOKABLE void runTest(const QString &id);
     Q_INVOKABLE void cancelTests();
     Q_INVOKABLE void startRecording();
+    Q_INVOKABLE void startRecordingForSlot(const QString &id);
     Q_INVOKABLE void stopRecording();
 
 signals:
@@ -78,6 +83,7 @@ private:
         int *deletions, int *insertions, double *wer);
 
     QVector<struct Entry> m_entries;
+    QVector<QString> m_queue;
     QString m_directory;
     QString m_provider = QStringLiteral("local");
     QString m_modelPath;
@@ -88,6 +94,7 @@ private:
     QString m_status = QStringLiteral("Add a recording to begin.");
     QString m_error;
     int m_current = -1;
+    QString m_recordingId;
     quint64 m_generation = 0;
     quint64 m_workerGeneration = 0;
     quint64 m_nextWorkerGeneration = 0;
