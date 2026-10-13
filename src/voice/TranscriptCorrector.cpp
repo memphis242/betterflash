@@ -24,7 +24,7 @@ QString normalizedWord(const QString &value) {
 } // namespace
 
 TranscriptCorrector::TranscriptCorrector(QObject *parent)
-    : QObject(parent), m_settings(QSettings::UserScope, QStringLiteral("BetterFlash"), QStringLiteral("BetterFlash")) {
+    : QObject(parent) {
     m_enabled = m_settings.value(QStringLiteral("voice/transcriptCorrection"), false).toBool();
     m_vocabulary = m_settings.value(QStringLiteral("voice/recognitionVocabulary")).toString().left(kMaxVocabularyCharacters);
 }
