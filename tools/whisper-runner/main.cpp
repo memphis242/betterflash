@@ -13,8 +13,9 @@
 #include <cmath>
 
 namespace {
-bool sufficientGpuMemory(const QString &modelPath) {
+int suitableGpuDevice(const QString &modelPath) {
     const quint64 required = static_cast<quint64>(QFileInfo(modelPath).size()) + 512ULL * 1024ULL * 1024ULL;
+    int gpuIndex = 0;
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
         const ggml_backend_dev_t device = ggml_backend_dev_get(i);
         if (!device) continue;
@@ -22,9 +23,10 @@ bool sufficientGpuMemory(const QString &modelPath) {
         if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) continue;
         size_t freeMemory = 0, totalMemory = 0;
         ggml_backend_dev_memory(device, &freeMemory, &totalMemory);
-        if (freeMemory >= required) return true;
+        if (freeMemory >= required) return gpuIndex;
+        ++gpuIndex;
     }
-    return false;
+    return -1;
 }
 
 struct Wav { QVector<float> samples; };
@@ -68,9 +70,10 @@ int main(int argc, char **argv) {
     const QByteArray vocabulary = object.value(QStringLiteral("vocabulary")).toString().left(4096).toUtf8();
     QString transcript;
     const QString acceleration = object.value(QStringLiteral("acceleration")).toString().toLower();
-    const auto run = [&modelPath, &wav, &vocabulary, &transcript](const bool useGpu) {
+    const auto run = [&modelPath, &wav, &vocabulary, &transcript](const int gpuDevice) {
         struct whisper_context_params contextParams = whisper_context_default_params();
-        contextParams.use_gpu = useGpu;
+        contextParams.use_gpu = gpuDevice >= 0;
+        contextParams.gpu_device = std::max(0, gpuDevice);
         struct whisper_context *const context = whisper_init_from_file_with_params(modelPath.toUtf8().constData(), contextParams);
         if (!context) return false;
         struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
@@ -86,9 +89,9 @@ int main(int argc, char **argv) {
         return result == 0 && !transcript.trimmed().isEmpty();
     };
     const bool automatic = acceleration != QStringLiteral("cpu");
-    const bool useGpu = automatic && sufficientGpuMemory(modelPath);
-    bool succeeded = run(useGpu);
-    if (!succeeded && useGpu) succeeded = run(false);
+    const int gpuDevice = automatic ? suitableGpuDevice(modelPath) : -1;
+    bool succeeded = run(gpuDevice);
+    if (!succeeded && gpuDevice >= 0) succeeded = run(-1);
     transcript = transcript.simplified();
     if (!succeeded || transcript.isEmpty()) { output << QJsonDocument(QJsonObject{{QStringLiteral("error"), QStringLiteral("Whisper could not transcribe the recording on the selected accelerator or CPU fallback.")}}).toJson(QJsonDocument::Compact) << Qt::endl; return 5; }
     output << QJsonDocument(QJsonObject{{QStringLiteral("transcript"), transcript}}).toJson(QJsonDocument::Compact) << Qt::endl;

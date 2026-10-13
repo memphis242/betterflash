@@ -347,8 +347,11 @@ void VoiceController::setSttAcceleration(const QString &acceleration) {
     }
     if (m_sttAcceleration == value) return;
     cancelTranscriptCorrection();
+    if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Speech acceleration changed."));
     m_sttAcceleration = value;
+    resetSttTestReport();
     persistConfiguration();
+    m_customSttTests->setConfiguration(m_sttProvider, m_modelPath, m_sttModel, m_secret->key(), m_recognitionVocabulary, m_sttAcceleration);
     emit sttAccelerationChanged();
     if (m_enabled && m_sttProvider == QStringLiteral("local")) restartWorker();
 }

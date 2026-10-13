@@ -657,7 +657,7 @@ void CustomSttTests::startNext(const quint64 generation) {
     worker->setSttModel(m_model);
     worker->setApiKey(m_apiKey);
     worker->setRecognitionVocabulary(m_vocabulary);
-    worker->setAcceleration(m_acceleration);
+    worker->setWhisperAcceleration(m_acceleration);
     worker->setRuntimePath(QDir::cleanPath(QDir(m_modelPath).filePath(QStringLiteral("../runtime"))));
     worker->setOpenTranscriptionTest(true);
     const QString id = entry->id;
