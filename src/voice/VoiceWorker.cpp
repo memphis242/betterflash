@@ -170,7 +170,7 @@ void VoiceWorker::initialize() {
                 reportError(QStringLiteral("VOICE_WHISPER_RUNTIME"), QStringLiteral("The local Whisper model or runtime is unavailable."), true);
                 return;
             }
-            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, this);
+            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, m_whisperAcceleration, this);
             connect(m_whisper, &WhisperTranscriber::transcriptReady, this, [this](const QString &text, const quint64 epoch) {
                 if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, epoch);
             });
@@ -228,7 +228,7 @@ void VoiceWorker::initializeForTest() {
                 emit testFinished({}, false, QStringLiteral("VOICE_WHISPER_RUNTIME: The local Whisper model or runtime is unavailable."));
                 return;
             }
-            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, this);
+            m_whisper = new WhisperTranscriber(m_modelPath, m_recognitionVocabulary, m_whisperAcceleration, this);
             connect(m_whisper, &WhisperTranscriber::transcriptReady, this, [this](const QString &text, const quint64) {
                 if (!m_testMode || m_shuttingDown || m_testAnswered) return;
                 m_testAnswered = true;

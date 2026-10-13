@@ -10,7 +10,7 @@ class QTemporaryFile;
 class WhisperTranscriber final : public QObject {
     Q_OBJECT
 public:
-    explicit WhisperTranscriber(QString modelPath, QString vocabulary, QObject *parent = nullptr);
+    explicit WhisperTranscriber(QString modelPath, QString vocabulary, QString acceleration, QObject *parent = nullptr);
     ~WhisperTranscriber() override;
 
     [[nodiscard]] bool busy() const { return !m_process.isNull(); }
@@ -26,6 +26,7 @@ private:
     void finish(quint64 generation, quint64 epoch);
     const QString m_modelPath;
     const QString m_vocabulary;
+    const QString m_acceleration;
     QPointer<QProcess> m_process;
     QPointer<QTemporaryFile> m_audioFile;
     QByteArray m_stdout;

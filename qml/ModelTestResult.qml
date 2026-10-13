@@ -101,6 +101,20 @@ Rectangle {
             ToolTip.text: "Word error rate is substitutions, omissions, and insertions divided by the expected word count. Lower is better; insertions can make it exceed 100%."
             HoverHandler { id: wordScoreHover }
         }
+        ColumnLayout {
+            visible: control.report.scoringMode === "numeric-equivalent"
+            Layout.fillWidth: true
+            spacing: 5
+            Label { text: "Normalized scoring"; color: Theme.inkMuted; font.pixelSize: 15; font.bold: true }
+            Label {
+                text: "Expected: " + (control.report.normalizedExpected || "") + "\nOutput: " + (control.report.normalizedOutput || "")
+                textFormat: Text.PlainText
+                color: Theme.inkMuted
+                font.pixelSize: 15
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+        }
         Repeater {
             model: control.report.comparisons || []
             delegate: Rectangle {

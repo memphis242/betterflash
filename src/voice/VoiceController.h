@@ -40,6 +40,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString sttModel READ sttModel WRITE setSttModel NOTIFY sttModelChanged)
     Q_PROPERTY(QString sttProfile READ sttProfile WRITE setSttProfile NOTIFY sttProfileChanged)
     Q_PROPERTY(QString recognitionVocabulary READ recognitionVocabulary WRITE setRecognitionVocabulary NOTIFY recognitionVocabularyChanged)
+    Q_PROPERTY(QString sttAcceleration READ sttAcceleration WRITE setSttAcceleration NOTIFY sttAccelerationChanged)
     Q_PROPERTY(bool sttModelReady READ sttModelReady NOTIFY modelReadinessChanged)
     Q_PROPERTY(bool sttModelDownloading READ sttModelDownloading NOTIFY modelReadinessChanged)
     Q_PROPERTY(QString sttModelStatus READ sttModelStatus NOTIFY modelReadinessChanged)
@@ -82,6 +83,7 @@ public:
     [[nodiscard]] QString sttModel() const { return m_sttModel; }
     [[nodiscard]] QString sttProfile() const { return m_sttProfile; }
     [[nodiscard]] QString recognitionVocabulary() const { return m_recognitionVocabulary; }
+    [[nodiscard]] QString sttAcceleration() const { return m_sttAcceleration; }
     [[nodiscard]] bool sttModelReady() const;
     [[nodiscard]] bool sttModelDownloading() const;
     [[nodiscard]] double sttModelProgress() const;
@@ -112,6 +114,7 @@ public:
     void setSttModel(const QString &model);
     void setSttProfile(const QString &profile);
     void setRecognitionVocabulary(const QString &vocabulary);
+    void setSttAcceleration(const QString &acceleration);
     void setTtsProvider(const QString &provider);
     void setTtsProfile(const QString &profile);
     Q_INVOKABLE void testSttModel();
@@ -145,6 +148,7 @@ signals:
     void sttModelChanged();
     void sttProfileChanged();
     void recognitionVocabularyChanged();
+    void sttAccelerationChanged();
     void ttsProviderChanged();
     void ttsProfileChanged();
     void modelReadinessChanged();
@@ -208,6 +212,7 @@ private:
     QString m_sttModel = QStringLiteral("whisper-large-v3-turbo");
     QString m_sttProfile = QStringLiteral("whisper-turbo");
     QString m_recognitionVocabulary;
+    QString m_sttAcceleration = QStringLiteral("automatic");
     QString m_ttsProvider = QStringLiteral("local");
     QString m_ttsProfile = QStringLiteral("ljspeech-medium");
     bool m_modelTestBusy = false;
