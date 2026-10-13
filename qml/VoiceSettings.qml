@@ -140,6 +140,9 @@ ColumnLayout {
                 Layout.topMargin: 12
             }
             TextArea {
+                id: recognitionVocabularyField
+                property bool dismissOnOutsideTap: true
+                property Item editorViewport: recognitionVocabularyField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
                 text: voice.recognitionVocabulary
@@ -170,8 +173,8 @@ ColumnLayout {
                 Layout.topMargin: 12
                 Layout.bottomMargin: 12
                 spacing: 10
-                Icon { kind: "check"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
-                Label { text: "Correct transcripts with local language model"; color: Theme.ink; font.pixelSize: 16; wrapMode: Text.Wrap; Layout.maximumWidth: Math.max(180, root.width - 100) }
+                Icon { kind: "paper-pencil"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
+                Label { text: "Correct transcripts with language model"; color: Theme.ink; font.pixelSize: 16; wrapMode: Text.Wrap; Layout.maximumWidth: Math.max(180, root.width - 100) }
                 SettingsSwitch {
                     checked: voice.transcriptCorrector.enabled
                     onToggled: voice.transcriptCorrector.enabled = checked
@@ -180,15 +183,21 @@ ColumnLayout {
                     Layout.topMargin: 8
                     Layout.bottomMargin: 8
                     ToolTip.visible: hovered
-                    ToolTip.text: "After speech recognition, use the selected local language model to repair grammar and likely technical abbreviations"
+                    ToolTip.text: "After speech recognition, use the selected language model to repair grammar and likely technical abbreviations"
                 }
                 Item { Layout.fillWidth: true }
             }
             ModelStatus {
                 Layout.fillWidth: true
                 visible: voice.transcriptCorrector.enabled
-                state: voice.transcriptCorrector.ready ? "ready" : voice.transcriptCorrector.error ? "degraded" : "missing"
-                text: voice.transcriptCorrector.ready ? "Local transcript correction is ready" : voice.transcriptCorrector.error ? voice.transcriptCorrector.error : "Prepare the selected local language model to enable transcript correction"
+                state: voice.transcriptCorrector.error ? "degraded" : voice.transcriptCorrector.ready ? "ready" : "missing"
+                text: voice.transcriptCorrector.error
+                    ? voice.transcriptCorrector.error
+                    : voice.transcriptCorrector.ready
+                    ? "Transcript correction is ready"
+                    : root.ai && root.ai.provider === "remote"
+                    ? "Configure the provider key, endpoint, and model in Language model settings"
+                    : "Download the selected language model in Language model settings"
             }
             ModelTestResult {
                 Layout.fillWidth: true

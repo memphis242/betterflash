@@ -226,6 +226,13 @@ Canvas {
             c.lineTo(7, 13)
             c.lineTo(15, 5)
             break
+        case "paper-pencil":
+            c.moveTo(4, 2.5); c.lineTo(12, 2.5); c.lineTo(14, 4.5); c.lineTo(14, 12)
+            c.moveTo(4, 2.5); c.lineTo(4, 15.5); c.lineTo(10, 15.5)
+            c.moveTo(6.5, 6); c.lineTo(11.5, 6)
+            c.moveTo(6.5, 9); c.lineTo(10.5, 9)
+            c.moveTo(9, 14); c.lineTo(14.5, 8.5); c.lineTo(16, 10); c.lineTo(10.5, 15.5); c.lineTo(8.5, 16); c.closePath()
+            break
         case "arrow-left":
             c.moveTo(8, 4)
             c.lineTo(3, 9)
