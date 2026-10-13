@@ -8,8 +8,9 @@ does not start a microphone or load inference models.
 
 ## Managed local speech
 
-On Fedora x86-64, enabling voice or using a prepared local model loads Vosk's
-balanced English model and its native runtime inside the application. The
+On Fedora x86-64, enabling voice or using a prepared local model uses Whisper Large v3 Turbo Q8_0 through the bundled native
+`betterflash-whisper` helper. Vosk's balanced and compact streaming profiles
+remain selectable alternatives. The
 **Download local model** action obtains those files; testing requires them to be
 prepared and does not download them. Reading uses the same separate download
 step for a Piper voice with a pinned Sherpa-ONNX runtime. No
@@ -20,14 +21,17 @@ verified files for later offline use. The first download needs Internet access.
 
 | Purpose | Default | Download | Inference |
 | --- | --- | --- | --- |
-| Recognition | Vosk English 0.22 lgraph (balanced desktop default) | 130.6 MB model + 7.2 MB runtime | CPU, native streaming recognition |
+| Desktop recognition | Whisper Large v3 Turbo Q8_0 | 874.2 MB model; bundled whisper.cpp helper | CPU, up to eight threads; optional Vulkan GPU with CPU fallback |
+| Streaming recognition | Vosk English 0.22 lgraph | 130.6 MB model + 7.2 MB runtime | CPU, native streaming recognition |
 | Compact recognition | Vosk small English 0.15 (explicit compact profile) | 41.2 MB model + shared runtime | CPU, native streaming recognition |
 | Desktop reading | Piper LJSpeech medium | 67.2 MB voice + 20.5 MB runtime | CPU, at most four threads, 22,050 Hz |
 | Compact reading profile | Piper Amy low | 67.1 MB voice + shared runtime | CPU, at most four threads, 16,000 Hz |
 
 The compact voice primarily lowers synthesis work; its floating-point model has
 approximately the same size as the desktop voice. Both voices have roughly
-63 MB of weights. Models load only when used. Recognition releases its model
+63 MB of weights. Models load only when used. Whisper loads its model in a separate process for each utterance and releases
+it when transcription completes or is canceled. Its isolated process keeps
+whisper.cpp and llama.cpp backend symbols separate. Vosk releases its model
 when voice is disabled. The reading worker releases weights after 30 seconds
 idle and when voice is disabled, while verified downloads remain on disk.
 Piper's small model runs on CPU in this first implementation. GPU use is not
@@ -37,7 +41,8 @@ future hardware work.
 The cache lives below Qt's per-user application data directory at
 `models/voice/`. Recognition's editable advanced model path can also refer to a
 previous local installation. **Download model** restores the managed path.
-`BETTERFLASH_VOSK_LIBRARY` remains an optional development override. Model
+`BETTERFLASH_VOSK_LIBRARY` and `BETTERFLASH_WHISPER_EXECUTABLE` remain
+optional development overrides. The latter must name an executable file. Model
 archives, runtime archives, and the validation recording all have hard-coded
 checksums in `VoiceController`; the C API header is pinned independently in
 `cmake/LocalSpeech.cmake`.
@@ -76,9 +81,12 @@ card, or populate an answer. A recognition test is bounded to 45 seconds after
 asset preparation, and cloud requests have their own 30-second timeout.
 [Official validation recording](https://github.com/alphacep/vosk-api/tree/v0.3.45/python/example)
 
-The balanced Vosk profile is the desktop baseline. It produced an exact phrase
-match on three consecutive runs of the official recording on the development
-machine, with no grammar or vocabulary hints. This is a fixture result, not a
+The official recording is scored as literal words for Vosk and as an exact
+sequence of spoken digits for Whisper. Numeric scoring treats `oh` as zero and
+expands written digit runs; its normalized reference and hypothesis appear in
+the result alongside the untouched model output. The balanced Vosk profile
+produced an exact phrase match on three consecutive runs of that recording on
+the development machine, with no grammar or vocabulary hints. This is a fixture result, not a
 guarantee for arbitrary microphones or speech. The validation result
 distinguishes an exact phrase match from a completed transcription
 whose words differ, and retains the transcript and word-level error counts so
@@ -87,9 +95,11 @@ model quality is visible rather than reported as an opaque pass or failure.
 ### Custom recognition tests
 
 Speech recognition settings also provide a custom test set for recordings that
-reflect the user's microphone, accent, vocabulary, and review commands. Import
-or record up to five short WAV samples, enter the transcript expected for each,
-and run the set against the selected local or Groq provider. Recordings are
+reflect the user's microphone, accent, vocabulary, and review commands. Five persistent slots are shown from the start. Import or record a short PCM
+WAV in any slot, enter its expected transcript in the adjacent field, and use
+the right-hand **Test slot** action or the bottom-right **Test custom set**
+action. Clearing or replacing a recording preserves the slot and its expected
+text. Empty slots are skipped when testing the set. Recordings are
 normalized to mono 16-bit PCM at 16 kHz, bounded to 60 seconds, and stored in
 the per-user application data directory. They are independent of cards,
 sync, backups, and model downloads.
@@ -97,9 +107,33 @@ sync, backups, and model downloads.
 Each result retains the raw transcript and reports word error rate, accuracy,
 substitutions, deletions, and insertions. A completed result can therefore be
 useful even when it is not an exact match. Changing the selected provider,
-model, path, or credential cancels an active set. Custom testing does not
+model, path, acceleration, vocabulary, correction configuration, or credential
+cancels an active set and invalidates its earlier scores. Custom testing does not
 download model files automatically and shares the normal speech worker so it
 does not keep another recognition model loaded.
+
+### Vocabulary and local transcript correction
+
+**Recognition vocabulary** supplies optional project terms to local Whisper.
+It is context rather than a restricted dictionary, and can make recognition
+worse as well as better. Leave it empty for an unprompted comparison. The
+built-in fixture and custom expected transcript are never provided to the
+recognizer or correction model.
+
+**Correct transcripts with local language model** is optional and off by
+default. It uses the already selected, downloaded local language model after
+recognition, with no cloud fallback or automatic model download. It requests
+conservative grammar, spelling and acronym corrections using the optional
+vocabulary. Raw text is retained; invalid structured output or changed numeric
+values is rejected with a visible error and the raw transcript is preserved.
+Commands are interpreted from raw speech and bypass correction. Correction
+output is treated as answer text and cannot create a review command.
+
+Custom tests show the recognition output and score separately from the
+corrected output and score. The correction model receives only the raw
+transcript and vocabulary, never the expected test text or card answers. These
+scores measure recognition and correction independently; a correction is not
+proof that a technical abbreviation was understood correctly.
 
 **Test model** for local reading synthesizes a short phrase, checks that samples
 are finite, in range, non-silent, and have a plausible length, then plays it

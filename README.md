@@ -286,7 +286,8 @@ The timeline can also be scrolled horizontally without recentering the current c
 ## Voice and language models
 
 Voice recognition, speech synthesis, and language-model features are local by
-default. Voice downloads its managed Vosk and Piper/Sherpa assets on first use;
+default. Desktop voice uses managed Whisper Turbo by default, with Vosk alternatives
+and Piper/Sherpa speech output downloaded on demand;
 the Settings page exposes progress, cancellation, and known-input validation.
 Groq recognition and other remote providers remain explicit BYOK choices. Keys
 are saved through the desktop Secret Service when available and never enter

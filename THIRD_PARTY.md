@@ -11,6 +11,7 @@ The build fetches pinned source archives and verifies their SHA-256 checksums:
 | --- | --- | --- |
 | MicroTeX | `0e3707f6dafebb121d98b53c64364d16fefe481d` | [MIT](packaging/licenses/MicroTeX-MIT.txt), [source](https://github.com/NanoMichael/MicroTeX/tree/0e3707f6dafebb121d98b53c64364d16fefe481d) |
 | tinyxml2 | `11.0.0` | [zlib](packaging/licenses/tinyxml2-zlib.txt), [source](https://github.com/leethomason/tinyxml2/tree/11.0.0) |
+| whisper.cpp | `v1.9.5` | [MIT](packaging/licenses/whisper.cpp-MIT.txt), [source](https://github.com/ggml-org/whisper.cpp/tree/v1.9.5); bundled as an isolated helper |
 | llama.cpp | `8bb3cf0d216a5ae48360179f2931daf284be4d01` | [MIT](packaging/licenses/llama.cpp-MIT.txt), [source](https://github.com/ggml-org/llama.cpp/tree/8bb3cf0d216a5ae48360179f2931daf284be4d01) |
 | SPIRV-Headers | `vulkan-sdk-1.4.341.0` | [notices](packaging/licenses/SPIRV-Headers-notices.txt), [source](https://github.com/KhronosGroup/SPIRV-Headers/tree/vulkan-sdk-1.4.341.0) |
 | libarchive headers | `3.8.1` | [notices](packaging/licenses/libarchive-notices.txt), [source](https://github.com/libarchive/libarchive/tree/v3.8.1); links the system runtime |
@@ -48,6 +49,7 @@ the official Sherpa C API header used to describe the downloaded runtime ABI.
 
 | Component | Pinned source | License |
 | --- | --- | --- |
+| Whisper Large v3 Turbo Q8_0 | [OpenAI model card](https://huggingface.co/openai/whisper-large-v3-turbo), [pinned conversion](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1) | [MIT model terms](https://huggingface.co/openai/whisper-large-v3-turbo/blob/main/LICENSE) |
 | Vosk native runtime | [Vosk API 0.3.45](https://github.com/alphacep/vosk-api/tree/v0.3.45) and its official Linux x64 wheel | [Apache-2.0](https://github.com/alphacep/vosk-api/blob/v0.3.45/COPYING) |
 | Vosk small English model | [vosk-model-small-en-us-0.15](https://alphacephei.com/vosk/models) | Apache-2.0 as listed in the model catalog |
 | Vosk English balanced model | [vosk-model-en-us-0.22-lgraph](https://alphacephei.com/vosk/models) | Apache-2.0 as listed in the model catalog |

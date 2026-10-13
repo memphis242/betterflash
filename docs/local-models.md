@@ -44,8 +44,9 @@ voice's subjective quality. Listen to the sample to evaluate its clarity.
 
 ## Speech
 
-Fedora x86-64 uses the managed Vosk English 0.22 lgraph recognition model and a
-native runtime. The compact Vosk small English profile remains available for
+Fedora x86-64 defaults to managed Whisper Large v3 Turbo Q8_0 (874.2 MB),
+executed by a bundled whisper.cpp helper. The Vosk English 0.22 lgraph
+streaming profile remains available. The compact Vosk small English profile remains available for
 lower-memory devices and is the intended Android profile. Local speech synthesis uses a managed Piper/Sherpa-ONNX voice;
 the compact Amy low profile and desktop LJSpeech medium profile are available.
 Speech assets are downloaded on demand. See [Voice review](voice.md) for package sizes, validation,
@@ -61,14 +62,15 @@ optional and require an explicitly configured BYOK endpoint.
 
 ## Execution runtimes
 
-These are native libraries inside the BetterFlash process, driven by background
-workers. The GUI thread handles presentation; it does not execute model inference.
+Inference uses native code driven by background workers. Whisper runs in
+a bundled child process to isolate its backend from llama.cpp; the other
+models use libraries inside the BetterFlash process. The GUI thread handles presentation; it does not execute model inference.
 There is no Python interpreter or separate local inference server.
 
 | Feature | Model files and execution | Current device support | Allocation lifetime |
 | --- | --- | --- | --- |
 | Language | Gemma/LFM quantized GGUF through llama.cpp | CPU, or Vulkan GPU with sufficient free memory | One request at a time; model and context released after completion |
-| Recognition | Vosk English 0.22 lgraph through the Vosk C API (compact 0.15 profile also available) | CPU | Loaded by the recognition worker while voice recognition is enabled; separate validation workers release their model afterward |
+| Recognition | Whisper Turbo Q8_0 through whisper.cpp; optional Vosk balanced/compact through its C API | Whisper: CPU or optional Vulkan with CPU fallback. Vosk: CPU | Whisper releases its process and model after each utterance. Vosk stays loaded while recognition is enabled; validation releases it afterward |
 | Speech output | Piper ONNX voices through Sherpa-ONNX, with eSpeak phonemization | CPU, up to four inference threads | Loaded lazily; voice model released after 30 seconds idle |
 | Embeddings | Quantized BGE ONNX through ONNX Runtime | CPU, four desktop threads or two compact threads | Search worker retains its selected model for reuse; standalone validation releases its model after the check |
 
@@ -83,8 +85,11 @@ the CPU execution provider.
 Cloud choices send requests to the configured provider over HTTPS. Groq speech
 recognition uploads audio; remote language and embedding requests send their
 input text. System speech output delegates to Qt's installed speech engine.
-No per-model latency measurements have been recorded for this build; initial
-loading and warm inference times should be evaluated separately on each device.
+Whisper Turbo Q8_0 with beam decoding took about 3.6 seconds including loading
+on the development CPU for a 7.8-second acronym recording. This is one sample,
+not a cross-device latency guarantee. Optional local language-model transcript
+correction adds a separate inference operation; raw and corrected custom test
+results are displayed independently.
 
 ## Resource policy
 
