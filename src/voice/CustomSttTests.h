@@ -34,7 +34,7 @@ public:
     [[nodiscard]] bool canRun() const;
     [[nodiscard]] QString currentRecordingId() const { return m_recordingId; }
 
-    void setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary = {});
+    void setConfiguration(QString provider, QString modelPath, QString model, QString apiKey, QString vocabulary = {}, QString acceleration = QStringLiteral("automatic"));
     void setTranscriptCorrector(TranscriptCorrector *corrector);
 
     Q_INVOKABLE void addRecording(const QUrl &source);
@@ -102,6 +102,7 @@ private:
     QString m_model = QStringLiteral("whisper-large-v3-turbo");
     QString m_apiKey;
     QString m_vocabulary;
+    QString m_acceleration = QStringLiteral("automatic");
     bool m_busy = false;
     bool m_recording = false;
     QString m_status = QStringLiteral("Add a recording to begin.");

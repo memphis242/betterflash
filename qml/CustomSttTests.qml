@@ -109,8 +109,9 @@ ColumnLayout {
                             }
                                 ColumnLayout {
                                 Layout.preferredWidth: 145; Layout.alignment: Qt.AlignTop
-                                AppButton {
-                                    text: "Test slot"; glyph: "check"; glyphSize: 16
+                                ModelActionButton {
+                                    text: "Test slot"
+                                    actionKind: "test"
                                     enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy
                                     hint: "Transcribe only this recording"
                                     onClicked: { root.commitDraft(modelData.id); tests.runTest(modelData.id) }
