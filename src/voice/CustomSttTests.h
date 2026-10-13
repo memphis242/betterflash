@@ -10,6 +10,7 @@
 class QAudioSource;
 class QIODevice;
 class QThread;
+class QTimer;
 class VoiceWorker;
 class TranscriptCorrector;
 
@@ -18,6 +19,10 @@ class CustomSttTests final : public QObject {
     Q_PROPERTY(QVariantList entries READ entries NOTIFY entriesChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY stateChanged)
+    Q_PROPERTY(bool recordingPaused READ recordingPaused NOTIFY recordingMetricsChanged)
+    Q_PROPERTY(double recordingDuration READ recordingDuration NOTIFY recordingMetricsChanged)
+    Q_PROPERTY(double recordingLevel READ recordingLevel NOTIFY recordingMetricsChanged)
+    Q_PROPERTY(QVariantList recordingActivity READ recordingActivity NOTIFY recordingActivityChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
     Q_PROPERTY(QString error READ error NOTIFY stateChanged)
     Q_PROPERTY(bool canRun READ canRun NOTIFY stateChanged)
@@ -29,6 +34,10 @@ public:
     [[nodiscard]] QVariantList entries() const;
     [[nodiscard]] bool busy() const { return m_busy; }
     [[nodiscard]] bool recording() const { return m_recording; }
+    [[nodiscard]] bool recordingPaused() const { return m_recordingPaused; }
+    [[nodiscard]] double recordingDuration() const { return static_cast<double>(m_recordedPcm.size()) / (VoiceUtteranceBuffer::SampleRate * 2.0); }
+    [[nodiscard]] double recordingLevel() const { return m_recordingLevel; }
+    [[nodiscard]] QVariantList recordingActivity() const { return m_recordingActivity; }
     [[nodiscard]] QString status() const { return m_status; }
     [[nodiscard]] QString error() const { return m_error; }
     [[nodiscard]] bool canRun() const;
@@ -48,10 +57,14 @@ public:
     Q_INVOKABLE void startRecording();
     Q_INVOKABLE void startRecordingForSlot(const QString &id);
     Q_INVOKABLE void stopRecording();
+    Q_INVOKABLE void pauseRecording();
+    Q_INVOKABLE void resumeRecording();
 
 signals:
     void entriesChanged();
     void stateChanged();
+    void recordingMetricsChanged();
+    void recordingActivityChanged();
 
 private:
     struct Entry {
@@ -64,7 +77,7 @@ private:
         QString correctedTranscript;
         QString correctionStatus;
         QString correctionError;
-        QString status = QStringLiteral("Ready");
+        QString status = QStringLiteral("Need recording");
         QString error;
         double duration = 0.0;
         double wordErrorRate = -1.0;
@@ -85,6 +98,9 @@ private:
     bool persist();
     void notifyEntries();
     void setState(bool busy, QString status, QString error = {});
+    void resetRecordingMetrics();
+    void resetRecordingSignal();
+    void updateRecordingMetrics();
     void finishCurrent(quint64 generation, quint64 workerEpoch, const QString &id, const QString &transcript, const QString &workerError);
     void startNext(quint64 generation);
     void retireWorker();
@@ -105,6 +121,7 @@ private:
     QString m_acceleration = QStringLiteral("automatic");
     bool m_busy = false;
     bool m_recording = false;
+    bool m_recordingPaused = false;
     QString m_status = QStringLiteral("Add a recording to begin.");
     QString m_error;
     int m_current = -1;
@@ -121,4 +138,9 @@ private:
     QIODevice *m_audioDevice = nullptr;
     QByteArray m_recordedPcm;
     VoicePcmConverter m_converter;
+    QPointer<QTimer> m_recordingMeterTimer;
+    double m_recordingLevel = 0.0;
+    QVariantList m_recordingActivity;
+    double m_meterSquareSum = 0.0;
+    qsizetype m_meterSampleCount = 0;
 };
