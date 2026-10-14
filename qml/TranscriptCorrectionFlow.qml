@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Flickable {
     id: root
     property bool correctionEnabled: true
-    property int styleIndex: 0
+    property int styleIndex: 2
     property bool spacious: false
     property real nodeHeight: styleIndex === 3 ? (spacious ? 92 : 72) : (spacious ? 96 : 78)
     property real flowSpacing: spacious ? (styleIndex === 2 ? 24 : 12) : (styleIndex === 2 ? 14 : 6)
@@ -19,7 +19,8 @@ Flickable {
     flickableDirection: Flickable.HorizontalFlick
     boundsBehavior: Flickable.StopAtBounds
     contentWidth: Math.max(width, naturalWidth)
-    contentHeight: flow.implicitHeight + diagramPadding * 2 + (styleIndex === 4 ? 26 : 0)
+    contentHeight: flow.implicitHeight + diagramPadding * 2
+        + (styleIndex === 2 ? 32 : styleIndex === 4 ? 26 : 0)
     implicitWidth: naturalWidth
     implicitHeight: contentHeight + (interactive ? 10 : 0)
     activeFocusOnTab: interactive
@@ -109,6 +110,7 @@ Flickable {
     }
 
     component FlowArrow: Item {
+        property bool correctionStep: false
         width: root.spacious ? (root.styleIndex === 2 ? 34 : 22) : (root.styleIndex === 2 ? 22 : 16)
         height: root.nodeHeight
         Icon {
@@ -116,7 +118,8 @@ Flickable {
             width: root.spacious ? (root.styleIndex === 2 ? 25 : 18) : (root.styleIndex === 2 ? 20 : 16)
             height: width
             kind: "arrow-right"
-            stroke: Theme.inkMuted
+            visible: root.styleIndex !== 2 || !parent.correctionStep || root.correctionEnabled
+            stroke: parent.correctionStep && root.correctionEnabled ? Theme.accent : Theme.inkMuted
             lineWidth: 1.35
         }
     }
@@ -133,14 +136,70 @@ Flickable {
         radius: root.styleIndex === 4 ? 12 : 8
     }
 
-    Rectangle {
+    Canvas {
+        id: signalTrack
         visible: root.styleIndex === 2
-        x: flow.x + 24
-        y: diagramPadding + root.nodeHeight - 7
-        width: Math.max(0, flow.implicitWidth - 70)
-        height: 1
-        color: Theme.rule
+        width: root.contentWidth
+        height: root.contentHeight
+        antialiasing: true
         z: 0
+        readonly property real speechX: flow.x + speechNode.x + speechNode.width / 2
+        readonly property real recognitionX: flow.x + recognitionNode.x + recognitionNode.width / 2
+        readonly property real textX: flow.x + textNode.x + textNode.width / 2
+        readonly property real trackY: flow.y + root.nodeHeight - 5.5
+        readonly property bool correctionEnabled: root.correctionEnabled
+        readonly property color trackColor: Theme.rule
+        readonly property color routeColor: correctionEnabled ? Theme.accent : Theme.inkMuted
+        onSpeechXChanged: requestPaint()
+        onRecognitionXChanged: requestPaint()
+        onTextXChanged: requestPaint()
+        onTrackYChanged: requestPaint()
+        onCorrectionEnabledChanged: requestPaint()
+        onTrackColorChanged: requestPaint()
+        onRouteColorChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
+        onPaint: {
+            const context = getContext("2d")
+            context.reset()
+            context.lineWidth = 1.25
+            context.lineCap = "round"
+            context.lineJoin = "round"
+            context.strokeStyle = trackColor
+            context.beginPath()
+            context.moveTo(speechX, trackY)
+            context.lineTo(recognitionX, trackY)
+            context.stroke()
+
+            context.strokeStyle = routeColor
+            context.beginPath()
+            context.moveTo(recognitionX, trackY)
+            if (correctionEnabled) {
+                context.lineTo(textX, trackY)
+            } else {
+                const bypassY = trackY + 26
+                const bend = 8
+                context.lineTo(recognitionX, bypassY - bend)
+                context.quadraticCurveTo(recognitionX, bypassY, recognitionX + bend, bypassY)
+                context.lineTo(textX - bend, bypassY)
+                context.quadraticCurveTo(textX, bypassY, textX, bypassY - bend)
+                context.lineTo(textX, trackY + 5)
+            }
+            context.stroke()
+            if (!correctionEnabled) {
+                const arrowX = (recognitionX + textX) / 2
+                const arrowY = trackY + 26
+                context.beginPath()
+                context.moveTo(arrowX - 5, arrowY - 4)
+                context.lineTo(arrowX, arrowY)
+                context.lineTo(arrowX - 5, arrowY + 4)
+                context.moveTo(textX - 4, trackY + 10)
+                context.lineTo(textX, trackY + 5)
+                context.lineTo(textX + 4, trackY + 10)
+                context.stroke()
+            }
+        }
     }
 
     Row {
@@ -151,6 +210,7 @@ Flickable {
         z: 1
 
         FlowNode {
+            id: speechNode
             title: "Speech"
             detail: root.styleIndex === 4 ? "raw audio" : "user voice"
             description: "Words spoken by the user"
@@ -159,13 +219,14 @@ Flickable {
         }
         FlowArrow {}
         FlowNode {
+            id: recognitionNode
             title: root.styleIndex === 3 ? "Speech recognition" : "Recognition"
             detail: root.styleIndex === 4 ? "audio to text" : "speech model"
             description: "The speech recognition model turns audio into text"
             iconKind: "ear"
             nodeWidth: root.styleIndex === 3 ? (root.spacious ? 190 : 168) : (root.spacious ? 132 : 92)
         }
-        FlowArrow {}
+        FlowArrow { correctionStep: true }
         FlowNode {
             title: root.styleIndex === 3 ? "Language model" : (root.spacious ? "Language model" : "LLM")
             detail: root.styleIndex === 4 ? "correction" : "grammar + terms"
@@ -174,11 +235,12 @@ Flickable {
                 : "LLM means language model. Correction is off, so recognized text is used directly"
             iconKind: "paper-pencil"
             muted: !root.correctionEnabled
-            highlighted: true
+            highlighted: root.correctionEnabled
             nodeWidth: root.styleIndex === 3 ? (root.spacious ? 178 : 150) : (root.spacious ? 124 : 66)
         }
-        FlowArrow {}
+        FlowArrow { correctionStep: true }
         FlowNode {
+            id: textNode
             title: root.styleIndex === 3 ? "Final text" : "Text"
             detail: root.styleIndex === 4 ? "review input" : "voice review"
             description: "The final text used by voice review"

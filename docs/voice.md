@@ -140,9 +140,11 @@ built-in fixture and custom expected transcript are never provided to the
 recognizer or correction model.
 
 **Correct transcripts with language model** is optional and off by default.
-The diagram beside the setting shows speech, recognition, language-model
-correction, and the resulting text. Its language-model step is muted while
-correction is off; each step has a tooltip explaining its role.
+The Signal path diagram beside the setting shows speech, recognition,
+language-model correction, and the resulting text. Enabling correction
+highlights the language-model icon and routes through it. With correction
+off, the icon is muted and a curved path bypasses that stage to deliver
+recognized text directly. Each step has a tooltip explaining its role.
 It uses the provider selected in Language model settings. Local correction
 requires the already downloaded model and never downloads weights during
 correction. Cloud correction uses the configured endpoint, model identifier,

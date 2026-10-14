@@ -49,7 +49,7 @@ ApplicationWindow {
                 checked: gallery.correctionEnabled
                 onToggled: gallery.correctionEnabled = checked
                 ToolTip.visible: hovered
-                ToolTip.text: "Highlight or mute the language-model correction step"
+                ToolTip.text: "Route through the highlighted language model, or bypass it when correction is off"
             }
             GlyphButton {
                 objectName: "galleryThemeToggle"

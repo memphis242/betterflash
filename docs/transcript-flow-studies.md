@@ -12,7 +12,11 @@ scripts/run-desktop.sh --transcript-flow-designs
 4. **Editorial stages** - icons beside longer, descriptive labels.
 5. **Transcript strip** - one frame around the flow and an illustrative text correction.
 
-The preview correction switch highlights or mutes the language-model stage.
+The app uses **03 Signal path**. Enabling correction highlights the
+language-model icon and directs the arrows through that stage. Disabling it
+mutes the icon and routes recognition directly to the final text along a
+curved bypass beneath the language-model stage. Stage positions stay fixed.
+
+The preview correction switch also shows these two routes in Signal path.
 The window does not access recordings, cards, provider credentials, or models.
-Its example transcript is illustrative. The app temporarily uses Glyph chain
-while the final treatment is being chosen.
+Its example transcript is illustrative.
