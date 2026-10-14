@@ -9,6 +9,7 @@
 #include "render/MarkdownView.h"
 #include "render/CodeRendering.h"
 #include "voice/VoiceController.h"
+#include "ui/TextFocusDismissal.h"
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -41,6 +42,7 @@ int main(int argc, char **argv) {
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
     QGuiApplication application(argc, argv);
+    TextFocusDismissal textFocusDismissal(&application);
     const QStringList fontResources{
         QStringLiteral(":/fonts/IBMPlexMono-Regular.ttf"),
         QStringLiteral(":/fonts/IBMPlexMono-Bold.ttf"),

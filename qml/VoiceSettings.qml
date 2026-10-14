@@ -141,7 +141,6 @@ ColumnLayout {
             }
             TextArea {
                 id: recognitionVocabularyField
-                property bool dismissOnOutsideTap: true
                 property Item editorViewport: recognitionVocabularyField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
