@@ -4,6 +4,7 @@
 #include "CustomSttTests.h"
 #include "TranscriptCorrector.h"
 #include "LocalTtsWorker.h"
+#include "RemoteTts.h"
 #include "integrations/SecretStore.h"
 #include "models/ModelDownload.h"
 
@@ -96,10 +97,12 @@ void validationScore(const QString &expected, const QString &actual, int *substi
     *wordErrorRate = reference.isEmpty() ? (hypothesis.isEmpty() ? 0.0 : 1.0)
         : static_cast<double>(substitutionsValue + deletionsValue + insertionsValue) / reference.size();
 }
+
 }
 
 VoiceController::VoiceController(QObject *parent)
-    : QObject(parent), m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)),
+    : QObject(parent), m_remoteTts(new RemoteTts(this)),
+      m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)),
       m_speech(nullptr), m_customSttTests(new CustomSttTests(this)), m_corrector(new TranscriptCorrector(this)) {
     connect(m_corrector, &TranscriptCorrector::configurationChanged, this, [this] { cancelTranscriptCorrection(); });
     m_localDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("models/voice"));
@@ -142,9 +145,14 @@ VoiceController::VoiceController(QObject *parent)
     m_sttAcceleration = settings.value(QStringLiteral("sttAcceleration"), QStringLiteral("automatic")).toString().trimmed().toLower();
     if (m_sttAcceleration != QStringLiteral("automatic") && m_sttAcceleration != QStringLiteral("cpu")) m_sttAcceleration = QStringLiteral("automatic");
     const QString ttsProvider = settings.value(QStringLiteral("ttsProvider"), m_ttsProvider).toString().trimmed().toLower();
-    if (ttsProvider == QStringLiteral("local") || ttsProvider == QStringLiteral("system")) m_ttsProvider = ttsProvider;
+    if (ttsProvider == QStringLiteral("local") || ttsProvider == QStringLiteral("system") || ttsProvider == QStringLiteral("remote")) m_ttsProvider = ttsProvider;
     const QString ttsProfile = settings.value(QStringLiteral("ttsProfile"), m_ttsProfile).toString().trimmed();
     if (ttsProfile == QStringLiteral("amy-low") || ttsProfile == QStringLiteral("ljspeech-medium")) m_ttsProfile = ttsProfile;
+    settings.beginGroup(QStringLiteral("remoteTts"));
+    m_remoteTts->setEndpoint(settings.value(QStringLiteral("endpoint"), m_remoteTts->endpoint()).toString());
+    m_remoteTts->setModel(settings.value(QStringLiteral("model"), m_remoteTts->model()).toString());
+    m_remoteTts->setVoice(settings.value(QStringLiteral("voice"), m_remoteTts->voice()).toString());
+    settings.endGroup();
     if (storedProfileVersion < kCurrentSttProfileVersion) {
         settings.setValue(QStringLiteral("sttProfileVersion"), kCurrentSttProfileVersion);
         settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
@@ -199,6 +207,39 @@ VoiceController::VoiceController(QObject *parent)
             if (m_enabled && m_sttProvider == QStringLiteral("groq")) restartWorker();
         }
     });
+    connect(m_remoteTts, &RemoteTts::configurationChanged, this, [this] {
+        if (m_ttsProvider == QStringLiteral("remote")) {
+            stopSpeaking();
+            if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Remote speech configuration changed."));
+            resetTtsTestReport();
+        }
+        QSettings settings;
+        settings.beginGroup(QStringLiteral("voice"));
+        settings.beginGroup(QStringLiteral("remoteTts"));
+        settings.setValue(QStringLiteral("endpoint"), m_remoteTts->endpoint());
+        settings.setValue(QStringLiteral("model"), m_remoteTts->model());
+        settings.setValue(QStringLiteral("voice"), m_remoteTts->voice());
+        settings.endGroup();
+        emit modelReadinessChanged();
+    });
+    connect(m_remoteTts, &RemoteTts::credentialChanged, this, [this] {
+        if (m_ttsProvider == QStringLiteral("remote")) {
+            if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Validation canceled"), QStringLiteral("Remote speech API key changed."));
+            if (m_speaking) stopSpeaking();
+            resetTtsTestReport();
+        }
+    });
+    connect(m_remoteTts, &RemoteTts::keyChanged, this, [this] { emit modelReadinessChanged(); });
+    connect(m_remoteTts, &RemoteTts::readinessChanged, this, [this] { emit modelReadinessChanged(); });
+    connect(m_remoteTts, &RemoteTts::audioReady, this, [this](const QByteArray &pcm, const QAudioFormat &format,
+        const double seconds, const quint64 request) {
+        if (request != m_speechGeneration || !m_speaking) return;
+        m_playbackFormat = format;
+        startLocalPlayback(pcm, request, seconds);
+    });
+    connect(m_remoteTts, &RemoteTts::failed, this, [this](const QString &message, const quint64 request) {
+        if (request == m_speechGeneration && m_speaking) speechError(message);
+    });
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] { setEnabled(false); });
 }
 
@@ -225,6 +266,7 @@ VoiceController::~VoiceController() {
 bool VoiceController::hasApiKey() const { return m_secret->hasKey(); }
 QString VoiceController::keyStorageStatus() const { return m_secret->status(); }
 QObject *VoiceController::customSttTests() const { return m_customSttTests; }
+QObject *VoiceController::remoteTts() const { return m_remoteTts; }
 QObject *VoiceController::transcriptCorrector() const { return m_corrector; }
 
 void VoiceController::attachLanguageModel(Summarizer *summarizer) { m_corrector->attachSummarizer(summarizer); }
@@ -250,6 +292,11 @@ void VoiceController::persistConfiguration() const {
     settings.setValue(QStringLiteral("sttProfileVersion"), kCurrentSttProfileVersion);
     settings.setValue(QStringLiteral("ttsProvider"), m_ttsProvider);
     settings.setValue(QStringLiteral("ttsProfile"), m_ttsProfile);
+    settings.beginGroup(QStringLiteral("remoteTts"));
+    settings.setValue(QStringLiteral("endpoint"), m_remoteTts->endpoint());
+    settings.setValue(QStringLiteral("model"), m_remoteTts->model());
+    settings.setValue(QStringLiteral("voice"), m_remoteTts->voice());
+    settings.endGroup();
 }
 
 void VoiceController::setModelPath(const QString &path) {
@@ -358,8 +405,8 @@ void VoiceController::setSttAcceleration(const QString &acceleration) {
 
 void VoiceController::setTtsProvider(const QString &provider) {
     const QString value = provider.trimmed().toLower();
-    if (value != QStringLiteral("local") && value != QStringLiteral("system")) {
-        setError(QStringLiteral("VOICE_TTS_PROVIDER_INVALID"), QStringLiteral("Choose the managed local voice or the operating system speech engine."));
+    if (value != QStringLiteral("local") && value != QStringLiteral("system") && value != QStringLiteral("remote")) {
+        setError(QStringLiteral("VOICE_TTS_PROVIDER_INVALID"), QStringLiteral("Choose local, remote cloud, or the operating system speech engine."));
         return;
     }
     if (m_ttsProvider == value) return;
@@ -512,10 +559,13 @@ bool VoiceController::sttModelDownloading() const { return m_sttDownload->downlo
 double VoiceController::sttModelProgress() const { return m_sttDownload->downloading() ? m_sttDownload->progress() : m_fixtureDownload->progress(); }
 
 bool VoiceController::ttsReady() const {
-    return m_ttsProvider == QStringLiteral("local") ? m_ttsDownload->ready() : !QTextToSpeech::availableEngines().isEmpty();
+    if (m_ttsProvider == QStringLiteral("local")) return m_ttsDownload->ready();
+    if (m_ttsProvider == QStringLiteral("remote")) return m_remoteTts->ready();
+    return !QTextToSpeech::availableEngines().isEmpty();
 }
 
 QString VoiceController::ttsStatus() const {
+    if (m_ttsProvider == QStringLiteral("remote")) return m_remoteTts->status();
     if (m_ttsProvider == QStringLiteral("system")) return ttsReady() ? QStringLiteral("System speech engine is ready") : QStringLiteral("No system speech engine is available; choose the managed local voice");
 #if defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64) && !defined(Q_OS_ANDROID)
     return m_ttsDownload->error().isEmpty() ? m_ttsDownload->status() : m_ttsDownload->error();
@@ -590,6 +640,10 @@ void VoiceController::testTtsModel() {
     }
     if (m_ttsProvider == QStringLiteral("local") && !ttsReady()) {
         finishTtsTest(false, QStringLiteral("Speech output validation failed"), QStringLiteral("VOICE_TEST_MODEL_MISSING: Download the selected local voice before testing it."));
+        return;
+    }
+    if (m_ttsProvider == QStringLiteral("remote") && !ttsReady()) {
+        finishTtsTest(false, QStringLiteral("Speech output validation failed"), QStringLiteral("VOICE_REMOTE_TTS_UNAVAILABLE: %1").arg(m_remoteTts->status()));
         return;
     }
     if (!m_ttsTestBusy) return;
@@ -959,7 +1013,7 @@ void VoiceController::speak(const QString &text) {
     m_captureSuspended = !m_worker || !m_ready;
     updateCapture();
     if (m_captureSuspended) beginSpeech();
-    if (m_ttsProvider == QStringLiteral("local")) return;
+    if (m_ttsProvider == QStringLiteral("local") || m_ttsProvider == QStringLiteral("remote")) return;
     const quint64 generation = m_speechGeneration;
     QTimer::singleShot(5000, this, [this, generation] {
         if (generation == m_speechGeneration && m_speaking && !m_ttsStarted)
@@ -970,6 +1024,18 @@ void VoiceController::speak(const QString &text) {
 void VoiceController::beginSpeech() {
     if ((!m_enabled && !m_ttsTestBusy) || !m_speaking || !m_captureSuspended || m_ttsIssued || m_pendingSpeech.isEmpty()) return;
     if (m_ttsProvider == QStringLiteral("local")) { beginLocalSpeech(); return; }
+    if (m_ttsProvider == QStringLiteral("remote")) {
+        if (!m_remoteTts->ready()) { speechError(m_remoteTts->status()); return; }
+        m_ttsIssued = true;
+        const quint64 request = ++m_speechGeneration;
+        setStatus(QStringLiteral("Preparing remote speech"));
+        const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+        if (device.isNull() || !device.preferredFormat().isValid()) {
+            speechError(QStringLiteral("Connect an audio output and select it in system sound settings.")); return;
+        }
+        m_remoteTts->synthesize(m_pendingSpeech, device.preferredFormat(), request);
+        return;
+    }
     if (!m_speech) {
         m_speech = new QTextToSpeech(this);
         connect(m_speech, &QTextToSpeech::stateChanged, this, [this](const auto) { onSpeechStateChanged(); });
@@ -1159,6 +1225,7 @@ void VoiceController::finishSpeech() {
 
 void VoiceController::stopSpeaking() {
     ++m_speechGeneration;
+    m_remoteTts->cancel();
     m_synthesisCancelled->store(true);
     if (m_audioSink) { m_audioSink->disconnect(this); m_audioSink->stop(); m_audioSink->deleteLater(); m_audioSink = nullptr; }
     if (m_playbackBuffer) { m_playbackBuffer->deleteLater(); m_playbackBuffer = nullptr; }
