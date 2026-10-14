@@ -32,6 +32,9 @@ QtObject {
     readonly property color modelDownloadHover: dark ? "#384d6d" : "#cddfeb"
     readonly property color modelTestFill: dark ? "#4a3d25" : "#f9efce"
     readonly property color modelTestHover: dark ? "#605032" : "#f1dfac"
+    readonly property color modelLocationLocalFill: dark ? warning : "#f0d17a"
+    readonly property color modelLocationLocalInk: dark ? canvas : ink
+    readonly property color modelLocationLocalMutedInk: dark ? "#d6c7a5" : "#765821"
     readonly property color error: dark ? "#ee9a9a" : "#a13939"
     readonly property color recallMissed: dark ? "#ee9a9a" : "#a13939"
     readonly property color recallPartial: dark ? "#e6c17a" : "#815714"
