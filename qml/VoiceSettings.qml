@@ -201,7 +201,8 @@ ColumnLayout {
                 }
                 TranscriptCorrectionFlow {
                     correctionEnabled: voice.transcriptCorrector.enabled
-                    width: Math.min(410, root.width)
+                    Layout.preferredWidth: implicitWidth
+                    Layout.maximumWidth: implicitWidth
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
                 }
