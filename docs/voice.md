@@ -2,8 +2,11 @@
 
 Speech recognition and reading are local by default. Settings > Voice keeps
 provider fields on the page and exposes a separate **Test model** action for
-recognition and reading. **Location of model:** uses the same Local and Remote
-choices as Language model and Search settings. Groq recognition and remote
+recognition and reading. A single model box contains the location selector,
+configuration, status, downloads, and basic model test, with space separating
+it from the feature's other settings. **Location of model:** uses a compact
+Local/Remote selector with a yellow local selection and blue remote selection,
+matching Language model and Search settings. Groq recognition and remote
 speech output are explicit alternatives. The operating system's Qt speech
 engine remains a local speech-output choice. Voice starts disabled, so opening the app
 does not start a microphone or load inference models.
