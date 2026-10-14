@@ -167,24 +167,44 @@ ColumnLayout {
                 ToolTip.text: "Terms are supplied as context to local Whisper so project and technical abbreviations are more likely to be recognized"
                 Layout.bottomMargin: 12
             }
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: 12
                 Layout.bottomMargin: 12
-                spacing: 10
-                Icon { kind: "paper-pencil"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
-                Label { text: "Correct transcripts with language model"; color: Theme.ink; font.pixelSize: 16; wrapMode: Text.Wrap; Layout.maximumWidth: Math.max(180, root.width - 100) }
-                SettingsSwitch {
-                    checked: voice.transcriptCorrector.enabled
-                    onToggled: voice.transcriptCorrector.enabled = checked
-                    Layout.leftMargin: 8
-                    Layout.rightMargin: 12
-                    Layout.topMargin: 8
-                    Layout.bottomMargin: 8
-                    ToolTip.visible: hovered
-                    ToolTip.text: "After speech recognition, use the selected language model to repair grammar and likely technical abbreviations"
+                columns: root.width >= 900 ? 2 : 1
+                columnSpacing: 14
+                rowSpacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 10
+                    Icon { kind: "paper-pencil"; Layout.preferredWidth: 20; Layout.preferredHeight: 20; stroke: Theme.inkMuted }
+                    Label {
+                        text: "Correct transcripts with language model"
+                        color: Theme.ink
+                        font.pixelSize: 16
+                        wrapMode: Text.Wrap
+                        Layout.preferredWidth: implicitWidth
+                        Layout.minimumWidth: 0
+                    }
+                    SettingsSwitch {
+                        checked: voice.transcriptCorrector.enabled
+                        onToggled: voice.transcriptCorrector.enabled = checked
+                        Layout.leftMargin: 8
+                        Layout.rightMargin: 12
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 8
+                        ToolTip.visible: hovered
+                        ToolTip.text: "After speech recognition, use the selected language model to repair grammar and likely technical abbreviations"
+                    }
                 }
-                Item { Layout.fillWidth: true }
+                TranscriptCorrectionFlow {
+                    correctionEnabled: voice.transcriptCorrector.enabled
+                    width: Math.min(410, root.width)
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                }
             }
             ModelStatus {
                 Layout.fillWidth: true
