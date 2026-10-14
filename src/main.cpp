@@ -81,6 +81,7 @@ int main(int argc, char **argv) {
     parser.addOption({QStringLiteral("card-timeline-designs"), QStringLiteral("Preview calendar-scaled card history with illustrative data.")});
     parser.addOption({QStringLiteral("menu-designs"), QStringLiteral("Compare three shared menu designs without changing the collection.")});
     parser.addOption({QStringLiteral("voice-tab-designs"), QStringLiteral("Compare three speech settings tab styles without changing the collection.")});
+    parser.addOption({QStringLiteral("transcript-flow-designs"), QStringLiteral("Compare five transcript correction pipeline styles without changing the collection.")});
 #ifdef BETTERFLASH_GUI_SWEEP
     parser.addOption({QStringLiteral("gui-sweep"), QStringLiteral("Run the native scripted interface verification."), QStringLiteral("artifact-directory")});
     parser.addOption({QStringLiteral("export-queue-designs"), QStringLiteral("Capture and verify the isolated queue design gallery, then exit."), QStringLiteral("directory")});
@@ -91,6 +92,7 @@ int main(int argc, char **argv) {
     bool controlDesigns=parser.isSet(QStringLiteral("control-designs"));
     const bool progressDesigns = parser.isSet(QStringLiteral("progress-designs"));
     const bool logoStudies = parser.isSet(QStringLiteral("logo-studies"));
+    const bool transcriptFlowDesigns = parser.isSet(QStringLiteral("transcript-flow-designs"));
 #ifdef BETTERFLASH_GUI_SWEEP
     queueDesigns=queueDesigns||parser.isSet(QStringLiteral("export-queue-designs"));
     controlDesigns=controlDesigns||parser.isSet(QStringLiteral("export-control-designs"));
@@ -110,7 +112,8 @@ int main(int argc, char **argv) {
         {parser.isSet(QStringLiteral("deck-graph-designs")), "BetterFlash Deck Graph Studies", "DeckGraphGallery", "deckGraphWarnings"},
         {parser.isSet(QStringLiteral("card-timeline-designs")), "BetterFlash Card Timeline Studies", "CardTimelineGallery", "cardTimelineWarnings"},
         {parser.isSet(QStringLiteral("menu-designs")), "BetterFlash Menu Studies", "MenuDesignGallery", "menuDesignWarnings"},
-        {parser.isSet(QStringLiteral("voice-tab-designs")), "BetterFlash Voice Tab Studies", "VoiceTabsGallery", "voiceTabWarnings"}
+        {parser.isSet(QStringLiteral("voice-tab-designs")), "BetterFlash Voice Tab Studies", "VoiceTabsGallery", "voiceTabWarnings"},
+        {transcriptFlowDesigns, "BetterFlash Transcript Flow Studies", "TranscriptFlowGallery", "transcriptFlowWarnings"}
     };
     const struct GalleryMode *selectedGallery = nullptr;
     for (const struct GalleryMode &mode : galleryModes) {
