@@ -1763,6 +1763,7 @@ ApplicationWindow {
                 localHint: "Runs speech recognition on this machine using the configured local model."
                 remoteHint: "Sends microphone audio to the configured cloud speech provider."
                 Layout.fillWidth: true
+                onActivated: currentIndex = index
             }
             Label {
                 textFormat: Text.PlainText
