@@ -1747,7 +1747,7 @@ ApplicationWindow {
         objectName: "voiceConfigDialog"
         title: "Voice connection"
         onOpened: {
-            sttProvider.currentIndex = voice.sttProvider === "groq" ? 0 : 1
+            sttProvider.currentIndex = voice.sttProvider === "groq" ? 1 : 0
             sttModel.text = voice.sttModel
             localModel.text = voice.modelPath
         }
@@ -1758,44 +1758,34 @@ ApplicationWindow {
                 text: "Speech recognition"
                 color: Theme.inkMuted
             }
-            ComboBox {
+            ModelLocationPicker {
                 id: sttProvider
-                model: [
-                    {
-                        label: "Groq",
-                        key: "groq"
-                    },
-                    {
-                        label: "Local test model",
-                        key: "local"
-                    }
-                ]
-                textRole: "label"
-                valueRole: "key"
+                localHint: "Runs speech recognition on this machine using the configured local model."
+                remoteHint: "Sends microphone audio to the configured cloud speech provider."
                 Layout.fillWidth: true
             }
             Label {
                 textFormat: Text.PlainText
-                text: sttProvider.currentValue === "groq" ? "Model" : "Local model folder"
+                text: sttProvider.currentIndex === 1 ? "Model" : "Local model folder"
                 color: Theme.inkMuted
             }
             TextField {
                 id: sttModel
-                visible: sttProvider.currentValue === "groq"
+                visible: sttProvider.currentIndex === 1
                 Layout.fillWidth: true
                 selectByMouse: true
                 placeholderText: "whisper-large-v3-turbo"
             }
             TextField {
                 id: localModel
-                visible: sttProvider.currentValue === "local"
+                visible: sttProvider.currentIndex === 0
                 Layout.fillWidth: true
                 selectByMouse: true
                 placeholderText: "/path/to/vosk/model"
             }
             Label {
                 textFormat: Text.PlainText
-                text: "Playback uses the system speech engine. With Groq, microphone audio is sent to Groq while voice review is enabled."
+                text: "Speech output uses the selected speech engine. With Groq, microphone audio is sent to Groq while voice review is enabled."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -1813,7 +1803,7 @@ ApplicationWindow {
                 text: "Save connection"
                 primary: true
                 onClicked: {
-                    voice.sttProvider = sttProvider.currentValue
+                    voice.sttProvider = sttProvider.currentIndex === 1 ? "groq" : "local"
                     voice.sttModel = sttModel.text.trim()
                     voice.modelPath = localModel.text.trim()
                     voiceConfigDialog.close()

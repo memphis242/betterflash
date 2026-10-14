@@ -47,6 +47,14 @@ ColumnLayout {
         checked: settings.search.semanticEnabled
         onToggled: settings.search.semanticEnabled = checked
     }
+    ModelLocationPicker {
+        id: embeddingLocation
+        visible: settings.search.semanticEnabled
+        localHint: "Runs semantic retrieval on this machine using the selected embedding model."
+        remoteHint: "Uses a cloud embedding endpoint. The configured endpoint, model, and key are required."
+        currentIndex: settings.search.provider === "remote" ? 1 : 0
+        onActivated: settings.search.provider = index === 1 ? "remote" : "local"
+    }
     ValueRow {
         visible: settings.search.semanticEnabled && settings.search.provider === "local"
         label: "Local model"
@@ -165,24 +173,6 @@ ColumnLayout {
     Flow {
         Layout.fillWidth: true
         spacing: 10
-        SettingsButton {
-            width: Math.min(implicitWidth, parent.width)
-            text: settings.search.provider === "remote" ? "Remote provider" : "Local model"
-            onClicked: providerMenu.open()
-            AppMenu {
-                id: providerMenu
-                AppMenuItem {
-                    glyph: "cards"
-                    text: "Local model"
-                    onTriggered: settings.search.provider = "local"
-                }
-                AppMenuItem {
-                    glyph: "arrow-right"
-                    text: "Remote encoding service"
-                    onTriggered: settings.search.provider = "remote"
-                }
-            }
-        }
         SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             text: "Rebuild search index"

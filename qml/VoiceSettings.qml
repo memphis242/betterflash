@@ -8,7 +8,7 @@ ColumnLayout {
     property var ai: null
     property string apiKeyDraft: ""
     property int tabIndex: 0
-    onTabIndexChanged: if (tabIndex !== 0) clearSecretDraft()
+    onTabIndexChanged: clearSecretDraft()
     spacing: 18
 
     component SettingsButton: AppButton { font.pixelSize: 16 }
@@ -37,11 +37,13 @@ ColumnLayout {
         }
     }
 
-    function clearSecretDraft() { apiKeyDraft = "" }
+    function clearSecretDraft() { apiKeyDraft = ""; if (ttsApiKey) ttsApiKey.text = "" }
     readonly property bool localStt: voice.sttProvider !== "groq"
-    readonly property bool localTts: voice.ttsProvider !== "system"
+    readonly property bool localTts: voice.ttsProvider !== "remote"
     readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
-    readonly property string ttsState: localTts && voice.ttsModelDownloading ? "busy"
+    readonly property string ttsState: voice.ttsProvider === "local" && voice.ttsModelDownloading ? "busy"
+        : voice.ttsProvider === "remote" ? (voice.remoteTts.ready ? voice.ttsTestError ? "degraded" : "ready" : "missing")
+        : voice.ttsProvider === "system" ? (voice.ttsReady ? voice.ttsTestError ? "degraded" : "ready" : "missing")
         : !voice.ttsReady ? "missing" : voice.ttsTestError ? "degraded" : "ready"
 
     ColumnLayout {
@@ -53,18 +55,16 @@ ColumnLayout {
             Layout.fillWidth: true
 
             Label { text: "Speech recognition"; color: Theme.inkMuted; font.pixelSize: 15 }
-            SettingsCombo {
+            ModelLocationPicker {
                 id: sttProvider
-                Layout.fillWidth: true
-                model: ["Local model", "Groq cloud"]
                 currentIndex: voice.sttProvider === "groq" ? 1 : 0
+                localHint: "Runs speech recognition on this machine after the local model is installed."
+                remoteHint: "Sends microphone audio to the configured cloud speech provider. A network connection and provider key are required."
                 onActivated: {
-                    voice.sttProvider = currentIndex === 1 ? "groq" : "local"
-                    if (currentIndex !== 1)
+                    voice.sttProvider = index === 1 ? "groq" : "local"
+                    if (index !== 1)
                         root.clearSecretDraft()
                 }
-                ToolTip.visible: hovered
-                ToolTip.text: "Choose on-device speech recognition or Groq"
             }
             TextField {
                 Layout.fillWidth: true
@@ -241,24 +241,48 @@ ColumnLayout {
             Layout.fillWidth: true
 
             Label { text: "Speech output"; color: Theme.inkMuted; font.pixelSize: 15 }
-            SettingsCombo {
+            ModelLocationPicker {
                 id: ttsProvider
+                currentIndex: voice.ttsProvider === "remote" ? 1 : 0
+                localHint: "Uses a speech engine on this machine. Choose the local engine below."
+                remoteHint: "Uses a configured remote speech provider. A network connection and provider key are required."
+                onActivated: if (index === 1) voice.ttsProvider = "remote"; else if (voice.ttsProvider === "remote") voice.ttsProvider = "local"
+            }
+            Label { text: "Local speech engine"; visible: ttsProvider.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
+            SettingsCombo {
+                id: localTtsEngine
                 Layout.fillWidth: true
-                model: ["Local Piper voice", "System speech engine"]
+                visible: ttsProvider.currentIndex === 0
+                model: ["Piper voice", "System speech engine"]
                 currentIndex: voice.ttsProvider === "system" ? 1 : 0
                 onActivated: voice.ttsProvider = currentIndex === 1 ? "system" : "local"
                 ToolTip.visible: hovered
-                ToolTip.text: "Use a local Piper voice, or an installed system speech engine"
+                ToolTip.text: currentIndex === 0 ? "Use a downloaded Piper voice on this machine" : "Use an installed operating system speech engine on this machine"
             }
-            Label { text: "Text-to-speech profile"; visible: ttsProvider.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
+            Label { text: "Text-to-speech profile"; visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
             SettingsCombo {
                 Layout.fillWidth: true
-                visible: ttsProvider.currentIndex === 0
+                visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0
                 model: ["Amy low / compact (67 MB download)", "LJSpeech medium (67 MB download)"]
                 currentIndex: voice.ttsProfile === "ljspeech-medium" ? 1 : 0
                 onActivated: voice.ttsProfile = ["amy-low", "ljspeech-medium"][currentIndex]
                 ToolTip.visible: hovered
                 ToolTip.text: "Choose a local speech synthesis profile"
+            }
+            ColumnLayout {
+                visible: ttsProvider.currentIndex === 1
+                Layout.fillWidth: true
+                spacing: 10
+                Label { text: "Remote endpoint"; color: Theme.inkMuted; font.pixelSize: 15 }
+                TextField { Layout.fillWidth: true; text: voice.remoteTts.endpoint; onEditingFinished: voice.remoteTts.endpoint = text.trim(); placeholderText: "https://api.groq.com/openai/v1/audio/speech"; font.pixelSize: 17 }
+                Label { text: "Remote model"; color: Theme.inkMuted; font.pixelSize: 15 }
+                TextField { Layout.fillWidth: true; text: voice.remoteTts.model; onEditingFinished: voice.remoteTts.model = text.trim(); placeholderText: "canopylabs/orpheus-v1-english"; font.pixelSize: 17 }
+                Label { text: "Voice"; color: Theme.inkMuted; font.pixelSize: 15 }
+                TextField { Layout.fillWidth: true; text: voice.remoteTts.voice; onEditingFinished: voice.remoteTts.voice = text.trim(); placeholderText: "troy"; font.pixelSize: 17 }
+                Label { text: "Speech output API key"; color: Theme.inkMuted; font.pixelSize: 15 }
+                TextField { id: ttsApiKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: voice.remoteTts.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"; font.pixelSize: 17; onVisibleChanged: if (!visible) text = "" }
+                RowLayout { Layout.fillWidth: true; SettingsButton { text: "Save key"; enabled: ttsApiKey.text.trim().length > 0; onClicked: { voice.remoteTts.setApiKey(ttsApiKey.text.trim()); ttsApiKey.text = "" } } SettingsButton { visible: voice.remoteTts.hasApiKey; text: "Clear key"; onClicked: voice.remoteTts.clearApiKey() } }
+                ValueRow { label: "Credential storage"; value: voice.remoteTts.keyStorageStatus; Layout.fillWidth: true }
             }
             ModelStatus {
                 Layout.fillWidth: true
@@ -266,7 +290,7 @@ ColumnLayout {
                 state: root.ttsState
             }
             ProgressBar {
-                visible: ttsProvider.currentIndex === 0 && voice.ttsModelDownloading
+                visible: voice.ttsProvider === "local" && voice.ttsModelDownloading
                 value: voice.ttsModelProgress
                 Layout.fillWidth: true
             }
@@ -274,7 +298,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 10
                 ModelActionButton {
-                    visible: ttsProvider.currentIndex === 0
+                    visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0
                     width: Math.min(implicitWidth, root.width)
                     actionKind: "download"
                     text: voice.ttsModelDownloading ? "Cancel download" : voice.ttsReady ? "Download again" : "Download local model"
@@ -284,8 +308,8 @@ ColumnLayout {
                     width: Math.min(implicitWidth, root.width)
                     actionKind: "test"
                     text: voice.ttsTestBusy ? "Testing..." : "Test model"
-                    enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy) && (voice.ttsProvider === "system" || voice.ttsReady)
-                    hint: enabled ? "Run a short speech synthesis check" : "Download the local model before testing"
+                    enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy) && (voice.ttsProvider === "remote" ? voice.remoteTts.ready : voice.ttsProvider === "system" || voice.ttsReady)
+                    hint: enabled ? "Run a short speech synthesis check" : voice.ttsProvider === "remote" ? "Configure the remote endpoint, model, voice, and API key before testing" : "Download the local model before testing"
                     onClicked: voice.testTtsModel()
                 }
             }
