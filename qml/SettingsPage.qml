@@ -368,15 +368,12 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
-                        Label { text: "Provider"; color: Theme.inkMuted; font.pixelSize: 15 }
-                        SettingsCombo {
+                        ModelLocationPicker {
                             id: aiProvider
-                            Layout.fillWidth: true
-                            model: ["Local model", "Remote provider"]
                             currentIndex: ai.provider === "remote" ? 1 : 0
-                            onActivated: if (typeof ai.provider !== "undefined") ai.provider = currentIndex === 1 ? "remote" : "local"
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Local models work offline. Remote providers require a key."
+                            localHint: "Runs the language model on your machine and works offline after the model is downloaded."
+                            remoteHint: "Sends language model requests to the configured cloud provider. A network connection and provider key are required."
+                            onActivated: if (typeof ai.provider !== "undefined") ai.provider = index === 1 ? "remote" : "local"
                         }
                         Label { visible: aiProvider.currentIndex === 0; text: "Selected local model"; color: Theme.inkMuted; font.pixelSize: 15 }
                         SettingsCombo {
