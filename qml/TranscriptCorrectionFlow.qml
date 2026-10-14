@@ -5,9 +5,12 @@ import QtQuick.Layouts
 Flickable {
     id: root
     property bool correctionEnabled: true
-    property real nodeHeight: 68
-    property real arrowWidth: 18
-    property real flowSpacing: 6
+    property int styleIndex: 0
+    property bool spacious: false
+    property real nodeHeight: styleIndex === 3 ? (spacious ? 92 : 72) : (spacious ? 96 : 78)
+    property real flowSpacing: spacious ? (styleIndex === 2 ? 24 : 12) : (styleIndex === 2 ? 14 : 6)
+    property real diagramPadding: styleIndex === 1 || styleIndex === 4 ? (spacious ? 20 : 12) : 4
+    readonly property real naturalWidth: flow.implicitWidth + diagramPadding * 2
 
     Layout.fillWidth: true
     Layout.minimumWidth: 0
@@ -15,10 +18,10 @@ Flickable {
     interactive: contentWidth > width
     flickableDirection: Flickable.HorizontalFlick
     boundsBehavior: Flickable.StopAtBounds
-    contentWidth: flow.implicitWidth
-    contentHeight: flow.implicitHeight
-    implicitWidth: flow.implicitWidth
-    implicitHeight: flow.implicitHeight + (interactive ? 10 : 0)
+    contentWidth: Math.max(width, naturalWidth)
+    contentHeight: flow.implicitHeight + diagramPadding * 2 + (styleIndex === 4 ? 26 : 0)
+    implicitWidth: naturalWidth
+    implicitHeight: contentHeight + (interactive ? 10 : 0)
     activeFocusOnTab: interactive
     Keys.onLeftPressed: contentX = Math.max(0, contentX - 96)
     Keys.onRightPressed: contentX = Math.min(Math.max(0, contentWidth - width), contentX + 96)
@@ -36,43 +39,68 @@ Flickable {
     }
     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
 
-    component FlowNode: Rectangle {
+    component FlowNode: Item {
         id: node
         required property string title
         required property string description
         required property string iconKind
+        required property string detail
         property bool muted: false
         property bool highlighted: false
-        property real nodeWidth: 68
+        property real nodeWidth: 92
         width: nodeWidth
         height: root.nodeHeight
-        radius: 6
-        color: Theme.surfaceRaised
-        border.width: 1
-        border.color: highlighted && !muted ? Theme.accent : Theme.rule
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 7
-            spacing: 3
-            Icon {
-                kind: node.iconKind
-                Layout.preferredWidth: 21
-                Layout.preferredHeight: 21
-                Layout.alignment: Qt.AlignHCenter
-                stroke: node.muted ? Theme.inkMuted : Theme.ink
-                lineWidth: 1.35
-            }
+        Icon {
+            id: nodeIcon
+            kind: node.iconKind
+            width: root.styleIndex === 3 ? 24 : 30
+            height: width
+            anchors.top: root.styleIndex === 3 ? parent.top : undefined
+            anchors.topMargin: root.styleIndex === 3 ? 8 : 0
+            anchors.horizontalCenter: root.styleIndex === 3 ? undefined : parent.horizontalCenter
+            anchors.left: root.styleIndex === 3 ? parent.left : undefined
+            stroke: node.muted ? Theme.inkMuted : node.highlighted ? Theme.accent : Theme.ink
+            lineWidth: root.styleIndex === 4 ? 1.7 : 1.45
+        }
+        Rectangle {
+            visible: root.styleIndex === 2
+            width: 9
+            height: 9
+            radius: 5
+            anchors.horizontalCenter: nodeIcon.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 1
+            color: Theme.transparent
+            border.width: 1
+            border.color: node.muted ? Theme.inkMuted : node.highlighted ? Theme.accent : Theme.ink
+        }
+        Column {
+            anchors.left: root.styleIndex === 3 ? nodeIcon.right : parent.left
+            anchors.leftMargin: root.styleIndex === 3 ? 10 : 0
+            anchors.right: parent.right
+            anchors.top: root.styleIndex === 3 ? parent.top : nodeIcon.bottom
+            anchors.topMargin: root.styleIndex === 3 ? 8 : 7
+            spacing: 4
             Label {
                 text: node.title
                 color: node.muted ? Theme.inkMuted : Theme.ink
                 font.family: Theme.monoFont
-                font.pixelSize: 11
-                horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: root.spacious ? (root.styleIndex === 4 ? 14 : 12) : 11
+                font.bold: node.highlighted && !node.muted
+                horizontalAlignment: root.styleIndex === 3 ? Text.AlignLeft : Text.AlignHCenter
                 wrapMode: Text.Wrap
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                verticalAlignment: Text.AlignVCenter
+                width: parent.width
+            }
+            Label {
+                visible: root.styleIndex === 1 || root.styleIndex === 4
+                text: node.detail
+                color: Theme.inkMuted
+                font.family: Theme.monoFont
+                font.pixelSize: root.spacious ? 11 : 10
+                horizontalAlignment: root.styleIndex === 3 ? Text.AlignLeft : Text.AlignHCenter
+                wrapMode: Text.Wrap
+                width: parent.width
             }
         }
         ToolTip.visible: hoverHandler.hovered
@@ -81,50 +109,93 @@ Flickable {
     }
 
     component FlowArrow: Item {
-        width: root.arrowWidth
+        width: root.spacious ? (root.styleIndex === 2 ? 34 : 22) : (root.styleIndex === 2 ? 22 : 16)
         height: root.nodeHeight
         Icon {
             anchors.centerIn: parent
-            width: 18
-            height: 18
+            width: root.spacious ? (root.styleIndex === 2 ? 25 : 18) : (root.styleIndex === 2 ? 20 : 16)
+            height: width
             kind: "arrow-right"
             stroke: Theme.inkMuted
             lineWidth: 1.35
         }
     }
 
+    Rectangle {
+        x: 0
+        y: 0
+        width: root.contentWidth
+        height: root.contentHeight
+        visible: root.styleIndex === 1 || root.styleIndex === 4
+        color: root.styleIndex === 1 ? Theme.ledgerSurface : Theme.surface
+        border.color: Theme.rule
+        border.width: 1
+        radius: root.styleIndex === 4 ? 12 : 8
+    }
+
+    Rectangle {
+        visible: root.styleIndex === 2
+        x: flow.x + 24
+        y: diagramPadding + root.nodeHeight - 7
+        width: Math.max(0, flow.implicitWidth - 70)
+        height: 1
+        color: Theme.rule
+        z: 0
+    }
+
     Row {
         id: flow
+        x: Math.max(diagramPadding, (root.contentWidth - flow.implicitWidth) / 2)
+        y: diagramPadding
         spacing: root.flowSpacing
+        z: 1
 
         FlowNode {
             title: "Speech"
+            detail: root.styleIndex === 4 ? "raw audio" : "user voice"
             description: "Words spoken by the user"
             iconKind: "mic"
+            nodeWidth: root.styleIndex === 3 ? (root.spacious ? 150 : 132) : (root.spacious ? 104 : 66)
         }
         FlowArrow {}
         FlowNode {
-            title: "Recognition"
+            title: root.styleIndex === 3 ? "Speech recognition" : "Recognition"
+            detail: root.styleIndex === 4 ? "audio to text" : "speech model"
             description: "The speech recognition model turns audio into text"
             iconKind: "ear"
-            nodeWidth: 94
+            nodeWidth: root.styleIndex === 3 ? (root.spacious ? 190 : 168) : (root.spacious ? 132 : 92)
         }
         FlowArrow {}
         FlowNode {
-            title: "LLM"
+            title: root.styleIndex === 3 ? "Language model" : (root.spacious ? "Language model" : "LLM")
+            detail: root.styleIndex === 4 ? "correction" : "grammar + terms"
             description: root.correctionEnabled
                 ? "LLM means language model. The selected local or cloud model can correct grammar and likely technical terms"
                 : "LLM means language model. Correction is off, so recognized text is used directly"
             iconKind: "paper-pencil"
             muted: !root.correctionEnabled
             highlighted: true
-            nodeWidth: 66
+            nodeWidth: root.styleIndex === 3 ? (root.spacious ? 178 : 150) : (root.spacious ? 124 : 66)
         }
         FlowArrow {}
         FlowNode {
-            title: "Text"
-            description: "The text used by voice review"
+            title: root.styleIndex === 3 ? "Final text" : "Text"
+            detail: root.styleIndex === 4 ? "review input" : "voice review"
+            description: "The final text used by voice review"
             iconKind: "review-ledger"
+            nodeWidth: root.styleIndex === 3 ? (root.spacious ? 140 : 118) : (root.spacious ? 104 : 66)
         }
+    }
+
+    Label {
+        visible: root.styleIndex === 4
+        x: diagramPadding + 14
+        y: diagramPadding + root.nodeHeight + 3
+        width: Math.max(0, root.contentWidth - diagramPadding * 2 - 28)
+        text: "Example:  raw \"micro controller\"  →  corrected \"microcontroller\""
+        color: Theme.inkMuted
+        font.family: Theme.monoFont
+        font.pixelSize: root.spacious ? 11 : 10
+        wrapMode: Text.Wrap
     }
 }
