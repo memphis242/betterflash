@@ -54,17 +54,25 @@ ColumnLayout {
             spacing: 14
             Layout.fillWidth: true
 
-            Label { text: "Speech recognition"; color: Theme.inkMuted; font.pixelSize: 15 }
+            ModelSettingsSection {
+                id: sttModelSection
+                title: "Speech recognition"
             ModelLocationPicker {
                 id: sttProvider
                 currentIndex: voice.sttProvider === "groq" ? 1 : 0
                 localHint: "Runs speech recognition on this machine after the local model is installed."
                 remoteHint: "Sends microphone audio to the configured cloud speech provider. A network connection and provider key are required."
-                onActivated: {
-                    voice.sttProvider = index === 1 ? "groq" : "local"
-                    if (index !== 1)
+                onActivated: selectedIndex => {
+                    voice.sttProvider = selectedIndex === 1 ? "groq" : "local"
+                    if (selectedIndex !== 1)
                         root.clearSecretDraft()
                 }
+            }
+            Label {
+                visible: sttProvider.currentIndex === 1
+                text: "Remote model"
+                color: Theme.inkMuted
+                font.pixelSize: 15
             }
             TextField {
                 Layout.fillWidth: true
@@ -74,6 +82,12 @@ ColumnLayout {
                 placeholderText: "whisper-large-v3-turbo"
                 font.pixelSize: 17
             }
+            Label {
+                visible: sttProvider.currentIndex === 0
+                text: "Local model folder"
+                color: Theme.inkMuted
+                font.pixelSize: 15
+            }
             TextField {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
@@ -81,6 +95,12 @@ ColumnLayout {
                 onEditingFinished: voice.modelPath = text.trim()
                 placeholderText: "Local model folder"
                 font.pixelSize: 17
+            }
+            Label {
+                visible: sttProvider.currentIndex === 0
+                text: "Selected local model"
+                color: Theme.inkMuted
+                font.pixelSize: 15
             }
             SettingsCombo {
                 Layout.fillWidth: true
@@ -117,14 +137,14 @@ ColumnLayout {
                 spacing: 10
                 ModelActionButton {
                     visible: sttProvider.currentIndex === 0
-                    width: Math.min(implicitWidth, root.width)
+                    width: Math.min(implicitWidth, parent.width)
                     actionKind: "download"
                     text: voice.sttModelDownloading ? "Cancel download" : voice.sttModelReady ? "Download again" : "Download local model"
                     enabled: true
                     onClicked: voice.sttModelDownloading ? voice.cancelSttDownload() : voice.downloadSttModel()
                 }
                 ModelActionButton {
-                    width: Math.min(implicitWidth, root.width)
+                    width: Math.min(implicitWidth, parent.width)
                     actionKind: "test"
                     text: voice.sttTestBusy ? "Testing..." : "Test model"
                     enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy)
@@ -133,6 +153,48 @@ ColumnLayout {
                     hint: enabled ? "Run a short speech recognition check" : "Download the local model before testing"
                     onClicked: voice.testSttModel()
                 }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                visible: sttProvider.currentIndex === 1
+                Label {
+                    text: "Groq API key"
+                    color: Theme.inkMuted
+                    font.pixelSize: 15
+                }
+                TextField {
+                    Layout.fillWidth: true
+                    echoMode: TextInput.Password
+                    text: root.apiKeyDraft
+                    placeholderText: voice.hasApiKey ? "Leave empty to keep the stored Groq key" : "Groq API key"
+                    font.pixelSize: 17
+                    onTextChanged: if (activeFocus) root.apiKeyDraft = text
+                }
+                SettingsButton {
+                    text: "Save key"
+                    enabled: root.apiKeyDraft.trim().length > 0
+                    onClicked: { voice.setApiKey(root.apiKeyDraft.trim()); root.apiKeyDraft = "" }
+                }
+                SettingsButton {
+                    visible: voice.hasApiKey
+                    text: "Clear stored key"
+                    onClicked: voice.clearApiKey()
+                }
+                ValueRow {
+                    label: "Credential storage"
+                    value: voice.keyStorageStatus
+                    Layout.fillWidth: true
+                }
+            }
+            ModelTestResult {
+                Layout.fillWidth: true
+                title: "Speech recognition test"
+                report: voice.sttTestReport
+                status: voice.sttTestStatus
+                error: voice.sttTestError
+                busy: voice.sttTestBusy
+            }
             }
             Label {
                 text: "Recognition vocabulary"
@@ -219,40 +281,9 @@ ColumnLayout {
                     ? "Configure the provider key, endpoint, and model in Language model settings"
                     : "Download the selected language model in Language model settings"
             }
-            ModelTestResult {
-                Layout.fillWidth: true
-                title: "Speech recognition test"
-                report: voice.sttTestReport
-                status: voice.sttTestStatus
-                error: voice.sttTestError
-                busy: voice.sttTestBusy
-            }
             CustomSttTests {
                 Layout.fillWidth: true
                 voice: root.voice
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 10
-                visible: sttProvider.currentIndex === 1
-                TextField {
-                    Layout.fillWidth: true
-                    echoMode: TextInput.Password
-                    text: root.apiKeyDraft
-                    placeholderText: voice.hasApiKey ? "Leave empty to keep the stored Groq key" : "Groq API key"
-                    font.pixelSize: 17
-                    onTextChanged: if (activeFocus) root.apiKeyDraft = text
-                }
-                SettingsButton {
-                    text: "Save key"
-                    enabled: root.apiKeyDraft.trim().length > 0
-                    onClicked: { voice.setApiKey(root.apiKeyDraft.trim()); root.apiKeyDraft = "" }
-                }
-                SettingsButton {
-                    visible: voice.hasApiKey
-                    text: "Clear stored key"
-                    onClicked: voice.clearApiKey()
-                }
             }
         }
 
@@ -261,13 +292,20 @@ ColumnLayout {
             spacing: 14
             Layout.fillWidth: true
 
-            Label { text: "Speech output"; color: Theme.inkMuted; font.pixelSize: 15 }
+            ModelSettingsSection {
+                id: ttsModelSection
+                title: "Speech output"
             ModelLocationPicker {
                 id: ttsProvider
                 currentIndex: voice.ttsProvider === "remote" ? 1 : 0
                 localHint: "Uses a speech engine on this machine. Choose the local engine below."
                 remoteHint: "Uses a configured remote speech provider. A network connection and provider key are required."
-                onActivated: if (index === 1) voice.ttsProvider = "remote"; else if (voice.ttsProvider === "remote") voice.ttsProvider = "local"
+                onActivated: selectedIndex => {
+                    if (selectedIndex === 1)
+                        voice.ttsProvider = "remote"
+                    else if (voice.ttsProvider === "remote")
+                        voice.ttsProvider = "local"
+                }
             }
             Label { text: "Local speech engine"; visible: ttsProvider.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
             SettingsCombo {
@@ -320,13 +358,13 @@ ColumnLayout {
                 spacing: 10
                 ModelActionButton {
                     visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0
-                    width: Math.min(implicitWidth, root.width)
+                    width: Math.min(implicitWidth, parent.width)
                     actionKind: "download"
                     text: voice.ttsModelDownloading ? "Cancel download" : voice.ttsReady ? "Download again" : "Download local model"
                     onClicked: voice.ttsModelDownloading ? voice.cancelTtsDownload() : voice.downloadTtsModel()
                 }
                 ModelActionButton {
-                    width: Math.min(implicitWidth, root.width)
+                    width: Math.min(implicitWidth, parent.width)
                     actionKind: "test"
                     text: voice.ttsTestBusy ? "Testing..." : "Test model"
                     enabled: !voice.modelTestBusy && (!root.ai || !root.ai.testBusy) && (voice.ttsProvider === "remote" ? voice.remoteTts.ready : voice.ttsProvider === "system" || voice.ttsReady)
@@ -342,15 +380,10 @@ ColumnLayout {
                 error: voice.ttsTestError
                 busy: voice.ttsTestBusy
             }
+            }
         }
     }
 
-    ValueRow {
-        visible: voice.sttProvider === "groq"
-        label: "Credential storage"
-        value: voice.keyStorageStatus
-        Layout.fillWidth: true
-    }
     ModelStatus {
         state: !voice.enabled ? "disabled" : voice.lastError ? "degraded" : voice.ready ? "ready" : "busy"
         text: voice.status

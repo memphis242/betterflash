@@ -368,12 +368,18 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
+                        ModelSettingsSection {
+                            id: aiModelSection
+                            title: "Language model"
                         ModelLocationPicker {
                             id: aiProvider
                             currentIndex: ai.provider === "remote" ? 1 : 0
                             localHint: "Runs the language model on your machine and works offline after the model is downloaded."
                             remoteHint: "Sends language model requests to the configured cloud provider. A network connection and provider key are required."
-                            onActivated: if (typeof ai.provider !== "undefined") ai.provider = index === 1 ? "remote" : "local"
+                            onActivated: selectedIndex => {
+                                if (typeof ai.provider !== "undefined")
+                                    ai.provider = selectedIndex === 1 ? "remote" : "local"
+                            }
                         }
                         Label { visible: aiProvider.currentIndex === 0; text: "Selected local model"; color: Theme.inkMuted; font.pixelSize: 15 }
                         SettingsCombo {
@@ -463,14 +469,6 @@ Item {
                             font.pixelSize: 17
                             placeholderText: "Provider model identifier"
                         }
-                        Label {
-                            textFormat: Text.PlainText
-                            text: "A remaining-card summary is generated only when you request it during a review. Before generating, you can see which provider receives the question prompts."
-                            color: Theme.inkMuted
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 16
-                        }
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 10
@@ -513,6 +511,15 @@ Item {
                         SettingsError {
                             message: ai.error
                             Layout.fillWidth: true
+                        }
+                        }
+                        Label {
+                            textFormat: Text.PlainText
+                            text: "A remaining-card summary is generated only when you request it during a review. Before generating, you can see which provider receives the question prompts."
+                            color: Theme.inkMuted
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.pixelSize: 16
                         }
                     }
                     ColumnLayout {

@@ -47,12 +47,15 @@ ColumnLayout {
         checked: settings.search.semanticEnabled
         onToggled: settings.search.semanticEnabled = checked
     }
+    ModelSettingsSection {
+        id: embeddingModelSection
+        title: "Semantic retrieval model"
     ModelLocationPicker {
         id: embeddingLocation
         localHint: "Runs semantic retrieval on this machine using the selected embedding model."
         remoteHint: "Uses a cloud embedding endpoint. The configured endpoint, model, and key are required."
         currentIndex: settings.search.provider === "remote" ? 1 : 0
-        onActivated: settings.search.provider = index === 1 ? "remote" : "local"
+        onActivated: selectedIndex => settings.search.provider = selectedIndex === 1 ? "remote" : "local"
     }
     ValueRow {
         visible: settings.search.semanticEnabled && settings.search.provider === "local"
@@ -169,17 +172,6 @@ ColumnLayout {
         busy: settings.search.testBusy
         Layout.fillWidth: true
     }
-    Flow {
-        Layout.fillWidth: true
-        spacing: 10
-        SettingsButton {
-            width: Math.min(implicitWidth, parent.width)
-            text: "Rebuild search index"
-            enabled: !settings.search.downloading
-            hint: "Clear cached embeddings. The next search encodes cards in the active search scope again."
-            onClicked: settings.search.rebuildIndex()
-        }
-    }
     ValueRow {
         visible: settings.search.provider === "remote"
         label: "Remote service"
@@ -207,5 +199,18 @@ ColumnLayout {
         text: "Clear stored embedding key"
         visible: settings.search.hasApiKey && settings.search.provider === "remote" && !reuseKey.checked
         onClicked: settings.search.clearApiKey()
+    }
+    }
+
+    Flow {
+        Layout.fillWidth: true
+        spacing: 10
+        SettingsButton {
+            width: Math.min(implicitWidth, parent.width)
+            text: "Rebuild search index"
+            enabled: !settings.search.downloading
+            hint: "Clear cached embeddings. The next search encodes cards in the active search scope again."
+            onClicked: settings.search.rebuildIndex()
+        }
     }
 }
