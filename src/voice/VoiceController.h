@@ -16,6 +16,7 @@ class QThread;
 class QTimer;
 class VoiceWorker;
 class LocalTtsWorker;
+class RemoteTts;
 class ModelDownload;
 class QAudioSink;
 class QBuffer;
@@ -64,6 +65,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString modelTestError READ modelTestError NOTIFY modelTestChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyStorageStatusChanged)
     Q_PROPERTY(QObject *customSttTests READ customSttTests CONSTANT)
+    Q_PROPERTY(QObject *remoteTts READ remoteTts CONSTANT)
 public:
     explicit VoiceController(QObject *parent = nullptr);
     ~VoiceController() override;
@@ -107,6 +109,7 @@ public:
     [[nodiscard]] QString modelTestError() const { return m_modelTestError; }
     [[nodiscard]] QString keyStorageStatus() const;
     [[nodiscard]] QObject *customSttTests() const;
+    [[nodiscard]] QObject *remoteTts() const;
 
     Q_INVOKABLE void setEnabled(bool enabled);
     void setModelPath(const QString &path);
@@ -238,6 +241,7 @@ private:
     QPointer<LocalTtsWorker> m_ttsWorker;
     QPointer<QThread> m_ttsThread;
     QPointer<QThread> m_retiringTtsThread;
+    RemoteTts *const m_remoteTts;
     QAudioSink *m_audioSink = nullptr;
     QBuffer *m_playbackBuffer = nullptr;
     QAudioFormat m_playbackFormat;
