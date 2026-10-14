@@ -26,3 +26,14 @@ separate compatibility milestone after Android device verification.
 - Evaluate additional speech runtimes and Android-compatible packages.
 - Revisit GPU backends and model quantization after measuring startup, memory,
   and review latency.
+
+## In-app usage and configuration help
+
+- Explore an optional language-model help feature using the selected local or
+  remote model. Help should explain the application's current controls and
+  settings in plain language, including starting a particular deck's review,
+  resetting a deck's review state, and configuring model connections.
+- Ground answers in versioned application documentation and the current screen
+  so instructions match the installed application. Keep credentials out of
+  help prompts. Guidance and any future user-requested actions need separate
+  interaction design; this feature is a to-do, not an implemented help panel.
