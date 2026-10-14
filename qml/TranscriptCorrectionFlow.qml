@@ -22,8 +22,18 @@ Flickable {
     activeFocusOnTab: interactive
     Keys.onLeftPressed: contentX = Math.max(0, contentX - 96)
     Keys.onRightPressed: contentX = Math.min(Math.max(0, contentWidth - width), contentX + 96)
-    Keys.onHomePressed: contentX = 0
-    Keys.onEndPressed: contentX = Math.max(0, contentWidth - width)
+    Keys.onPressed: event => {
+        switch (event.key) {
+        case Qt.Key_Home:
+            contentX = 0
+            event.accepted = true
+            break
+        case Qt.Key_End:
+            contentX = Math.max(0, contentWidth - width)
+            event.accepted = true
+            break
+        }
+    }
     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
 
     component FlowNode: Rectangle {

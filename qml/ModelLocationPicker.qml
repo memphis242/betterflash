@@ -25,6 +25,21 @@ ColumnLayout {
             remoteButton.forceActiveFocus()
     }
 
+    function handleNavigation(event) {
+        switch (event.key) {
+        case Qt.Key_Left:
+        case Qt.Key_Home:
+            root.select(0)
+            event.accepted = true
+            break
+        case Qt.Key_Right:
+        case Qt.Key_End:
+            root.select(1)
+            event.accepted = true
+            break
+        }
+    }
+
     Rectangle {
         id: locationFrame
         Layout.fillWidth: true
@@ -92,10 +107,7 @@ ColumnLayout {
                         radius: 6
                     }
                     onClicked: root.select(0)
-                    Keys.onLeftPressed: root.select(0)
-                    Keys.onRightPressed: root.select(1)
-                    Keys.onHomePressed: root.select(0)
-                    Keys.onEndPressed: root.select(1)
+                    Keys.onPressed: event => root.handleNavigation(event)
                 }
 
                 Button {
@@ -133,10 +145,7 @@ ColumnLayout {
                         radius: 6
                     }
                     onClicked: root.select(1)
-                    Keys.onLeftPressed: root.select(0)
-                    Keys.onRightPressed: root.select(1)
-                    Keys.onHomePressed: root.select(0)
-                    Keys.onEndPressed: root.select(1)
+                    Keys.onPressed: event => root.handleNavigation(event)
                 }
             }
         }
