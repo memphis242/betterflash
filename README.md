@@ -289,7 +289,9 @@ Voice recognition, speech synthesis, and language-model features are local by
 default. Desktop voice uses managed Whisper Turbo by default, with Vosk alternatives
 and Piper/Sherpa speech output downloaded on demand;
 the Settings page exposes progress, cancellation, and known-input validation.
-Groq recognition and other remote providers remain explicit BYOK choices. Keys
+Each model settings page has a **Location of model:** selector with Local and
+Remote choices. Groq recognition, remote speech output, and other remote
+providers remain explicit BYOK choices. Keys
 are saved through the desktop Secret Service when available and never enter
 collection data, backups, sync events, or logs. See [voice setup](docs/voice.md)
 and [local model support](docs/local-models.md).

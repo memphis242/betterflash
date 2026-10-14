@@ -2,8 +2,10 @@
 
 Speech recognition and reading are local by default. Settings > Voice keeps
 provider fields on the page and exposes a separate **Test model** action for
-recognition and reading. Groq recognition and the operating system's Qt speech
-engine are explicit alternatives. Voice starts disabled, so opening the app
+recognition and reading. **Location of model:** uses the same Local and Remote
+choices as Language model and Search settings. Groq recognition and remote
+speech output are explicit alternatives. The operating system's Qt speech
+engine remains a local speech-output choice. Voice starts disabled, so opening the app
 does not start a microphone or load inference models.
 
 ## Managed local speech
@@ -164,7 +166,8 @@ is discarded after playback or cancellation.
 
 ## Cloud and system alternatives
 
-Select Groq in Settings > Voice and add an API key when cloud recognition is
+Select **Remote (cloud-provider)** in Settings > Voice > Speech recognition
+and add a Groq API key when cloud recognition is
 desired. The default cloud model is `whisper-large-v3-turbo`; requests use Groq's
 HTTPS transcription endpoint and a JSON response.
 [Groq speech documentation](https://console.groq.com/docs/speech-to-text)
@@ -176,7 +179,23 @@ is an optional development alternative. QML only sees key availability and
 storage status. Keys stay out of application settings, SQLite collections,
 backups, logs, sync payloads, and process arguments.
 
-The **System speech engine** option uses Qt's selected platform engine. Fedora
+Speech output also offers **Remote (cloud-provider)**. Configure the speech
+endpoint, model, voice, and a separate speech-output API key. The defaults use
+Groq's `canopylabs/orpheus-v1-english` model with the `troy` voice. Compatible
+speech endpoints must accept the same JSON speech request and return WAV audio.
+Long prompts are split into smaller requests to respect Groq's documented
+200-character input limit.
+[Groq speech-output documentation](https://console.groq.com/docs/text-to-speech/orpheus)
+
+The remote connection sends the text being read to the selected service only
+when speech or its explicit model test is requested. Selecting Remote or
+opening Settings does not start a request. The speech-output key uses its own
+Secret Service entry; it is not automatically copied from recognition.
+`GROQ_TTS_API_KEY` is an optional development alternative. There is no automatic
+fallback to another speech provider. Remote audio uses the same default output
+device and microphone suspension as local playback.
+
+Under Local, the **System speech engine** option uses Qt's selected platform engine. Fedora
 requires a working Speech Dispatcher engine and audio output for that option;
 Android uses the configured Android system engine.
 [Qt speech API](https://doc.qt.io/qt-6/qtexttospeech.html)

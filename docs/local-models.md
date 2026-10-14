@@ -83,8 +83,9 @@ runtime uses its own compatible ONNX Runtime 1.17.1 library. Both presently use
 the CPU execution provider.
 
 Cloud choices send requests to the configured provider over HTTPS. Groq speech
-recognition uploads audio; remote language and embedding requests send their
-input text. System speech output delegates to Qt's installed speech engine.
+recognition uploads audio; remote language, embedding, and speech-output
+requests send their input text. Remote speech returns WAV audio for native
+playback. System speech output delegates to Qt's installed speech engine.
 Whisper Turbo Q8_0 with beam decoding took about 3.6 seconds including loading
 on the development CPU for a 7.8-second acronym recording. This is one sample,
 not a cross-device latency guarantee. Optional language-model transcript correction adds a separate inference
