@@ -1199,6 +1199,7 @@ void VoiceController::onSpeechStateChanged() {
 
 void VoiceController::finishSpeech() {
     if (!m_speaking) return;
+    m_remoteTts->cancel();
     m_pendingSpeech.clear();
     m_ttsStarted = false;
     m_ttsIssued = false;

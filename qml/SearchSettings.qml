@@ -49,7 +49,6 @@ ColumnLayout {
     }
     ModelLocationPicker {
         id: embeddingLocation
-        visible: settings.search.semanticEnabled
         localHint: "Runs semantic retrieval on this machine using the selected embedding model."
         remoteHint: "Uses a cloud embedding endpoint. The configured endpoint, model, and key are required."
         currentIndex: settings.search.provider === "remote" ? 1 : 0

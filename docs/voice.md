@@ -182,7 +182,7 @@ backups, logs, sync payloads, and process arguments.
 Speech output also offers **Remote (cloud-provider)**. Configure the speech
 endpoint, model, voice, and a separate speech-output API key. The defaults use
 Groq's `canopylabs/orpheus-v1-english` model with the `troy` voice. Compatible
-speech endpoints must accept the same JSON speech request and return WAV audio.
+speech endpoints must accept the same JSON speech request and return PCM WAV audio.
 Long prompts are split into smaller requests to respect Groq's documented
 200-character input limit.
 [Groq speech-output documentation](https://console.groq.com/docs/text-to-speech/orpheus)
