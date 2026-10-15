@@ -84,7 +84,7 @@ Popup {
                 RowLayout {
                     Layout.fillWidth: true; spacing: 10
                     Label { text: "Type"; color: Theme.inkMuted; font.family: Theme.uiFont; font.pixelSize: 13; Layout.preferredWidth: 52 }
-                    ComboBox {
+                    AppComboBox {
                         id: kindFilter
                         Layout.fillWidth: true
                         onActiveFocusChanged: if (activeFocus) popup.revealField(kindFilter)
@@ -97,7 +97,7 @@ Popup {
                 RowLayout {
                     Layout.fillWidth: true; spacing: 10
                     Label { text: "Review"; color: Theme.inkMuted; font.family: Theme.uiFont; font.pixelSize: 13; Layout.preferredWidth: 52 }
-                    ComboBox {
+                    AppComboBox {
                         id: stateFilter
                         Layout.fillWidth: true
                         onActiveFocusChanged: if (activeFocus) popup.revealField(stateFilter)

@@ -7,7 +7,7 @@ ColumnLayout {
     readonly property var search: librarySearch
     spacing: 18
     component SettingsButton: AppButton { font.pixelSize: 16 }
-    component SettingsCombo: ComboBox { font.pixelSize: 17 }
+    component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
     component SettingsError: ErrorBlock { textSize: 16 }
 

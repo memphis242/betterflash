@@ -1086,7 +1086,7 @@ ApplicationWindow {
                 text: "Parent deck (optional)"
                 color: Theme.inkMuted
             }
-            ComboBox {
+            AppComboBox {
                 id: deckParent
                 objectName: "deckParent"
                 model: window.deckParentChoices()
@@ -1181,7 +1181,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                ComboBox {
+                AppComboBox {
                     id: cardDeck
                     objectName: "cardDeck"
                     model: app.decks
@@ -1192,7 +1192,7 @@ ApplicationWindow {
                     ToolTip.visible: hovered
                     ToolTip.text: "Deck containing this card"
                 }
-                ComboBox {
+                AppComboBox {
                     id: cardKind
                     objectName: "cardKind"
                     model: [

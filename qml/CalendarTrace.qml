@@ -461,7 +461,7 @@ Item {
             implicitWidth: 28
             onClicked: trace.zoomBy(1, trace.plotLeft + trace.plotWidth() / 2)
         }
-        ComboBox {
+        AppComboBox {
             id: zoomPicker
             width: 104
             height: 32
@@ -473,18 +473,6 @@ Item {
             Accessible.name: "Visible time span"
             ToolTip.visible: hovered
             ToolTip.text: "Choose the time span shown by the calendar"
-            background: Rectangle {
-                color: Theme.surfaceRaised
-                border.color: Theme.ledgerRule
-                radius: 5
-            }
-            contentItem: Label {
-                text: zoomPicker.displayText
-                color: Theme.ink
-                font: zoomPicker.font
-                verticalAlignment: Text.AlignVCenter
-                leftPadding: 8
-            }
         }
         AppButton {
             text: "+"

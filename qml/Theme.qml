@@ -24,6 +24,10 @@ QtObject {
     readonly property color editorTabActiveInk: dark ? "#211722" : "#322832"
     readonly property color editorTabInactive: dark ? "#3b2e3a" : "#ede5dc"
     readonly property color editorField: dark ? "#241c28" : "#fffdf8"
+    readonly property color comboFill: editorField
+    readonly property color comboHover: dark ? "#463144" : "#f7eee1"
+    readonly property color comboOpen: dark ? "#563b3f" : "#f1d9cd"
+    readonly property color comboDisabled: dark ? "#2a222d" : "#f1ece4"
     readonly property color timelineDue: dark ? "#c6b2e3" : "#74528c"
     readonly property color success: dark ? "#a9c79b" : "#38704a"
     readonly property color warning: dark ? "#e6c17a" : "#815714"
