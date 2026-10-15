@@ -142,6 +142,10 @@ ApplicationWindow {
             label: "Pause or resume review"
         },
         {
+            action: "microphone",
+            label: "Trigger microphone"
+        },
+        {
             action: "reviewPage",
             label: "Open Review"
         },
@@ -558,6 +562,12 @@ ApplicationWindow {
     function shortcutAllowed(action) {
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
             return cardDialog.visible && !imageDialog.visible && !errorDialog.visible && (action === "saveCard" || editorTabs.currentIndex === 0)
+        if (action === "microphone") {
+            const tests = voice.customSttTests
+            if (typing || app.busy || voice.modelTestBusy || voice.sttTestBusy || voice.ttsTestBusy
+                || tests && (tests.busy || tests.recording))
+                return false
+        }
         if (modalOpen)
             return false
         switch (action) {
@@ -681,6 +691,9 @@ ApplicationWindow {
                 app.resumeReview()
             else
                 app.pauseReview()
+            break
+        case "microphone":
+            voice.triggerMicrophone()
             break
         case "editorSplit":
             splitOrMove()
@@ -2207,6 +2220,7 @@ ApplicationWindow {
             required property string modelData
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
+            autoRepeat: modelData !== "microphone"
             enabled: window.shortcutAllowed(modelData)
             onActivated: window.runAction(modelData)
         }

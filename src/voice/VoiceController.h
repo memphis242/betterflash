@@ -27,6 +27,8 @@ class TranscriptCorrector;
 class VoiceController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
+    Q_PROPERTY(QString reviewMode READ reviewMode WRITE setReviewMode NOTIFY reviewModeChanged)
+    Q_PROPERTY(bool microphoneArmed READ microphoneArmed NOTIFY microphoneArmedChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
     Q_PROPERTY(bool listening READ listening NOTIFY listeningChanged)
     Q_PROPERTY(bool speaking READ speaking NOTIFY speakingChanged)
@@ -71,6 +73,8 @@ public:
     ~VoiceController() override;
 
     [[nodiscard]] bool enabled() const { return m_enabled; }
+    [[nodiscard]] QString reviewMode() const { return m_reviewMode; }
+    [[nodiscard]] bool microphoneArmed() const { return m_microphoneArmed; }
     [[nodiscard]] bool ready() const { return m_ready; }
     [[nodiscard]] bool listening() const { return m_listening; }
     [[nodiscard]] bool speaking() const { return m_speaking; }
@@ -112,6 +116,7 @@ public:
     [[nodiscard]] QObject *remoteTts() const;
 
     Q_INVOKABLE void setEnabled(bool enabled);
+    Q_INVOKABLE void setReviewMode(const QString &mode);
     void setModelPath(const QString &path);
     void setSttProvider(const QString &provider);
     void setSttModel(const QString &model);
@@ -128,6 +133,7 @@ public:
     Q_INVOKABLE void cancelTtsDownload();
     Q_INVOKABLE void startListening();
     Q_INVOKABLE void stopListening();
+    Q_INVOKABLE void triggerMicrophone();
     Q_INVOKABLE void speak(const QString &text);
     Q_INVOKABLE void stopSpeaking();
     Q_INVOKABLE void cancelPendingRecognition();
@@ -138,6 +144,8 @@ public:
 
 signals:
     void enabledChanged();
+    void reviewModeChanged();
+    void microphoneArmedChanged();
     void readyChanged();
     void listeningChanged();
     void speakingChanged();
@@ -173,6 +181,7 @@ private:
     void onSpeechStateChanged();
     void setReady(bool ready);
     void setListeningState(bool listening);
+    void setMicrophoneArmed(bool armed);
     void setSpeakingState(bool speaking);
     void setStatus(const QString &status);
     void setError(const QString &code, const QString &message);
@@ -193,6 +202,8 @@ private:
     void cancelTranscriptCorrection();
 
     bool m_enabled = false;
+    QString m_reviewMode = QStringLiteral("trigger");
+    bool m_microphoneArmed = false;
     bool m_ready = false;
     bool m_listening = false;
     bool m_speaking = false;
@@ -260,5 +271,7 @@ private:
     bool m_customVoiceSuspended = false;
     QPointer<VoiceWorker> m_worker;
     QPointer<QThread> m_workerThread;
+    QPointer<QThread> m_retiringWorkerThread;
+    bool m_workerRestartPending = false;
     QVector<QPointer<QThread>> m_threads;
 };

@@ -239,6 +239,53 @@ Item {
                     onClicked: shortcuts.reset()
                 }
             }
+            ColumnLayout {
+                visible: settingsPage.section === 2
+                Layout.fillWidth: true
+                spacing: 5
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Voice review mode"
+                        color: Theme.ink
+                        font.pixelSize: 16
+                    }
+                    AppComboBox {
+                        objectName: "voiceReviewMode"
+                        font.pixelSize: 17
+                        Layout.preferredWidth: Math.min(260, settingsContent.width * 0.52)
+                        model: ["Keyboard trigger", "Always on"]
+                        currentIndex: settingsPage.voiceController.reviewMode === "always-on" ? 1 : 0
+                        onActivated: settingsPage.voiceController.reviewMode = currentIndex === 1 ? "always-on" : "trigger"
+                        enabled: !settingsPage.voiceController.modelTestBusy
+                            && !settingsPage.voiceController.sttTestBusy
+                            && !settingsPage.voiceController.ttsTestBusy
+                            && (!settingsPage.voiceController.customSttTests
+                                || (!settingsPage.voiceController.customSttTests.busy
+                                    && !settingsPage.voiceController.customSttTests.recording))
+                        Accessible.name: "Voice review mode"
+                        ToolTip.visible: modeHover.hovered
+                        ToolTip.text: enabled
+                            ? "Choose whether voice review listens continuously or waits for a trigger"
+                            : "Voice review mode cannot change during a model test or recording"
+                        HoverHandler { id: modeHover }
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                }
+                Label {
+                    text: settingsPage.voiceController.reviewMode === "always-on"
+                        ? "Voice review listens between utterances while voice review is enabled."
+                        : shortcuts.bindings.microphone
+                            ? "Press " + shortcuts.bindings.microphone + " to speak once. Press again to cancel."
+                            : "Assign a microphone shortcut in Settings > Key bindings."
+                    color: Theme.inkMuted
+                    font.pixelSize: 13
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+            }
             VoiceSettingsTabs {
                 id: voiceTabs
                 visible: settingsPage.section === 2

@@ -36,6 +36,7 @@ public:
     void setOpenTranscriptionTest(const bool open) { m_openTranscriptionTest = open; }
     void setRecognitionVocabulary(QString vocabulary) { m_recognitionVocabulary = std::move(vocabulary); }
     void setWhisperAcceleration(QString acceleration) { m_whisperAcceleration = std::move(acceleration); }
+    void setOneShot(const bool oneShot) { m_oneShot = oneShot; }
 
 public slots:
     void initialize();
@@ -49,7 +50,9 @@ signals:
     void listeningChanged(bool listening, quint64 epoch);
     void processingChanged(bool processing, quint64 epoch);
     void transcriptReady(const QString &transcript, quint64 epoch);
+    void oneShotFinished(quint64 epoch);
     void errorOccurred(const QString &code, const QString &message, bool fatal);
+    void captureError(const QString &code, const QString &message, bool fatal, quint64 epoch);
     void testFinished(const QString &transcript, bool passed, const QString &error);
 
 private:
@@ -66,6 +69,7 @@ private:
     void processLocalResult(const QByteArray &json);
     [[nodiscard]] bool usesWhisper() const;
     void reportError(const QString &code, const QString &message, bool fatal);
+    void reportCaptureError(const QString &code, const QString &message, bool fatal, quint64 epoch);
 
     QString m_modelPath;
     QString m_runtimePath;
@@ -84,6 +88,7 @@ private:
     quint64 m_captureEpoch = 0;
     bool m_initialized = false;
     bool m_requestedListening = false;
+    bool m_oneShot = false;
     bool m_listening = false;
     bool m_processing = false;
     bool m_shuttingDown = false;

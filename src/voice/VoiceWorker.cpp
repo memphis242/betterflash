@@ -153,13 +153,13 @@ void VoiceWorker::initialize() {
             if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, epoch);
         });
         connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
-            if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportError(code, message, fatal);
+            if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportCaptureError(code, message, fatal, epoch);
         });
         connect(m_transcriber, &VoiceTranscriber::finished, this, [this](const quint64 epoch) {
             if (epoch != m_captureEpoch || !m_requestedListening || m_shuttingDown) return;
             m_processing = false;
             emit processingChanged(false, epoch);
-            resumeCapture(epoch);
+            if (!m_oneShot) resumeCapture(epoch);
         });
     } else if (m_provider == QStringLiteral("local")) {
         if (usesWhisper()) {
@@ -175,13 +175,13 @@ void VoiceWorker::initialize() {
                 if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, epoch);
             });
             connect(m_whisper, &WhisperTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
-                if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportError(code, message, fatal);
+                if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportCaptureError(code, message, fatal, epoch);
             });
             connect(m_whisper, &WhisperTranscriber::finished, this, [this](const quint64 epoch) {
                 if (epoch != m_captureEpoch || !m_requestedListening || m_shuttingDown) return;
                 m_processing = false;
                 emit processingChanged(false, epoch);
-                resumeCapture(epoch);
+                if (!m_oneShot) resumeCapture(epoch);
             });
         } else if (!loadLocalModel()) return;
     } else {
@@ -365,7 +365,7 @@ bool VoiceWorker::prepareAudio() {
     m_audio->setBufferSize(format.bytesForDuration(200000));
     connect(m_audio, &QAudioSource::stateChanged, this, [this](const auto) {
         if (m_listening && m_audio && m_audio->error() != QAudio::NoError)
-            reportError(QStringLiteral("VOICE_MICROPHONE_FAILED"), QStringLiteral("Microphone capture stopped. Check audio input access, then enable voice again."), true);
+            reportCaptureError(QStringLiteral("VOICE_MICROPHONE_FAILED"), QStringLiteral("Microphone capture stopped. Check audio input access, then enable voice again."), true, m_captureEpoch);
     });
     return true;
 }
@@ -377,7 +377,7 @@ void VoiceWorker::startCapture() {
     m_utterance.reset();
     m_audioDevice = m_audio->start();
     if (!m_audioDevice || m_audio->error() != QAudio::NoError) {
-        reportError(QStringLiteral("VOICE_MICROPHONE_FAILED"), QStringLiteral("Microphone capture failed. Check the default input and microphone permission, then enable voice again."), true);
+        reportCaptureError(QStringLiteral("VOICE_MICROPHONE_FAILED"), QStringLiteral("Microphone capture failed. Check the default input and microphone permission, then enable voice again."), true, m_captureEpoch);
         return;
     }
     m_listening = true;
@@ -430,7 +430,13 @@ void VoiceWorker::resumeCapture(const quint64 epoch) {
 
 void VoiceWorker::processLocalResult(const QByteArray &json) {
     const QString text = QJsonDocument::fromJson(json).object().value(QStringLiteral("text")).toString().trimmed();
-    if (!text.isEmpty() && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, m_captureEpoch);
+    if (!m_requestedListening || m_shuttingDown) return;
+    const quint64 epoch = m_captureEpoch;
+    if (m_oneShot) {
+        stopCapture();
+    }
+    if (!text.isEmpty()) emit transcriptReady(text, epoch);
+    if (m_oneShot) emit oneShotFinished(epoch);
 }
 
 void VoiceWorker::setListening(const bool listening, const quint64 epoch) {
@@ -453,7 +459,6 @@ void VoiceWorker::cancelRequest() {
     if (m_whisper) m_whisper->cancel();
     if (m_processing) {
         m_processing = false;
-        emit processingChanged(false, m_captureEpoch);
     }
 }
 
@@ -465,6 +470,16 @@ void VoiceWorker::reportError(const QString &code, const QString &message, const
         stopCapture();
     }
     emit errorOccurred(code, message, fatal);
+}
+
+void VoiceWorker::reportCaptureError(const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
+    if (fatal) {
+        m_requestedListening = false;
+        m_initialized = false;
+        cancelRequest();
+        stopCapture();
+    }
+    emit captureError(code, message, fatal, epoch);
 }
 
 void VoiceWorker::shutdown() {

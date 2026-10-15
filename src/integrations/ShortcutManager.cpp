@@ -1,5 +1,6 @@
 #include "ShortcutManager.h"
 #include <QKeySequence>
+#include <QStringList>
 
 QVariantMap ShortcutManager::defaultBindings() {
     return {
@@ -19,6 +20,7 @@ QVariantMap ShortcutManager::defaultBindings() {
         {QStringLiteral("defer"), QStringLiteral("D")},
         {QStringLiteral("postpone"), QStringLiteral("S")},
         {QStringLiteral("pause"), QStringLiteral("P")},
+        {QStringLiteral("microphone"), QStringLiteral("M")},
         {QStringLiteral("reviewPage"), QStringLiteral("Alt+1")},
         {QStringLiteral("libraryPage"), QStringLiteral("Alt+2")},
         {QStringLiteral("historyPage"), QStringLiteral("Alt+3")},
@@ -33,6 +35,34 @@ ShortcutManager::ShortcutManager(QObject *parent) : QObject(parent), m_bindings(
     const QVariantMap stored = m_settings.value(QStringLiteral("keyboard/bindings")).toMap();
     for (auto it = stored.cbegin(); it != stored.cend(); ++it) {
         if (m_bindings.contains(it.key())) m_bindings[it.key()] = it.value();
+    }
+    const QString microphoneAction = QStringLiteral("microphone");
+    const QString microphoneBinding = m_bindings.value(microphoneAction).toString();
+    bool collision = false;
+    for (auto it = m_bindings.cbegin(); it != m_bindings.cend(); ++it) {
+        if (it.key() != microphoneAction && it.value().toString() == microphoneBinding) {
+            collision = true;
+            break;
+        }
+    }
+    if (collision) {
+        const QStringList fallbacks = {QStringLiteral("Ctrl+Shift+M"), QStringLiteral("F8")};
+        QString replacement;
+        for (const QString &candidate : fallbacks) {
+            bool used = false;
+            for (auto it = m_bindings.cbegin(); it != m_bindings.cend(); ++it) {
+                if (it.key() != microphoneAction && it.value().toString() == candidate) {
+                    used = true;
+                    break;
+                }
+            }
+            if (!used) {
+                replacement = candidate;
+                break;
+            }
+        }
+        m_bindings[microphoneAction] = replacement;
+        m_settings.setValue(QStringLiteral("keyboard/bindings"), m_bindings);
     }
 }
 QString ShortcutManager::get(const QString &action) const { return m_bindings.value(action).toString(); }

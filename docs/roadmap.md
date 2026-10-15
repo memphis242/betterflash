@@ -27,6 +27,13 @@ separate compatibility milestone after Android device verification.
 - Revisit GPU backends and model quantization after measuring startup, memory,
   and review latency.
 
+## Future hands-free voice review
+
+- Add a fully hands-free mode with a wake phrase and clear controls for false
+  activations, background noise, microphone device changes, and lifecycle state.
+- Define how hands-free voice review behaves across application navigation and
+  other screens before enabling it outside review.
+
 ## In-app usage and configuration help
 
 - Explore an optional language-model help feature using the selected local or

@@ -11,6 +11,19 @@ speech output are explicit alternatives. The operating system's Qt speech
 engine remains a local speech-output choice. Voice starts disabled, so opening the app
 does not start a microphone or load inference models.
 
+## Voice review listening modes
+
+Voice review uses **Keyboard trigger** by default. Enabling voice review in
+Settings prepares recognition without opening the microphone. Press the
+configured microphone shortcut (M by default) to enable voice if needed and arm
+one utterance. Press the shortcut again to cancel. The utterance ends after
+silence and the microphone stops. The shortcut can be changed under Settings >
+Key bindings; its current binding is shown in the Voice review settings help.
+
+**Always on** is an explicit opt-in mode. While voice review is enabled, it
+listens between utterances. The review microphone control starts or pauses the
+continuous listener, and disabling voice review in Settings stops it.
+
 ## Managed local speech
 
 On Fedora x86-64, enabling voice or using a prepared local model uses Whisper Large v3 Turbo Q8_0 through the bundled native

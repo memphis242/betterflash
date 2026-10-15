@@ -997,9 +997,15 @@ Item {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     glyph: "mic"
-                                    selected: voice.enabled
-                                    hint: voice.enabled ? "Disable voice review" : "Enable voice review"
-                                    onClicked: voice.enabled = !voice.enabled
+                                    selected: voice.microphoneArmed || voice.listening
+                                    enabled: !app.busy && !voice.modelTestBusy && !voice.sttTestBusy && !voice.ttsTestBusy
+                                        && (!voice.customSttTests || (!voice.customSttTests.busy && !voice.customSttTests.recording))
+                                    hint: voice.reviewMode === "always-on"
+                                        ? (voice.microphoneArmed || voice.listening ? "Stop listening" : "Start listening")
+                                            + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
+                                        : (voice.microphoneArmed || voice.listening ? "Cancel microphone" : "Speak once")
+                                            + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
+                                    onClicked: voice.triggerMicrophone()
                                 }
                             }
                             Label {

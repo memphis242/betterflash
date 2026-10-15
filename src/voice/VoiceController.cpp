@@ -138,6 +138,9 @@ VoiceController::VoiceController(QObject *parent)
         m_modelPath = storedModelPath;
     const QString provider = settings.value(QStringLiteral("provider"), QStringLiteral("local")).toString().trimmed().toLower();
     if (provider == QStringLiteral("local") || provider == QStringLiteral("groq")) m_sttProvider = provider;
+    const QString storedReviewMode = settings.value(QStringLiteral("reviewMode"), QStringLiteral("trigger")).toString().trimmed().toLower();
+    if (storedReviewMode == QStringLiteral("trigger") || storedReviewMode == QStringLiteral("always-on"))
+        m_reviewMode = storedReviewMode;
     const QString model = settings.value(QStringLiteral("sttModel"), m_sttModel).toString().trimmed();
     static const QRegularExpression validModel(QStringLiteral(R"(^[A-Za-z0-9._:-]{1,128}$)"));
     if (validModel.match(model).hasMatch()) m_sttModel = model;
@@ -181,7 +184,7 @@ VoiceController::VoiceController(QObject *parent)
         const bool active = m_customSttTests->busy() || m_customSttTests->recording();
         if (active && !m_customVoiceSuspended) {
             m_customVoiceSuspended = true;
-            m_testSavedWantsListening = m_wantsListening;
+            m_testSavedWantsListening = m_reviewMode == QStringLiteral("always-on") && m_wantsListening;
             stopListening();
             stopSpeaking();
         }
@@ -189,7 +192,7 @@ VoiceController::VoiceController(QObject *parent)
         else if (m_customVoiceSuspended) {
             m_customVoiceSuspended = false;
             setModelTestState(m_sttTestBusy || m_ttsTestBusy, m_customSttTests->status(), m_customSttTests->error());
-            if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); }
+            if (m_enabled) { m_wantsListening = m_testSavedWantsListening; setMicrophoneArmed(m_wantsListening); updateCapture(); }
         }
     });
     connect(m_secret, &SecretStore::changed, this, [this] {
@@ -285,6 +288,7 @@ void VoiceController::persistConfiguration() const {
     settings.beginGroup(QStringLiteral("voice"));
     settings.setValue(QStringLiteral("modelPath"), m_modelPath);
     settings.setValue(QStringLiteral("provider"), m_sttProvider);
+    settings.setValue(QStringLiteral("reviewMode"), m_reviewMode);
     settings.setValue(QStringLiteral("sttModel"), m_sttModel);
     settings.setValue(QStringLiteral("sttProfile"), m_sttProfile);
     settings.setValue(QStringLiteral("recognitionVocabulary"), m_recognitionVocabulary);
@@ -604,7 +608,7 @@ void VoiceController::testSttModel() {
         {QStringLiteral("expected"), QStringLiteral("one zero zero zero one nine oh two one oh zero one eight zero three")},
         {QStringLiteral("scoringMode"), m_sttProfile == QStringLiteral("whisper-turbo") ? QStringLiteral("numeric-equivalent") : QStringLiteral("literal-words")}};
     m_sttTestStatus = QStringLiteral("Preparing a known spoken phrase");
-    m_testSavedWantsListening = m_wantsListening;
+    m_testSavedWantsListening = m_reviewMode == QStringLiteral("always-on") && m_wantsListening;
     stopListening();
     stopSpeaking();
     setModelTestState(true, m_sttTestStatus);
@@ -630,7 +634,7 @@ void VoiceController::testTtsModel() {
         {QStringLiteral("input"), QStringLiteral("BetterFlash speech test. Your next card is ready.")},
         {QStringLiteral("expected"), QStringLiteral("The selected speech engine synthesizes and plays the complete sample.")}};
     m_ttsTestStatus = QStringLiteral("Preparing a spoken sample");
-    m_testSavedWantsListening = m_wantsListening;
+    m_testSavedWantsListening = m_reviewMode == QStringLiteral("always-on") && m_wantsListening;
     stopListening();
     stopSpeaking();
     setModelTestState(true, m_ttsTestStatus);
@@ -738,7 +742,7 @@ void VoiceController::finishSttTest(const bool passed, const QString &message, c
     if (thread) thread->requestInterruption();
     if (worker && thread) QMetaObject::invokeMethod(worker, [worker, thread] { if (worker) worker->shutdown(); if (thread) thread->quit(); }, Qt::QueuedConnection);
     setModelTestState(m_ttsTestBusy, message, error);
-    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); continuePendingOperations(); }
+    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; setMicrophoneArmed(m_wantsListening); updateCapture(); continuePendingOperations(); }
 }
 
 void VoiceController::beginTtsTest() {
@@ -771,7 +775,7 @@ void VoiceController::finishTtsTest(const bool passed, const QString &message, c
     m_ttsTestReport.insert(QStringLiteral("outcome"), message.startsWith(QStringLiteral("Validation canceled")) ? QStringLiteral("canceled") : passed ? QStringLiteral("passed") : QStringLiteral("failed"));
     if (!error.isEmpty()) m_ttsTestReport.insert(QStringLiteral("details"), error);
     setModelTestState(m_sttTestBusy, message, error);
-    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; updateCapture(); }
+    if (m_enabled) { m_wantsListening = m_testSavedWantsListening; setMicrophoneArmed(m_wantsListening); updateCapture(); }
 }
 
 void VoiceController::resetSttTestReport() {
@@ -791,6 +795,39 @@ void VoiceController::resetTtsTestReport() {
 void VoiceController::setApiKey(const QString &key) { m_secret->setKey(key); }
 void VoiceController::clearApiKey() { m_secret->clear(); }
 
+void VoiceController::setMicrophoneArmed(const bool armed) {
+    if (m_microphoneArmed == armed) return;
+    m_microphoneArmed = armed;
+    emit microphoneArmedChanged();
+}
+
+void VoiceController::setReviewMode(const QString &mode) {
+    const QString value = mode.trimmed().toLower();
+    if (value != QStringLiteral("trigger") && value != QStringLiteral("always-on")) {
+        setError(QStringLiteral("VOICE_REVIEW_MODE_INVALID"), QStringLiteral("Choose keyboard trigger or always-on microphone mode."));
+        return;
+    }
+    if (m_reviewMode == value) return;
+    cancelTranscriptCorrection();
+    ++m_captureEpoch;
+    m_testSavedWantsListening = false;
+    m_wantsListening = m_enabled && value == QStringLiteral("always-on");
+    setMicrophoneArmed(m_wantsListening);
+    m_reviewMode = value;
+    persistConfiguration();
+    emit reviewModeChanged();
+    if (m_enabled && !m_modelTestBusy) {
+        m_workerRestartPending = true;
+        retireWorker();
+        if (!m_retiringWorkerThread) m_workerRestartPending = false;
+    }
+    updateCapture();
+    if (m_enabled) {
+        setStatus(QStringLiteral("Ready"));
+        if (!m_workerRestartPending) continuePendingOperations();
+    }
+}
+
 void VoiceController::setEnabled(const bool enabled) {
     if (!enabled) cancelTranscriptCorrection();
     if (m_enabled == enabled) return;
@@ -803,6 +840,7 @@ void VoiceController::setEnabled(const bool enabled) {
     emit enabledChanged();
     if (!enabled) {
         m_wantsListening = false;
+        setMicrophoneArmed(false);
         stopSpeaking();
         retireWorker();
         retireTtsWorker();
@@ -810,7 +848,9 @@ void VoiceController::setEnabled(const bool enabled) {
         setStatus(QStringLiteral("Voice disabled"));
         return;
     }
-    m_wantsListening = true;
+    m_wantsListening = m_reviewMode == QStringLiteral("always-on");
+    setMicrophoneArmed(m_wantsListening);
+    if (m_retiringWorkerThread) m_workerRestartPending = true;
     if (!m_lastError.isEmpty()) { m_lastError.clear(); emit lastErrorChanged(); }
 #ifdef Q_OS_ANDROID
     const QMicrophonePermission permission;
@@ -835,7 +875,7 @@ void VoiceController::setEnabled(const bool enabled) {
 }
 
 void VoiceController::beginWorker() {
-    if (!m_enabled || m_worker || m_modelTestBusy) return;
+    if (!m_enabled || m_worker || m_modelTestBusy || m_retiringWorkerThread) return;
     if (m_sttProvider == QStringLiteral("local") && !sttModelReady()) {
         setStatus(QStringLiteral("Preparing local speech recognition"));
         downloadSttModel();
@@ -850,6 +890,7 @@ void VoiceController::beginWorker() {
     worker->setRecognitionVocabulary(m_recognitionVocabulary);
     worker->setWhisperAcceleration(m_sttAcceleration);
     worker->setApiKey(m_secret->key());
+    worker->setOneShot(m_reviewMode == QStringLiteral("trigger"));
     worker->moveToThread(thread);
     m_worker = worker;
     m_workerThread = thread;
@@ -874,15 +915,42 @@ void VoiceController::beginWorker() {
     });
     connect(worker, &VoiceWorker::processingChanged, this, [this, generation](const bool processing, const quint64 epoch) {
         if (!m_enabled || generation != m_workerGeneration || epoch != m_captureEpoch) return;
+        const bool wasProcessing = m_processing;
         m_processing = processing;
+        if (!processing && wasProcessing && m_reviewMode == QStringLiteral("trigger")) {
+            m_wantsListening = false;
+            setMicrophoneArmed(false);
+        }
         if (!m_speaking) setStatus(processing ? QStringLiteral("Transcribing") : QStringLiteral("Ready"));
     });
     connect(worker, &VoiceWorker::transcriptReady, this, [this, generation](const QString &text, const quint64 epoch) {
         if (m_enabled && generation == m_workerGeneration && epoch == m_captureEpoch
-            && m_wantsListening && !m_speaking && !m_echoTail) processTranscript(text);
+            && m_wantsListening && !m_speaking && !m_echoTail) {
+            if (m_reviewMode == QStringLiteral("trigger")) {
+                m_wantsListening = false;
+                setMicrophoneArmed(false);
+            }
+            processTranscript(text);
+        }
+    });
+    connect(worker, &VoiceWorker::oneShotFinished, this, [this, generation](const quint64 epoch) {
+        if (!m_enabled || generation != m_workerGeneration || epoch != m_captureEpoch || m_reviewMode != QStringLiteral("trigger")) return;
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+        if (!m_processing && !m_speaking) setStatus(QStringLiteral("Ready"));
     });
     connect(worker, &VoiceWorker::errorOccurred, this, [this, generation](const QString &code, const QString &message, const bool fatal) {
         if (!m_enabled || generation != m_workerGeneration) return;
+        if (fatal) setEnabled(false);
+        setError(code, message);
+    });
+    connect(worker, &VoiceWorker::captureError, this, [this, generation](const QString &code, const QString &message,
+        const bool fatal, const quint64 epoch) {
+        if (!m_enabled || generation != m_workerGeneration || epoch != m_captureEpoch) return;
+        if (m_reviewMode == QStringLiteral("trigger")) {
+            m_wantsListening = false;
+            setMicrophoneArmed(false);
+        }
         if (fatal) setEnabled(false);
         setError(code, message);
     });
@@ -898,6 +966,16 @@ void VoiceController::retireWorker() {
     const QPointer<QThread> thread = m_workerThread;
     m_worker = nullptr;
     m_workerThread = nullptr;
+    if (thread) {
+        m_retiringWorkerThread = thread;
+        connect(thread, &QThread::finished, this, [this, thread] {
+            if (m_retiringWorkerThread == thread) m_retiringWorkerThread = nullptr;
+            if (m_workerRestartPending && m_enabled) {
+                m_workerRestartPending = false;
+                beginWorker();
+            }
+        });
+    }
     m_processing = false;
     m_captureSuspended = true;
     setReady(false);
@@ -913,10 +991,16 @@ void VoiceController::retireWorker() {
 
 void VoiceController::restartWorker() {
     if (!m_enabled) return;
-    const bool wanted = m_wantsListening;
+    const bool wanted = m_reviewMode == QStringLiteral("always-on") && m_wantsListening;
+    m_workerRestartPending = true;
     setEnabled(false);
     setEnabled(true);
     m_wantsListening = wanted;
+    setMicrophoneArmed(wanted);
+    if (!m_retiringWorkerThread) {
+        m_workerRestartPending = false;
+        continuePendingOperations();
+    }
 }
 
 void VoiceController::updateCapture() {
@@ -931,6 +1015,10 @@ void VoiceController::updateCapture() {
 
 void VoiceController::cancelPendingRecognition() {
     cancelTranscriptCorrection();
+    if (m_reviewMode == QStringLiteral("trigger")) {
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+    }
     ++m_captureEpoch;
     m_processing = false;
     setListeningState(false);
@@ -939,18 +1027,50 @@ void VoiceController::cancelPendingRecognition() {
 
 void VoiceController::startListening() {
     if (!m_enabled) return;
+    if (m_reviewMode == QStringLiteral("trigger")) return;
     m_wantsListening = true;
+    setMicrophoneArmed(true);
     updateCapture();
 }
 
 void VoiceController::stopListening() {
     cancelTranscriptCorrection();
     m_wantsListening = false;
+    setMicrophoneArmed(false);
     ++m_captureEpoch;
     m_processing = false;
     setListeningState(false);
     updateCapture();
     if (!m_speaking && m_enabled) setStatus(QStringLiteral("Ready"));
+}
+
+void VoiceController::triggerMicrophone() {
+    if (!m_enabled) {
+        setEnabled(true);
+        if (!m_enabled) return;
+        if (m_reviewMode == QStringLiteral("always-on")) return;
+    }
+    if (m_reviewMode != QStringLiteral("trigger")) {
+        m_wantsListening = !m_wantsListening;
+        setMicrophoneArmed(m_wantsListening);
+        updateCapture();
+        return;
+    }
+    cancelTranscriptCorrection();
+    ++m_captureEpoch;
+    m_processing = false;
+    if (m_speaking) stopSpeaking();
+    if (m_wantsListening) {
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+        setListeningState(false);
+        updateCapture();
+        if (!m_speaking) setStatus(QStringLiteral("Ready"));
+        return;
+    }
+    m_wantsListening = true;
+    setMicrophoneArmed(true);
+    updateCapture();
 }
 
 void VoiceController::processTranscript(const QString &transcript) {
@@ -999,6 +1119,10 @@ void VoiceController::processTranscript(const QString &transcript) {
 
 void VoiceController::speak(const QString &text) {
     if (!m_enabled || m_modelTestBusy || text.trimmed().isEmpty()) return;
+    if (m_reviewMode == QStringLiteral("trigger")) {
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+    }
     cancelTranscriptCorrection();
     stopSpeaking();
     m_echoTail = false;
@@ -1199,6 +1323,10 @@ void VoiceController::onSpeechStateChanged() {
 
 void VoiceController::finishSpeech() {
     if (!m_speaking) return;
+    if (m_reviewMode == QStringLiteral("trigger")) {
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+    }
     m_remoteTts->cancel();
     m_pendingSpeech.clear();
     m_ttsStarted = false;
@@ -1225,6 +1353,10 @@ void VoiceController::finishSpeech() {
 }
 
 void VoiceController::stopSpeaking() {
+    if (m_reviewMode == QStringLiteral("trigger")) {
+        m_wantsListening = false;
+        setMicrophoneArmed(false);
+    }
     ++m_speechGeneration;
     m_remoteTts->cancel();
     m_synthesisCancelled->store(true);

@@ -10,9 +10,10 @@ Control {
     readonly property bool recording: !!tests && tests.recording
     readonly property bool paused: recording && tests.recordingPaused
     readonly property bool capturing: recording ? !paused : voice.listening
+    readonly property bool armed: !!voice.microphoneArmed
     readonly property color stateColor: capturing ? Theme.success : paused ? Theme.warning : Theme.inkMuted
     readonly property string stateText: recording ? (paused ? "Recording paused" : "Recording")
-        : voice.listening ? "Listening" : "Mic inactive"
+        : voice.listening ? "Listening" : armed ? "Mic armed" : "Mic inactive"
     readonly property string durationText: {
         const seconds = recording ? Math.floor(tests.recordingDuration) : 0
         return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")
@@ -20,8 +21,11 @@ Control {
     readonly property string description: recording
         ? (paused ? "Microphone recording is paused; paused audio is not saved" : "Microphone is listening and recording this custom test")
         : voice.listening ? "Microphone is listening for voice review commands and answers"
+        : armed ? (voice.reviewMode === "always-on"
+            ? "Microphone is preparing to listen continuously"
+            : "Microphone is preparing to listen for one voice utterance")
         : "Microphone is not listening. " + voice.status
-    visible: recording || voice.enabled
+    visible: recording || voice.enabled || armed
     implicitWidth: content.implicitWidth + leftPadding + rightPadding
     implicitHeight: 44
     leftPadding: compact ? 6 : 10
