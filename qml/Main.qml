@@ -1810,7 +1810,7 @@ ApplicationWindow {
             }
             Label {
                 textFormat: Text.PlainText
-                text: "Speech output uses the selected speech engine. With Groq, microphone audio is sent to Groq while voice review is enabled."
+                text: "Speech output uses the selected speech engine. With Groq, microphone audio is sent to Groq while Voice Control is enabled."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true

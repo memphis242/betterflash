@@ -17,24 +17,54 @@ ComboBox {
     palette.text: control.enabled ? Theme.ink : Theme.inkMuted
     palette.placeholderText: Theme.inkMuted
     property string comboHint: "Choose an option"
+    property bool keyboardCandidateActive: false
     ToolTip.visible: hovered && comboHint.length > 0
     ToolTip.text: comboHint
+
+    function recordNavigation(event) {
+        event.accepted = false
+        if (!popup.visible)
+            return
+        switch (event.key) {
+        case Qt.Key_Up:
+        case Qt.Key_Down:
+        case Qt.Key_Home:
+        case Qt.Key_End:
+        case Qt.Key_PageUp:
+        case Qt.Key_PageDown:
+            keyboardCandidateActive = true
+            break
+        default:
+            break
+        }
+    }
+
+    Keys.priority: Keys.BeforeItem
+    Keys.onPressed: event => control.recordNavigation(event)
 
     delegate: ItemDelegate {
         id: option
         required property var model
         required property int index
         readonly property bool selectedEntry: control.currentIndex === index
+        readonly property bool keyboardCandidate: control.keyboardCandidateActive
+            && control.highlightedIndex === index
         width: ListView.view ? ListView.view.width : control.width
         implicitHeight: Math.max(38, control.font.pixelSize + 25)
         text: control.textRole ? model[control.textRole] : model.modelData
-        highlighted: control.highlightedIndex === index
+        // Mouse hover is the primary transient highlight. Keyboard navigation
+        // gets a thin outline only after the highlighted index moves.
+        highlighted: option.hovered
         hoverEnabled: true
         leftPadding: 14
         rightPadding: 12
         font.family: control.font.family
         font.pixelSize: control.font.pixelSize
         font.weight: selectedEntry ? Font.DemiBold : Font.Normal
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: event => control.recordNavigation(event)
+        onHoveredChanged: if (option.hovered)
+            control.keyboardCandidateActive = false
         contentItem: Label {
             text: option.text
             textFormat: Text.PlainText
@@ -45,9 +75,8 @@ ComboBox {
         }
         background: Rectangle {
             radius: 4
-            color: option.hovered || option.highlighted ? Theme.comboOptionHover
-                : option.selectedEntry ? Theme.comboOptionSelected : Theme.comboPopupFill
-            border.width: option.selectedEntry || option.activeFocus ? 1 : 0
+            color: option.hovered ? Theme.comboOptionHover : Theme.comboPopupFill
+            border.width: option.selectedEntry ? 2 : option.keyboardCandidate ? 1 : 0
             border.color: Theme.accent
             Rectangle {
                 visible: option.selectedEntry
@@ -121,6 +150,8 @@ ComboBox {
         rightPadding: 0
         topPadding: 0
         bottomPadding: 0
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: event => control.recordNavigation(event)
         background: null
     }
 
@@ -129,5 +160,15 @@ ComboBox {
         border.color: Theme.rule
         border.width: 1
         radius: 5
+    }
+
+    Connections {
+        target: control.popup
+        function onOpened() {
+            control.keyboardCandidateActive = false
+        }
+        function onClosed() {
+            control.keyboardCandidateActive = false
+        }
     }
 }
