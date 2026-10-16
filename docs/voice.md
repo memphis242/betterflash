@@ -230,6 +230,23 @@ use safe recovery messages; arbitrary response text is not displayed because it
 may repeat submitted content or credentials. Error text is selectable, and the
 error dialog's Copy button copies the complete displayed report.
 
+### Groq connection checks (2026-10-16)
+
+These checks used public sample inputs and an explicitly supplied development
+key. Availability and account permissions can change.
+
+| Feature | Models checked | Result |
+| --- | --- | --- |
+| Language model | `allam-2-7b`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b` | All passed the native structured-answer model test. |
+| Speech recognition | `whisper-large-v3`, `whisper-large-v3-turbo` | Both transcribed the official spoken-digit recording correctly, using numeric-equivalent scoring. |
+| Speech output | English and Arabic Orpheus | Both returned `model_terms_required`; the native request path displayed the corresponding terms address. Audio synthesis remains unverified until acceptance. |
+| Embeddings | Provider model discovery and embeddings request | No embedding models were listed; the embeddings request returned HTTP 404. Keep local embeddings or use another compatible provider. |
+
+Groq's safety classifiers are excluded from suggested language models because
+their intended output is a classification. Manual model identifiers remain
+available. GPT-OSS model validation uses a 512-token budget and low reasoning
+effort so its internal reasoning does not exhaust the short answer test.
+
 The remote connection sends the text being read to the selected service only
 when speech or its explicit model test is requested. Selecting Remote or
 opening Settings does not start a request. A key entered in Speech output has
