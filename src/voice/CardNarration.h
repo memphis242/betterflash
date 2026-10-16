@@ -6,6 +6,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QByteArray>
+#include <optional>
+#include "../core/cardmodel.h"
 #include "VoiceAudio.h"
 
 class AppController;
@@ -70,6 +72,8 @@ public:
     Q_INVOKABLE bool playSaved(const QString &cardId, const QString &variantKey, const QString &side);
     Q_INVOKABLE void stopPlayback();
     Q_INVOKABLE void remove(const QString &side);
+    Q_INVOKABLE void confirmRecording(const QString &side);
+    Q_INVOKABLE QVariantMap warningsForCard(const QVariantMap &cardMap) const;
 
 signals:
     void cardChanged();
@@ -91,8 +95,11 @@ private:
     void stopCapture();
     void stopPlaybackInternal();
     bool playPcm(const QByteArray &pcm, const QString &side);
-    bool invokeNarrationSave(const QString &side, const QString &name, const QString &requestId);
+    bool invokeNarrationSave(const QString &side, const QString &name, const QString &requestId,
+        const QString &fingerprint = {});
     void clearPendingSave();
+
+    enum class PendingAction { None, Save, Remove, Confirm };
 
     QPointer<AppController> m_app;
     QPointer<VoiceController> m_voice;
@@ -125,4 +132,8 @@ private:
     QString m_pendingRequestId;
     QString m_pendingSide;
     QString m_pendingName;
+    PendingAction m_pendingAction = PendingAction::None;
+    std::optional<struct betterflash::model::Card> m_displayedCard;
+    std::optional<struct betterflash::model::Card> m_captureCard;
+    QString m_captureVariantKey;
 };

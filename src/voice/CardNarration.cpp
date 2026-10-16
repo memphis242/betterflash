@@ -28,6 +28,18 @@ bool validSide(const QString &side) {
     return side == QStringLiteral("front") || side == QStringLiteral("back");
 }
 
+QString staleReason(const struct betterflash::model::Card &card, const QString &key, const QString &side) {
+    if (!betterflash::model::narrationIsStale(card, key, side)) return {};
+    if (card.narrationFingerprints.value(key + QLatin1Char('/') + side).toString().isEmpty())
+        return QStringLiteral("This recording has no saved text reference. Confirm that it matches the text, or record it again.");
+    return QStringLiteral("The text has changed since this recording was made or confirmed. Check the recording before using it.");
+}
+
+struct SavedRecording {
+    QString name;
+    QString fingerprint;
+};
+
 std::expected<struct betterflash::model::Card, QString> selectedCard(const AppController *app, const QString &id) {
     if (app) for (const QVariant &value : app->cards()) {
         const QVariantMap candidate = value.toMap();
@@ -72,6 +84,49 @@ CardNarration::~CardNarration() {
 QVariantMap CardNarration::card() const {
     const auto selected = selectedCard(m_app, m_cardId);
     return selected ? betterflash::model::toMap(*selected) : QVariantMap{};
+}
+
+QVariantMap CardNarration::warningsForCard(const QVariantMap &cardMap) const {
+    struct betterflash::model::Card candidate{};
+    candidate.id = cardMap.value(QStringLiteral("id")).toString();
+    candidate.deckId = cardMap.value(QStringLiteral("deckId")).toString();
+    candidate.kind = cardMap.value(QStringLiteral("kind")).toString();
+    candidate.front = cardMap.value(QStringLiteral("front")).toString();
+    candidate.back = cardMap.value(QStringLiteral("back")).toString();
+    candidate.narrations = cardMap.value(QStringLiteral("narrations")).toMap();
+    candidate.narrationFingerprints = cardMap.value(QStringLiteral("narrationFingerprints")).toMap();
+    const auto keys = betterflash::model::variantKeys(candidate);
+    bool front = false;
+    bool back = false;
+    int count = 0;
+    for (auto it = candidate.narrations.cbegin(); it != candidate.narrations.cend(); ++it) {
+        if (it.value().toString().isEmpty()) continue;
+        const QStringList parts = it.key().split(QLatin1Char('/'));
+        if (parts.size() != 2 || !validSide(parts.at(1))) {
+            front = true;
+            back = true;
+            ++count;
+            continue;
+        }
+        const QString &key = parts.at(0);
+        const QString &side = parts.at(1);
+        if (keys && keys->contains(key) && !betterflash::model::narrationIsStale(candidate, key, side)) continue;
+        ++count;
+        const bool question = side == QStringLiteral("front");
+        if (key == QStringLiteral("forward")) {
+            if (question) front = true; else back = true;
+        } else if (key == QStringLiteral("reverse")) {
+            if (question) back = true; else front = true;
+        } else if (key.startsWith(QLatin1Char('c'))) {
+            front = true;
+            if (!question && !candidate.back.trimmed().isEmpty()) back = true;
+        } else {
+            front = true;
+            back = true;
+        }
+    }
+    return {{QStringLiteral("hasStale"), count > 0}, {QStringLiteral("front"), front},
+        {QStringLiteral("back"), back}, {QStringLiteral("count"), count}};
 }
 
 void CardNarration::setState(const QString &status, const QString &error) {
@@ -123,6 +178,9 @@ bool CardNarration::close() {
     m_variants.clear();
     m_sides.clear();
     m_pcm.clear();
+    m_displayedCard.reset();
+    m_captureCard.reset();
+    m_captureVariantKey.clear();
     if (m_voice) m_voice->endNarrationSession();
     emit cardChanged();
     emit variantChanged();
@@ -152,18 +210,21 @@ bool CardNarration::rebuildCardState() {
     m_variants.clear();
     m_sides.clear();
     if (!selected) {
+        m_displayedCard.reset();
         emit cardChanged();
         setState(QStringLiteral("Narration unavailable."), selected.error());
         return false;
     }
     const auto keys = betterflash::model::variantKeys(*selected);
     if (!keys || keys->isEmpty()) {
+        m_displayedCard.reset();
         emit cardChanged();
         setState(QStringLiteral("Narration unavailable."), QStringLiteral("This card has no valid review direction."));
         return false;
     }
     if (!keys->contains(m_variantKey)) {
         if (m_recording || m_waitingForCapture || hasDraft() || m_busy) {
+            m_displayedCard.reset();
             emit cardChanged();
             setState(QStringLiteral("Review direction changed."), QStringLiteral("Discard this recording and select an available direction."));
             return false;
@@ -171,19 +232,25 @@ bool CardNarration::rebuildCardState() {
         m_variantKey = keys->first();
         emit variantChanged();
     }
+    m_displayedCard = *selected;
     for (const QString &key : *keys) {
         const QString label = key == QStringLiteral("forward") ? QStringLiteral("Forward")
             : key == QStringLiteral("reverse") ? QStringLiteral("Inverted")
             : QStringLiteral("Cloze %1").arg(key.mid(1));
-        m_variants.append(QVariantMap{{QStringLiteral("key"), key}, {QStringLiteral("label"), label}});
+        const bool stale = betterflash::model::narrationIsStale(*selected, key, QStringLiteral("front"))
+            || betterflash::model::narrationIsStale(*selected, key, QStringLiteral("back"));
+        m_variants.append(QVariantMap{{QStringLiteral("key"), key}, {QStringLiteral("label"), label},
+            {QStringLiteral("stale"), stale}});
     }
     for (const QString &side : {QStringLiteral("front"), QStringLiteral("back")}) {
         const bool front = side == QStringLiteral("front");
         const QString name = selected->narrations.value(m_variantKey + QLatin1Char('/') + side).toString();
+        const QString reason = staleReason(*selected, m_variantKey, side);
         m_sides.append(QVariantMap{{QStringLiteral("side"), side},
             {QStringLiteral("label"), front ? QStringLiteral("Question") : QStringLiteral("Answer")},
             {QStringLiteral("markdown"), front ? betterflash::model::question(*selected, m_variantKey) : betterflash::model::answer(*selected, m_variantKey)},
-            {QStringLiteral("hasRecording"), !name.isEmpty()}});
+            {QStringLiteral("hasRecording"), !name.isEmpty()},
+            {QStringLiteral("stale"), !reason.isEmpty()}, {QStringLiteral("staleReason"), reason}});
     }
     emit cardChanged();
     emit stateChanged();
@@ -219,10 +286,24 @@ void CardNarration::startRecording(const QString &side) {
 
 void CardNarration::beginCapture(const QString &side) {
     if (!m_sessionActive || !validSide(side) || hasDraft() || m_busy || !m_voice || !m_voice->narrationCaptureReady()) return;
+    const auto selected = selectedCard(m_app, m_cardId);
+    if (!selected) {
+        m_recordingSide.clear();
+        setState(QStringLiteral("Recording unavailable."), selected.error());
+        return;
+    }
+    const auto keys = betterflash::model::variantKeys(*selected);
+    if (!keys || !keys->contains(m_variantKey)) {
+        m_recordingSide.clear();
+        setState(QStringLiteral("Recording unavailable."), QStringLiteral("The card or review direction changed. Reopen narration and try again."));
+        return;
+    }
     const QAudioDevice device = QMediaDevices::defaultAudioInput();
     if (device.isNull()) { m_recordingSide.clear(); setState(QStringLiteral("Recording unavailable."), QStringLiteral("No microphone is available. Select an input in system sound settings.")); return; }
     m_captureFormat = device.preferredFormat();
     if (!m_converter.configure(m_captureFormat)) { m_recordingSide.clear(); setState(QStringLiteral("Recording unavailable."), QStringLiteral("The default microphone format is unsupported. Select another input in system sound settings.")); return; }
+    m_captureCard = *selected;
+    m_captureVariantKey = m_variantKey;
     m_recordingSide = side;
     m_pcm.clear();
     m_recordingLevel = 0.0;
@@ -239,6 +320,8 @@ void CardNarration::beginCapture(const QString &side) {
     m_input = source->start();
     if (!m_input || !m_source || source->error() != QAudio::NoError) {
         stopCapture();
+        m_captureCard.reset();
+        m_captureVariantKey.clear();
         setState(QStringLiteral("Recording unavailable."), QStringLiteral("The microphone could not be opened. Check its connection and system permissions."));
         return;
     }
@@ -313,7 +396,13 @@ void CardNarration::finishRecording() {
     const QString side = m_recordingSide;
     readCapture();
     stopCapture();
-    if (m_pcm.size() < 640) { m_pcm.clear(); setState(QStringLiteral("Recording discarded."), QStringLiteral("Record at least 20 milliseconds of audio.")); return; }
+    if (m_pcm.size() < 640) {
+        m_pcm.clear();
+        m_captureCard.reset();
+        m_captureVariantKey.clear();
+        setState(QStringLiteral("Recording discarded."), QStringLiteral("Record at least 20 milliseconds of audio."));
+        return;
+    }
     m_draftSide = side;
     setState(QStringLiteral("Recording ready. Save it to use it during review."));
 }
@@ -324,12 +413,15 @@ void CardNarration::discardDraft() {
     stopPlaybackInternal();
     m_pcm.clear();
     m_draftSide.clear();
+    m_captureCard.reset();
+    m_captureVariantKey.clear();
     if (m_sessionActive) rebuildCardState();
     setState(QStringLiteral("Recording discarded."));
 }
 
-bool CardNarration::invokeNarrationSave(const QString &side, const QString &name, const QString &requestId) {
-    return m_app && m_app->setCardNarration(m_cardId, m_variantKey, side, name, requestId);
+bool CardNarration::invokeNarrationSave(const QString &side, const QString &name, const QString &requestId,
+    const QString &fingerprint) {
+    return m_app && m_app->setCardNarration(m_cardId, m_variantKey, side, name, requestId, fingerprint);
 }
 
 void CardNarration::clearPendingSave() {
@@ -337,52 +429,77 @@ void CardNarration::clearPendingSave() {
     m_pendingRequestId.clear();
     m_pendingSide.clear();
     m_pendingName.clear();
+    m_pendingAction = PendingAction::None;
 }
 
 void CardNarration::narrationSaveFinished(const QString &cardId, const QString &variantKey, const QString &side,
     const QString &requestId, const bool success) {
-    if (requestId != m_pendingRequestId || cardId != m_cardId || variantKey != m_variantKey || side != m_pendingSide) return;
-    const bool savedDraft = !m_pendingName.isEmpty();
+    if (m_pendingAction == PendingAction::None || m_pendingRequestId.isEmpty()
+        || requestId != m_pendingRequestId || cardId != m_cardId || variantKey != m_variantKey || side != m_pendingSide) return;
+    const PendingAction action = m_pendingAction;
     clearPendingSave();
     if (!success) {
-        setState(QStringLiteral("Narration could not be saved."), QStringLiteral("The card update was rejected. Check the reported storage error and try again."));
+        setState(action == PendingAction::Confirm ? QStringLiteral("Recording could not be confirmed.") : QStringLiteral("Narration could not be saved."),
+            QStringLiteral("The card update was rejected. Check the reported storage error and try again."));
         return;
     }
-    if (savedDraft) { m_pcm.clear(); m_draftSide.clear(); }
+    if (action == PendingAction::Save) {
+        m_pcm.clear();
+        m_draftSide.clear();
+        m_captureCard.reset();
+        m_captureVariantKey.clear();
+    }
     rebuildCardState();
-    setState(savedDraft ? QStringLiteral("Narration saved.") : QStringLiteral("Narration removed."));
+    switch (action) {
+    case PendingAction::Save: setState(QStringLiteral("Narration saved.")); break;
+    case PendingAction::Remove: setState(QStringLiteral("Narration removed.")); break;
+    case PendingAction::Confirm: setState(QStringLiteral("Recording confirmed to match the text.")); break;
+    case PendingAction::None: Q_ASSERT(false); break;
+    }
 }
 
 void CardNarration::saveDraft() {
-    if (!m_sessionActive || !hasDraft() || m_busy || m_recording || !rebuildCardState()) return;
+    if (!m_sessionActive || !hasDraft() || m_busy || m_recording || m_waitingForCapture || !rebuildCardState()) return;
+    if (!m_captureCard || m_captureVariantKey != m_variantKey) {
+        setState(QStringLiteral("Narration could not be saved."), QStringLiteral("The recording has no matching text reference. Discard it and record this side again."));
+        return;
+    }
     stopPlaybackInternal();
     m_busy = true;
     m_pendingSide = m_draftSide;
     m_pendingRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_pendingAction = PendingAction::Save;
     const QString requestId = m_pendingRequestId;
     const quint64 generation = ++m_asyncGeneration;
     const QByteArray pcm = m_pcm;
+    const struct betterflash::model::Card capturedCard = *m_captureCard;
+    const QString capturedKey = m_captureVariantKey;
+    const QString side = m_draftSide;
     const QString directory = QDir(m_dataDirectory).filePath(QStringLiteral("media"));
-    using Result = std::expected<QString, QString>;
+    using Result = std::expected<struct SavedRecording, QString>;
     auto *const watcher = new QFutureWatcher<Result>(this);
     connect(watcher, &QFutureWatcher<Result>::finished, this, [this, watcher, generation, requestId] {
         const Result result = watcher->result();
         watcher->deleteLater();
         if (generation != m_asyncGeneration || requestId != m_pendingRequestId) return;
         if (!result) { clearPendingSave(); setState(QStringLiteral("Narration could not be saved."), result.error()); return; }
-        m_pendingName = *result;
-        if (!invokeNarrationSave(m_pendingSide, m_pendingName, requestId)) {
+        m_pendingName = result->name;
+        if (!invokeNarrationSave(m_pendingSide, m_pendingName, requestId, result->fingerprint)) {
             clearPendingSave();
             setState(QStringLiteral("Narration could not be saved."), QStringLiteral("The card update could not be queued. Try again after other changes finish."));
         }
     });
-    watcher->setFuture(QtConcurrent::run([pcm, directory]() -> Result {
+    watcher->setFuture(QtConcurrent::run([pcm, directory, capturedCard, capturedKey, side]() -> Result {
         const QByteArray wav = voiceWav(pcm);
         const QString name = QString::fromLatin1(QCryptographicHash::hash(wav, QCryptographicHash::Sha256).toHex()) + QStringLiteral(".wav");
         const struct betterflash::model::MediaAttachment attachment{name, wav};
         const auto result = betterflash::model::writeBackupMedia(directory, {attachment});
         if (!result) return std::unexpected(result.error());
-        return name;
+        struct betterflash::model::Card recordingCard = capturedCard;
+        recordingCard.narrations.insert(capturedKey + QLatin1Char('/') + side, name);
+        const QString fingerprint = betterflash::model::narrationFingerprint(recordingCard, capturedKey, side);
+        if (fingerprint.isEmpty()) return std::unexpected(QStringLiteral("The captured card text cannot be matched to this recording. Record this side again."));
+        return SavedRecording{name, fingerprint};
     }));
     setState(QStringLiteral("Saving narration."));
 }
@@ -467,6 +584,7 @@ void CardNarration::remove(const QString &side) {
     m_pendingRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_pendingSide = side;
     m_pendingName.clear();
+    m_pendingAction = PendingAction::Remove;
     m_busy = true;
     if (!invokeNarrationSave(side, {}, m_pendingRequestId)) {
         clearPendingSave();
@@ -474,4 +592,29 @@ void CardNarration::remove(const QString &side) {
         return;
     }
     setState(QStringLiteral("Removing narration."));
+}
+
+void CardNarration::confirmRecording(const QString &side) {
+    if (!m_sessionActive || !m_app || !m_displayedCard || !validSide(side)
+        || m_recording || m_waitingForCapture || m_busy || hasDraft()) return;
+    const struct betterflash::model::Card displayedCard = *m_displayedCard;
+    if (!betterflash::model::narrationIsStale(displayedCard, m_variantKey, side)) return;
+    const QString name = displayedCard.narrations.value(m_variantKey + QLatin1Char('/') + side).toString();
+    const QString fingerprint = betterflash::model::narrationFingerprint(displayedCard, m_variantKey, side);
+    if (name.isEmpty() || fingerprint.isEmpty()) {
+        setState(QStringLiteral("Recording could not be confirmed."), QStringLiteral("The card or recording changed. Reopen narration and check this side again."));
+        return;
+    }
+    stopPlaybackInternal();
+    m_pendingRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_pendingSide = side;
+    m_pendingName = name;
+    m_pendingAction = PendingAction::Confirm;
+    m_busy = true;
+    if (!m_app->confirmCardNarration(m_cardId, m_variantKey, side, name, fingerprint, m_pendingRequestId)) {
+        clearPendingSave();
+        setState(QStringLiteral("Recording could not be confirmed."), QStringLiteral("The card update could not be queued. Try again after other changes finish."));
+        return;
+    }
+    setState(QStringLiteral("Confirming that the recording matches the text."));
 }
