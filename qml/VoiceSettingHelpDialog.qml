@@ -5,7 +5,8 @@ import QtQuick.Layouts
 Dialog {
     id: dialog
     property string topic: ""
-    readonly property string topicTitle: topic === "vocabulary" ? "Recognition vocabulary"
+    readonly property string topicTitle: topic === "voice-control" ? "Voice Control"
+        : topic === "vocabulary" ? "Recognition vocabulary"
         : topic === "stt-model" ? "Selected local model (STT)"
         : topic === "stt-acceleration" ? "Speech recognition acceleration"
         : topic === "tts-engine" ? "Local speech engine (TTS)"
@@ -67,6 +68,33 @@ Dialog {
         ColumnLayout {
             width: viewport.availableWidth
             spacing: 18
+
+            ColumnLayout {
+                visible: dialog.topic === "voice-control"
+                Layout.fillWidth: true
+                spacing: 12
+                Label {
+                    Layout.fillWidth: true
+                    text: "Voice Control listens for one spoken interaction when you press the microphone key. Press the key again to cancel that capture before it is submitted."
+                    color: Theme.ink
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 17
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "In Keyboard trigger mode, a short pause of about 900 milliseconds submits the captured speech. The 60-second limit protects the review session from an unbounded recording. Always-on mode keeps listening between utterances and is intended for hands-free use."
+                    color: Theme.inkMuted
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 16
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Speech is first transcribed by the selected speech recognition model. Deterministic commands such as next card, reveal, pause, and end review are handled directly. If transcript correction is enabled, the selected language model may correct the submitted transcript after the user speaks."
+                    color: Theme.inkMuted
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 16
+                }
+            }
 
             ColumnLayout {
                 visible: dialog.topic === "vocabulary"

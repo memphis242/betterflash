@@ -31,6 +31,14 @@ AppMenu {
             menu.ui.openCardEditor(menu.cardId)
         }
     }
+    AppMenuItem { glyph: "mic"
+        text: "Record narration"
+        enabled: menu.cardAvailable
+        onTriggered: {
+            menu.beforeAction()
+            menu.ui.openCardNarration(menu.cardId)
+        }
+    }
     AppMenuItem { glyph: "arrow-right"
         text: "Move card"
         enabled: menu.cardAvailable && !app.busy

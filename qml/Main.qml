@@ -37,6 +37,7 @@ ApplicationWindow {
     readonly property int gutter: width < 600 ? 12 : 24
     readonly property int collapsedNavigationWidth: 96
     readonly property var voiceController: voice
+    readonly property var cardNarrationController: narration
     property int page: preferences.page
     property bool navCollapsed: preferences.navCollapsed
     property string deckBrowserParentId: preferences.deckBrowserParentId
@@ -73,7 +74,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -399,6 +400,11 @@ ApplicationWindow {
         }
         editingCardId = id || ""
         cardDialog.open()
+    }
+    function openCardNarration(id) {
+        const target = String(id || selectedCardId || "")
+        if (target.length > 0)
+            narrationDialog.openFor(target)
     }
     function openMoveCard(id) {
         if (!cardById(id).id)
@@ -821,6 +827,7 @@ ApplicationWindow {
                 id: microphoneStatus
                 objectName: "microphoneStatus"
                 voice: window.voiceController
+                narration: window.cardNarrationController
                 compact: window.width < 700
             }
             GlyphButton {
@@ -2181,6 +2188,12 @@ ApplicationWindow {
         id: detailDialog
         objectName: "cardDetailDialog"
         ui: window
+    }
+    CardNarrationDialog {
+        id: narrationDialog
+        objectName: "cardNarrationDialog"
+        ui: window
+        narration: window.cardNarrationController
     }
     MoveCardDialog {
         id: moveCardDialog
