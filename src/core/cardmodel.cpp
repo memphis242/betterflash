@@ -1,6 +1,7 @@
 #include "cardmodel.h"
 #include "mediabackup.h"
 
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QSet>
@@ -150,6 +151,30 @@ QString answer(const struct Card &card, const QString &key)
     if (card.kind != QStringLiteral("cloze")) return key == QStringLiteral("reverse") ? card.front : card.back;
     return clozeText(card, key, false) + (card.back.trimmed().isEmpty() ? QString() : QStringLiteral("\n\n") + card.back);
 }
+QString narrationFingerprint(const struct Card &card, const QString &variantKey, const QString &side)
+{
+    if (side != QStringLiteral("front") && side != QStringLiteral("back")) return {};
+    const auto keys = variantKeys(card);
+    if (!keys || !keys->contains(variantKey)) return {};
+    const QString key = variantKey + QLatin1Char('/') + side;
+    const QVariant asset = card.narrations.value(key);
+    if (asset.metaType().id() != QMetaType::QString || !validNarrationMediaName(asset.toString())) return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const QString markdown = side == QStringLiteral("front") ? question(card,variantKey) : answer(card,variantKey);
+    for (const QString &part : {QStringLiteral("betterflash-card-narration-v1"),variantKey,side,asset.toString(),markdown}) {
+        const QByteArray bytes = part.toUtf8();
+        hash.addData(QByteArray::number(bytes.size()) + ':');
+        hash.addData(bytes);
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+bool narrationIsStale(const struct Card &card, const QString &variantKey, const QString &side)
+{
+    const QString key = variantKey + QLatin1Char('/') + side;
+    if (!card.narrations.contains(key)) return false;
+    const QString expected = narrationFingerprint(card,variantKey,side);
+    return expected.isEmpty() || card.narrationFingerprints.value(key).toString() != expected;
+}
 double readingBudget(const QString &question)
 {
     const int words = question.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size();
@@ -165,7 +190,7 @@ QString gradeLabel(int grade)
 QVariantMap toMap(const struct Deck &r)
 { return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId}}; }
 QVariantMap toMap(const struct Card &r)
-{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations}}; }
+{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations},{"narrationFingerprints",r.narrationFingerprints}}; }
 QVariantMap toMap(const struct Variant &r)
 { return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty}}; }
 QVariantMap toMap(const struct Review &r)
@@ -193,7 +218,10 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
     const QVariantMap narrations = m.contains("narrations") ? m.value("narrations").toMap() : QVariantMap{};
     if (m.contains("narrations") && m.value("narrations").metaType().id() != QMetaType::QVariantMap)
         return std::unexpected(QStringLiteral("Card narrations must be an object."));
-    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt(),narrations};
+    const QVariantMap fingerprints = m.contains("narrationFingerprints") ? m.value("narrationFingerprints").toMap() : QVariantMap{};
+    if (m.contains("narrationFingerprints") && m.value("narrationFingerprints").metaType().id() != QMetaType::QVariantMap)
+        return std::unexpected(QStringLiteral("Card narration fingerprints must be an object."));
+    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt(),narrations,fingerprints};
     if (card.kind != QStringLiteral("cloze") && card.back.trimmed().isEmpty())
         return std::unexpected(QStringLiteral("A basic or reverse card needs both sides."));
     const auto keys = variantKeys(card);
@@ -206,6 +234,12 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
             return std::unexpected(QStringLiteral("Card narration key is invalid."));
         if (it.value().metaType().id() != QMetaType::QString || !validNarrationMediaName(it.value().toString()))
             return std::unexpected(QStringLiteral("Card narration must reference a content-addressed WAV asset."));
+    }
+    static const QRegularExpression fingerprintPattern(QStringLiteral("^[0-9a-f]{64}$"));
+    for (auto it = card.narrationFingerprints.cbegin(); it != card.narrationFingerprints.cend(); ++it) {
+        if (!card.narrations.contains(it.key()) || it.value().metaType().id() != QMetaType::QString
+            || !fingerprintPattern.match(it.value().toString()).hasMatch())
+            return std::unexpected(QStringLiteral("Card narration fingerprints must reference an attached narration and contain a SHA-256 digest."));
     }
     const auto references=cardMediaReferences(card);
     if (!references) return std::unexpected(references.error());
@@ -297,9 +331,9 @@ std::expected<struct Review, QString> reviewFromMap(const QVariantMap &m)
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {
     const int version = object.value("version").toInt();
-    if (version < 2 || version > 3 || !object.value("decks").isArray()
+    if (version < 2 || version > 4 || !object.value("decks").isArray()
         || !object.value("cards").isArray() || !object.value("variants").isArray() || !object.value("history").isArray())
-        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2 or 3 collection with decks, cards, variants, and history arrays."));
+        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, or 4 collection with decks, cards, variants, and history arrays."));
     int count = 0;
     for (const QString &key : {QStringLiteral("decks"),QStringLiteral("cards"),QStringLiteral("variants"),QStringLiteral("history")}) {
         count += object.value(key).toArray().size();

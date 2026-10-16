@@ -90,7 +90,7 @@ bool AppController::saveCard(const QString &id,const QString &deckId,const QStri
     }
     invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,tags,points);});return true;
 }
-bool AppController::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId)
+bool AppController::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
 {
     if (m_busy) {
         setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before saving narration."},{"detail",QString()}});
@@ -104,7 +104,26 @@ bool AppController::setCardNarration(const QString &cardId,const QString &varian
         return false;
     }
     const bool queued = invoke([=](DatabaseWorker *worker) {
-        worker->setCardNarration(cardId,variantKey,side,mediaName,requestId);
+        worker->setCardNarration(cardId,variantKey,side,mediaName,requestId,fingerprint);
+    });
+    if (!queued) emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+    return queued;
+}
+bool AppController::confirmCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &expectedFingerprint,const QString &requestId)
+{
+    if (m_busy) {
+        setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before confirming narration."},{"detail",QString()}});
+        emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+        return false;
+    }
+    if (!betterflash::model::validUuid(cardId) || variantKey.isEmpty()
+        || (side != QStringLiteral("front") && side != QStringLiteral("back"))) {
+        setError({{"code","NARRATION_REQUEST_INVALID"},{"message","Choose a valid card narration target."},{"detail",QString()}});
+        emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+        return false;
+    }
+    const bool queued = invoke([=](DatabaseWorker *worker) {
+        worker->confirmCardNarration(cardId,variantKey,side,mediaName,expectedFingerprint,requestId);
     });
     if (!queued) emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
     return queued;

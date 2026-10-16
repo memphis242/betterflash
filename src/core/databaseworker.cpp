@@ -29,7 +29,7 @@ QString json(const QVariantMap &map) { return QString::fromUtf8(QJsonDocument(QJ
 struct model::Deck readDeck(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString()}; }
 struct model::Card readCard(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),q.value(7).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(7).toString().toUtf8()).object().toVariantMap()}; }
+{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),q.value(7).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(7).toString().toUtf8()).object().toVariantMap(),q.value(8).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(8).toString().toUtf8()).object().toVariantMap()}; }
 struct model::Variant readVariant(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble()}; }
 struct model::Review readReview(const QSqlQuery &q)
@@ -122,11 +122,11 @@ bool DatabaseWorker::migrate()
     QSqlQuery versionQuery(m_db);
     if (!versionQuery.exec("PRAGMA user_version") || !versionQuery.next()) { m_sqlDetail = versionQuery.lastError().text();return false; }
     const int version = versionQuery.value(0).toInt();
-    if (version > 5) { m_sqlDetail = QStringLiteral("Database version is newer than this application.");return false; }
+    if (version > 6) { m_sqlDetail = QStringLiteral("Database version is newer than this application.");return false; }
     return mutate([&] {
         const QStringList schema{
             "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '')",
-            "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,kind TEXT NOT NULL,front TEXT NOT NULL,back TEXT NOT NULL,tags TEXT NOT NULL,point_count INTEGER NOT NULL CHECK(point_count BETWEEN 1 AND 1000),narrations TEXT NOT NULL DEFAULT '{}')",
+            "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,kind TEXT NOT NULL,front TEXT NOT NULL,back TEXT NOT NULL,tags TEXT NOT NULL,point_count INTEGER NOT NULL CHECK(point_count BETWEEN 1 AND 1000),narrations TEXT NOT NULL DEFAULT '{}',narration_fingerprints TEXT NOT NULL DEFAULT '{}')",
             "CREATE TABLE IF NOT EXISTS review_variants(id TEXT PRIMARY KEY,card_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,variant_key TEXT NOT NULL,due TEXT NOT NULL,review_count INTEGER NOT NULL CHECK(review_count>=0),stability REAL NOT NULL CHECK(stability BETWEEN .25 AND 3650),difficulty REAL NOT NULL CHECK(difficulty BETWEEN 0 AND 1),UNIQUE(card_id,variant_key))",
             "CREATE INDEX IF NOT EXISTS variants_due ON review_variants(due)",
             "CREATE TABLE IF NOT EXISTS reviews(id TEXT PRIMARY KEY,card_id TEXT NOT NULL,variant_id TEXT NOT NULL,deck_name TEXT NOT NULL,grade INTEGER NOT NULL CHECK(grade BETWEEN 0 AND 4),recall_fraction REAL NOT NULL CHECK(recall_fraction BETWEEN 0 AND 1),response_seconds REAL NOT NULL CHECK(response_seconds BETWEEN 0 AND 86400),reviewed_at TEXT NOT NULL,due TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '',session_deck_name TEXT NOT NULL DEFAULT '',session_started_at TEXT NOT NULL DEFAULT '')",
@@ -165,6 +165,12 @@ bool DatabaseWorker::migrate()
             QSet<QString> names; while (columns.next()) names.insert(columns.value(1).toString());
             if (!names.contains("narrations") && !execute("ALTER TABLE notes ADD COLUMN narrations TEXT NOT NULL DEFAULT '{}'")) return false;
         }
+        if (version < 6) {
+            QSqlQuery columns(m_db);
+            if (!columns.exec("PRAGMA table_info(notes)")) { m_sqlDetail=columns.lastError().text(); return false; }
+            QSet<QString> names; while (columns.next()) names.insert(columns.value(1).toString());
+            if (!names.contains("narration_fingerprints") && !execute("ALTER TABLE notes ADD COLUMN narration_fingerprints TEXT NOT NULL DEFAULT '{}'")) return false;
+        }
         if (!execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('device_id',?)",{model::uuid()})
             || !execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('sync_cursor','0')")) return false;
         QSqlQuery device(m_db);
@@ -175,7 +181,7 @@ bool DatabaseWorker::migrate()
             if (!old.exec("SELECT id,deck_id,kind,front,back,tags,point_count,due,review_count,stability,difficulty FROM cards")) {m_sqlDetail=old.lastError().text();return false;}
             QList<struct model::Card> migrated;
             while (old.next()) {
-                const struct model::Card note = readCard(old);
+                const struct model::Card note{old.value(0).toString(),old.value(1).toString(),old.value(2).toString(),old.value(3).toString(),old.value(4).toString(),old.value(5).toString(),old.value(6).toInt()};
                 const auto valid = model::cardFromMap(model::toMap(note));
                 if (!valid) {m_sqlDetail=valid.error();return false;}
                 if (!upsertCard(note)) return false;
@@ -213,7 +219,7 @@ bool DatabaseWorker::migrate()
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
-        return execute("PRAGMA user_version=5");
+        return execute("PRAGMA user_version=6");
     });
 }
 std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
@@ -224,7 +230,7 @@ std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
 }
 std::optional<struct model::Card> DatabaseWorker::card(const QString &id)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id,deck_id,kind,front,back,tags,point_count,narrations FROM notes WHERE id=?");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
     return q.next() ? std::optional<struct model::Card>(readCard(q)) : std::nullopt;
 }
@@ -245,7 +251,7 @@ QList<struct model::Variant> DatabaseWorker::cardVariants(const QString &id)
 bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
 { return execute("INSERT INTO decks(id,name,description,created_at,parent_id) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id",{r.id,r.name,r.description,r.createdAt,r.parentId}); }
 bool DatabaseWorker::upsertCard(const struct model::Card &r)
-{ return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count,narrations) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count,narrations=excluded.narrations",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount,json(r.narrations)}); }
+{ return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count,narrations=excluded.narrations,narration_fingerprints=excluded.narration_fingerprints",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount,json(r.narrations),json(r.narrationFingerprints)}); }
 bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString &reviewId)
 {
     const auto previous=variant(r.id);
@@ -419,7 +425,7 @@ bool DatabaseWorker::publishSnapshot()
     QHash<QString,QList<struct model::Variant>> variants;
     if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants ORDER BY variant_key")) {fail("STORAGE_READ","Could not load review variants. Try refreshing.",q.lastError().text());return false;}
     while (q.next()) {const struct model::Variant schedule=readVariant(q);variants[schedule.cardId].append(schedule);}
-    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations FROM notes ORDER BY id")) {fail("STORAGE_READ","Could not load cards. Try refreshing.",q.lastError().text());return false;}
+    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("STORAGE_READ","Could not load cards. Try refreshing.",q.lastError().text());return false;}
     while (q.next()) {
         const struct model::Card note=readCard(q);
         QVariantMap map=model::toMap(note);
@@ -564,15 +570,15 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         const QString now=model::nowUtc();
         QHash<QString,QVariantMap> cache;
         QSqlQuery q(m_db);
-        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,d.name FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
+        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
         if (!q.exec()) {fail("REVIEW_LOAD","Could not load the review queue. Refresh and try again.",q.lastError().text());return false;}
         while (q.next()) {
             const struct model::Variant schedule=readVariant(q);
             if (!members.contains(schedule.id)||(!m_sessionGrades.contains(schedule.id)&&schedule.due>now)) continue;
-            const struct model::Card note{schedule.cardId,q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString(),q.value(12).toInt(),q.value(13).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(13).toString().toUtf8()).object().toVariantMap()};
+            const struct model::Card note{schedule.cardId,q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString(),q.value(12).toInt(),q.value(13).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(13).toString().toUtf8()).object().toVariantMap(),q.value(14).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(14).toString().toUtf8()).object().toVariantMap()};
             const auto keys=model::variantKeys(note);
             if (!keys||!keys->contains(schedule.key)) continue;
-            cache.insert(schedule.id,reviewCard(note,schedule,q.value(14).toString()));
+            cache.insert(schedule.id,reviewCard(note,schedule,q.value(15).toString()));
         }
         m_queueCache=std::move(cache);
     }
@@ -679,15 +685,19 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
     if (!ready()) return;
     const auto previous = id.isEmpty() ? std::optional<struct model::Card>{} : card(id);
     const QString recordId = id.isEmpty() ? model::uuid() : id;
-    const struct model::Card draft{recordId,deckId,kind,front,back,tags,points,previous?previous->narrations:QVariantMap{}};
+    const struct model::Card draft{recordId,deckId,kind,front,back,tags,points,previous?previous->narrations:QVariantMap{},previous?previous->narrationFingerprints:QVariantMap{}};
     QVariantMap narrations;
+    QVariantMap fingerprints;
     const auto draftKeys = model::variantKeys(draft);
     if (draftKeys) {
         const QSet<QString> allowedKeys(draftKeys->cbegin(),draftKeys->cend());
         for (auto it = draft.narrations.cbegin(); it != draft.narrations.cend(); ++it)
-            if (allowedKeys.contains(it.key().section(QLatin1Char('/'),0,0))) narrations.insert(it.key(),it.value());
+            if (allowedKeys.contains(it.key().section(QLatin1Char('/'),0,0))) {
+                narrations.insert(it.key(),it.value());
+                if (draft.narrationFingerprints.contains(it.key())) fingerprints.insert(it.key(),draft.narrationFingerprints.value(it.key()));
+            }
     }
-    const struct model::Card record{recordId,deckId,kind,front,back,tags,points,narrations};
+    const struct model::Card record{recordId,deckId,kind,front,back,tags,points,narrations,fingerprints};
     const auto valid=model::cardFromMap(model::toMap(record));
     if (!valid) {fail(kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD","Could not save the card. Correct the card fields.",valid.error());return;}
     if (!validateMedia(record)) {fail("CARD_MEDIA","Could not save the card images. Restore missing images, insert them again, or split cards containing more than 64 MiB of images.",m_sqlDetail);return;}
@@ -704,7 +714,7 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card saved");
 }
-void DatabaseWorker::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId)
+void DatabaseWorker::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
 {
     if (!ready()) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
     const auto failRequest = [&] (const QString &code, const QString &message, const QString &detail = QString()) {
@@ -723,6 +733,8 @@ void DatabaseWorker::setCardNarration(const QString &cardId,const QString &varia
     struct model::Card updated = *existing;
     const QString key = variantKey + QLatin1Char('/') + side;
     if (mediaName.isEmpty()) updated.narrations.remove(key); else updated.narrations.insert(key,mediaName);
+    if (mediaName.isEmpty() || fingerprint.isEmpty()) updated.narrationFingerprints.remove(key);
+    else updated.narrationFingerprints.insert(key,fingerprint);
     const auto valid = model::cardFromMap(model::toMap(updated));
     if (!valid) { failRequest("NARRATION_INVALID","Could not save this narration.",valid.error()); return; }
     if (!validateMedia(updated)) { failRequest("NARRATION_MEDIA_INVALID","Could not save the narration because an attached media asset is missing or invalid.",m_sqlDetail); return; }
@@ -732,6 +744,49 @@ void DatabaseWorker::setCardNarration(const QString &cardId,const QString &varia
     m_queueDirty=true;
     const bool published = publishSnapshot() && publishQueue(false);
     if (published) done("Narration saved");
+    emit cardNarrationSaved(cardId,variantKey,side,requestId,true);
+}
+void DatabaseWorker::confirmCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &expectedFingerprint,const QString &requestId)
+{
+    if (!ready()) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
+    QString failureCode = QStringLiteral("NARRATION_CONFIRM_FAILED");
+    QString failureMessage = QStringLiteral("Could not confirm the narration. Check storage and try again.");
+    const bool committed = mutate([&] {
+        const auto existing = card(cardId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!existing || isDeleted("card",cardId)) {
+            failureCode = QStringLiteral("CARD_NOT_FOUND");
+            failureMessage = QStringLiteral("This card no longer exists. Refresh the collection.");
+            return false;
+        }
+        if (!m_sqlDetail.isEmpty()) return false;
+        const QString key = variantKey + QLatin1Char('/') + side;
+        const QString currentFingerprint = model::narrationFingerprint(*existing,variantKey,side);
+        if (currentFingerprint.isEmpty() || expectedFingerprint != currentFingerprint
+            || existing->narrations.value(key).toString() != mediaName) {
+            failureCode = QStringLiteral("NARRATION_TEXT_CHANGED");
+            failureMessage = QStringLiteral("The card text or recording changed. Read the current text and listen to the recording before confirming it again.");
+            return false;
+        }
+        struct model::Card updated = *existing;
+        updated.narrationFingerprints.insert(key,currentFingerprint);
+        const auto valid = model::cardFromMap(model::toMap(updated));
+        if (!valid) { m_sqlDetail=valid.error(); return false; }
+        if (!validateMedia(updated)) {
+            failureCode = QStringLiteral("NARRATION_MEDIA_INVALID");
+            failureMessage = QStringLiteral("The narration recording is missing or invalid. Save the recording again.");
+            return false;
+        }
+        return upsertCard(updated) && enqueue("card.upsert",cardPayload(updated));
+    });
+    if (!committed) {
+        fail(failureCode,failureMessage,m_sqlDetail);
+        emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+        return;
+    }
+    m_queueDirty=true;
+    const bool published = publishSnapshot() && publishQueue(false);
+    if (published) done("Narration confirmed");
     emit cardNarrationSaved(cardId,variantKey,side,requestId,true);
 }
 void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals)
@@ -809,7 +864,7 @@ void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &desti
         for (const struct model::Card &existing : cards) {
             if (existing.deckId == destinationDeckId) continue;
             if (!execute("UPDATE notes SET deck_id=? WHERE id=?", {destinationDeckId, existing.id})) return false;
-            const struct model::Card moved{existing.id, destinationDeckId, existing.kind, existing.front, existing.back, existing.tags, existing.pointCount, existing.narrations};
+            const struct model::Card moved{existing.id, destinationDeckId, existing.kind, existing.front, existing.back, existing.tags, existing.pointCount, existing.narrations, existing.narrationFingerprints};
             const QVariantMap payload = cardPayload(moved);
             if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert", payload)) return false;
         }
@@ -843,8 +898,8 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
     const bool committed=mutate([&] {
         QSqlQuery query(m_db);
         query.prepare(deckScope
-            ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
-            : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations FROM notes WHERE id=?");
+            ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
+            : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");
         query.addBindValue(id);
         if (!query.exec()) {m_sqlDetail=query.lastError().text();return false;}
         QList<struct model::Card> cards;
@@ -1057,8 +1112,10 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         const auto parsedRecord = model::cardFromMap(incomingCardMap);
         if (!parsedRecord) { m_sqlDetail=parsedRecord.error(); return false; }
         struct model::Card record=*parsedRecord;
+        const auto stored = (!incomingCardMap.contains(QStringLiteral("narrations"))
+            || !incomingCardMap.contains(QStringLiteral("narrationFingerprints"))) ? card(record.id) : std::optional<struct model::Card>{};
+        if (!m_sqlDetail.isEmpty()) return false;
         if (!incomingCardMap.contains(QStringLiteral("narrations"))) {
-            const auto stored=card(record.id);
             if (stored) {
                 const auto keys=model::variantKeys(record);
                 if (!keys) { m_sqlDetail=keys.error(); return false; }
@@ -1067,6 +1124,13 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
                     const QString variantKey=it.key().section(QLatin1Char('/'),0,0);
                     if (allowed.contains(variantKey)) record.narrations.insert(it.key(),it.value());
                 }
+            }
+        }
+        if (!incomingCardMap.contains(QStringLiteral("narrationFingerprints")) && stored) {
+            for (auto it=stored->narrationFingerprints.cbegin();it!=stored->narrationFingerprints.cend();++it) {
+                if (record.narrations.contains(it.key())
+                    && record.narrations.value(it.key()) == stored->narrations.value(it.key()))
+                    record.narrationFingerprints.insert(it.key(),it.value());
             }
         }
         QList<struct model::Variant> schedules;
@@ -1309,7 +1373,7 @@ void DatabaseWorker::exportCollection(const QString &path)
     QSqlQuery q(m_db);
     if (!q.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
     while (q.next()) decks.append(model::toMap(readDeck(q)));
-    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
+    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
     while (q.next()) {const struct model::Card note=readCard(q);notes.append(note);cards.append(model::toMap(note));}
     if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants ORDER BY id")) {fail("EXPORT_READ","Could not read variants for export.",q.lastError().text());return;}
     while (q.next()) variants.append(model::toMap(readVariant(q)));
@@ -1321,7 +1385,7 @@ void DatabaseWorker::exportCollection(const QString &path)
     if (!references) {fail("EXPORT_MEDIA","Could not include card images. Repair the media references and export again.",references.error());return;}
     const auto media=model::readBackupMedia(QDir(QFileInfo(m_path).absolutePath()).filePath("media"),*references);
     if (!media) {fail("EXPORT_MEDIA","Could not include card images. Restore the missing or invalid image and export again.",media.error());return;}
-    const QJsonObject root{{"version",3},{"media",model::mediaToJson(*media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
+    const QJsonObject root{{"version",4},{"media",model::mediaToJson(*media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
         {"variants",QJsonArray::fromVariantList(variants)},{"history",QJsonArray::fromVariantList(history)},{"deleted",QJsonArray::fromVariantList(deleted)}};
     QSaveFile file(path);
     const QByteArray bytes=QJsonDocument(root).toJson(QJsonDocument::Indented);
