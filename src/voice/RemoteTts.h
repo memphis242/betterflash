@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 class QNetworkAccessManager;
@@ -20,6 +21,7 @@ class RemoteTts final : public QObject {
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY configurationChanged)
     Q_PROPERTY(QString model READ model WRITE setModel NOTIFY configurationChanged)
     Q_PROPERTY(QString voice READ voice WRITE setVoice NOTIFY configurationChanged)
+    Q_PROPERTY(QStringList availableVoices READ availableVoices NOTIFY availableVoicesChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readinessChanged)
     Q_PROPERTY(QString status READ status NOTIFY readinessChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
@@ -33,6 +35,7 @@ public:
     [[nodiscard]] QString endpoint() const { return m_endpoint; }
     [[nodiscard]] QString model() const { return m_model; }
     [[nodiscard]] QString voice() const { return m_voice; }
+    [[nodiscard]] QStringList availableVoices() const;
     [[nodiscard]] bool ready() const;
     [[nodiscard]] QString status() const;
     [[nodiscard]] bool hasApiKey() const;
@@ -51,6 +54,7 @@ public:
 
 signals:
     void configurationChanged();
+    void availableVoicesChanged();
     void readinessChanged();
     void keyChanged();
     void credentialChanged();
@@ -68,6 +72,8 @@ private:
     static bool decodeWav(const QByteArray &payload, QByteArray *pcm, QAudioFormat *format,
         double *seconds, QString *error);
     static bool validEndpoint(const QUrl &url);
+    static QStringList voicesFor(const QUrl &endpoint, const QString &model);
+    QString sanitizedProviderError(const QByteArray &payload, int httpStatus) const;
 
     QString m_endpoint = QStringLiteral("https://api.groq.com/openai/v1/audio/speech");
     QString m_model = QStringLiteral("canopylabs/orpheus-v1-english");

@@ -340,7 +340,21 @@ ColumnLayout {
                     onModelEdited: model => voice.remoteTts.model = model
                 }
                 Label { text: "Voice"; color: Theme.inkMuted; font.pixelSize: 15 }
-                TextField { Layout.fillWidth: true; text: voice.remoteTts.voice; onEditingFinished: voice.remoteTts.voice = text.trim(); placeholderText: "troy"; font.pixelSize: 17 }
+                SettingsCombo {
+                    visible: voice.remoteTts.availableVoices.length > 0
+                    Layout.fillWidth: true
+                    model: voice.remoteTts.availableVoices
+                    currentIndex: Math.max(0, voice.remoteTts.availableVoices.indexOf(voice.remoteTts.voice))
+                    onActivated: voice.remoteTts.voice = currentText
+                }
+                TextField {
+                    visible: voice.remoteTts.availableVoices.length === 0
+                    Layout.fillWidth: true
+                    text: voice.remoteTts.voice
+                    onEditingFinished: voice.remoteTts.voice = text.trim()
+                    placeholderText: "Voice identifier"
+                    font.pixelSize: 17
+                }
                 ApiKeyEditor {
                     id: ttsKeyEditor
                     binding: voice.remoteTts.apiKey
