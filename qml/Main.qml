@@ -58,6 +58,12 @@ ApplicationWindow {
     property var knownDeckIds: []
     property int imageCursor: 0
     property int editorSession: 0
+    property bool narrationSavePending: false
+    property string pendingNarrationCardId: ""
+    property int pendingNarrationSession: -1
+    property var pendingNarrationFields: ({})
+    readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
+                                           && !narrationFieldsMatch(editingCard(), currentCardDraft())
     property int imageSession: -1
     property string globalErrorCode: ""
     property string globalErrorMessage: ""
@@ -406,6 +412,97 @@ ApplicationWindow {
         if (target.length > 0)
             narrationDialog.openFor(target)
     }
+    function clearPendingNarration() {
+        narrationSavePending = false
+        pendingNarrationCardId = ""
+        pendingNarrationSession = -1
+        pendingNarrationFields = ({})
+    }
+    function currentCardDraft() {
+        const parts = splitSource(editorSource.text)
+        const cloze = /\{\{c\d+::/.test(parts.front)
+        return {
+            deckId: cardDeck.currentValue,
+            kind: cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic",
+            front: parts.front,
+            back: parts.back,
+            tags: cardTags.text,
+            points: cardPoints.value
+        }
+    }
+    function cardSubmission() {
+        const parts = splitSource(editorSource.text)
+        const cloze = /\{\{c\d+::/.test(parts.front)
+        const kind = cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic"
+        if (!cardDeck.currentValue) {
+            localCardError = "CARD_DECK: Choose a deck for this card."
+            return null
+        }
+        if (!parts.front) {
+            localCardError = "CARD_FRONT: Write a question before the separator."
+            return null
+        }
+        if (kind !== "cloze" && !parts.back) {
+            localCardError = "CARD_BACK: Add the answer after a standalone --- line."
+            return null
+        }
+        return {
+            deckId: cardDeck.currentValue,
+            kind: kind,
+            front: parts.front,
+            back: parts.back,
+            tags: cardTags.text,
+            points: cardPoints.value
+        }
+    }
+    function narrationFieldsMatch(card, fields) {
+        return card.id && card.deckId === fields.deckId && card.kind === fields.kind
+                && card.front === fields.front && card.back === fields.back
+                && (card.tags || "") === fields.tags && Number(card.pointCount || 1) === Number(fields.points)
+    }
+    function maybeOpenPendingNarration() {
+        if (!narrationSavePending || !cardDialog.visible
+                || pendingNarrationSession !== editorSession || pendingNarrationCardId !== editingCardId)
+            return
+        if (app.busy)
+            return
+        if (app.lastError.message) {
+            clearPendingNarration()
+            return
+        }
+        const saved = cardById(pendingNarrationCardId)
+        if (!narrationFieldsMatch(saved, pendingNarrationFields)) {
+            clearPendingNarration()
+            localCardError = "CARD_SAVE: The saved card did not match the narration request. Try again."
+            return
+        }
+        const target = pendingNarrationCardId
+        clearPendingNarration()
+        openCardNarration(target)
+    }
+    function requestCardNarration() {
+        if (!editingCardId || narrationSavePending || app.busy || media.busy)
+            return
+        const submission = cardSubmission()
+        if (!submission)
+            return
+        const stored = editingCard()
+        if (narrationFieldsMatch(stored, submission)) {
+            openCardNarration(editingCardId)
+            return
+        }
+        const target = editingCardId
+        const session = editorSession
+        pendingNarrationCardId = target
+        pendingNarrationSession = session
+        pendingNarrationFields = submission
+        narrationSavePending = true
+        if (!app.saveCard(target, submission.deckId, submission.kind, submission.front, submission.back, submission.tags, submission.points)) {
+            clearPendingNarration()
+            return
+        }
+        maybeOpenPendingNarration()
+    }
     function openMoveCard(id) {
         if (!cardById(id).id)
             return
@@ -501,24 +598,14 @@ ApplicationWindow {
         imageDialog.open()
     }
     function submitCard() {
-        const parts = splitSource(editorSource.text)
-        const cloze = /\{\{c\d+::/.test(parts.front)
-        const kind = cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic"
-        if (!cardDeck.currentValue) {
-            localCardError = "CARD_DECK: Choose a deck for this card."
+        if (narrationSavePending)
             return
-        }
-        if (!parts.front) {
-            localCardError = "CARD_FRONT: Write a question before the separator."
+        const submission = cardSubmission()
+        if (!submission)
             return
-        }
-        if (kind !== "cloze" && !parts.back) {
-            localCardError = "CARD_BACK: Add the answer after a standalone --- line."
-            return
-        }
-        if (app.saveCard(editingCardId, cardDeck.currentValue, kind, parts.front, parts.back, cardTags.text, cardPoints.value)) {
-            if (cardDeck.currentValue !== app.selectedDeckId)
-                setDeck(cardDeck.currentValue)
+        if (app.saveCard(editingCardId, submission.deckId, submission.kind, submission.front, submission.back, submission.tags, submission.points)) {
+            if (submission.deckId !== app.selectedDeckId)
+                setDeck(submission.deckId)
             cardDialog.close()
         }
     }
@@ -578,7 +665,9 @@ ApplicationWindow {
     }
     function shortcutAllowed(action) {
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
-            return cardDialog.visible && !imageDialog.visible && !errorDialog.visible && (action === "saveCard" || editorTabs.currentIndex === 0)
+            return cardDialog.visible && !narrationSavePending && !narrationDialog.visible
+                    && !imageDialog.visible && !errorDialog.visible
+                    && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
             const tests = voice.customSttTests
             if (typing || app.busy || voice.modelTestBusy || voice.sttTestBusy || voice.ttsTestBusy
@@ -1180,10 +1269,24 @@ ApplicationWindow {
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
-                GlyphButton { glyph: "close"; hint: "Close card editor"; onClicked: cardDialog.close() }
+                AppButton {
+                    objectName: "cardNarrationButton"
+                    glyph: "mic"
+                    visible: !!editingCardId
+                    text: narrationSavePending ? "Saving card..." : editorDraftDirty
+                          ? (window.width < 600 ? "Save + narrate" : "Save and record narration")
+                          : (window.width < 600 ? "Narrate" : "Record narration")
+                    hint: narrationSavePending ? "Saving card before opening narration"
+                          : editorDraftDirty ? "Save this card, then record narration"
+                          : "Record narration for this card"
+                    enabled: !narrationSavePending && !app.busy && !media.busy
+                    onClicked: requestCardNarration()
+                }
+                GlyphButton { glyph: "close"; hint: "Close card editor"; enabled: !narrationSavePending; onClicked: cardDialog.close() }
             }
         }
         onOpened: {
+            clearPendingNarration()
             window.editorSession += 1
             const c = editingCard()
             localCardError = ""
@@ -1197,8 +1300,12 @@ ApplicationWindow {
             editorSource.cursorPosition = 0
             window.focusEditorSource()
         }
-        onClosed: window.imageSession = -1
+        onClosed: {
+            window.imageSession = -1
+            clearPendingNarration()
+        }
         contentItem: ColumnLayout {
+            enabled: !narrationSavePending
             spacing: 10
             Instantiator {
                 model: ["editorSplit", "editorCloze", "editorImage", "saveCard"]
@@ -1483,6 +1590,7 @@ ApplicationWindow {
             }
             AppButton {
                 text: "Cancel"
+                enabled: !narrationSavePending
                 onClicked: cardDialog.close()
             }
             AppButton {
@@ -1490,7 +1598,7 @@ ApplicationWindow {
                 text: "Save card"
                 primary: true
                 hint: shortcuts.bindings.saveCard
-                enabled: !media.busy
+                enabled: !media.busy && !narrationSavePending && !app.busy
                 onClicked: submitCard()
             }
         }
@@ -2269,10 +2377,16 @@ ApplicationWindow {
                 window.selectedCardId = ""
                 window.detailOpen = false
             }
+            Qt.callLater(function() { window.maybeOpenPendingNarration() })
+        }
+        function onBusyChanged() {
+            Qt.callLater(function() { window.maybeOpenPendingNarration() })
         }
         function onLastErrorChanged() {
             if (app.lastError.message) {
                 window.pendingDeckName = ""
+                if (window.narrationSavePending)
+                    window.clearPendingNarration()
                 window.showError(app.lastError.code || "APP_ERROR", app.lastError.message, app.lastError.detail || app.lastError.details || "")
             }
         }
