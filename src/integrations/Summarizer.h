@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SecretStore.h"
+#include "ApiKeyBinding.h"
 #include "models/ModelDownload.h"
 #include <QHash>
 #include <QJsonObject>
@@ -15,6 +15,7 @@
 
 class AppController;
 class QNetworkReply;
+class ApiKeyRegistry;
 
 struct ProviderError {
     QString code;
@@ -43,6 +44,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
+    Q_PROPERTY(QObject *apiKey READ apiKey CONSTANT)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
@@ -50,7 +52,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(QString summaryDeckId READ summaryDeckId NOTIFY changed)
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY changed)
 public:
-    explicit Summarizer(AppController *app, QObject *parent = nullptr);
+    explicit Summarizer(AppController *app, QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr);
     ~Summarizer() override;
     QString endpoint() const { return m_endpoint; }
     QString model() const { return m_model; }
@@ -70,8 +72,10 @@ public:
     QString testError() const { return m_testError; }
     QVariantMap testReport() const { return m_testReport; }
     bool hasApiKey() const { return m_credentials->hasKey(); }
-    QString keyStorageStatus() const { return m_credentials->status(); }
+    QString keyStorageStatus() const { return m_credentials->storageStatus(); }
     QString keyStorageState() const { return m_credentials->storageState(); }
+    QObject *apiKey() const { return m_credentials; }
+    ApiKeyRegistry *credentialRegistry() const;
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
     QString error() const { return m_error; }
@@ -122,7 +126,8 @@ private:
         bool waitingForDownload = false;
     };
     AppController *const m_app;
-    SecretStore *m_credentials = nullptr;
+    ApiKeyBinding *m_credentials = nullptr;
+    ApiKeyRegistry *const m_registry;
     QNetworkAccessManager m_network;
     QSettings m_settings;
     ModelDownload m_localDownload;
@@ -144,6 +149,7 @@ private:
     QString m_status;
     QString m_error;
     QString m_lastKey;
+    QString m_lastCredentialId;
     QString m_summary;
     QString m_summaryDeckId;
     bool m_busy = false;

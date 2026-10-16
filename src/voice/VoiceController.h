@@ -1,5 +1,6 @@
 #pragma once
 
+#include "integrations/ApiKeyBinding.h"
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -10,7 +11,7 @@
 #include <atomic>
 #include <memory>
 
-class SecretStore;
+class ApiKeyRegistry;
 class QTextToSpeech;
 class QThread;
 class QTimer;
@@ -67,10 +68,11 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString modelTestError READ modelTestError NOTIFY modelTestChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyStorageStatusChanged)
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyStorageStatusChanged)
+    Q_PROPERTY(QObject *apiKey READ apiKey CONSTANT)
     Q_PROPERTY(QObject *customSttTests READ customSttTests CONSTANT)
     Q_PROPERTY(QObject *remoteTts READ remoteTts CONSTANT)
 public:
-    explicit VoiceController(QObject *parent = nullptr);
+    explicit VoiceController(QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr);
     ~VoiceController() override;
 
     [[nodiscard]] bool enabled() const { return m_enabled; }
@@ -114,6 +116,8 @@ public:
     [[nodiscard]] QString modelTestError() const { return m_modelTestError; }
     [[nodiscard]] QString keyStorageStatus() const;
     [[nodiscard]] QString keyStorageState() const;
+    [[nodiscard]] QObject *apiKey() const { return m_secret; }
+    [[nodiscard]] ApiKeyRegistry *credentialRegistry() const { return m_registry; }
     [[nodiscard]] QObject *customSttTests() const;
     [[nodiscard]] QObject *remoteTts() const;
 
@@ -254,6 +258,7 @@ private:
     QPointer<LocalTtsWorker> m_ttsWorker;
     QPointer<QThread> m_ttsThread;
     QPointer<QThread> m_retiringTtsThread;
+    ApiKeyRegistry *const m_registry;
     RemoteTts *const m_remoteTts;
     QAudioSink *m_audioSink = nullptr;
     QBuffer *m_playbackBuffer = nullptr;
@@ -262,7 +267,7 @@ private:
     quint64 m_testGeneration = 0;
     QString m_pendingSpeech;
     QString m_lastKey;
-    SecretStore *const m_secret;
+    ApiKeyBinding *const m_secret;
     QTextToSpeech *m_speech = nullptr;
     CustomSttTests *const m_customSttTests;
     TranscriptCorrector *const m_corrector;

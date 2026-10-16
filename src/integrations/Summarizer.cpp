@@ -1,9 +1,9 @@
 #include "Summarizer.h"
+#include "ApiKeyRegistry.h"
 #include "core/appcontroller.h"
 #include "core/cardmodel.h"
 #include "models/LocalLanguageModel.h"
 
-#include <QCryptographicHash>
 #include <QDateTime>
 #include <QHash>
 #include <QDir>
@@ -20,8 +20,8 @@
 #include <QSet>
 #include <QUrl>
 
-Summarizer::Summarizer(AppController *app, QObject *parent)
-    : QObject(parent), m_app(app), m_localDownload(qEnvironmentVariable("BETTERFLASH_MODEL_DIR",
+Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *registry)
+    : QObject(parent), m_app(app), m_registry(registry ? registry : new ApiKeyRegistry(this)), m_localDownload(qEnvironmentVariable("BETTERFLASH_MODEL_DIR",
         QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/BetterFlash/models")), this) {
     Q_ASSERT(m_app);
     m_endpoint = m_settings.value(QStringLiteral("llm/endpoint"),
@@ -240,33 +240,40 @@ void Summarizer::resetTestReport() {
     emit testChanged();
 }
 void Summarizer::configureCredentials() {
-    if (m_credentials) m_credentials->deleteLater();
-    const QString host = QUrl(m_endpoint).host().toLower();
-    const QString scope = QString::fromLatin1(QCryptographicHash::hash(host.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-    m_credentials = new SecretStore(QStringLiteral("llm-") + scope,
-        host == QStringLiteral("api.groq.com") ? QStringLiteral("GROQ_API_KEY") : QStringLiteral("BETTERFLASH_LLM_API_KEY"), this);
-    m_lastKey = m_credentials->key();
-    connect(m_credentials, &SecretStore::changed, this, [this] {
-        const QString key = m_credentials->key();
-        if (key != m_lastKey) {
+    if (!m_credentials) {
+        m_credentials = m_registry->binding(QStringLiteral("language-model"), this);
+        connect(m_credentials, &ApiKeyBinding::changed, this, [this] {
+            const QString id = m_credentials->selectedKeyId();
+            const QString key = m_credentials->key();
+            const bool resolvedChanged = id != m_lastCredentialId || key != m_lastKey;
+            m_lastCredentialId = id;
             m_lastKey = key;
-            emit actualCredentialChanged();
-            if (m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); }
-        }
-        emit keyChanged();
-    });
+            if (resolvedChanged) {
+                cancelAllCompletions();
+                emit actualCredentialChanged();
+                if (m_provider == QStringLiteral("remote")) { cancelTest(); resetTestReport(); }
+            }
+            emit keyChanged();
+        });
+    }
+    m_credentials->setEndpoint(m_endpoint);
+    m_lastKey = m_credentials->key();
+    m_lastCredentialId = m_credentials->selectedKeyId();
     emit keyChanged();
 }
-void Summarizer::setApiKey(const QString &key) { m_credentials->setKey(key); }
-void Summarizer::clearApiKey() { m_credentials->clear(); }
+ApiKeyRegistry *Summarizer::credentialRegistry() const { return m_registry; }
+void Summarizer::setApiKey(const QString &key) {
+    if (key.trimmed().isEmpty()) m_credentials->clearKey();
+    else m_credentials->saveKey(key);
+}
+void Summarizer::clearApiKey() { m_credentials->clearKey(); }
 void Summarizer::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();
     if (value == m_endpoint) return;
     cancelAllCompletions(); resetTestReport();
-    const QString previousHost = QUrl(m_endpoint).host();
     m_endpoint = value;
     m_settings.setValue(QStringLiteral("llm/endpoint"), value);
-    if (QUrl(m_endpoint).host() != previousHost) configureCredentials();
+    configureCredentials();
     emit configurationChanged();
 }
 void Summarizer::setModel(const QString &model) {
