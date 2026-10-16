@@ -54,7 +54,7 @@ struct ImportResult importFile(const QString &path, const QString &directory, QS
 MediaStore::MediaStore(const QString &dataDirectory, QObject *parent)
     : QObject(parent), m_rootPath(QDir(dataDirectory).filePath(QStringLiteral("media"))) {}
 bool MediaStore::validName(const QString &name) {
-    return betterflash::model::validMediaName(name);
+    return betterflash::model::validImageName(name);
 }
 std::expected<void, QString> MediaStore::validateImage(const QString &name, const QByteArray &bytes) {
     return betterflash::model::validateMediaImage(name, bytes);

@@ -165,7 +165,7 @@ QString gradeLabel(int grade)
 QVariantMap toMap(const struct Deck &r)
 { return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId}}; }
 QVariantMap toMap(const struct Card &r)
-{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount}}; }
+{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations}}; }
 QVariantMap toMap(const struct Variant &r)
 { return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty}}; }
 QVariantMap toMap(const struct Review &r)
@@ -190,11 +190,23 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
         || !text(m,"kind",16,true) || !text(m,"front",maxTextLength,true) || !text(m,"back",maxTextLength)
         || !text(m,"tags",4096) || !number(m,"pointCount",1,1000,true))
         return std::unexpected(QStringLiteral("Card fields are invalid or exceed their limits."));
-    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt()};
+    const QVariantMap narrations = m.contains("narrations") ? m.value("narrations").toMap() : QVariantMap{};
+    if (m.contains("narrations") && m.value("narrations").metaType().id() != QMetaType::QVariantMap)
+        return std::unexpected(QStringLiteral("Card narrations must be an object."));
+    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt(),narrations};
     if (card.kind != QStringLiteral("cloze") && card.back.trimmed().isEmpty())
         return std::unexpected(QStringLiteral("A basic or reverse card needs both sides."));
     const auto keys = variantKeys(card);
     if (!keys) return std::unexpected(keys.error());
+    const QSet<QString> allowedKeys(keys->cbegin(),keys->cend());
+    for (auto it = card.narrations.cbegin(); it != card.narrations.cend(); ++it) {
+        const QStringList parts = it.key().split(QLatin1Char('/'));
+        if (parts.size() != 2 || !allowedKeys.contains(parts.at(0))
+            || (parts.at(1) != QStringLiteral("front") && parts.at(1) != QStringLiteral("back")))
+            return std::unexpected(QStringLiteral("Card narration key is invalid."));
+        if (it.value().metaType().id() != QMetaType::QString || !validNarrationMediaName(it.value().toString()))
+            return std::unexpected(QStringLiteral("Card narration must reference a content-addressed WAV asset."));
+    }
     const auto references=cardMediaReferences(card);
     if (!references) return std::unexpected(references.error());
     return card;
@@ -205,8 +217,9 @@ std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct 
         return std::unexpected(QStringLiteral("A replacement needs between two and five focused cards."));
     const auto original=cardFromMap(toMap(source));
     if (!original) return std::unexpected(original.error());
-    const QStringList originalImages=*cardMediaReferences(source);
-    const QSet<QString> allowedImages(originalImages.cbegin(),originalImages.cend());
+    const QStringList originalMedia=*cardMediaReferences(source);
+    QSet<QString> allowedImages;
+    for (const QString &name : originalMedia) if (validImageName(name)) allowedImages.insert(name);
     QSet<QString> usedImages,questions;
     QList<struct Card> result;
     for (const QVariant &value:proposals) {
@@ -217,7 +230,7 @@ std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct 
         if (!text(fields,"front",10000,true)||!text(fields,"back",10000,true)||!number(fields,"pointCount",1,1000,true))
             return std::unexpected(QStringLiteral("Each proposed side needs Markdown text of at most 10000 characters and a whole answer-point count from 1 through 1000."));
         const struct Card proposed{uuid(),source.deckId,QStringLiteral("basic"),fields.value("front").toString(),
-            fields.value("back").toString(),source.tags,fields.value("pointCount").toInt()};
+            fields.value("back").toString(),source.tags,fields.value("pointCount").toInt(),{}};
         const auto valid=cardFromMap(toMap(proposed));
         if (!valid) return std::unexpected(valid.error());
         const QString question=proposed.front.simplified().toCaseFolded();
@@ -225,6 +238,7 @@ std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct 
             return std::unexpected(QStringLiteral("Give every proposed card a distinct question."));
         questions.insert(question);
         for (const QString &name:*cardMediaReferences(proposed)) {
+            if (!validImageName(name)) continue;
             if (!allowedImages.contains(name))
                 return std::unexpected(QStringLiteral("A proposed card references an image that is absent from the original card."));
             usedImages.insert(name);
@@ -282,9 +296,10 @@ std::expected<struct Review, QString> reviewFromMap(const QVariantMap &m)
 }
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {
-    if (object.value("version").toInt() != 2 || !object.value("decks").isArray()
+    const int version = object.value("version").toInt();
+    if (version < 2 || version > 3 || !object.value("decks").isArray()
         || !object.value("cards").isArray() || !object.value("variants").isArray() || !object.value("history").isArray())
-        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2 collection with decks, cards, variants, and history arrays."));
+        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2 or 3 collection with decks, cards, variants, and history arrays."));
     int count = 0;
     for (const QString &key : {QStringLiteral("decks"),QStringLiteral("cards"),QStringLiteral("variants"),QStringLiteral("history")}) {
         count += object.value(key).toArray().size();

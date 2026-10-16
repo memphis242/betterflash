@@ -41,19 +41,19 @@ std::expected<FileDescriptor,QString> openMediaDirectory(const QString &director
     if (descriptor<0) return std::unexpected(QStringLiteral("Could not open the media directory. It must be a readable directory rather than a symbolic link: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
     return FileDescriptor(descriptor);
 }
-std::expected<QByteArray,QString> readImage(int directory,const QString &name)
+std::expected<QByteArray,QString> readAttachment(int directory,const QString &name)
 {
     const QByteArray filename=QFile::encodeName(name);
     const FileDescriptor descriptor(::openat(directory,filename.constData(),O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK));
     struct stat info{};
     if (descriptor.value()<0||::fstat(descriptor.value(),&info)!=0||!S_ISREG(info.st_mode)||info.st_size<=0||info.st_size>maxImageBytes)
-        return std::unexpected(QStringLiteral("Image %1 must be a regular file of at most 20 MiB; symbolic links are rejected.").arg(name));
+        return std::unexpected(QStringLiteral("Media %1 must be a regular file of at most 20 MiB; symbolic links are rejected.").arg(name));
     QFile file;
     if (!file.open(descriptor.value(),QIODevice::ReadOnly)) return std::unexpected(QStringLiteral("Could not read image %1: %2").arg(name,file.errorString()));
     const QByteArray bytes=file.read(maxImageBytes+1);
     if (file.error()!=QFileDevice::NoError)
         return std::unexpected(QStringLiteral("Could not read image %1: %2").arg(name,file.errorString()));
-    const auto valid=validateMediaImage(name,bytes);
+    const auto valid=validateMediaAttachment(name,bytes);
     if (!valid)
         return std::unexpected(valid.error());
     return bytes;
@@ -61,12 +61,22 @@ std::expected<QByteArray,QString> readImage(int directory,const QString &name)
 }
 bool validMediaName(const QString &name)
 {
+    static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{64}\\.(png|jpg|jpeg|webp|gif|wav)$"));
+    return pattern.match(name).hasMatch();
+}
+bool validImageName(const QString &name)
+{
     static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{64}\\.(png|jpg|jpeg|webp|gif)$"));
+    return pattern.match(name).hasMatch();
+}
+bool validNarrationMediaName(const QString &name)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{64}\\.wav$"));
     return pattern.match(name).hasMatch();
 }
 std::expected<void,QString> validateMediaImage(const QString &name,const QByteArray &bytes)
 {
-    if (!validMediaName(name)||bytes.isEmpty()||bytes.size()>maxImageBytes||!matchingHash(name,bytes))
+    if (!validImageName(name)||bytes.isEmpty()||bytes.size()>maxImageBytes||!matchingHash(name,bytes))
         return std::unexpected(QStringLiteral("Image %1 must contain at most 20 MiB and match its SHA256 filename.").arg(name));
     QBuffer buffer;buffer.setData(bytes);buffer.open(QIODevice::ReadOnly);
     QImageReader reader(&buffer);reader.setDecideFormatFromContent(true);
@@ -86,6 +96,33 @@ std::expected<void,QString> validateMediaImage(const QString &name,const QByteAr
         return std::unexpected(QStringLiteral("Image %1 cannot be decoded. Export it as PNG and insert it again.").arg(name));
     return {};
 }
+std::expected<void,QString> validateNarrationWave(const QString &name,const QByteArray &bytes)
+{
+    constexpr qsizetype headerSize = 44;
+    constexpr qsizetype maxPcmBytes = 60 * 16000 * 2;
+    if (!validNarrationMediaName(name) || bytes.size() < headerSize || bytes.size() > headerSize + maxPcmBytes || !matchingHash(name,bytes))
+        return std::unexpected(QStringLiteral("Narration %1 must be a content-addressed WAV of at most 60 seconds.").arg(name));
+    const auto u16 = [&bytes](qsizetype at) -> quint16 {
+        return quint16(quint8(bytes.at(at))) | (quint16(quint8(bytes.at(at + 1))) << 8);
+    };
+    const auto u32 = [&bytes](qsizetype at) -> quint32 {
+        return quint32(quint8(bytes.at(at))) | (quint32(quint8(bytes.at(at + 1))) << 8)
+            | (quint32(quint8(bytes.at(at + 2))) << 16) | (quint32(quint8(bytes.at(at + 3))) << 24);
+    };
+    if (bytes.mid(0,4) != QByteArrayLiteral("RIFF") || bytes.mid(8,4) != QByteArrayLiteral("WAVE")
+        || u32(4) != quint32(bytes.size() - 8) || bytes.mid(12,4) != QByteArrayLiteral("fmt ")
+        || u32(16) != 16 || u16(20) != 1 || u16(22) != 1 || u32(24) != 16000
+        || u32(28) != 32000 || u16(32) != 2 || u16(34) != 16 || bytes.mid(36,4) != QByteArrayLiteral("data")
+        || u32(40) != quint32(bytes.size() - headerSize) || u32(40) == 0 || (u32(40) % 2) != 0)
+        return std::unexpected(QStringLiteral("Narration %1 is not canonical 16 kHz mono PCM audio.").arg(name));
+    return {};
+}
+std::expected<void,QString> validateMediaAttachment(const QString &name,const QByteArray &bytes)
+{
+    if (validImageName(name)) return validateMediaImage(name,bytes);
+    if (validNarrationMediaName(name)) return validateNarrationWave(name,bytes);
+    return std::unexpected(QStringLiteral("Media filename %1 is not a supported image or narration WAV.").arg(name));
+}
 std::expected<QStringList,QString> mediaReferences(const QList<struct Card> &cards)
 {
     static const QRegularExpression pattern(QStringLiteral("media:([^\\s\\)\\]>\\\"'`]+)"));
@@ -95,9 +132,14 @@ std::expected<QStringList,QString> mediaReferences(const QList<struct Card> &car
             auto matches=pattern.globalMatch(side);
             while (matches.hasNext()) {
                 const QString name=matches.next().captured(1);
-                if (!validMediaName(name)) return std::unexpected(QStringLiteral("Card %1 has an invalid media reference. Insert the image again using the image control.").arg(card.id));
+                if (!validImageName(name)) return std::unexpected(QStringLiteral("Card %1 has an invalid image reference. Insert the image again using the image control.").arg(card.id));
                 unique.insert(name);
             }
+        }
+        for (auto it = card.narrations.cbegin(); it != card.narrations.cend(); ++it) {
+            if (!validNarrationMediaName(it.value().toString()))
+                return std::unexpected(QStringLiteral("Card %1 has an invalid narration reference.").arg(card.id));
+            unique.insert(it.value().toString());
         }
     }
     QStringList names=unique.values();std::sort(names.begin(),names.end());return names;
@@ -126,7 +168,7 @@ std::expected<QList<struct MediaAttachment>,QString> mediaFromJson(const QJsonAr
         if (!decoded||decoded.decoded.isEmpty()||decoded.decoded.size()>maxImageBytes
             ||QString::fromLatin1(encoded)!=data||decoded.decoded.toBase64()!=encoded||!matchingHash(name,decoded.decoded))
             return std::unexpected(QStringLiteral("Image %1 has invalid base64 data or a mismatched SHA256 digest.").arg(name));
-        const auto valid=validateMediaImage(name,decoded.decoded);
+        const auto valid=validateMediaAttachment(name,decoded.decoded);
         if (!valid) return std::unexpected(valid.error());
         total+=decoded.decoded.size();
         if (total>maxMediaBytes) return std::unexpected(QStringLiteral("Decoded image data exceeds the 64 MiB backup limit."));
@@ -145,7 +187,7 @@ std::expected<QList<struct MediaAttachment>,QString> readBackupMedia(const QStri
         if (!validMediaName(name)) return std::unexpected(QStringLiteral("Invalid media filename."));
         if (seen.contains(name)) continue;
         seen.insert(name);
-        const auto bytes=readImage(root->value(),name);
+        const auto bytes=readAttachment(root->value(),name);
         if (!bytes) return std::unexpected(bytes.error());
         total+=bytes->size();
         if (total>maxMediaBytes) return std::unexpected(QStringLiteral("Referenced images exceed 64 MiB. Split the card or export a smaller collection."));
@@ -160,7 +202,7 @@ std::expected<void,QString> writeBackupMedia(const QString &directory,const QLis
     for (const struct MediaAttachment &image:media) {
         if (names.contains(image.name))
             return std::unexpected(QStringLiteral("An image filename, size, or SHA256 digest is invalid, or the filename is duplicated."));
-        const auto valid=validateMediaImage(image.name,image.bytes);
+        const auto valid=validateMediaAttachment(image.name,image.bytes);
         if (!valid) return std::unexpected(valid.error());
         names.insert(image.name);total+=image.bytes.size();
         if (total>maxMediaBytes) return std::unexpected(QStringLiteral("Image data exceeds the 64 MiB storage batch limit."));
@@ -180,7 +222,7 @@ std::expected<void,QString> writeBackupMedia(const QString &directory,const QLis
         const auto present=exists(image.name);
         if (!present) return std::unexpected(present.error());
         if (*present) {
-            const auto existing=readImage(directoryDescriptor,image.name);
+            const auto existing=readAttachment(directoryDescriptor,image.name);
             if (!existing||*existing!=image.bytes) return std::unexpected(existing?QStringLiteral("An existing image has different bytes."):existing.error());
         }
     }
@@ -188,7 +230,7 @@ std::expected<void,QString> writeBackupMedia(const QString &directory,const QLis
         const auto present=exists(image.name);
         if (!present) return std::unexpected(present.error());
         if (*present) {
-            const auto existing=readImage(directoryDescriptor,image.name);
+            const auto existing=readAttachment(directoryDescriptor,image.name);
             if (!existing||*existing!=image.bytes) return std::unexpected(existing?QStringLiteral("An existing image has different bytes."):existing.error());
             continue;
         }
@@ -205,7 +247,7 @@ std::expected<void,QString> writeBackupMedia(const QString &directory,const QLis
         const bool removed=::unlinkat(directoryDescriptor,sourceName.constData(),0)==0;
         if (linked!=0) {
             if (error!=EEXIST) return std::unexpected(QStringLiteral("Could not publish image %1: %2").arg(image.name,QString::fromLocal8Bit(std::strerror(error))));
-            const auto existing=readImage(directoryDescriptor,image.name);
+            const auto existing=readAttachment(directoryDescriptor,image.name);
             if (!existing||*existing!=image.bytes) return std::unexpected(existing?QStringLiteral("Concurrent image creation produced different content."):existing.error());
         }
         if (!removed) return std::unexpected(QStringLiteral("The image was saved, but its temporary file could not be removed. Check the media directory permissions."));

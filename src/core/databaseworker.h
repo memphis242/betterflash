@@ -25,6 +25,8 @@ public:
     void deleteDeck(const QString &id);
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
                   const QString &front, const QString &back, const QString &tags, int points);
+    void setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
+                          const QString &mediaName, const QString &requestId);
     void deleteCard(const QString &id);
     void moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     void resetReviewState(const QString &id, bool deckScope);
@@ -48,6 +50,8 @@ signals:
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
+                            const QString &requestId, bool success);
     void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
                           bool inspecting, const QString &cursorVariantId);
     void gradeCommitted(bool correction);
