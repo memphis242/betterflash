@@ -9,6 +9,7 @@ ColumnLayout {
     readonly property var tests: voice.customSttTests
     property var expectedDrafts: ({})
     property string importSlotId: ""
+    readonly property bool dialogOpen: expectedTranscriptDialog.visible || recordingPicker.visible
     readonly property bool draftSetReady: tests.entries.some(entry => entry.hasRecording)
         && tests.entries.filter(entry => entry.hasRecording).every(entry => root.expectedFor(entry).trim().length > 0)
     readonly property bool providerReady: voice.sttProvider === "groq" ? voice.hasApiKey : voice.sttModelReady && !voice.sttModelDownloading
@@ -29,6 +30,28 @@ ColumnLayout {
         if (Object.prototype.hasOwnProperty.call(expectedDrafts, String(id))) tests.setExpected(id, expectedDrafts[String(id)])
     }
     function commitAllDrafts() { for (const entry of tests.entries) commitDraft(entry.id) }
+    function openExpectedDialog(entry, slotNumber) {
+        expectedTranscriptDialog.openFor(entry.id, "Slot " + slotNumber, root.expectedFor(entry))
+    }
+    function saveExpectedDialog(id, value) {
+        const key = String(id)
+        const entry = tests.entries.find(candidate => String(candidate.id) === key)
+        if (!entry || tests.busy || tests.recording) return false
+        root.rememberExpected(key, value)
+        root.commitDraft(key)
+        return true
+    }
+
+    ExpectedTranscriptDialog {
+        id: expectedTranscriptDialog
+        readOnly: tests.busy || tests.recording
+        onSaved: (id, value) => {
+            if (root.saveExpectedDialog(id, value))
+                expectedTranscriptDialog.close()
+            else
+                expectedTranscriptDialog.showSaveError("EXPECTED_SLOT: This recording slot is no longer available. Cancel and choose an existing slot.")
+        }
+    }
 
     FileDialog {
         id: recordingPicker
@@ -80,7 +103,7 @@ ColumnLayout {
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 9; spacing: 10
                             RowLayout {
                                 id: fields
-                                readonly property real sideWidth: Math.min(184, Math.max(0, (width - spacing * 2) / 4))
+                                readonly property real sideWidth: Math.min(220, Math.max(0, (width - spacing * 2) / 3))
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
                                 spacing: 10
@@ -130,72 +153,59 @@ ColumnLayout {
                                         font.pixelSize: 13
                                     }
                                 }
-                                Item {
+                                ColumnLayout {
                                     Layout.fillWidth: true
                                     Layout.minimumWidth: 0
                                     Layout.preferredWidth: 0
                                     Layout.alignment: Qt.AlignVCenter
-                                    Layout.preferredHeight: 112
-                                    Layout.minimumHeight: 112
-                                    Layout.maximumHeight: 112
+                                    Layout.preferredHeight: 78
+                                    Layout.minimumHeight: 78
+                                    Layout.maximumHeight: 78
                                     Label {
                                         id: expectedLabel
-                                        anchors.bottom: expectedViewport.top
-                                        anchors.bottomMargin: 4
-                                        anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        height: 15
+                                        Layout.fillWidth: true
                                         text: "Expected transcription"
                                         color: Theme.inkMuted; font.pixelSize: 12
                                         horizontalAlignment: Text.AlignHCenter
                                     }
-                                    ScrollView {
-                                        id: expectedViewport
-                                        anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        height: 74
-                                        contentWidth: availableWidth
-                                        clip: true
-                                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                                        background: Rectangle {
-                                            radius: 6
-                                            color: expectedText.readOnly ? Theme.canvas : expectedText.activeFocus ? Theme.surface : Theme.surfaceRaised
-                                            border.color: expectedText.activeFocus && !expectedText.readOnly ? Theme.accent : Theme.rule
-                                            border.width: expectedText.activeFocus ? 2 : 1
-                                        }
-                                        TextArea {
-                                            id: expectedText
-                                            property Item editorViewport: expectedViewport
-                                            width: expectedViewport.availableWidth
-                                            implicitWidth: 0
-                                            height: Math.max(74, implicitHeight)
-                                            text: root.expectedFor(modelData); placeholderText: "Enter the expected words"
+                                    Button {
+                                        id: expectedPreview
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        text: root.expectedFor(modelData).trim().length > 0 ? root.expectedFor(modelData) : "Add expected transcription"
+                                        enabled: true
+                                        Accessible.name: "Expected transcription for slot " + (index + 1)
+                                        Accessible.description: tests.busy || tests.recording ? "Open to view the expected transcription" : "Open to edit the expected transcription"
+                                        onClicked: root.openExpectedDialog(modelData, index + 1)
+                                        contentItem: Label {
+                                            text: expectedPreview.text
+                                            color: expectedPreview.text === "Add expected transcription" ? Theme.inkMuted : Theme.ink
+                                            font.family: Theme.uiFont
+                                            font.pixelSize: 14
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
-                                            font.pixelSize: 15; wrapMode: TextEdit.Wrap; selectByMouse: true
-                                            readOnly: tests.busy || tests.recording
-                                            color: readOnly ? Theme.inkMuted : Theme.ink
-                                            placeholderTextColor: Theme.inkMuted
-                                            background: Item {}
-                                            cursorVisible: activeFocus && !readOnly
-                                            HoverHandler { cursorShape: Qt.IBeamCursor }
-                                            onTextChanged: if (activeFocus) root.rememberExpected(modelData.id, text)
-                                            onActiveFocusChanged: if (!activeFocus) root.commitDraft(modelData.id)
-                                            Accessible.name: "Expected transcription for slot " + (index + 1)
-                                            ToolTip.visible: hovered && !activeFocus
-                                            ToolTip.text: readOnly ? "Expected transcription is locked while recording or testing" : "Click to edit the expected transcription"
+                                            wrapMode: Text.Wrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
                                         }
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: expectedPreview.activeFocus ? Theme.surface : Theme.surfaceRaised
+                                            border.color: expectedPreview.activeFocus ? Theme.accent : Theme.rule
+                                            border.width: expectedPreview.activeFocus ? 2 : 1
+                                        }
+                                        HoverHandler { cursorShape: Qt.PointingHandCursor }
                                     }
                                 }
                                 Item {
                                     Layout.minimumWidth: fields.sideWidth; Layout.preferredWidth: fields.sideWidth; Layout.maximumWidth: fields.sideWidth
                                     Layout.alignment: Qt.AlignVCenter
-                                    implicitHeight: 112
+                                    implicitHeight: 78
                                     ModelActionButton {
-                                        anchors.centerIn: parent
-                                        width: Math.min(implicitWidth, parent.width)
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        height: 44
                                         text: "Test slot"
                                         actionKind: "test"
                                         enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy
