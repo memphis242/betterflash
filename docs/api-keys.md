@@ -39,6 +39,10 @@ referencing that key sees the update. Switching a connection back to its own
 key leaves the shared source key intact. Changing the source page's model
 location to Local does not remove its saved remote key.
 
+If the source page now uses a different provider, switch it to the provider
+address shown beside the shared key and choose its **This page** key. The
+original key remains associated with that address.
+
 Existing keys retain their current keyring entries and receive the automatic
 page-based names. Independently entered keys remain separate even if their
 secret values happen to match. No key is merged or deleted automatically.
@@ -49,6 +53,10 @@ The desktop Secret Service keyring stores the secrets. Application settings
 contain only source names, provider addresses, and selected key identifiers.
 Key values stay out of collection data, backups, synchronization payloads,
 logs, and readable QML properties.
+
+Provider associations for older keyring entries are pinned in the keyring
+itself. If that association cannot be saved, Settings explains how to restore
+access; the older key is retained.
 
 The status beside the controls distinguishes a key saved on this computer
 from one available only for the current session or supplied through an

@@ -83,6 +83,11 @@ cannot silently carry a credential to the new origin. Settings retain only
 non-secret catalog metadata and references. Sync tokens use their separate
 credential store. See [API-key reuse](api-keys.md).
 
+Legacy service names are authorized only by an immutable source-to-origin map
+in the desktop keyring. User-writable catalog metadata cannot assign an older
+broad keyring service to another provider. The registry waits for the map before
+resolving legacy entries and fails closed if it cannot verify the association.
+
 ## Interface and platform boundaries
 
 QML supplies one shared interface with fixed top bars, bounded content areas,
