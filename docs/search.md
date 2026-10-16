@@ -161,9 +161,11 @@ deck. In provider mode, it may send uncached passages from every deck.
 The connection dialog explains this before saving. Provider charges may apply.
 Cached vectors avoid repeatedly transmitting unchanged text.
 
-A separate key uses the existing desktop Secret Service integration. Reusing
-the language-model key is an explicit setting and requires matching scheme,
-host and effective port. A chat model identifier is not an embedding model.
+A separate key uses the existing desktop Secret Service integration. After
+saving the remote connection, the **Key source** picker can select an existing
+model API key for the same scheme, host, and effective port. The selected key
+is resolved independently of the source page's Local or Remote model choice.
+See [API-key reuse](api-keys.md). A chat model identifier is not an embedding model.
 HTTP is accepted only on loopback, where a local compatible endpoint may omit
 authentication. No API key is exposed as a readable QML property or stored in
 the collection/cache.

@@ -210,7 +210,9 @@ storage status. Keys stay out of application settings, SQLite collections,
 backups, logs, sync payloads, and process arguments.
 
 Speech output also offers **Remote (cloud-provider)**. Configure the speech
-endpoint, model, voice, and a separate speech-output API key. The defaults use
+endpoint, model, voice, and an API key. The **Key source** picker can reuse a key
+entered in another model settings page for the same provider address, such as
+`speech-recognition-api-key`. The defaults use
 Groq's `canopylabs/orpheus-v1-english` model with the `troy` voice. Compatible
 speech endpoints must accept the same JSON speech request and return PCM WAV audio.
 Long prompts are split into smaller requests to respect Groq's documented
@@ -219,8 +221,9 @@ Long prompts are split into smaller requests to respect Groq's documented
 
 The remote connection sends the text being read to the selected service only
 when speech or its explicit model test is requested. Selecting Remote or
-opening Settings does not start a request. The speech-output key uses its own
-Secret Service entry; it is not automatically copied from recognition.
+opening Settings does not start a request. A key entered in Speech output has
+its own Secret Service entry; an explicitly reused key keeps its original
+entry. See [API-key reuse](api-keys.md).
 `GROQ_TTS_API_KEY` is an optional development alternative. There is no automatic
 fallback to another speech provider. Remote audio uses the same default output
 device and microphone suspension as local playback.

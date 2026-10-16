@@ -293,7 +293,10 @@ Each model settings page has a **Location of model:** selector with Local and
 Remote choices. Groq recognition, remote speech output, and other remote
 providers remain explicit BYOK choices. Keys
 are saved through the desktop Secret Service when available and never enter
-collection data, backups, sync events, or logs. See [voice setup](docs/voice.md)
+collection data, backups, sync events, or logs. Use **Key source** to reuse a key
+from another model settings page for the same provider. Names such as
+`speech-recognition-api-key` identify where it was entered. See
+[API-key reuse](docs/api-keys.md), [voice setup](docs/voice.md)
 and [local model support](docs/local-models.md).
 
 The Review landing page summarizes a selected deck's due prompts, including

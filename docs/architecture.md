@@ -75,6 +75,14 @@ serialized `secret-tool` processes. An unavailable keyring means session-only
 storage. Keys are never exposed as readable QML properties. Android persistence
 remains session-only until Keystore integration is implemented.
 
+A shared native API-key registry owns model credentials. Each consumer stores
+an origin-scoped reference to an entry named after its source settings page.
+Reuse resolves directly to that entry, without alias chains or another keyring
+copy. Resolution checks the scheme, host, and effective port; changing providers
+cannot silently carry a credential to the new origin. Settings retain only
+non-secret catalog metadata and references. Sync tokens use their separate
+credential store. See [API-key reuse](api-keys.md).
+
 ## Interface and platform boundaries
 
 QML supplies one shared interface with fixed top bars, bounded content areas,

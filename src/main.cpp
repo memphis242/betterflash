@@ -2,6 +2,7 @@
 #include "core/cardmodel.h"
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
+#include "integrations/ApiKeyRegistry.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/Summarizer.h"
 #include "search/SearchController.h"
@@ -199,11 +200,12 @@ int main(int argc, char **argv) {
     AppController app(dataDirectory);
     MediaStore media(dataDirectory);
     ShortcutManager shortcuts;
-    Summarizer ai(&app);
-    SearchController librarySearch(&app, &ai, dataDirectory);
+    ApiKeyRegistry apiKeys;
+    Summarizer ai(&app, nullptr, &apiKeys);
+    SearchController librarySearch(&app, &ai, dataDirectory, nullptr, &apiKeys);
     Atomicizer atomic(&app, &ai);
     SyncController sync(&app, media.rootPath());
-    VoiceController voice;
+    VoiceController voice(nullptr, &apiKeys);
     voice.attachLanguageModel(&ai);
 #ifdef Q_OS_ANDROID
     QObject::connect(&application, &QGuiApplication::applicationStateChanged, &voice,
