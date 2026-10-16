@@ -11,6 +11,7 @@
 #include "render/MarkdownView.h"
 #include "render/CodeRendering.h"
 #include "voice/VoiceController.h"
+#include "voice/CardNarration.h"
 #include "ui/TextFocusDismissal.h"
 #include "ui/LocalFilePaths.h"
 #include "ui/Clipboard.h"
@@ -211,6 +212,7 @@ int main(int argc, char **argv) {
     Atomicizer atomic(&app, &ai);
     SyncController sync(&app, media.rootPath());
     VoiceController voice(nullptr, &apiKeys);
+    CardNarration narration(&app, &voice, dataDirectory, &application);
     voice.attachLanguageModel(&ai);
 #ifdef Q_OS_ANDROID
     QObject::connect(&application, &QGuiApplication::applicationStateChanged, &voice,
@@ -222,6 +224,7 @@ int main(int argc, char **argv) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("app"), &app);
     engine.rootContext()->setContextProperty(QStringLiteral("voice"), &voice);
+    engine.rootContext()->setContextProperty(QStringLiteral("narration"), &narration);
     engine.rootContext()->setContextProperty(QStringLiteral("ai"), &ai);
     engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
     engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
@@ -232,19 +235,34 @@ int main(int argc, char **argv) {
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &application,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
 
+    const auto speakSide = [&](const QString &side, const QString &markdown) {
+        if (narration.sessionActive()) return;
+        narration.stopPlayback();
+        voice.stopSpeaking();
+        const QVariantMap card = app.currentCard();
+        const QString cardId = card.value(QStringLiteral("cardId"), card.value(QStringLiteral("id"))).toString();
+        const QString variantKey = card.value(QStringLiteral("variantKey"), QStringLiteral("forward")).toString();
+        const QVariantMap recorded = card.value(QStringLiteral("narrations")).toMap();
+        const QString mediaName = recorded.value(variantKey + QLatin1Char('/') + side).toString();
+        if (!mediaName.isEmpty()) {
+            if (!narration.playSaved(cardId, variantKey, side))
+                voice.reportNarrationError(QStringLiteral("The saved narration could not be opened. Open this card's narration editor and record this side again."));
+            return;
+        }
+        voice.speak(MarkdownView::spokenText(markdown));
+    };
     const auto speakQuestion = [&] {
         if (voice.enabled() && app.reviewing() && !app.paused()) {
-            QString narration = MarkdownView::plainText(app.currentCard().value(QStringLiteral("question")).toString());
-            if (app.reviewingCompletedCard())
-                narration += QStringLiteral(". ") + MarkdownView::plainText(app.currentCard().value(QStringLiteral("answer")).toString());
-            voice.speak(narration);
+            const bool answerVisible = app.answerRevealed();
+            speakSide(answerVisible ? QStringLiteral("back") : QStringLiteral("front"),
+                app.currentCard().value(answerVisible ? QStringLiteral("answer") : QStringLiteral("question")).toString());
         }
     };
     bool voiceSummaryPending = false;
     QObject::connect(&ai, &Summarizer::changed, &application, [&] {
         if (!voiceSummaryPending || ai.busy()) return;
         voiceSummaryPending = false;
-        if (voice.enabled()) voice.speak(ai.summary().isEmpty() ? ai.error() : MarkdownView::plainText(ai.summary()));
+        if (voice.enabled()) voice.speak(ai.summary().isEmpty() ? ai.error() : MarkdownView::spokenText(ai.summary()));
     });
     QObject::connect(&voice, &VoiceController::readyChanged, &application, [&] {
         if (voice.ready()) {
@@ -262,6 +280,8 @@ int main(int argc, char **argv) {
             || card.value(QStringLiteral("sessionRecall")) != narratedCard.value(QStringLiteral("sessionRecall"));
         narratedCard = card;
         if (contentChanged) {
+            narration.stopPlayback();
+            voice.stopSpeaking();
             voice.cancelPendingRecognition();
             QTimer::singleShot(0, &application, speakQuestion);
         } else if (ratingChanged && voice.enabled() && card.value(QStringLiteral("sessionGrade"), -1).toInt() >= 0) {
@@ -276,12 +296,21 @@ int main(int argc, char **argv) {
             voice.speak(QStringLiteral("Change the earlier rating? Say confirm rating to change it, or keep rating to cancel. The original review time will be kept."));
     });
     QObject::connect(&app, &AppController::answerRevealedChanged, &application, [&] {
-        if (voice.enabled() && app.answerRevealed() && !app.reviewingCompletedCard())
-            voice.speak(MarkdownView::plainText(app.currentCard().value(QStringLiteral("answer")).toString())
-                + QStringLiteral(". Choose missed, partial, hard, good, or easy."));
+        if (voice.enabled() && app.answerRevealed() && !app.reviewingCompletedCard()) {
+            speakSide(QStringLiteral("back"), app.currentCard().value(QStringLiteral("answer")).toString());
+        }
+    });
+    QObject::connect(&app, &AppController::pausedChanged, &application, [&] {
+        if (app.paused()) {
+            narration.stopPlayback();
+            voice.stopSpeaking();
+        } else {
+            QTimer::singleShot(0, &application, speakQuestion);
+        }
     });
     QObject::connect(&app, &AppController::reviewingChanged, &application, [&] {
         if (!app.reviewing()) {
+            narration.stopPlayback();
             voice.cancelPendingRecognition();
             voice.stopSpeaking();
         }
@@ -350,7 +379,7 @@ int main(int argc, char **argv) {
             }
             case VoiceCommand::ShowAnswer: app.revealAnswer(); break;
             case VoiceCommand::Repeat: {
-                if (app.answerRevealed()) voice.speak(MarkdownView::plainText(app.currentCard().value(QStringLiteral("answer")).toString()));
+                if (app.answerRevealed()) speakSide(QStringLiteral("back"), app.currentCard().value(QStringLiteral("answer")).toString());
                 else speakQuestion();
                 break;
             }
@@ -367,7 +396,7 @@ int main(int argc, char **argv) {
             case VoiceCommand::Postpone: app.postponeDays(argument.toInt()); break;
             case VoiceCommand::Pause:
                 app.pauseReview(); voice.speak(QStringLiteral("Review paused. Say resume to continue.")); break;
-            case VoiceCommand::Resume: app.resumeReview(); speakQuestion(); break;
+            case VoiceCommand::Resume: app.resumeReview(); break;
             case VoiceCommand::Summarize:
                 if (ai.busy()) { voice.speak(QStringLiteral("A summary is being generated.")); return; }
                 voiceSummaryPending = true;

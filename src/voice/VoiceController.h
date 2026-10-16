@@ -141,6 +141,12 @@ public:
     Q_INVOKABLE void stopListening();
     Q_INVOKABLE void triggerMicrophone();
     Q_INVOKABLE void speak(const QString &text);
+    bool playRecordedPcm(const QByteArray &pcm);
+    void reportNarrationError(const QString &message);
+    bool beginNarrationSession();
+    void endNarrationSession();
+    [[nodiscard]] bool narrationCaptureReady() const;
+    [[nodiscard]] quint64 speechGeneration() const { return m_speechGeneration; }
     Q_INVOKABLE void stopSpeaking();
     Q_INVOKABLE void cancelPendingRecognition();
     Q_INVOKABLE void processTranscript(const QString &transcript);
@@ -220,6 +226,10 @@ private:
     bool m_ttsIssued = false;
     bool m_stoppingSpeech = false;
     bool m_echoTail = false;
+    bool m_recordedPlayback = false;
+    bool m_narrationSession = false;
+    bool m_narrationSavedWantsListening = false;
+    QByteArray m_pendingRecordedPcm;
     quint64 m_workerGeneration = 0;
     quint64 m_captureEpoch = 0;
     quint64 m_speechGeneration = 0;

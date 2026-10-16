@@ -13,6 +13,7 @@
 #include <QBuffer>
 #include <QPainter>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTextBlock>
@@ -455,4 +456,22 @@ QString MarkdownView::plainText(const QString &markdown) {
     text.replace(images, QStringLiteral("[Image: \\1]"));
     document.setMarkdown(text, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
     return document.toPlainText();
+}
+
+QString MarkdownView::spokenText(const QString &markdown) {
+    class SpokenDocument final : public QTextDocument {
+    protected:
+        QVariant loadResource(int, const QUrl &) override { return QImage(); }
+    } document;
+    QString source = markdown;
+    static const QRegularExpression images(QStringLiteral("!\\[([^\\]]*)\\]\\([^)]*\\)"));
+    source.replace(images, QStringLiteral("[Image: \\1]"));
+    document.setMarkdown(source, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
+    QStringList prose;
+    for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+        const QTextBlockFormat format = block.blockFormat();
+        if (format.hasProperty(QTextFormat::BlockCodeFence) || format.hasProperty(QTextFormat::BlockCodeLanguage)) continue;
+        prose.append(block.text());
+    }
+    return prose.join(QLatin1Char('\n')).simplified();
 }

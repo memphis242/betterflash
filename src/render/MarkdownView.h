@@ -37,6 +37,8 @@ public:
     void setBaseFontSize(qreal size);
     void setMediaRoot(const QString &directory);
     static QString plainText(const QString &markdown);
+    // Returns prose suitable for narration, omitting fenced and indented code blocks.
+    static QString spokenText(const QString &markdown);
 signals:
     void markdownChanged();
     void styleChanged();

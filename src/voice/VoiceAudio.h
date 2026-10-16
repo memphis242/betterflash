@@ -37,3 +37,5 @@ private:
 };
 
 [[nodiscard]] QByteArray voiceWav(QByteArrayView pcm);
+
+[[nodiscard]] QByteArray voiceConvertPcm(const QByteArray &source, const QAudioFormat &from, const QAudioFormat &to);

@@ -54,6 +54,7 @@ public:
     Q_INVOKABLE void runTests();
     Q_INVOKABLE void runTest(const QString &id);
     Q_INVOKABLE void cancelTests();
+    void setInteractionBlocked(bool blocked) { m_interactionBlocked = blocked; }
     Q_INVOKABLE void startRecording();
     Q_INVOKABLE void startRecordingForSlot(const QString &id);
     Q_INVOKABLE void stopRecording();
@@ -120,6 +121,7 @@ private:
     QString m_vocabulary;
     QString m_acceleration = QStringLiteral("automatic");
     bool m_busy = false;
+    bool m_interactionBlocked = false;
     bool m_recording = false;
     bool m_recordingPaused = false;
     QString m_status = QStringLiteral("Add a recording to begin.");
