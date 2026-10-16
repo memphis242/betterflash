@@ -6,6 +6,7 @@ import QtCore
 Item {
     id: settingsPage
     required property var ui
+    readonly property bool modalDialogOpen: voiceSettings.dialogOpen
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }

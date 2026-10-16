@@ -130,9 +130,12 @@ recent microphone amplitude. Pausing suspends input, excludes paused audio from
 the saved sample, and freezes the activity history. The meter displays measured
 PCM amplitude rather than an animated placeholder.
 
-Expected transcripts and recognition vocabulary use labeled, bounded textboxes
-with visible focus styling. Expected transcripts remain selectable but become
-read-only during capture or testing. Empty slots say **Need recording**. The
+Expected transcriptions appear as compact, two-line previews. A click or
+keyboard activation opens a full paragraph editor; Save commits to that slot,
+while Cancel preserves its existing text. Previews do not intercept page
+scrolling. During capture or testing, the modal permits read-only viewing.
+Empty slots say **Need recording**. Recognition vocabulary remains a labeled,
+bounded textbox with visible focus styling. The
 recognition/output tabs stay above the scrolling settings content and restore
 each tab's own scroll position.
 
@@ -145,6 +148,12 @@ download model files automatically and shares the normal speech worker so it
 does not keep another recognition model loaded.
 
 ### Vocabulary and transcript correction
+
+Question-mark controls beside vocabulary, model, acceleration, engine, and
+voice-profile labels open detailed explanations. Vocabulary help includes an
+illustrative project glossary and a diagram of its use by recognition and
+optional correction. The recognition model path also offers the system file
+browser for Whisper files or the folder browser for Vosk installations.
 
 **Recognition vocabulary** supplies optional project terms to local Whisper.
 It is context rather than a restricted dictionary, and can make recognition

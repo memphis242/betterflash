@@ -46,6 +46,14 @@ ColumnLayout {
             selectByMouse: true
             font.pixelSize: 17
             placeholderText: root.label
+            Accessible.name: root.label
+            background: Rectangle {
+                radius: 6
+                color: Theme.editorField
+                border.color: pathField.activeFocus ? Theme.accent : Theme.rule
+                border.width: pathField.activeFocus ? 2 : 1
+            }
+            HoverHandler { cursorShape: Qt.IBeamCursor }
             onEditingFinished: root.pathEdited(text)
         }
 

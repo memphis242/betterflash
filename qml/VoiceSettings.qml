@@ -9,7 +9,7 @@ ColumnLayout {
     property string apiKeyDraft: ""
     property int tabIndex: 0
     onTabIndexChanged: clearSecretDraft()
-    readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen
+    readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen || sttModelPath.dialogOpen
     spacing: 18
 
     component SettingsButton: AppButton { font.pixelSize: 16 }
@@ -83,19 +83,14 @@ ColumnLayout {
                 placeholderText: "whisper-large-v3-turbo"
                 font.pixelSize: 17
             }
-            Label {
-                visible: sttProvider.currentIndex === 0
-                text: "Local model folder"
-                color: Theme.inkMuted
-                font.pixelSize: 15
-            }
-            TextField {
+            ModelPathField {
+                id: sttModelPath
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
                 text: voice.modelPath
-                onEditingFinished: voice.modelPath = text.trim()
-                placeholderText: "Local model folder"
-                font.pixelSize: 17
+                selectDirectory: voice.sttProfile !== "whisper-turbo"
+                label: selectDirectory ? "Local model folder" : "Local model file"
+                onPathEdited: path => voice.modelPath = path.trim()
             }
             RowLayout {
                 visible: sttProvider.currentIndex === 0
