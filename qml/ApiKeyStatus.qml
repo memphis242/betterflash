@@ -9,6 +9,10 @@ ColumnLayout {
     property string storageStatus: ""
     property bool hasKey: false
     property bool reusesLanguageModelKey: false
+    property bool reusingKey: false
+    property string keyName: ""
+    property string sourcePage: ""
+    property bool showProviderScope: false
     property string credentialLabel: "API key"
     property string saveAction: "Save key"
     property string clearAction: "Clear stored key"
@@ -46,12 +50,16 @@ ColumnLayout {
         case "invalid":
             status = "New key was rejected"
             break
+        case "unavailable":
+            status = "Selected key unavailable"
+            break
         case "missing":
         default:
             status = "No " + control.credentialNoun + " saved"
             break
         }
-        return (control.reusesLanguageModelKey ? "Language model key: " : "") + status
+        return (control.reusingKey && control.keyName.length > 0 ? "Using " + control.keyName + " - " : "")
+            + (control.reusesLanguageModelKey ? "Language model key: " : "") + status
     }
 
     function stateColor() {
@@ -64,6 +72,7 @@ ColumnLayout {
         case "session-only": return Theme.warning
         case "removal-failed":
         case "invalid": return Theme.error
+        case "unavailable": return Theme.error
         default: return Theme.inkMuted
         }
     }
@@ -71,17 +80,19 @@ ColumnLayout {
     function attentionText() {
         switch (control.storageState) {
         case "session-only":
-            return control.reusesLanguageModelKey
-                ? "CREDENTIAL_SESSION_ONLY: The shared credential could not be saved by the secure keyring or its integration. Make sure a desktop keyring service is available, then save it again in Language model settings."
+            return control.reusingKey || control.reusesLanguageModelKey
+                ? "CREDENTIAL_SESSION_ONLY: The shared credential could not be saved by the secure keyring or its integration. Make sure a desktop keyring service is available, then save it again in " + (control.sourcePage || "its source settings") + "."
                 : "CREDENTIAL_SESSION_ONLY: The secure keyring or its integration is unavailable. Make sure a desktop keyring service is available, then enter the credential again and choose " + control.saveAction + "."
         case "removal-failed":
-            return control.reusesLanguageModelKey
-                ? "CREDENTIAL_REMOVE_FAILED: The shared credential is cleared for this session, but its saved copy may still be in the desktop keyring. Remove it again from Language model settings after the keyring is available."
+            return control.reusingKey || control.reusesLanguageModelKey
+                ? "CREDENTIAL_REMOVE_FAILED: The shared credential is cleared for this session, but its saved copy may still be in the desktop keyring. Remove it again from " + (control.sourcePage || "its source settings") + " after the keyring is available."
                 : "CREDENTIAL_REMOVE_FAILED: The credential is cleared for this session, but its saved copy may still be in the desktop keyring. Try " + control.clearAction + " again after the keyring is available."
         case "invalid":
-            return control.reusesLanguageModelKey
-                ? "CREDENTIAL_INVALID: The new language model credential was rejected. Enter one credential of at most 4096 characters without line breaks in Language model settings. The previous credential, if any, remains unchanged."
+            return control.reusingKey || control.reusesLanguageModelKey
+                ? "CREDENTIAL_INVALID: The new shared credential was rejected. Enter one credential of at most 4096 characters without line breaks in " + (control.sourcePage || "its source settings") + ". The previous credential, if any, remains unchanged."
                 : "CREDENTIAL_INVALID: Enter one credential of at most 4096 characters without line breaks. The previously usable credential, if any, remains unchanged."
+        case "unavailable":
+            return "KEY_SELECTION: The selected credential is unavailable for this provider address. Choose a compatible key from the source list, or switch to the key owned by this page."
         default:
             return ""
         }
@@ -143,6 +154,10 @@ ColumnLayout {
         id: helpDialog
         credentialLabel: control.credentialLabel
         reusesLanguageModelKey: control.reusesLanguageModelKey
+        reusingKey: control.reusingKey
+        keyName: control.keyName
+        sourcePage: control.sourcePage
+        showProviderScope: control.showProviderScope
         saveAction: control.saveAction
         clearAction: control.clearAction
     }

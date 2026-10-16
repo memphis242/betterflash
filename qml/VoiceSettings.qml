@@ -6,11 +6,10 @@ ColumnLayout {
     id: root
     required property var voice
     property var ai: null
-    property string apiKeyDraft: ""
     property int tabIndex: 0
     onTabIndexChanged: clearSecretDraft()
     readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen || sttModelPath.dialogOpen
-        || sttKeyStatus.dialogOpen || ttsKeyStatus.dialogOpen
+        || sttKeyEditor.dialogOpen || ttsKeyEditor.dialogOpen
     spacing: 18
 
     component SettingsButton: AppButton { font.pixelSize: 16 }
@@ -39,7 +38,7 @@ ColumnLayout {
         }
     }
 
-    function clearSecretDraft() { apiKeyDraft = ""; if (ttsApiKey) ttsApiKey.text = "" }
+    function clearSecretDraft() { if (sttKeyEditor) sttKeyEditor.clearSecretDraft(); if (ttsKeyEditor) ttsKeyEditor.clearSecretDraft() }
     readonly property bool localStt: voice.sttProvider !== "groq"
     readonly property bool localTts: voice.ttsProvider !== "remote"
     readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
@@ -164,42 +163,12 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 10
                 visible: sttProvider.currentIndex === 1
-                Label {
-                    text: "Groq API key"
-                    color: Theme.inkMuted
-                    font.pixelSize: 15
-                }
-                TextField {
+                ApiKeyEditor {
+                    id: sttKeyEditor
+                    binding: voice.apiKey
+                    credentialLabel: "Speech recognition API key"
+                    clearAction: "Clear stored key"
                     Layout.fillWidth: true
-                    echoMode: TextInput.Password
-                    text: root.apiKeyDraft
-                    placeholderText: voice.hasApiKey ? "Leave empty to keep the stored Groq key" : "Groq API key"
-                    font.pixelSize: 17
-                    onTextChanged: if (activeFocus) root.apiKeyDraft = text
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    Layout.preferredWidth: 0
-                    spacing: 10
-                    SettingsButton {
-                        text: "Save key"
-                        enabled: root.apiKeyDraft.trim().length > 0
-                        onClicked: { voice.setApiKey(root.apiKeyDraft.trim()); root.apiKeyDraft = "" }
-                    }
-                    SettingsButton {
-                        visible: voice.hasApiKey || voice.keyStorageState === "removal-failed"
-                        text: "Clear stored key"
-                        onClicked: voice.clearApiKey()
-                    }
-                    ApiKeyStatus {
-                        id: sttKeyStatus
-                        width: Math.min(implicitWidth, parent.width)
-                        storageState: voice.keyStorageState
-                        storageStatus: voice.keyStorageStatus
-                        hasKey: voice.hasApiKey
-                        clearAction: "Clear stored key"
-                    }
                 }
             }
             ModelTestResult {
@@ -371,23 +340,12 @@ ColumnLayout {
                 TextField { Layout.fillWidth: true; text: voice.remoteTts.model; onEditingFinished: voice.remoteTts.model = text.trim(); placeholderText: "canopylabs/orpheus-v1-english"; font.pixelSize: 17 }
                 Label { text: "Voice"; color: Theme.inkMuted; font.pixelSize: 15 }
                 TextField { Layout.fillWidth: true; text: voice.remoteTts.voice; onEditingFinished: voice.remoteTts.voice = text.trim(); placeholderText: "troy"; font.pixelSize: 17 }
-                Label { text: "Speech output API key"; color: Theme.inkMuted; font.pixelSize: 15 }
-                TextField { id: ttsApiKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: voice.remoteTts.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"; font.pixelSize: 17; onVisibleChanged: if (!visible) text = "" }
-                Flow {
+                ApiKeyEditor {
+                    id: ttsKeyEditor
+                    binding: voice.remoteTts.apiKey
+                    credentialLabel: "Speech output API key"
+                    clearAction: "Clear key"
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    Layout.preferredWidth: 0
-                    spacing: 10
-                    SettingsButton { text: "Save key"; enabled: ttsApiKey.text.trim().length > 0; onClicked: { voice.remoteTts.setApiKey(ttsApiKey.text.trim()); ttsApiKey.text = "" } }
-                    SettingsButton { visible: voice.remoteTts.hasApiKey || voice.remoteTts.keyStorageState === "removal-failed"; text: "Clear key"; onClicked: voice.remoteTts.clearApiKey() }
-                    ApiKeyStatus {
-                        id: ttsKeyStatus
-                        width: Math.min(implicitWidth, parent.width)
-                        storageState: voice.remoteTts.keyStorageState
-                        storageStatus: voice.remoteTts.keyStorageStatus
-                        hasKey: voice.remoteTts.hasApiKey
-                        clearAction: "Clear key"
-                    }
                 }
             }
             ModelStatus {

@@ -6,7 +6,7 @@ import QtCore
 Item {
     id: settingsPage
     required property var ui
-    readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyStatus.dialogOpen
+    readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen
         || syncKeyStatus.dialogOpen || searchSettings.dialogOpen
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
@@ -23,7 +23,6 @@ Item {
             if (voiceSettings)
                 voiceSettings.clearSecretDraft()
         }
-        if (section !== 3) aiKeyDraft = ""
         if (section !== 4) syncTokenDraft = ""
     }
     readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search", "Code rendering"]
@@ -36,14 +35,12 @@ Item {
     Settings { id: voicePreferences; category: "voiceSettings"; property int selectedTab: 0 }
     property int voiceTabIndex: voicePreferences.selectedTab
     onVoiceTabIndexChanged: voicePreferences.selectedTab = Math.max(0, Math.min(1, voiceTabIndex))
-    property string aiKeyDraft: ""
     property string syncTokenDraft: ""
     property string exportDestinationDraft: ""
     onVisibleChanged: if (!visible) {
         voiceKeyDraft = ""
         if (voiceSettings)
             voiceSettings.clearSecretDraft()
-        aiKeyDraft = ""
         syncTokenDraft = ""
     }
 
@@ -489,45 +486,12 @@ Item {
                             Layout.fillWidth: true
                             spacing: 10
                             visible: aiProvider.currentIndex === 1
-                            Label {
-                                text: "Language model API key"
-                                color: Theme.inkMuted
-                                font.pixelSize: 15
-                            }
-                            TextField {
+                            ApiKeyEditor {
+                                id: aiKeyEditor
+                                binding: ai.apiKey
+                                credentialLabel: "Language model API key"
+                                clearAction: "Clear key"
                                 Layout.fillWidth: true
-                                echoMode: TextInput.Password
-                                text: settingsPage.aiKeyDraft
-                                placeholderText: ai.hasApiKey ? "Leave empty to keep the stored API key" : "Provider API key"
-                                font.pixelSize: 17
-                                onTextChanged: if (activeFocus) settingsPage.aiKeyDraft = text
-                            }
-                            Flow {
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 0
-                                Layout.preferredWidth: 0
-                                spacing: 10
-                                SettingsButton {
-                                    text: "Save key"
-                                    enabled: settingsPage.aiKeyDraft.trim().length > 0
-                                    onClicked: {
-                                        ai.setApiKey(settingsPage.aiKeyDraft.trim())
-                                        settingsPage.aiKeyDraft = ""
-                                    }
-                                }
-                                SettingsButton {
-                                    text: "Clear key"
-                                    visible: ai.hasApiKey || ai.keyStorageState === "removal-failed"
-                                    onClicked: ai.clearApiKey()
-                                }
-                                ApiKeyStatus {
-                                    id: aiKeyStatus
-                                    width: Math.min(implicitWidth, parent.width)
-                                    storageState: ai.keyStorageState
-                                    storageStatus: ai.keyStorageStatus
-                                    hasKey: ai.hasApiKey
-                                    clearAction: "Clear key"
-                                }
                             }
                         }
                         ModelTestResult {
