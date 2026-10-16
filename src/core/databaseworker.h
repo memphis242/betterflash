@@ -26,7 +26,9 @@ public:
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
                   const QString &front, const QString &back, const QString &tags, int points);
     void setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
-                          const QString &mediaName, const QString &requestId);
+                          const QString &mediaName, const QString &requestId, const QString &fingerprint = {});
+    void confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
+                              const QString &mediaName, const QString &expectedFingerprint, const QString &requestId);
     void deleteCard(const QString &id);
     void moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     void resetReviewState(const QString &id, bool deckScope);

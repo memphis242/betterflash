@@ -97,6 +97,12 @@ def card_keys(card):
     narrations = card.get("narrations", {})
     if not isinstance(narrations, dict):
         raise ProtocolError("INVALID_EVENT", "Card narrations must be an object.")
+    fingerprints = card.get("narrationFingerprints", {})
+    if not isinstance(fingerprints, dict):
+        raise ProtocolError("INVALID_EVENT", "Card narration fingerprints must be an object.")
+    for key, value in fingerprints.items():
+        if key not in narrations or not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ProtocolError("INVALID_EVENT", "Card narration fingerprints must reference an attached narration and contain a SHA-256 digest.")
     def validate_narrations(keys):
         for key, value in narrations.items():
             parts = key.split("/")

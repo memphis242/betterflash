@@ -41,6 +41,8 @@ struct Card {
     int pointCount = 1;
     // Content-addressed narration assets keyed by "<variantKey>/<front|back>".
     QVariantMap narrations{};
+    // Accepted text-and-audio baselines keyed by the same narration side.
+    QVariantMap narrationFingerprints{};
 };
 struct Variant {
     QString id;
@@ -91,6 +93,8 @@ std::expected<QStringList, QString> variantKeys(const struct Card &card);
 QString variantId(const QString &cardId, const QString &key);
 QString question(const struct Card &card, const QString &key);
 QString answer(const struct Card &card, const QString &key);
+QString narrationFingerprint(const struct Card &card, const QString &variantKey, const QString &side);
+bool narrationIsStale(const struct Card &card, const QString &variantKey, const QString &side);
 double readingBudget(const QString &question);
 QString gradeLabel(int grade);
 QVariantMap toMap(const struct Deck &record);
