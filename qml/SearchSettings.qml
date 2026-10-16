@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: settings
     readonly property var search: librarySearch
-    readonly property bool dialogOpen: embeddingKeyEditor.dialogOpen
+    readonly property bool dialogOpen: embeddingKeyEditor.dialogOpen || remoteModelPicker.dialogOpen
     spacing: 18
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
@@ -78,19 +78,13 @@ ColumnLayout {
         placeholderText: "https://example.invalid/embeddings"
         font.pixelSize: 17
     }
-    Label {
+    RemoteModelPicker {
+        id: remoteModelPicker
         visible: settings.search.provider === "remote"
-        text: "Embedding model"
-        color: Theme.inkMuted
-        font.pixelSize: 15
-    }
-    TextField {
-        id: remoteModel
-        visible: settings.search.provider === "remote"
-        Layout.fillWidth: true
-        text: settings.search.remoteModel
-        placeholderText: "text-embedding model"
-        font.pixelSize: 17
+        binding: settings.search.apiKey
+        endpoint: remoteEndpoint.text
+        category: "embedding"
+        modelName: settings.search.remoteModel
     }
     Flow {
         visible: settings.search.provider === "remote"
@@ -103,7 +97,7 @@ ColumnLayout {
             text: "Save remote connection"
             primary: true
             onClicked: {
-                settings.search.setRemoteConnection(remoteEndpoint.text.trim(), remoteModel.text.trim())
+                settings.search.setRemoteConnection(remoteEndpoint.text.trim(), remoteModelPicker.draftModelName.trim())
             }
         }
     }

@@ -9,7 +9,7 @@ ColumnLayout {
     property int tabIndex: 0
     onTabIndexChanged: clearSecretDraft()
     readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen || sttModelPath.dialogOpen
-        || sttKeyEditor.dialogOpen || ttsKeyEditor.dialogOpen
+        || sttKeyEditor.dialogOpen || ttsKeyEditor.dialogOpen || sttModelPicker.dialogOpen || ttsModelPicker.dialogOpen
     spacing: 18
 
     component SettingsButton: AppButton { font.pixelSize: 16 }
@@ -69,19 +69,14 @@ ColumnLayout {
                         root.clearSecretDraft()
                 }
             }
-            Label {
+            RemoteModelPicker {
+                id: sttModelPicker
                 visible: sttProvider.currentIndex === 1
-                text: "Remote model"
-                color: Theme.inkMuted
-                font.pixelSize: 15
-            }
-            TextField {
-                Layout.fillWidth: true
-                visible: sttProvider.currentIndex === 1
-                text: voice.sttModel
-                onEditingFinished: voice.sttModel = text.trim()
-                placeholderText: "whisper-large-v3-turbo"
-                font.pixelSize: 17
+                binding: voice.apiKey
+                endpoint: "https://api.groq.com/openai/v1/audio/transcriptions"
+                category: "speech-recognition"
+                modelName: voice.sttModel
+                onModelEdited: model => voice.sttModel = model
             }
             ModelPathField {
                 id: sttModelPath
@@ -336,8 +331,14 @@ ColumnLayout {
                 spacing: 10
                 Label { text: "Remote endpoint"; color: Theme.inkMuted; font.pixelSize: 15 }
                 TextField { Layout.fillWidth: true; text: voice.remoteTts.endpoint; onEditingFinished: voice.remoteTts.endpoint = text.trim(); placeholderText: "https://api.groq.com/openai/v1/audio/speech"; font.pixelSize: 17 }
-                Label { text: "Remote model"; color: Theme.inkMuted; font.pixelSize: 15 }
-                TextField { Layout.fillWidth: true; text: voice.remoteTts.model; onEditingFinished: voice.remoteTts.model = text.trim(); placeholderText: "canopylabs/orpheus-v1-english"; font.pixelSize: 17 }
+                RemoteModelPicker {
+                    id: ttsModelPicker
+                    binding: voice.remoteTts.apiKey
+                    endpoint: voice.remoteTts.endpoint
+                    category: "speech-output"
+                    modelName: voice.remoteTts.model
+                    onModelEdited: model => voice.remoteTts.model = model
+                }
                 Label { text: "Voice"; color: Theme.inkMuted; font.pixelSize: 15 }
                 TextField { Layout.fillWidth: true; text: voice.remoteTts.voice; onEditingFinished: voice.remoteTts.voice = text.trim(); placeholderText: "troy"; font.pixelSize: 17 }
                 ApiKeyEditor {
