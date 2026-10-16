@@ -58,7 +58,8 @@ target_link_libraries(betterflash_search PUBLIC betterflash_core betterflash_int
     betterflash_onnxruntime)
 target_compile_options(betterflash_search PRIVATE -Wall -Wextra -Wpedantic)
 
-qt_add_executable(betterflash src/main.cpp src/ui/TextFocusDismissal.cpp src/ui/TextFocusDismissal.h)
+qt_add_executable(betterflash src/main.cpp src/ui/TextFocusDismissal.cpp src/ui/TextFocusDismissal.h
+    src/ui/LocalFilePaths.cpp src/ui/LocalFilePaths.h)
 if(NOT ANDROID AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
     include(cmake/LocalWhisper.cmake)
 endif()

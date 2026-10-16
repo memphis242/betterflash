@@ -10,6 +10,7 @@
 #include "render/CodeRendering.h"
 #include "voice/VoiceController.h"
 #include "ui/TextFocusDismissal.h"
+#include "ui/LocalFilePaths.h"
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -19,6 +20,7 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QJSEngine>
 #include <QQmlError>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -63,6 +65,8 @@ int main(int argc, char **argv) {
     application.setWindowIcon(applicationIcon);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    qmlRegisterSingletonType<LocalFilePaths>("BetterFlash.Native", 1, 0, "LocalFilePaths",
+        [](QQmlEngine *, QJSEngine *) -> QObject * { return new LocalFilePaths; });
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Native Markdown flashcards for focused review."));
     parser.addHelpOption();
