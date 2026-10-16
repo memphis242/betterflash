@@ -210,7 +210,7 @@ storage status. Keys stay out of application settings, SQLite collections,
 backups, logs, sync payloads, and process arguments.
 
 Speech output also offers **Remote (cloud-provider)**. Configure the speech
-endpoint, model, voice, and an API key. The **Key source** picker can reuse a key
+endpoint, model, voice, and an API key. The API-key field's reuse menu can reuse a key
 entered in another model settings page for the same provider address, such as
 `speech-recognition-api-key`. The defaults use
 Groq's `canopylabs/orpheus-v1-english` model with the `troy` voice. Compatible

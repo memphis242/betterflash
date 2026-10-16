@@ -1,9 +1,11 @@
 # Reusing API keys
 
-Each remote model configuration has a **Key source** picker. Keep that page's
-own key selected to enter a new key, or choose an existing key from another
-model settings page. Selecting a key changes the reference used by that
-connection; it does not copy the secret into another keyring entry.
+Each remote model configuration has one masked API-key field. Click it or
+choose **Reuse saved key** above it to select a key entered on another model
+settings page. Continue typing to enter a new key for the current feature.
+Typing does not replace the active key until **Save key** is pressed.
+Selecting an existing key changes the reference used by that connection;
+it does not copy the secret into another keyring entry.
 
 Key names come from the page where they were entered:
 
@@ -40,7 +42,7 @@ key leaves the shared source key intact. Changing the source page's model
 location to Local does not remove its saved remote key.
 
 If the source page now uses a different provider, switch it to the provider
-address shown beside the shared key and choose its **This page** key. The
+address shown beside the shared key and choose its own feature key. The
 original key remains associated with that address.
 
 Existing keys retain their current keyring entries and receive the automatic
@@ -65,3 +67,21 @@ If a selected key is removed or unavailable, the connection keeps its selected
 reference and reports the missing key instead of substituting another one.
 
 Synchronization access tokens remain separate from the model API-key picker.
+
+## Available remote models
+
+The button beside a remote model selector fetches the provider's model list.
+Select a returned model or enter an identifier manually. Fetching the list
+does not run inference or change the configured model. Opening Settings does
+not fetch automatically.
+
+Groq provides a combined list at `https://api.groq.com/openai/v1/models`.
+BetterFlash groups the known Whisper and speech-output model families for the
+speech selectors. Other or newly introduced identifiers remain enterable
+manually. Compatible providers that do not describe model capabilities may
+return a combined list; choose a model suitable for the feature.
+[Groq model list](https://console.groq.com/docs/models)
+
+Requests use the selected provider key and the same provider address as the
+configured endpoint. Changing a provider or credential discards its fetched
+list. Errors leave the selected model intact.

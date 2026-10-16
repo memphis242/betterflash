@@ -3,6 +3,7 @@
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
 #include "integrations/ApiKeyRegistry.h"
+#include "integrations/RemoteModelCatalog.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/Summarizer.h"
 #include "search/SearchController.h"
@@ -66,6 +67,7 @@ int main(int argc, char **argv) {
     application.setWindowIcon(applicationIcon);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    qmlRegisterType<RemoteModelCatalog>("BetterFlash.Native", 1, 0, "RemoteModelCatalog");
     qmlRegisterSingletonType<LocalFilePaths>("BetterFlash.Native", 1, 0, "LocalFilePaths",
         [](QQmlEngine *, QJSEngine *) -> QObject * { return new LocalFilePaths; });
     QCommandLineParser parser;
