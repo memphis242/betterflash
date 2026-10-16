@@ -97,20 +97,20 @@ Dialog {
                         RowLayout {
                             spacing: 10
                             Layout.fillWidth: true
-                            ColumnLayout { spacing: 3; Icon { kind: "mic"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink }; Label { text: "audio"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "mic"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink } Label { text: "audio"; color: Theme.ink; font.pixelSize: 15 } }
                             Label { text: "→"; color: Theme.accent; font.pixelSize: 22 }
-                            ColumnLayout { spacing: 3; Icon { kind: "ear"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink }; Label { text: "Whisper"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "ear"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink } Label { text: "Whisper"; color: Theme.ink; font.pixelSize: 15 } }
                             Label { text: "→"; color: Theme.accent; font.pixelSize: 22 }
-                            ColumnLayout { spacing: 3; Icon { kind: "edit"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink }; Label { text: "raw transcript"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "edit"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink } Label { text: "raw transcript"; color: Theme.ink; font.pixelSize: 15 } }
                             Label { text: "→"; color: Theme.accent; font.pixelSize: 22 }
-                            ColumnLayout { spacing: 3; Icon { kind: "paper-pencil"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink }; Label { text: "optional correction"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "paper-pencil"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink } Label { text: "optional correction"; color: Theme.ink; font.pixelSize: 15 } }
                             Label { text: "→"; color: Theme.accent; font.pixelSize: 22 }
-                            ColumnLayout { spacing: 3; Icon { kind: "review-ledger"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink }; Label { text: "final text"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "review-ledger"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.ink } Label { text: "final text"; color: Theme.ink; font.pixelSize: 15 } }
                         }
                         RowLayout {
                             spacing: 10
                             Layout.leftMargin: 30
-                            ColumnLayout { spacing: 3; Icon { kind: "book"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.accent }; Label { text: "glossary"; color: Theme.ink; font.pixelSize: 15 } }
+                            ColumnLayout { spacing: 3; Icon { kind: "book"; Layout.preferredWidth: 24; Layout.preferredHeight: 24; stroke: Theme.accent } Label { text: "glossary"; color: Theme.ink; font.pixelSize: 15 } }
                             Label { text: "↗"; color: Theme.accent; font.pixelSize: 22 }
                             Label { text: "Whisper context"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 15 }
                             Label { text: "   ↘ optional language-model context"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 15 }

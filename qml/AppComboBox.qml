@@ -27,7 +27,7 @@ ComboBox {
         readonly property bool selectedEntry: control.currentIndex === index
         width: ListView.view ? ListView.view.width : control.width
         implicitHeight: Math.max(38, control.font.pixelSize + 25)
-        text: model[control.textRole]
+        text: control.textRole ? model[control.textRole] : model.modelData
         highlighted: control.highlightedIndex === index
         hoverEnabled: true
         leftPadding: 14
