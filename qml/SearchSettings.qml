@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: settings
     readonly property var search: librarySearch
-    readonly property bool dialogOpen: embeddingKeyStatus.dialogOpen
+    readonly property bool dialogOpen: embeddingKeyEditor.dialogOpen
     spacing: 18
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
@@ -92,28 +92,6 @@ ColumnLayout {
         placeholderText: "text-embedding model"
         font.pixelSize: 17
     }
-    CheckBox {
-        id: reuseKey
-        visible: settings.search.provider === "remote"
-        text: "Use the existing language model key"
-        checked: settings.search.useLanguageModelKey
-        font.pixelSize: 15
-    }
-    Label {
-        visible: settings.search.provider === "remote" && !reuseKey.checked
-        text: "Embedding API key"
-        color: Theme.inkMuted
-        font.pixelSize: 15
-    }
-    TextField {
-        id: serviceKey
-        visible: settings.search.provider === "remote" && !reuseKey.checked
-        Layout.fillWidth: true
-        echoMode: TextInput.Password
-        placeholderText: settings.search.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"
-        font.pixelSize: 17
-        onVisibleChanged: if (!visible) text = ""
-    }
     Flow {
         visible: settings.search.provider === "remote"
         Layout.fillWidth: true
@@ -125,27 +103,27 @@ ColumnLayout {
             text: "Save remote connection"
             primary: true
             onClicked: {
-                if (settings.search.setRemoteConfiguration(remoteEndpoint.text.trim(), remoteModel.text.trim(), reuseKey.checked, serviceKey.text))
-                    serviceKey.text = "";
+                settings.search.setRemoteConnection(remoteEndpoint.text.trim(), remoteModel.text.trim())
             }
         }
-        SettingsButton {
-            width: Math.min(implicitWidth, parent.width)
-            text: "Clear stored embedding key"
-            visible: !settings.search.useLanguageModelKey
-                && (settings.search.hasApiKey || settings.search.keyStorageState === "removal-failed")
-            onClicked: settings.search.clearApiKey()
-        }
-        ApiKeyStatus {
-            id: embeddingKeyStatus
-            width: Math.min(implicitWidth, parent.width)
-            storageState: settings.search.keyStorageState
-            storageStatus: settings.search.keyStorageStatus
-            hasKey: settings.search.hasApiKey
-            reusesLanguageModelKey: settings.search.useLanguageModelKey
-            saveAction: "Save remote connection"
-            clearAction: "Clear stored embedding key"
-        }
+    }
+    ApiKeyEditor {
+        id: embeddingKeyEditor
+        visible: settings.search.provider === "remote"
+        enabled: remoteEndpoint.text.trim() === settings.search.remoteEndpoint.trim()
+        opacity: enabled ? 1 : 0.62
+        binding: settings.search.apiKey
+        credentialLabel: "Embedding API key"
+        clearAction: "Clear stored embedding key"
+        Layout.fillWidth: true
+    }
+    Label {
+        visible: settings.search.provider === "remote" && remoteEndpoint.text.trim() !== settings.search.remoteEndpoint.trim()
+        text: "Save remote connection to configure its API key."
+        color: Theme.warning
+        font.pixelSize: 14
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
     }
     SettingsCombo {
         objectName: "semanticSearchProfile"
@@ -212,7 +190,7 @@ ColumnLayout {
     }
     Label {
         visible: settings.search.provider === "remote"
-        text: settings.search.useLanguageModelKey ? (settings.search.hasApiKey ? "Using the existing language model key for this configured service." : "A language model key is required by this service.") : "Search sends text only to the configured encoding service."
+        text: settings.search.apiKey.reusingKey ? "Using " + settings.search.apiKey.keyName + " for this configured service." : "Search sends text only to the configured encoding service."
         color: Theme.inkMuted
         wrapMode: Text.Wrap
         Layout.fillWidth: true

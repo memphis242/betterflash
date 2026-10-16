@@ -7,6 +7,10 @@ Dialog {
 
     property string credentialLabel: "API key"
     property bool reusesLanguageModelKey: false
+    property bool reusingKey: false
+    property string keyName: ""
+    property string sourcePage: ""
+    property bool showProviderScope: false
     property string saveAction: "Save key"
     property string clearAction: "Clear stored key"
     readonly property string credentialNoun: credentialLabel === "API key" ? credentialLabel : credentialLabel.toLowerCase()
@@ -69,7 +73,7 @@ Dialog {
 
             Label {
                 Layout.fillWidth: true
-                visible: !dialog.reusesLanguageModelKey
+                visible: !dialog.reusingKey && !dialog.reusesLanguageModelKey
                 text: "Paste the " + dialog.credentialNoun + " into the field, then choose " + dialog.saveAction + ". BetterFlash stores it in the operating system's secure keyring and retrieves it when the application starts again."
                 color: Theme.ink
                 font.family: Theme.contentFont
@@ -78,15 +82,15 @@ Dialog {
             }
             Label {
                 Layout.fillWidth: true
-                visible: dialog.reusesLanguageModelKey
-                text: "This service reuses the credential configured in Language model settings. The connection choice here only selects whether this service uses that credential; it does not provide a second credential field or manage another key."
+                visible: dialog.reusingKey || dialog.reusesLanguageModelKey
+                text: "This service reuses " + (dialog.keyName.length > 0 ? dialog.keyName : "the credential") + (dialog.sourcePage.length > 0 ? " configured in " + dialog.sourcePage : " configured elsewhere") + ". The connection choice here only selects whether this service uses that credential; it does not provide a second credential field or manage another key."
                 color: Theme.ink
                 font.family: Theme.contentFont
                 font.pixelSize: 16
                 wrapMode: Text.Wrap
             }
             Rectangle {
-                visible: !dialog.reusesLanguageModelKey
+                visible: !dialog.reusingKey && !dialog.reusesLanguageModelKey
                 Layout.fillWidth: true
                 implicitHeight: storageSteps.implicitHeight + 24
                 color: Theme.editorField
@@ -104,24 +108,33 @@ Dialog {
             }
             Label {
                 Layout.fillWidth: true
-                visible: !dialog.reusesLanguageModelKey
-                text: "Leaving the field blank is normal when a credential is already saved. The field stays blank so the secret is not exposed in the interface. A saved credential is used only by the service it belongs to."
+                visible: !dialog.reusingKey && !dialog.reusesLanguageModelKey
+                text: "Leaving the field blank is normal when a credential is already saved. The field stays blank so the secret is not exposed in the interface. Other compatible model settings can explicitly reuse a saved credential, and changes made at its source apply to every service using it."
                 color: Theme.ink
                 font.pixelSize: 16
                 wrapMode: Text.Wrap
             }
             Label {
                 Layout.fillWidth: true
-                visible: dialog.reusesLanguageModelKey
-                text: "To change or clear the shared credential, use the Language model settings page. The credential remains associated with the language model service and is not copied for this service."
+                visible: dialog.showProviderScope
+                text: "To change or clear the shared credential, use the source settings page shown above. If that page later uses another provider or key, switch it back to the matching provider address shown in this picker and choose its 'This page' key. The original entry remains available for services that still use it."
                 color: Theme.info
                 font.pixelSize: 16
                 wrapMode: Text.Wrap
             }
             Label {
                 Layout.fillWidth: true
-                text: dialog.reusesLanguageModelKey
-                    ? "If the secure keyring or its integration is unavailable, the shared credential may remain available only until BetterFlash closes. Manage it from the Language model settings page."
+                visible: dialog.showProviderScope
+                text: "Only keys saved for this provider address are offered in the source list. This keeps credentials scoped to the service that can use them."
+                color: Theme.inkMuted
+                font.family: Theme.contentFont
+                font.pixelSize: 15
+                wrapMode: Text.Wrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: (dialog.reusingKey || dialog.reusesLanguageModelKey)
+                    ? "If the secure keyring or its integration is unavailable, the shared credential may remain available only until BetterFlash closes. Manage it from " + (dialog.sourcePage || "its source settings") + "."
                     : "If the secure keyring or its integration is unavailable, the credential may remain available only until BetterFlash closes. An environment-supplied credential is read from the configured environment variable instead of being saved by this page."
                 color: Theme.inkMuted
                 font.pixelSize: 15
