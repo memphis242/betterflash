@@ -6,7 +6,7 @@ import QtCore
 Item {
     id: settingsPage
     required property var ui
-    readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen
+    readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen || aiModelPicker.dialogOpen
         || syncKeyStatus.dialogOpen || searchSettings.dialogOpen
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
@@ -48,7 +48,7 @@ Item {
         target: ai
         function onConfigurationChanged() {
             if (!aiEndpointField.activeFocus) settingsPage.aiEndpointDraft = ai.endpoint;
-            if (!aiModelField.activeFocus) settingsPage.aiModelDraft = ai.model;
+            if (!aiModelPicker.editorActiveFocus) settingsPage.aiModelDraft = ai.model;
         }
     }
 
@@ -471,16 +471,17 @@ Item {
                             font.pixelSize: 17
                             placeholderText: "https://api.groq.com/openai/v1/chat/completions"
                         }
-                        Label { visible: aiProvider.currentIndex === 1; text: "Remote model"; color: Theme.inkMuted; font.pixelSize: 15 }
-                        TextField {
-                            id: aiModelField
+                        RemoteModelPicker {
+                            id: aiModelPicker
                             visible: aiProvider.currentIndex === 1
-                            Layout.fillWidth: true
-                            text: settingsPage.aiModelDraft
-                            onTextChanged: if (activeFocus) settingsPage.aiModelDraft = text
-                            onEditingFinished: ai.model = settingsPage.aiModelDraft.trim()
-                            font.pixelSize: 17
-                            placeholderText: "Provider model identifier"
+                            binding: ai.apiKey
+                            endpoint: settingsPage.aiEndpointDraft
+                            category: "chat"
+                            modelName: settingsPage.aiModelDraft
+                            onModelEdited: model => {
+                                settingsPage.aiModelDraft = model
+                                ai.model = model
+                            }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
