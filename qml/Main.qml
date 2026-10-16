@@ -64,6 +64,11 @@ ApplicationWindow {
     property var pendingNarrationFields: ({})
     readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
                                            && !narrationFieldsMatch(editingCard(), currentCardDraft())
+    readonly property var editorNarrationWarnings: {
+        if (!editingCardId || !cardDialog.visible || !cardNarrationController)
+            return {hasStale: false, front: false, back: false, count: 0}
+        return cardNarrationController.warningsForCard(currentCardDraft())
+    }
     property int imageSession: -1
     property string globalErrorCode: ""
     property string globalErrorMessage: ""
@@ -421,13 +426,18 @@ ApplicationWindow {
     function currentCardDraft() {
         const parts = splitSource(editorSource.text)
         const cloze = /\{\{c\d+::/.test(parts.front)
+        const stored = editingCard()
         return {
+            id: editingCardId,
             deckId: cardDeck.currentValue,
             kind: cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic",
             front: parts.front,
             back: parts.back,
             tags: cardTags.text,
-            points: cardPoints.value
+            points: cardPoints.value,
+            pointCount: cardPoints.value,
+            narrations: stored && stored.narrations ? stored.narrations : ({}),
+            narrationFingerprints: stored && stored.narrationFingerprints ? stored.narrationFingerprints : ({})
         }
     }
     function cardSubmission() {
@@ -1273,6 +1283,10 @@ ApplicationWindow {
                     enabled: !narrationSavePending && !app.busy && !media.busy
                     onClicked: requestCardNarration()
                 }
+                NarrationWarning {
+                    shown: window.editorNarrationWarnings.hasStale
+                    reason: "A narration may no longer match the edited card text. Save the card, then confirm each affected side in Record narration."
+                }
                 GlyphButton { glyph: "close"; hint: "Close card editor"; enabled: !narrationSavePending; onClicked: cardDialog.close() }
             }
         }
@@ -1414,6 +1428,34 @@ ApplicationWindow {
                     onClicked: hideSelection()
                 }
             }
+            RowLayout {
+                visible: editorTabs.currentIndex === 0 && window.editorNarrationWarnings.hasStale
+                Layout.fillWidth: true
+                spacing: 16
+                Label {
+                    text: "Narration alignment"
+                    color: Theme.inkMuted
+                    font.family: Theme.monoFont
+                    font.pixelSize: 11
+                }
+                RowLayout {
+                    spacing: 6
+                    Label { text: "Front"; color: Theme.inkMuted; font.pixelSize: 11 }
+                    NarrationWarning {
+                        shown: window.editorNarrationWarnings.front
+                        reason: "The saved front narration may no longer match this draft. Confirm it in Record narration after saving."
+                    }
+                }
+                RowLayout {
+                    spacing: 6
+                    Label { text: "Back"; color: Theme.inkMuted; font.pixelSize: 11 }
+                    NarrationWarning {
+                        shown: window.editorNarrationWarnings.back
+                        reason: "The saved back narration may no longer match this draft. Confirm it in Record narration after saving."
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
             StackLayout {
                 currentIndex: editorTabs.currentIndex
                 Layout.fillWidth: true
@@ -1455,12 +1497,21 @@ ApplicationWindow {
                     ColumnLayout {
                         width: parent.width
                         spacing: 16
-                        Label {
-                            textFormat: Text.PlainText
-                            text: "Front"
-                            color: Theme.inkMuted
-                            font.family: Theme.monoFont
-                            font.pixelSize: 11
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Label {
+                                textFormat: Text.PlainText
+                                text: "Front"
+                                color: Theme.inkMuted
+                                font.family: Theme.monoFont
+                                font.pixelSize: 11
+                            }
+                            NarrationWarning {
+                                shown: window.editorNarrationWarnings.front
+                                reason: "The saved front narration may no longer match this draft. Confirm it in Record narration after saving."
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         MarkdownPane {
                             markdown: splitSource(editorSource.text).front
@@ -1474,12 +1525,21 @@ ApplicationWindow {
                             height: 1
                             color: Theme.rule
                         }
-                        Label {
-                            textFormat: Text.PlainText
-                            text: "Back"
-                            color: Theme.inkMuted
-                            font.family: Theme.monoFont
-                            font.pixelSize: 11
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Label {
+                                textFormat: Text.PlainText
+                                text: "Back"
+                                color: Theme.inkMuted
+                                font.family: Theme.monoFont
+                                font.pixelSize: 11
+                            }
+                            NarrationWarning {
+                                shown: window.editorNarrationWarnings.back
+                                reason: "The saved back narration may no longer match this draft. Confirm it in Record narration after saving."
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         MarkdownPane {
                             markdown: splitSource(editorSource.text).back

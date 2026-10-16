@@ -7,6 +7,8 @@ Dialog {
     required property var ui
     property string cardId: ""
     readonly property var card: ui.cardById(cardId)
+    readonly property var narrationWarnings: card && card.id && ui.cardNarrationController
+        ? ui.cardNarrationController.warningsForCard(card) : ({hasStale: false, front: false, back: false, count: 0})
     property var recordedEvents: []
     property var summary: ({})
     property var loadError: ({})
@@ -131,6 +133,10 @@ Dialog {
                 glyph: "mic"
                 onClicked: detail.ui.openCardNarration(detail.cardId)
             }
+            NarrationWarning {
+                shown: detail.narrationWarnings.hasStale
+                reason: "A narration may no longer match the card text. Open Record narration and confirm each affected side."
+            }
             GlyphButton {
                 glyph: "more"; hint: "Card actions"
                 onClicked: cardMenu.open()
@@ -169,14 +175,23 @@ Dialog {
                         columnSpacing: 30
                         rowSpacing: 20
                         Repeater {
-                            model: [{label: "Front", source: detail.card.front || ""}, {label: "Back", source: detail.card.back || ""}]
+                            model: [{label: "Front", side: "front", source: detail.card.front || ""}, {label: "Back", side: "back", source: detail.card.back || ""}]
                             delegate: ColumnLayout {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignTop
                                 Layout.preferredWidth: (cardContents.availableWidth - 30) / 2
                                 spacing: 14
-                                Label { text: modelData.label; font.pixelSize: 15; font.bold: true; color: Theme.inkMuted }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Label { text: modelData.label; font.pixelSize: 15; font.bold: true; color: Theme.inkMuted }
+                                    NarrationWarning {
+                                        shown: modelData.side === "front" ? detail.narrationWarnings.front : detail.narrationWarnings.back
+                                        reason: "The saved " + modelData.label.toLowerCase() + " narration may no longer match this text. Confirm it in Record narration."
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                }
                                 MarkdownPane {
                                     markdown: modelData.source
                                     mediaRoot: media.rootPath

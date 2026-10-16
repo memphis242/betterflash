@@ -11,6 +11,11 @@ Dialog {
     readonly property bool capturePending: narration.waitingForCapture
     readonly property bool captureInProgress: narration.recording || capturePending
 
+    function staleVariantLabels() {
+        return (narration.variants || []).filter(entry => Boolean(entry.stale))
+            .map(entry => String(entry.label || entry.key || "card form")).join(", ")
+    }
+
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(900, ui.width - 2 * ui.gutter)
@@ -98,6 +103,10 @@ Dialog {
                 enabled: !narration.busy && !dialog.captureInProgress && !narration.hasDraft
                 onActivated: narration.variantKey = model[index].key
             }
+            NarrationWarning {
+                shown: (narration.variants || []).some(entry => Boolean(entry.stale))
+                reason: "These card forms may have narrations that no longer match their text: " + dialog.staleVariantLabels() + ". Select a form and confirm each affected side."
+            }
             Item { Layout.fillWidth: true }
         }
         Label {
@@ -135,6 +144,10 @@ Dialog {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label { text: modelData.label || modelData.side; color: Theme.ink; font.pixelSize: 17; font.bold: true }
+                                NarrationWarning {
+                                    shown: Boolean(modelData.stale)
+                                    reason: modelData.staleReason || "This narration may no longer match the card text. Confirm it below."
+                                }
                                 Item { Layout.fillWidth: true }
                                 Label {
                                     visible: modelData.hasRecording || narrationSide.hasDraft
@@ -150,6 +163,15 @@ Dialog {
                                     font.family: Theme.monoFont
                                     font.pixelSize: 13
                                 }
+                            }
+                            Label {
+                                visible: Boolean(modelData.stale) && String(modelData.staleReason || "").length > 0
+                                Layout.fillWidth: true
+                                text: modelData.staleReason
+                                color: Theme.warning
+                                font.family: Theme.monoFont
+                                font.pixelSize: 12
+                                wrapMode: Text.Wrap
                             }
                             Rectangle {
                                 Layout.fillWidth: true
@@ -229,6 +251,34 @@ Dialog {
                                     text: "Remove"
                                     enabled: !narration.busy && !narration.hasDraft
                                     onClicked: narration.remove(modelData.side)
+                                }
+                            }
+                            RowLayout {
+                                visible: Boolean(modelData.stale) && !dialog.captureInProgress && !narration.hasDraft
+                                Layout.fillWidth: true
+                                Button {
+                                    id: confirmRecordingButton
+                                    Layout.fillWidth: true
+                                    text: "Confirm recording matches text as intended"
+                                    enabled: !narration.busy
+                                    implicitHeight: Math.max(38, confirmRecordingLabel.implicitHeight + 20)
+                                    contentItem: Label {
+                                        id: confirmRecordingLabel
+                                        text: confirmRecordingButton.text
+                                        color: confirmRecordingButton.enabled ? Theme.ink : Theme.inkMuted
+                                        font.family: Theme.uiFont
+                                        font.pixelSize: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        wrapMode: Text.Wrap
+                                    }
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: confirmRecordingButton.enabled && (confirmRecordingButton.hovered || confirmRecordingButton.down) ? Theme.accentSoft : Theme.transparent
+                                        border.width: confirmRecordingButton.activeFocus ? 2 : 1
+                                        border.color: confirmRecordingButton.activeFocus ? Theme.accent : Theme.rule
+                                    }
+                                    onClicked: narration.confirmRecording(modelData.side)
                                 }
                             }
                         }
