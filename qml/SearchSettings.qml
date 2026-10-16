@@ -5,6 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: settings
     readonly property var search: librarySearch
+    readonly property bool dialogOpen: embeddingKeyStatus.dialogOpen
     spacing: 18
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
@@ -95,6 +96,7 @@ ColumnLayout {
         id: reuseKey
         visible: settings.search.provider === "remote"
         text: "Use the existing language model key"
+        checked: settings.search.useLanguageModelKey
         font.pixelSize: 15
     }
     TextField {
@@ -106,13 +108,34 @@ ColumnLayout {
         font.pixelSize: 17
         onVisibleChanged: if (!visible) text = ""
     }
-    SettingsButton {
+    Flow {
         visible: settings.search.provider === "remote"
-        text: "Save remote connection"
-        primary: true
-        onClicked: {
-            if (settings.search.setRemoteConfiguration(remoteEndpoint.text.trim(), remoteModel.text.trim(), reuseKey.checked, serviceKey.text))
-                serviceKey.text = "";
+        Layout.fillWidth: true
+        spacing: 10
+        SettingsButton {
+            width: Math.min(implicitWidth, parent.width)
+            text: "Save remote connection"
+            primary: true
+            onClicked: {
+                if (settings.search.setRemoteConfiguration(remoteEndpoint.text.trim(), remoteModel.text.trim(), reuseKey.checked, serviceKey.text))
+                    serviceKey.text = "";
+            }
+        }
+        SettingsButton {
+            width: Math.min(implicitWidth, parent.width)
+            text: "Clear stored embedding key"
+            visible: settings.search.hasApiKey && !settings.search.useLanguageModelKey
+            onClicked: settings.search.clearApiKey()
+        }
+        ApiKeyStatus {
+            id: embeddingKeyStatus
+            width: Math.min(implicitWidth, parent.width)
+            storageState: settings.search.keyStorageState
+            storageStatus: settings.search.keyStorageStatus
+            hasKey: settings.search.hasApiKey
+            reusesLanguageModelKey: settings.search.useLanguageModelKey
+            saveAction: "Save remote connection"
+            clearAction: "Clear stored embedding key"
         }
     }
     SettingsCombo {
@@ -190,16 +213,6 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    ValueRow {
-        label: "Key storage"
-        value: settings.search.keyStorageStatus
-        Layout.fillWidth: true
-    }
-    SettingsButton {
-        text: "Clear stored embedding key"
-        visible: settings.search.hasApiKey && settings.search.provider === "remote" && !reuseKey.checked
-        onClicked: settings.search.clearApiKey()
-    }
     }
 
     Flow {

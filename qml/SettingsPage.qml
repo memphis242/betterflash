@@ -6,7 +6,8 @@ import QtCore
 Item {
     id: settingsPage
     required property var ui
-    readonly property bool modalDialogOpen: voiceSettings.dialogOpen
+    readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyStatus.dialogOpen
+        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
@@ -488,6 +489,11 @@ Item {
                             Layout.fillWidth: true
                             spacing: 10
                             visible: aiProvider.currentIndex === 1
+                            Label {
+                                text: "Language model API key"
+                                color: Theme.inkMuted
+                                font.pixelSize: 15
+                            }
                             TextField {
                                 Layout.fillWidth: true
                                 echoMode: TextInput.Password
@@ -496,18 +502,30 @@ Item {
                                 font.pixelSize: 17
                                 onTextChanged: if (activeFocus) settingsPage.aiKeyDraft = text
                             }
-                            SettingsButton {
-                                text: "Save key"
-                                enabled: settingsPage.aiKeyDraft.trim().length > 0
-                                onClicked: {
-                                    ai.setApiKey(settingsPage.aiKeyDraft.trim())
-                                    settingsPage.aiKeyDraft = ""
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                SettingsButton {
+                                    text: "Save key"
+                                    enabled: settingsPage.aiKeyDraft.trim().length > 0
+                                    onClicked: {
+                                        ai.setApiKey(settingsPage.aiKeyDraft.trim())
+                                        settingsPage.aiKeyDraft = ""
+                                    }
                                 }
-                            }
-                            SettingsButton {
-                                text: "Clear key"
-                                visible: ai.hasApiKey
-                                onClicked: ai.clearApiKey()
+                                SettingsButton {
+                                    text: "Clear key"
+                                    visible: ai.hasApiKey
+                                    onClicked: ai.clearApiKey()
+                                }
+                                ApiKeyStatus {
+                                    id: aiKeyStatus
+                                    width: Math.min(implicitWidth, parent.width)
+                                    storageState: ai.keyStorageState
+                                    storageStatus: ai.keyStorageStatus
+                                    hasKey: ai.hasApiKey
+                                    clearAction: "Clear key"
+                                }
                             }
                         }
                         ModelTestResult {
@@ -516,11 +534,6 @@ Item {
                             status: ai.testStatus
                             error: ai.testError
                             busy: ai.testBusy
-                            Layout.fillWidth: true
-                        }
-                        ValueRow {
-                            label: "Credential storage"
-                            value: ai.keyStorageStatus
                             Layout.fillWidth: true
                         }
                         SettingsError {
@@ -576,7 +589,9 @@ Item {
                                 primary: true
                                 onClicked: sync.endpoint = syncEndpointInline.text.trim()
                             }
+                            Label { text: "Access token"; color: Theme.inkMuted; font.pixelSize: 15 }
                             TextField {
+                                id: syncTokenField
                                 Layout.fillWidth: true
                                 echoMode: TextInput.Password
                                 text: settingsPage.syncTokenDraft
@@ -584,25 +599,34 @@ Item {
                                 font.pixelSize: 17
                                 onTextChanged: if (activeFocus) settingsPage.syncTokenDraft = text
                             }
-                            SettingsButton {
-                                text: "Save token"
-                                enabled: settingsPage.syncTokenDraft.trim().length > 0
-                                onClicked: {
-                                    sync.setToken(settingsPage.syncTokenDraft.trim())
-                                    settingsPage.syncTokenDraft = ""
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                SettingsButton {
+                                    text: "Save token"
+                                    enabled: settingsPage.syncTokenDraft.trim().length > 0
+                                    onClicked: {
+                                        sync.setToken(settingsPage.syncTokenDraft.trim())
+                                        settingsPage.syncTokenDraft = ""
+                                    }
+                                }
+                                SettingsButton {
+                                    width: Math.min(implicitWidth, parent.width)
+                                    text: "Clear token"
+                                    visible: sync.hasToken
+                                    onClicked: sync.clearToken()
+                                }
+                                ApiKeyStatus {
+                                    id: syncKeyStatus
+                                    width: Math.min(implicitWidth, parent.width)
+                                    storageState: sync.keyStorageState
+                                    storageStatus: sync.keyStorageStatus
+                                    hasKey: sync.hasToken
+                                    credentialLabel: "Access token"
+                                    saveAction: "Save token"
+                                    clearAction: "Clear token"
                                 }
                             }
-                            SettingsButton {
-                                width: Math.min(implicitWidth, parent.width)
-                                text: "Clear token"
-                                visible: sync.hasToken
-                                onClicked: sync.clearToken()
-                            }
-                        }
-                        ValueRow {
-                            label: "Credential storage"
-                            value: sync.keyStorageStatus
-                            Layout.fillWidth: true
                         }
                         Label {
                             textFormat: Text.PlainText
