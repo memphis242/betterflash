@@ -1443,7 +1443,7 @@ ApplicationWindow {
                     Label { text: "Front"; color: Theme.inkMuted; font.pixelSize: 11 }
                     NarrationWarning {
                         shown: window.editorNarrationWarnings.front
-                        reason: "The saved front narration may no longer match this draft. Confirm it in Record narration after saving."
+                        reason: "A recording may no longer match this front text. Save the card, then check the affected forms in Record narration."
                     }
                 }
                 RowLayout {
@@ -1451,7 +1451,7 @@ ApplicationWindow {
                     Label { text: "Back"; color: Theme.inkMuted; font.pixelSize: 11 }
                     NarrationWarning {
                         shown: window.editorNarrationWarnings.back
-                        reason: "The saved back narration may no longer match this draft. Confirm it in Record narration after saving."
+                        reason: "A recording may no longer match this back text. Save the card, then check the affected forms in Record narration."
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -1509,7 +1509,7 @@ ApplicationWindow {
                             }
                             NarrationWarning {
                                 shown: window.editorNarrationWarnings.front
-                                reason: "The saved front narration may no longer match this draft. Confirm it in Record narration after saving."
+                                reason: "A recording may no longer match this front text. Save the card, then check the affected forms in Record narration."
                             }
                             Item { Layout.fillWidth: true }
                         }
@@ -1537,7 +1537,7 @@ ApplicationWindow {
                             }
                             NarrationWarning {
                                 shown: window.editorNarrationWarnings.back
-                                reason: "The saved back narration may no longer match this draft. Confirm it in Record narration after saving."
+                                reason: "A recording may no longer match this back text. Save the card, then check the affected forms in Record narration."
                             }
                             Item { Layout.fillWidth: true }
                         }

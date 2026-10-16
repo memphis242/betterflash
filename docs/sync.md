@@ -83,8 +83,16 @@ card event without `narrations` preserves compatible saved recordings; an explic
 empty object clears them. Upgrade the server and clients before using audio
 narration, since older versions cannot transfer or play WAV attachments.
 
-New collection backups use version 3 for narration metadata and audio media.
-The application still imports version 2 backups. Provider credentials
+Cards can also contain `narrationFingerprints`, keyed by the same variant and
+side. Each SHA-256 digest binds a recording asset to its effective question or
+answer text. Recording and confirmation mutations preserve these baselines in
+the same transaction as their outgoing card event. An incoming legacy event
+without this field preserves a stored baseline only for the same attached
+audio asset; it never marks changed text as confirmed. An explicit empty
+object clears the baselines, leaving attached recordings unverified.
+
+New collection backups use version 4 for narration text baselines and audio media.
+The application still imports version 2 and 3 backups. Provider credentials
 remain excluded from every backup version.
 
 ## Conflict behavior and scope

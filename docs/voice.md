@@ -44,6 +44,21 @@ Automatic narration skips fenced and indented code blocks, retaining the prose
 around them. Inline code remains part of the spoken prose. A side containing
 only a code block is silent unless it has a saved narration.
 
+Each recording retains a reference to the text shown when recording started.
+A yellow **!** beside **Record narration** and the affected fields indicates
+that a recording may no longer match its text. The editor checks its current
+draft as well as saved cards. In the narration dialog, listen to an affected
+side and choose **Confirm recording matches text as intended** to acknowledge
+that recording against the current text. Confirmation persists with the card;
+a later text change brings the warning back. It does not change the audio or
+the review schedule. Changing only tags, answer-point counts, or the containing
+deck does not create a text mismatch.
+
+Recordings without a saved text reference, including those made before this
+tracking was added, need a one-time confirmation. A changed card or recording
+during confirmation must be checked again rather than acknowledging unseen
+content.
+
 Recordings belong to a particular review form. Reversed cards and each numbered
 cloze group have separate question and answer recordings, so a masked question
 never inherits a recording of the unmasked source. New cards proposed by

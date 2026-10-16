@@ -18,7 +18,7 @@ Item {
         radius: width / 2
         color: Theme.transparent
         border.color: Theme.warning
-        border.width: 1
+        border.width: control.activeFocus ? 2 : 1
     }
     Label {
         anchors.centerIn: parent

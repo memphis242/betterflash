@@ -188,7 +188,7 @@ Dialog {
                                     Label { text: modelData.label; font.pixelSize: 15; font.bold: true; color: Theme.inkMuted }
                                     NarrationWarning {
                                         shown: modelData.side === "front" ? detail.narrationWarnings.front : detail.narrationWarnings.back
-                                        reason: "The saved " + modelData.label.toLowerCase() + " narration may no longer match this text. Confirm it in Record narration."
+                                        reason: "A recording may no longer match this " + modelData.label.toLowerCase() + " text. Check the affected forms in Record narration."
                                     }
                                     Item { Layout.fillWidth: true }
                                 }

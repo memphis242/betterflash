@@ -44,3 +44,10 @@ separate compatibility milestone after Android device verification.
   so instructions match the installed application. Keep credentials out of
   help prompts. Guidance and any future user-requested actions need separate
   interaction design; this feature is a to-do, not an implemented help panel.
+
+## Narration checks when testing resumes
+
+- Cover edits during recording and saving, confirmation rejection after text
+  or audio changes, and confirmation followed by another edit.
+- Cover legacy sync fields versus explicit clears, schema 5 to 6 migration,
+  and version 4 backup round trips with per-side baselines.
