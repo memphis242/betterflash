@@ -99,6 +99,12 @@ ColumnLayout {
         checked: settings.search.useLanguageModelKey
         font.pixelSize: 15
     }
+    Label {
+        visible: settings.search.provider === "remote" && !reuseKey.checked
+        text: "Embedding API key"
+        color: Theme.inkMuted
+        font.pixelSize: 15
+    }
     TextField {
         id: serviceKey
         visible: settings.search.provider === "remote" && !reuseKey.checked
