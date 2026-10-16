@@ -9,6 +9,7 @@ Dialog {
     property string slotLabel: ""
     property bool readOnly: false
     property string saveError: ""
+    readonly property int wordCount: editor.text.trim().length === 0 ? 0 : editor.text.trim().split(/\s+/).length
     signal saved(string id, string text)
 
     parent: Overlay.overlay
@@ -66,6 +67,13 @@ Dialog {
             color: Theme.inkMuted
             wrapMode: Text.Wrap
             font.pixelSize: 13
+        }
+        Label {
+            Layout.fillWidth: true
+            text: dialog.wordCount + " of 512 words"
+            color: dialog.wordCount > 512 ? Theme.error : Theme.inkMuted
+            font.family: Theme.monoFont
+            font.pixelSize: 12
         }
         ScrollView {
             id: editorViewport
@@ -127,7 +135,7 @@ Dialog {
             AppButton {
                 text: "Save expected transcription"
                 primary: true
-                enabled: !dialog.readOnly
+                enabled: !dialog.readOnly && dialog.wordCount <= 512
                 onClicked: dialog.save()
             }
         }

@@ -48,7 +48,7 @@ public:
 
     Q_INVOKABLE void addRecording(const QUrl &source);
     Q_INVOKABLE void replaceRecording(const QString &id, const QUrl &source);
-    Q_INVOKABLE void setExpected(const QString &id, const QString &text);
+    Q_INVOKABLE bool setExpected(const QString &id, const QString &text);
     Q_INVOKABLE void setLabel(const QString &id, const QString &text);
     Q_INVOKABLE void removeRecording(const QString &id);
     Q_INVOKABLE void runTests();
