@@ -30,6 +30,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
+    connect(m_worker,&DatabaseWorker::cardNarrationSaved,this,&AppController::cardNarrationSaved);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
     connect(&m_elapsedTick,&QTimer::timeout,this,&AppController::updateElapsed);
@@ -88,6 +89,25 @@ bool AppController::saveCard(const QString &id,const QString &deckId,const QStri
         setError({{"code",kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD"},{"message","Could not save the card. Correct the card fields."},{"detail",valid.error()}});return false;
     }
     invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,tags,points);});return true;
+}
+bool AppController::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId)
+{
+    if (m_busy) {
+        setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before saving narration."},{"detail",QString()}});
+        emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+        return false;
+    }
+    if (!betterflash::model::validUuid(cardId) || variantKey.isEmpty()
+        || (side != QStringLiteral("front") && side != QStringLiteral("back"))) {
+        setError({{"code","NARRATION_REQUEST_INVALID"},{"message","Choose a valid card narration target."},{"detail",QString()}});
+        emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+        return false;
+    }
+    const bool queued = invoke([=](DatabaseWorker *worker) {
+        worker->setCardNarration(cardId,variantKey,side,mediaName,requestId);
+    });
+    if (!queued) emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+    return queued;
 }
 void AppController::deleteCard(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteCard(id);}); }

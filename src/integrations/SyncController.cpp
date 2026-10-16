@@ -173,7 +173,7 @@ void SyncController::uploadNext() {
     if (!images) {
         fail(QStringLiteral("SYNC_IMAGE_MISSING"), images.error() + QStringLiteral(" Restore the image from a collection backup.")); return;
     }
-    const auto valid = MediaStore::validateImage(name, images->first().bytes);
+    const auto valid = betterflash::model::validateMediaAttachment(name, images->first().bytes);
     if (!valid) { fail(QStringLiteral("SYNC_IMAGE_FORMAT"), valid.error()); return; }
     QNetworkRequest networkRequest = request(mediaUrl(name));
     networkRequest.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
@@ -249,7 +249,7 @@ void SyncController::postBatch() {
                 fail(QStringLiteral("SYNC_IMAGE_PATH"), QStringLiteral("An attached image path is a symbolic link. Remove the link from the media directory and sync again.")); return;
             }
             const auto images = betterflash::model::readBackupMedia(m_mediaDirectory, {name});
-            if (!images || !MediaStore::validateImage(name, images->first().bytes)) m_downloads.append(name);
+            if (!images || !betterflash::model::validateMediaAttachment(name, images->first().bytes)) m_downloads.append(name);
         }
         m_phase = Phase::Downloading;
         downloadNext();
@@ -305,7 +305,7 @@ void SyncController::downloadNext() {
             m_phase = Phase::Downloading;
             downloadNext();
         });
-        watcher->setFuture(QtConcurrent::run([name, bytes] { return MediaStore::validateImage(name, bytes); }));
+        watcher->setFuture(QtConcurrent::run([name, bytes] { return betterflash::model::validateMediaAttachment(name, bytes); }));
         m_status = QStringLiteral("Checking an attached image.");
         emit changed();
     });

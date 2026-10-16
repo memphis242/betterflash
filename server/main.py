@@ -27,7 +27,7 @@ RESPONSE_BYTES = 6 * 1024 * 1024
 MEDIA_LIMIT = 20 * 1024 * 1024
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
-MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif))$")
+MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
 EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert"))
 MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
 
@@ -94,8 +94,19 @@ def card_keys(card):
     back = text(card, "back", 1024 * 1024)
     text(card, "tags", 4096)
     number(card, "pointCount", 1, 1000, True)
+    narrations = card.get("narrations", {})
+    if not isinstance(narrations, dict):
+        raise ProtocolError("INVALID_EVENT", "Card narrations must be an object.")
+    def validate_narrations(keys):
+        for key, value in narrations.items():
+            parts = key.split("/")
+            if (len(parts) != 2 or parts[0] not in keys or parts[1] not in ("front", "back")
+                    or not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}\.wav", value)):
+                raise ProtocolError("INVALID_EVENT", "Card narration references must target a valid variant side and WAV asset.")
     if kind in ("basic", "reverse") and back.strip():
-        return ["forward"] if kind == "basic" else ["forward", "reverse"]
+        keys = ["forward"] if kind == "basic" else ["forward", "reverse"]
+        validate_narrations(keys)
+        return keys
     if kind != "cloze":
         raise ProtocolError("INVALID_EVENT", "Cards must have a supported kind and the required sides.")
     groups, offset = set(), 0
@@ -128,7 +139,9 @@ def card_keys(card):
         offset = closing + 2
     if not groups:
         raise ProtocolError("INVALID_EVENT", "A cloze card needs at least one hidden answer.")
-    return [f"c{group}" for group in sorted(groups)]
+    keys = [f"c{group}" for group in sorted(groups)]
+    validate_narrations(keys)
+    return keys
 
 
 def validate_variant(record):
@@ -241,10 +254,29 @@ def event_media(event):
     if event["type"] != "card.upsert":
         return set()
     card = event["payload"]["card"]
-    names = set(MEDIA_REFERENCE.findall(card["front"]) + MEDIA_REFERENCE.findall(card["back"]))
-    if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif)", name) for name in names):
+    image_names = set(MEDIA_REFERENCE.findall(card["front"]) + MEDIA_REFERENCE.findall(card["back"]))
+    if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif)", name) for name in image_names):
         raise ProtocolError("MEDIA_REFERENCE", "Attach images using valid collection media filenames.")
+    names = set(image_names)
+    narrations = card.get("narrations", {})
+    if isinstance(narrations, dict):
+        names.update(value for value in narrations.values() if isinstance(value, str))
+    if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav)", name) for name in names):
+        raise ProtocolError("MEDIA_REFERENCE", "Attach images and narration using valid collection media filenames.")
     return names
+
+
+def valid_media_bytes(name, data):
+    if name.endswith(".wav"):
+        if len(data) < 44 or len(data) > 44 + 60 * 16000 * 2 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+            return False
+        u16 = lambda at: int.from_bytes(data[at:at + 2], "little")
+        u32 = lambda at: int.from_bytes(data[at:at + 4], "little")
+        return (u32(4) == len(data) - 8 and data[12:16] == b"fmt " and u32(16) == 16
+                and u16(20) == 1 and u16(22) == 1 and u32(24) == 16000 and u32(28) == 32000
+                and u16(32) == 2 and u16(34) == 16 and data[36:40] == b"data"
+                and u32(40) == len(data) - 44 and u32(40) > 0 and u32(40) % 2 == 0)
+    return True
 
 
 class Store:
@@ -477,8 +509,9 @@ class Handler(BaseHTTPRequestHandler):
         temporary = None
         try:
             data = self.read_body(MEDIA_LIMIT)
-            if not data or hashlib.sha256(data).hexdigest() != match.group(1).split(".")[0]:
-                raise ProtocolError("MEDIA_HASH_MISMATCH", "The image bytes do not match the filename hash.", 422)
+            if (not data or hashlib.sha256(data).hexdigest() != match.group(1).split(".")[0]
+                    or not valid_media_bytes(match.group(1), data)):
+                raise ProtocolError("MEDIA_INVALID", "The media bytes do not match the filename or supported format.", 422)
             target = self.store.media / match.group(1)
             if target.is_symlink():
                 raise ProtocolError("MEDIA_PATH", "The stored image path is invalid.", 409)
@@ -522,7 +555,7 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def media_type(name):
         return {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".webp": "image/webp", ".gif": "image/gif"}[Path(name).suffix]
+                ".webp": "image/webp", ".gif": "image/gif", ".wav": "audio/wav"}[Path(name).suffix]
 
 
 def main():

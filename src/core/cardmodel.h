@@ -39,6 +39,8 @@ struct Card {
     QString back;
     QString tags;
     int pointCount = 1;
+    // Content-addressed narration assets keyed by "<variantKey>/<front|back>".
+    QVariantMap narrations{};
 };
 struct Variant {
     QString id;
