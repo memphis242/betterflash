@@ -24,6 +24,7 @@ constexpr qsizetype kMaximumTextCharacters = 8192;
 constexpr int kRequestTimeoutMs = 45 * 1000;
 constexpr int kOverallTimeoutMs = 180 * 1000;
 constexpr qsizetype kMaximumProviderErrorBytes = 64 * 1024;
+constexpr quint32 kUnknownWaveSize = std::numeric_limits<quint32>::max();
 
 quint32 readLe32(const char *const p) {
     return static_cast<quint32>(static_cast<unsigned char>(p[0]))
@@ -298,18 +299,32 @@ bool RemoteTts::decodeWav(const QByteArray &payload, QByteArray *const pcm, QAud
         *error = QStringLiteral("The remote speech service returned a response that is not a RIFF WAV file."); return false;
     }
     const quint32 declaredSize = readLe32(payload.constData() + 4);
-    if (declaredSize < 4 || static_cast<quint64>(declaredSize) + 8 != static_cast<quint64>(payload.size())) {
+    const bool unknownRiffSize = declaredSize == kUnknownWaveSize;
+    if ((!unknownRiffSize && declaredSize < 4)
+        || (!unknownRiffSize && static_cast<quint64>(declaredSize) + 8 != static_cast<quint64>(payload.size()))) {
         *error = QStringLiteral("The remote speech WAV declares a truncated RIFF payload."); return false;
     }
     quint16 channels = 0, bits = 0, audioFormat = 0, blockAlign = 0; quint32 rate = 0, byteRate = 0; QByteArray data;
-    const qsizetype riffEnd = static_cast<qsizetype>(declaredSize) + 8;
+    const qsizetype riffEnd = unknownRiffSize ? payload.size() : static_cast<qsizetype>(declaredSize) + 8;
     qsizetype offset = 12;
     while (offset + 8 <= riffEnd) {
         const QByteArray id = payload.mid(offset, 4);
         const quint32 rawSize = readLe32(payload.constData() + offset + 4);
-        const qsizetype size = static_cast<qsizetype>(rawSize);
         offset += 8;
-        if (size > riffEnd - offset || size + (size & 1) > riffEnd - offset) { *error = QStringLiteral("The remote speech WAV contains a truncated chunk."); return false; }
+        const qsizetype remaining = riffEnd - offset;
+        if (rawSize == kUnknownWaveSize) {
+            if (!unknownRiffSize || id != QByteArrayLiteral("data")) {
+                *error = QStringLiteral("The remote speech WAV contains an unsupported unknown-length chunk."); return false;
+            }
+            data = payload.mid(offset, remaining);
+            offset = riffEnd;
+            continue;
+        }
+        if (static_cast<quint64>(rawSize) > static_cast<quint64>(remaining)
+            || static_cast<quint64>(rawSize) + (rawSize & 1U) > static_cast<quint64>(remaining)) {
+            *error = QStringLiteral("The remote speech WAV contains a truncated chunk."); return false;
+        }
+        const qsizetype size = static_cast<qsizetype>(rawSize);
         if (id == QByteArrayLiteral("fmt ")) {
             if (size < 16) { *error = QStringLiteral("The remote speech WAV format chunk is incomplete."); return false; }
             const char *const p = payload.constData() + offset;
