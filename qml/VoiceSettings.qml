@@ -186,7 +186,7 @@ ColumnLayout {
                         onClicked: { voice.setApiKey(root.apiKeyDraft.trim()); root.apiKeyDraft = "" }
                     }
                     SettingsButton {
-                        visible: voice.hasApiKey
+                        visible: voice.hasApiKey || voice.keyStorageState === "removal-failed"
                         text: "Clear stored key"
                         onClicked: voice.clearApiKey()
                     }
@@ -375,7 +375,7 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 10
                     SettingsButton { text: "Save key"; enabled: ttsApiKey.text.trim().length > 0; onClicked: { voice.remoteTts.setApiKey(ttsApiKey.text.trim()); ttsApiKey.text = "" } }
-                    SettingsButton { visible: voice.remoteTts.hasApiKey; text: "Clear key"; onClicked: voice.remoteTts.clearApiKey() }
+                    SettingsButton { visible: voice.remoteTts.hasApiKey || voice.remoteTts.keyStorageState === "removal-failed"; text: "Clear key"; onClicked: voice.remoteTts.clearApiKey() }
                     ApiKeyStatus {
                         id: ttsKeyStatus
                         width: Math.min(implicitWidth, parent.width)

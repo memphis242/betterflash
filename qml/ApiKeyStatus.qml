@@ -12,6 +12,7 @@ ColumnLayout {
     property string credentialLabel: "API key"
     property string saveAction: "Save key"
     property string clearAction: "Clear stored key"
+    readonly property string credentialNoun: credentialLabel === "API key" ? credentialLabel : credentialLabel.toLowerCase()
     readonly property bool dialogOpen: helpDialog.visible
 
     implicitWidth: 290
@@ -22,7 +23,7 @@ ColumnLayout {
         switch (control.storageState) {
         case "saved":
         case "removed":
-            status = control.storageState === "saved" ? "Saved on this computer" : "No " + control.credentialLabel.toLowerCase() + " saved"
+            status = control.storageState === "saved" ? "Saved on this computer" : "No " + control.credentialNoun + " saved"
             break
         case "loading":
             status = "Checking saved key..."
@@ -47,7 +48,7 @@ ColumnLayout {
             break
         case "missing":
         default:
-            status = "No " + control.credentialLabel.toLowerCase() + " saved"
+            status = "No " + control.credentialNoun + " saved"
             break
         }
         return (control.reusesLanguageModelKey ? "Language model key: " : "") + status
@@ -78,7 +79,9 @@ ColumnLayout {
                 ? "CREDENTIAL_REMOVE_FAILED: The shared credential is cleared for this session, but its saved copy may still be in the desktop keyring. Remove it again from Language model settings after the keyring is available."
                 : "CREDENTIAL_REMOVE_FAILED: The credential is cleared for this session, but its saved copy may still be in the desktop keyring. Try " + control.clearAction + " again after the keyring is available."
         case "invalid":
-            return "CREDENTIAL_INVALID: Enter one credential of at most 4096 characters without line breaks. The previously usable credential, if any, remains unchanged."
+            return control.reusesLanguageModelKey
+                ? "CREDENTIAL_INVALID: The new language model credential was rejected. Enter one credential of at most 4096 characters without line breaks in Language model settings. The previous credential, if any, remains unchanged."
+                : "CREDENTIAL_INVALID: Enter one credential of at most 4096 characters without line breaks. The previously usable credential, if any, remains unchanged."
         default:
             return ""
         }
@@ -108,7 +111,7 @@ ColumnLayout {
         HelpButton {
             id: helpButton
             label: control.credentialLabel + " storage"
-            hint: "Learn about " + control.credentialLabel.toLowerCase() + " storage"
+            hint: "Learn about " + control.credentialNoun + " storage"
             onClicked: helpDialog.openFor()
             Layout.alignment: Qt.AlignVCenter
         }

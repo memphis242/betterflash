@@ -124,7 +124,8 @@ ColumnLayout {
         SettingsButton {
             width: Math.min(implicitWidth, parent.width)
             text: "Clear stored embedding key"
-            visible: settings.search.hasApiKey && !settings.search.useLanguageModelKey
+            visible: !settings.search.useLanguageModelKey
+                && (settings.search.hasApiKey || settings.search.keyStorageState === "removal-failed")
             onClicked: settings.search.clearApiKey()
         }
         ApiKeyStatus {

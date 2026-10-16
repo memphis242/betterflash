@@ -515,7 +515,7 @@ Item {
                                 }
                                 SettingsButton {
                                     text: "Clear key"
-                                    visible: ai.hasApiKey
+                                    visible: ai.hasApiKey || ai.keyStorageState === "removal-failed"
                                     onClicked: ai.clearApiKey()
                                 }
                                 ApiKeyStatus {
@@ -613,7 +613,7 @@ Item {
                                 SettingsButton {
                                     width: Math.min(implicitWidth, parent.width)
                                     text: "Clear token"
-                                    visible: sync.hasToken
+                                    visible: sync.hasToken || sync.keyStorageState === "removal-failed"
                                     onClicked: sync.clearToken()
                                 }
                                 ApiKeyStatus {

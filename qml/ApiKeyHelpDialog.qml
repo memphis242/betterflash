@@ -9,6 +9,7 @@ Dialog {
     property bool reusesLanguageModelKey: false
     property string saveAction: "Save key"
     property string clearAction: "Clear stored key"
+    readonly property string credentialNoun: credentialLabel === "API key" ? credentialLabel : credentialLabel.toLowerCase()
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -69,7 +70,7 @@ Dialog {
             Label {
                 Layout.fillWidth: true
                 visible: !dialog.reusesLanguageModelKey
-                text: "Paste the " + dialog.credentialLabel.toLowerCase() + " into the field, then choose " + dialog.saveAction + ". BetterFlash stores it in the operating system's secure keyring and retrieves it when the application starts again."
+                text: "Paste the " + dialog.credentialNoun + " into the field, then choose " + dialog.saveAction + ". BetterFlash stores it in the operating system's secure keyring and retrieves it when the application starts again."
                 color: Theme.ink
                 font.family: Theme.contentFont
                 font.pixelSize: 16
