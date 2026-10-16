@@ -11,6 +11,7 @@ ComboBox {
     topPadding: 0
     bottomPadding: 0
     font.family: Theme.uiFont
+    hoverEnabled: true
 
     palette.buttonText: control.enabled ? Theme.ink : Theme.inkMuted
     palette.text: control.enabled ? Theme.ink : Theme.inkMuted
@@ -18,6 +19,49 @@ ComboBox {
     property string comboHint: "Choose an option"
     ToolTip.visible: hovered && comboHint.length > 0
     ToolTip.text: comboHint
+
+    delegate: ItemDelegate {
+        id: option
+        required property var model
+        required property int index
+        readonly property bool selectedEntry: control.currentIndex === index
+        width: ListView.view ? ListView.view.width : control.width
+        implicitHeight: Math.max(38, control.font.pixelSize + 25)
+        text: model[control.textRole]
+        highlighted: control.highlightedIndex === index
+        hoverEnabled: true
+        leftPadding: 14
+        rightPadding: 12
+        font.family: control.font.family
+        font.pixelSize: control.font.pixelSize
+        font.weight: selectedEntry ? Font.DemiBold : Font.Normal
+        contentItem: Label {
+            text: option.text
+            textFormat: Text.PlainText
+            font: option.font
+            color: Theme.ink
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            radius: 4
+            color: option.hovered || option.highlighted ? Theme.comboOptionHover
+                : option.selectedEntry ? Theme.comboOptionSelected : Theme.comboPopupFill
+            border.width: option.selectedEntry || option.activeFocus ? 1 : 0
+            border.color: Theme.accent
+            Rectangle {
+                visible: option.selectedEntry
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 6
+                anchors.bottomMargin: 6
+                width: 3
+                radius: 1
+                color: Theme.accent
+            }
+        }
+    }
 
     indicator: Item {
         x: control.width - width
@@ -55,7 +99,7 @@ ComboBox {
     }
 
     popup.background: Rectangle {
-        color: Theme.surfaceRaised
+        color: Theme.comboPopupFill
         border.color: Theme.rule
         border.width: 1
         radius: 5

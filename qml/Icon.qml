@@ -33,6 +33,13 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "help":
+            c.moveTo(5.5, 6)
+            c.bezierCurveTo(5.5, 1.5, 13, 1.5, 13, 6)
+            c.bezierCurveTo(13, 8.5, 9, 8.5, 9, 11)
+            c.moveTo(9, 14.5)
+            c.lineTo(9, 15)
+            break
         case "download":
             c.moveTo(9, 2); c.lineTo(9, 11)
             c.moveTo(5, 7); c.lineTo(9, 11); c.lineTo(13, 7)

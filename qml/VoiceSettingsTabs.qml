@@ -67,9 +67,6 @@ Item {
                         event.accepted = true
                     }
                 }
-                ToolTip.visible: hovered
-                ToolTip.text: modelData.hint
-
                 contentItem: RowLayout {
                     spacing: root.styleIndex === 2 ? 10 : 8
                     Icon {
