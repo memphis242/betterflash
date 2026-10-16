@@ -431,29 +431,20 @@ ApplicationWindow {
         }
     }
     function cardSubmission() {
-        const parts = splitSource(editorSource.text)
-        const cloze = /\{\{c\d+::/.test(parts.front)
-        const kind = cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic"
-        if (!cardDeck.currentValue) {
+        const draft = currentCardDraft()
+        if (!draft.deckId) {
             localCardError = "CARD_DECK: Choose a deck for this card."
             return null
         }
-        if (!parts.front) {
+        if (!draft.front) {
             localCardError = "CARD_FRONT: Write a question before the separator."
             return null
         }
-        if (kind !== "cloze" && !parts.back) {
+        if (draft.kind !== "cloze" && !draft.back) {
             localCardError = "CARD_BACK: Add the answer after a standalone --- line."
             return null
         }
-        return {
-            deckId: cardDeck.currentValue,
-            kind: kind,
-            front: parts.front,
-            back: parts.back,
-            tags: cardTags.text,
-            points: cardPoints.value
-        }
+        return draft
     }
     function narrationFieldsMatch(card, fields) {
         return card.id && card.deckId === fields.deckId && card.kind === fields.kind

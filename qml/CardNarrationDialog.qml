@@ -46,25 +46,37 @@ Dialog {
             narration.close()
     }
 
-    header: RowLayout {
-        width: parent ? parent.width : 0
-        spacing: 12
-        Label {
-            Layout.fillWidth: true
-            text: "Record card narration"
-            color: Theme.ink
-            font.family: Theme.uiFont
-            font.pixelSize: 22
-            font.weight: Font.DemiBold
+    header: Item {
+        implicitHeight: 76
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: dialog.padding
+            anchors.rightMargin: dialog.padding
+            anchors.topMargin: 18
+            anchors.bottomMargin: 12
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: "Record card narration"
+                color: Theme.ink
+                font.family: Theme.uiFont
+                font.pixelSize: 22
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+            }
+            Label {
+                visible: dialog.captureInProgress
+                Layout.minimumWidth: 0
+                Layout.maximumWidth: dialog.width * 0.36
+                text: dialog.capturePending ? "Waiting for microphone" : narration.recordingPaused ? "Paused" : "Microphone active"
+                color: dialog.capturePending || narration.recordingPaused ? Theme.warning : Theme.success
+                font.family: Theme.monoFont
+                font.pixelSize: 13
+                elide: Text.ElideRight
+            }
+            GlyphButton { glyph: "close"; hint: "Close narration editor"; enabled: !narration.busy; onClicked: dialog.requestClose() }
         }
-        Label {
-            visible: dialog.captureInProgress
-            text: dialog.capturePending ? "Waiting for microphone" : narration.recordingPaused ? "Paused" : "Microphone active"
-            color: dialog.capturePending || narration.recordingPaused ? Theme.warning : Theme.success
-            font.family: Theme.monoFont
-            font.pixelSize: 13
-        }
-        GlyphButton { glyph: "close"; hint: "Close narration editor"; enabled: !narration.busy; onClicked: dialog.requestClose() }
     }
 
     contentItem: ColumnLayout {
@@ -106,7 +118,9 @@ Dialog {
                 Repeater {
                     model: narration.sides || []
                     delegate: Rectangle {
+                        id: narrationSide
                         required property var modelData
+                        readonly property bool hasDraft: narration.hasDraft && narration.draftSide === modelData.side
                         Layout.fillWidth: true
                         implicitHeight: sideContent.implicitHeight + 28
                         color: Theme.ledgerSurface
@@ -123,9 +137,9 @@ Dialog {
                                 Label { text: modelData.label || modelData.side; color: Theme.ink; font.pixelSize: 17; font.bold: true }
                                 Item { Layout.fillWidth: true }
                                 Label {
-                                    visible: modelData.hasRecording
-                                    text: "Recorded"
-                                    color: Theme.success
+                                    visible: modelData.hasRecording || narrationSide.hasDraft
+                                    text: narrationSide.hasDraft ? "Unsaved recording" : "Recorded"
+                                    color: narrationSide.hasDraft ? Theme.warning : Theme.success
                                     font.family: Theme.monoFont
                                     font.pixelSize: 12
                                 }
@@ -159,7 +173,7 @@ Dialog {
                                 to: 1
                                 value: Math.min(1, Number(narration.recordingLevel || 0))
                             }
-                            RowLayout {
+                            Flow {
                                 Layout.fillWidth: true
                                 spacing: 8
                                 AppButton {
@@ -191,6 +205,19 @@ Dialog {
                                     onClicked: narration.play(modelData.side)
                                 }
                                 AppButton {
+                                    text: "Discard recording"
+                                    visible: narrationSide.hasDraft
+                                    enabled: !narration.busy
+                                    onClicked: narration.discardDraft()
+                                }
+                                AppButton {
+                                    text: "Save recording"
+                                    primary: true
+                                    visible: narrationSide.hasDraft
+                                    enabled: !narration.busy
+                                    onClicked: narration.saveDraft()
+                                }
+                                AppButton {
                                     visible: narration.previewPlaying && narration.playingSide === modelData.side
                                     text: "Stop"
                                     glyph: "stop"
@@ -198,12 +225,11 @@ Dialog {
                                     onClicked: narration.stopPlayback()
                                 }
                                 AppButton {
-                                    visible: modelData.hasRecording && !dialog.captureInProgress
+                                    visible: modelData.hasRecording && !dialog.captureInProgress && !narrationSide.hasDraft
                                     text: "Remove"
                                     enabled: !narration.busy && !narration.hasDraft
                                     onClicked: narration.remove(modelData.side)
                                 }
-                                Item { Layout.fillWidth: true }
                             }
                         }
                     }
@@ -216,13 +242,6 @@ Dialog {
             text: narration.error || narration.status
             color: narration.error ? Theme.error : Theme.inkMuted
             wrapMode: Text.Wrap
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            Item { Layout.fillWidth: true }
-            Label { visible: narration.hasDraft; text: "Draft: " + String(narration.draftSide || ""); color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 12 }
-            AppButton { text: "Discard recording"; visible: narration.hasDraft; enabled: !narration.busy; onClicked: narration.discardDraft() }
-            AppButton { text: "Save recording"; primary: true; visible: narration.hasDraft; enabled: !narration.busy; onClicked: narration.saveDraft() }
         }
     }
 

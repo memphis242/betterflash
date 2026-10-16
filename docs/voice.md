@@ -29,9 +29,12 @@ continuous listener, and disabling Voice Control in Settings stops it.
 
 ## Card narration
 
-Open a saved card's detail view and choose **Record narration**. Record the
-question and answer separately, pause or resume as needed, then stop, preview,
-and save the recording. Each side can contain up to 60 seconds of audio;
+Open a saved card's detail view or editor and choose **Record narration**.
+When the editor has unsaved changes, **Save and record narration** saves those
+changes first and keeps the editor open underneath the narration dialog.
+Record the question and answer separately, pause or resume as needed, then
+stop, preview, and save the recording beside that side's Play button.
+Each side can contain up to 60 seconds of audio;
 silence does not automatically finish a narration recording. Saving a new
 recording replaces that side's previous narration. Removing a recording restores
 automatic speech for that side.
