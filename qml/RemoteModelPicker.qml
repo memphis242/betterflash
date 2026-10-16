@@ -78,6 +78,11 @@ ColumnLayout {
             Layout.fillWidth: true
             editable: true
             model: picker.modelOptions
+            // Keep the popup's selected row tied to the committed provider
+            // model. A catalog refresh must not select its first row, and a
+            // manually entered model remains unselected when absent from the
+            // fetched catalog.
+            currentIndex: picker.modelOptions.indexOf(String(picker.lastCommittedModel || "").trim())
             font.pixelSize: 17
             comboHint: "Choose a fetched model or type a provider model identifier"
 

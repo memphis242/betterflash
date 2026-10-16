@@ -25,8 +25,8 @@ Item {
         }
         if (section !== 4) syncTokenDraft = ""
     }
-    readonly property var sections: ["Appearance", "Keyboard", "Voice", "Language model", "Sync", "Data", "Search", "Code rendering"]
-    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice review", "Language model", "Device sync", "Collection data", "Library search", "Code rendering"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering"]
+    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering"]
     property var sectionScrollPositions: ({})
     property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
@@ -222,7 +222,7 @@ Item {
                 SettingsSwitch {
                     objectName: "voiceEnabled"
                     visible: settingsPage.section === 2
-                    text: "Enable voice review"
+                    text: "Enable Voice Control"
                     checked: settingsPage.voiceController.enabled
                     Layout.maximumWidth: Math.max(156, settingsContent.width * 0.5)
                     onToggled: settingsPage.voiceController.enabled = checked
@@ -245,7 +245,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: "Voice review mode"
+                        text: "Listening mode"
                         color: Theme.ink
                         font.pixelSize: 16
                     }
@@ -262,11 +262,11 @@ Item {
                             && (!settingsPage.voiceController.customSttTests
                                 || (!settingsPage.voiceController.customSttTests.busy
                                     && !settingsPage.voiceController.customSttTests.recording))
-                        Accessible.name: "Voice review mode"
+                        Accessible.name: "Listening mode"
                         ToolTip.visible: modeHover.hovered
                         ToolTip.text: enabled
-                            ? "Choose whether voice review listens continuously or waits for a trigger"
-                            : "Voice review mode cannot change during a model test or recording"
+                            ? "Choose whether Voice Control listens continuously or waits for a trigger"
+                            : "Listening mode cannot change during a model test or recording"
                         HoverHandler { id: modeHover }
                     }
                     Item {
@@ -275,7 +275,7 @@ Item {
                 }
                 Label {
                     text: settingsPage.voiceController.reviewMode === "always-on"
-                        ? "Voice review listens between utterances while voice review is enabled."
+                        ? "Voice Control listens between utterances while it is enabled."
                         : shortcuts.bindings.microphone
                             ? "Press " + shortcuts.bindings.microphone + " to speak once. Press again to cancel."
                             : "Assign a microphone shortcut in Settings > Key bindings."
