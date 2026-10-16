@@ -9,6 +9,7 @@ ColumnLayout {
     property string apiKeyDraft: ""
     property int tabIndex: 0
     onTabIndexChanged: clearSecretDraft()
+    readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen
     spacing: 18
 
     component SettingsButton: AppButton { font.pixelSize: 16 }
@@ -96,11 +97,13 @@ ColumnLayout {
                 placeholderText: "Local model folder"
                 font.pixelSize: 17
             }
-            Label {
+            RowLayout {
                 visible: sttProvider.currentIndex === 0
-                text: "Selected local model"
-                color: Theme.inkMuted
-                font.pixelSize: 15
+                Layout.fillWidth: true
+                spacing: 6
+                Label { text: "Selected local model"; color: Theme.inkMuted; font.pixelSize: 15 }
+                HelpButton { label: "Selected local model"; topic: "stt-model"; onClicked: helpDialog.openTopic(topic) }
+                Item { Layout.fillWidth: true }
             }
             SettingsCombo {
                 Layout.fillWidth: true
@@ -111,7 +114,14 @@ ColumnLayout {
                 ToolTip.visible: hovered
                 ToolTip.text: "Choose the desktop Whisper profile, balanced Vosk recognition, or the compact profile intended for Android"
             }
-            Label { text: "Speech recognition acceleration"; color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true; visible: sttProvider.currentIndex === 0 }
+            RowLayout {
+                visible: sttProvider.currentIndex === 0
+                Layout.fillWidth: true
+                spacing: 6
+                Label { text: "Speech recognition acceleration"; color: Theme.inkMuted; font.pixelSize: 15 }
+                HelpButton { label: "Speech recognition acceleration"; topic: "stt-acceleration"; onClicked: helpDialog.openTopic(topic) }
+                Item { Layout.fillWidth: true }
+            }
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: sttProvider.currentIndex === 0
@@ -196,10 +206,13 @@ ColumnLayout {
                 busy: voice.sttTestBusy
             }
             }
-            Label {
-                text: "Recognition vocabulary"
-                color: Theme.inkMuted; font.pixelSize: 15; Layout.fillWidth: true
+            RowLayout {
                 Layout.topMargin: 12
+                Layout.fillWidth: true
+                spacing: 6
+                Label { text: "Recognition vocabulary"; color: Theme.inkMuted; font.pixelSize: 15 }
+                HelpButton { label: "Recognition vocabulary"; topic: "vocabulary"; onClicked: helpDialog.openTopic(topic) }
+                Item { Layout.fillWidth: true }
             }
             TextArea {
                 id: recognitionVocabularyField
@@ -282,6 +295,7 @@ ColumnLayout {
                     : "Download the selected language model in Language model settings"
             }
             CustomSttTests {
+                id: customSttTestsControl
                 Layout.fillWidth: true
                 voice: root.voice
             }
@@ -307,7 +321,14 @@ ColumnLayout {
                         voice.ttsProvider = "local"
                 }
             }
-            Label { text: "Local speech engine"; visible: ttsProvider.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
+            RowLayout {
+                visible: ttsProvider.currentIndex === 0
+                Layout.fillWidth: true
+                spacing: 6
+                Label { text: "Local speech engine"; color: Theme.inkMuted; font.pixelSize: 15 }
+                HelpButton { label: "Local speech engine"; topic: "tts-engine"; onClicked: helpDialog.openTopic(topic) }
+                Item { Layout.fillWidth: true }
+            }
             SettingsCombo {
                 id: localTtsEngine
                 Layout.fillWidth: true
@@ -316,9 +337,16 @@ ColumnLayout {
                 currentIndex: voice.ttsProvider === "system" ? 1 : 0
                 onActivated: voice.ttsProvider = currentIndex === 1 ? "system" : "local"
                 ToolTip.visible: hovered
-                ToolTip.text: currentIndex === 0 ? "Use a downloaded Piper voice on this machine" : "Use an installed operating system speech engine on this machine"
+                ToolTip.text: currentIndex === 0 ? "Use the bundled Piper runtime and its downloaded local voice" : "Use a voice supplied by an installed operating-system Qt Text-to-Speech engine"
             }
-            Label { text: "Text-to-speech profile"; visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0; color: Theme.inkMuted; font.pixelSize: 15 }
+            RowLayout {
+                visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0
+                Layout.fillWidth: true
+                spacing: 6
+                Label { text: "Text-to-speech profile"; color: Theme.inkMuted; font.pixelSize: 15 }
+                HelpButton { label: "Text-to-speech profile"; topic: "tts-profile"; onClicked: helpDialog.openTopic(topic) }
+                Item { Layout.fillWidth: true }
+            }
             SettingsCombo {
                 Layout.fillWidth: true
                 visible: ttsProvider.currentIndex === 0 && localTtsEngine.currentIndex === 0
@@ -326,7 +354,7 @@ ColumnLayout {
                 currentIndex: voice.ttsProfile === "ljspeech-medium" ? 1 : 0
                 onActivated: voice.ttsProfile = ["amy-low", "ljspeech-medium"][currentIndex]
                 ToolTip.visible: hovered
-                ToolTip.text: "Choose a local speech synthesis profile"
+                ToolTip.text: "Choose the Piper voice weights and speech characteristics; this applies only to Piper"
             }
             ColumnLayout {
                 visible: ttsProvider.currentIndex === 1
@@ -398,4 +426,6 @@ ColumnLayout {
         Layout.fillWidth: true
         font.pixelSize: 16
     }
+
+    VoiceSettingHelpDialog { id: helpDialog }
 }
