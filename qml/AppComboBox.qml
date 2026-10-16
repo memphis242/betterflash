@@ -53,14 +53,14 @@ ComboBox {
         implicitHeight: Math.max(38, control.font.pixelSize + 25)
         text: control.textRole ? model[control.textRole] : model.modelData
         // Mouse hover is the primary transient highlight. Keyboard navigation
-        // gets a thin outline only after the highlighted index moves.
+        // gets a thin outline after an explicit navigation key.
         highlighted: option.hovered
         hoverEnabled: true
         leftPadding: 14
         rightPadding: 12
         font.family: control.font.family
         font.pixelSize: control.font.pixelSize
-        font.weight: selectedEntry ? Font.DemiBold : Font.Normal
+        font.weight: selectedEntry ? Font.Bold : Font.Normal
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: event => control.recordNavigation(event)
         onHoveredChanged: if (option.hovered)

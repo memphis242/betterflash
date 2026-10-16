@@ -242,8 +242,8 @@ Flickable {
         FlowNode {
             id: textNode
             title: root.styleIndex === 3 ? "Final text" : "Text"
-            detail: root.styleIndex === 4 ? "review input" : "voice review"
-            description: "The final text used by voice review"
+            detail: root.styleIndex === 4 ? "review input" : "Voice Control"
+            description: "The final text used by Voice Control"
             iconKind: "review-ledger"
             nodeWidth: root.styleIndex === 3 ? (root.spacious ? 140 : 118) : (root.spacious ? 104 : 66)
         }

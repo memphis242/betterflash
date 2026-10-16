@@ -20,7 +20,7 @@ Control {
     }
     readonly property string description: recording
         ? (paused ? "Microphone recording is paused; paused audio is not saved" : "Microphone is listening and recording this custom test")
-        : voice.listening ? "Microphone is listening for voice review commands and answers"
+        : voice.listening ? "Microphone is listening for Voice Control commands and answers"
         : armed ? (voice.reviewMode === "always-on"
             ? "Microphone is preparing to listen continuously"
             : "Microphone is preparing to listen for one voice utterance")

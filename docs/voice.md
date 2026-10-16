@@ -1,6 +1,6 @@
-# Voice review
+# Voice Control
 
-Speech recognition and reading are local by default. Settings > Voice keeps
+Speech recognition and reading are local by default. Settings > Voice Control keeps
 provider fields on the page and exposes a separate **Test model** action for
 recognition and reading. A single model box contains the location selector,
 configuration, status, downloads, and basic model test, with space separating
@@ -11,18 +11,18 @@ speech output are explicit alternatives. The operating system's Qt speech
 engine remains a local speech-output choice. Voice starts disabled, so opening the app
 does not start a microphone or load inference models.
 
-## Voice review listening modes
+## Listening modes
 
-Voice review uses **Keyboard trigger** by default. Enabling voice review in
+Voice Control uses **Keyboard trigger** by default. Enabling Voice Control in
 Settings prepares recognition without opening the microphone. Press the
 configured microphone shortcut (M by default) to enable voice if needed and arm
 one utterance. Press the shortcut again to cancel. The utterance ends after
 silence and the microphone stops. The shortcut can be changed under Settings >
-Key bindings; its current binding is shown in the Voice review settings help.
+Key bindings; its current binding is shown in the Voice Control settings help.
 
-**Always on** is an explicit opt-in mode. While voice review is enabled, it
+**Always on** is an explicit opt-in mode. While Voice Control is enabled, it
 listens between utterances. The review microphone control starts or pauses the
-continuous listener, and disabling voice review in Settings stops it.
+continuous listener, and disabling Voice Control in Settings stops it.
 
 ## Managed local speech
 
@@ -123,7 +123,7 @@ the per-user application data directory. They are independent of cards,
 sync, backups, and model downloads.
 
 The application header shows when the microphone is listening, including
-voice review and custom recording. During a custom recording it offers pause,
+Voice Control and custom recording. During a custom recording it offers pause,
 resume, and stop/save controls that remain visible when the slot is scrolled
 out of view. The active slot shows the same controls, captured duration, and
 recent microphone amplitude. Pausing suspends input, excludes paused audio from
