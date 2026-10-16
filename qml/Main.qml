@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtCore
 import QtQml
+import BetterFlash.Native 1.0 as Native
 
 ApplicationWindow {
     id: window
@@ -558,6 +559,16 @@ ApplicationWindow {
         globalErrorMessage = message
         globalErrorDetails = details || ""
         errorDialog.open()
+    }
+    function errorReport() {
+        const lines = []
+        if (globalErrorCode.trim().length > 0)
+            lines.push(globalErrorCode.trim())
+        if (globalErrorMessage.trim().length > 0)
+            lines.push(globalErrorMessage.trim())
+        if (globalErrorDetails.trim().length > 0)
+            lines.push("\nDetails:\n" + globalErrorDetails.trim())
+        return lines.join("\n")
     }
     function shortcutAllowed(action) {
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
@@ -2012,8 +2023,53 @@ ApplicationWindow {
         id: errorDialog
         objectName: "errorDialog"
         title: "Action could not complete"
+        property string copyFeedback: ""
         height: Math.min(430, window.height - 2 * window.gutter)
         standardButtons: Dialog.Close
+        onOpened: copyFeedback = ""
+        header: Item {
+            implicitHeight: errorHeaderRow.implicitHeight + 16
+            RowLayout {
+                id: errorHeaderRow
+                anchors.fill: parent
+                anchors.leftMargin: window.width < 600 ? 14 : 20
+                anchors.rightMargin: window.width < 600 ? 14 : 20
+                anchors.topMargin: 8
+                anchors.bottomMargin: 8
+                spacing: 12
+                Label {
+                    text: errorDialog.title
+                    color: Theme.ink
+                    font.family: Theme.uiFont
+                    font.pixelSize: 17
+                    font.bold: true
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+                Label {
+                    text: errorDialog.copyFeedback
+                    color: Theme.positive
+                    font.pixelSize: 12
+                    visible: text.length > 0
+                }
+                AppButton {
+                    objectName: "copyError"
+                    text: "Copy"
+                    onClicked: {
+                        if (Native.Clipboard.copyText(window.errorReport())) {
+                            errorDialog.copyFeedback = "Copied"
+                            copyFeedbackTimer.restart()
+                        }
+                    }
+                }
+            }
+        }
+        Timer {
+            id: copyFeedbackTimer
+            interval: 1800
+            repeat: false
+            onTriggered: errorDialog.copyFeedback = ""
+        }
         contentItem: ScrollView {
             clip: true
             contentWidth: availableWidth

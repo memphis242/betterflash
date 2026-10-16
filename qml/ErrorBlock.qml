@@ -12,23 +12,39 @@ ColumnLayout {
     onMessageChanged: expanded = false
     visible: message.length > 0
     spacing: 6
-    Label {
-        textFormat: Text.PlainText
+    TextEdit {
+        id: codeText
+        textFormat: TextEdit.PlainText
         text: block.code
         visible: text.length > 0
         color: Theme.error
         font.family: Theme.monoFont
         font.pixelSize: block.textSize
         Layout.fillWidth: true
-        wrapMode: Text.Wrap
+        wrapMode: TextEdit.Wrap
+        selectByMouse: true
+        readOnly: true
+        cursorVisible: false
+        activeFocusOnPress: true
+        selectionColor: Theme.accentSoft
+        selectedTextColor: Theme.ink
+        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
-    Label {
-        textFormat: Text.PlainText
+    TextEdit {
+        id: messageText
+        textFormat: TextEdit.PlainText
         font.pixelSize: block.textSize
         text: block.message
         color: Theme.ink
         Layout.fillWidth: true
-        wrapMode: Text.Wrap
+        wrapMode: TextEdit.Wrap
+        selectByMouse: true
+        readOnly: true
+        cursorVisible: false
+        activeFocusOnPress: true
+        selectionColor: Theme.accentSoft
+        selectedTextColor: Theme.ink
+        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
     AppButton {
         font.pixelSize: block.textSize
@@ -36,14 +52,22 @@ ColumnLayout {
         visible: block.details.length > 0
         onClicked: block.expanded = !block.expanded
     }
-    Label {
-        textFormat: Text.PlainText
+    TextEdit {
+        id: detailsText
+        textFormat: TextEdit.PlainText
         text: block.details
         visible: block.expanded
         color: Theme.inkMuted
         font.family: Theme.monoFont
         font.pixelSize: block.textSize
         Layout.fillWidth: true
-        wrapMode: Text.Wrap
+        wrapMode: TextEdit.Wrap
+        selectByMouse: true
+        readOnly: true
+        cursorVisible: false
+        activeFocusOnPress: true
+        selectionColor: Theme.accentSoft
+        selectedTextColor: Theme.ink
+        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
 }
