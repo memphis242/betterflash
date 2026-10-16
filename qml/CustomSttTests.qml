@@ -27,18 +27,29 @@ ColumnLayout {
         expectedDrafts = next
     }
     function commitDraft(id) {
-        if (Object.prototype.hasOwnProperty.call(expectedDrafts, String(id))) tests.setExpected(id, expectedDrafts[String(id)])
+        const key = String(id)
+        if (!Object.prototype.hasOwnProperty.call(expectedDrafts, key)) return true
+        if (!tests.setExpected(id, expectedDrafts[key])) return false
+        const next = Object.assign({}, expectedDrafts)
+        delete next[key]
+        expectedDrafts = next
+        return true
     }
-    function commitAllDrafts() { for (const entry of tests.entries) commitDraft(entry.id) }
+    function commitAllDrafts() {
+        for (const entry of tests.entries) if (!root.commitDraft(entry.id)) return false
+        return true
+    }
     function openExpectedDialog(entry, slotNumber) {
         expectedTranscriptDialog.openFor(entry.id, "Slot " + slotNumber, root.expectedFor(entry))
     }
     function saveExpectedDialog(id, value) {
         const key = String(id)
-        const entry = tests.entries.find(candidate => String(candidate.id) === key)
-        if (!entry || tests.busy || tests.recording) return false
-        root.rememberExpected(key, value)
-        root.commitDraft(key)
+        if (!tests.setExpected(id, value)) return false
+        if (Object.prototype.hasOwnProperty.call(expectedDrafts, key)) {
+            const next = Object.assign({}, expectedDrafts)
+            delete next[key]
+            expectedDrafts = next
+        }
         return true
     }
 
@@ -49,7 +60,7 @@ ColumnLayout {
             if (root.saveExpectedDialog(id, value))
                 expectedTranscriptDialog.close()
             else
-                expectedTranscriptDialog.showSaveError("EXPECTED_SLOT: This recording slot is no longer available. Cancel and choose an existing slot.")
+                expectedTranscriptDialog.showSaveError(tests.error || "VOICE_CUSTOM_SAVE: Check application storage permissions and available space.")
         }
     }
 
@@ -121,8 +132,8 @@ ColumnLayout {
                                         onClicked: updateMenu.open()
                                         AppMenu {
                                             id: updateMenu
-                                            AppMenuItem { glyph: "folder"; text: "Import WAV"; enabled: !tests.recording; onTriggered: { root.commitAllDrafts(); root.importSlotId = modelData.id; recordingPicker.open() } }
-                                            AppMenuItem { glyph: "mic"; text: "Record microphone"; enabled: !tests.recording; onTriggered: { root.commitAllDrafts(); tests.startRecordingForSlot(modelData.id) } }
+                                            AppMenuItem { glyph: "folder"; text: "Import WAV"; enabled: !tests.recording; onTriggered: if (root.commitAllDrafts()) { root.importSlotId = modelData.id; recordingPicker.open() } }
+                                            AppMenuItem { glyph: "mic"; text: "Record microphone"; enabled: !tests.recording; onTriggered: if (root.commitAllDrafts()) tests.startRecordingForSlot(modelData.id) }
                                             AppMenuItem { glyph: "empty-box"; text: "Clear recording"; enabled: modelData.hasRecording && !tests.recording; onTriggered: tests.removeRecording(modelData.id) }
                                         }
                                     }
@@ -210,7 +221,7 @@ ColumnLayout {
                                         actionKind: "test"
                                         enabled: modelData.hasRecording && root.expectedFor(modelData).trim().length > 0 && root.providerReady && !tests.busy && !tests.recording && !voice.modelTestBusy
                                         hint: "Transcribe only this recording"
-                                        onClicked: { root.commitDraft(modelData.id); tests.runTest(modelData.id) }
+                                        onClicked: if (root.commitDraft(modelData.id)) tests.runTest(modelData.id)
                                     }
                                 }
                             }
@@ -270,7 +281,7 @@ ColumnLayout {
                     actionKind: "test"
                     enabled: root.draftSetReady && root.providerReady && !voice.modelTestBusy && !tests.busy && !tests.recording
                     hint: enabled ? "Transcribe every populated custom recording" : "Populate each recording with an expected transcription and ensure the model is ready"
-                    onClicked: { root.commitAllDrafts(); tests.runTests() }
+                    onClicked: if (root.commitAllDrafts()) tests.runTests()
                 }
             }
             Label { visible: Boolean(tests.status) || tests.busy; Layout.fillWidth: true; text: tests.busy ? (tests.status || "Testing custom recordings...") : (tests.status || ""); color: Theme.inkMuted; wrapMode: Text.Wrap; font.pixelSize: 14 }

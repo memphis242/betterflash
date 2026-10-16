@@ -314,16 +314,23 @@ void CustomSttTests::replaceRecording(const QString &id, const QUrl &source) {
     setState(false, entry->expected.isEmpty() ? QStringLiteral("Add an expected transcript before running the test.") : QStringLiteral("Recording updated."));
 }
 
-void CustomSttTests::setExpected(const QString &id, const QString &text) {
-    if (m_busy || m_recording) return;
+bool CustomSttTests::setExpected(const QString &id, const QString &text) {
+    if (m_busy || m_recording) {
+        setState(m_busy, QStringLiteral("Expected transcript rejected."), QStringLiteral("VOICE_CUSTOM_BUSY: Finish recording or testing before changing expected transcription."));
+        return false;
+    }
     struct Entry *const entry = find(id);
-    if (!entry) return;
+    if (!entry) {
+        setState(false, QStringLiteral("Expected transcript rejected."), QStringLiteral("VOICE_CUSTOM_SLOT: The recording slot no longer exists."));
+        return false;
+    }
     const QString value = text.trimmed();
     if (value.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size() > 512) {
-        setState(false, QStringLiteral("Expected transcript rejected."), QStringLiteral("Use at most 512 words per recording."));
-        return;
+        setState(false, QStringLiteral("Expected transcript rejected."), QStringLiteral("VOICE_CUSTOM_WORD_LIMIT: Use at most 512 words per recording."));
+        return false;
     }
-    if (entry->expected == value) return;
+    if (entry->expected == value) return true;
+    const struct Entry previous = *entry;
     entry->expected = value;
     entry->transcript.clear();
     entry->rawTranscript.clear();
@@ -337,9 +344,14 @@ void CustomSttTests::setExpected(const QString &id, const QString &text) {
     entry->correctedWordErrorRate = -1.0;
     entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
     entry->resultConfiguration.clear();
-    persist();
+    if (!persist()) {
+        *entry = previous;
+        setState(false, QStringLiteral("Expected transcript could not be saved."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage permissions and available space."));
+        return false;
+    }
+    setState(false, QStringLiteral("Expected transcription saved."));
     notifyEntries();
-    emit stateChanged();
+    return true;
 }
 
 void CustomSttTests::setLabel(const QString &id, const QString &text) {
