@@ -126,6 +126,11 @@ Dialog {
                 primary: true
                 onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
             }
+            AppButton {
+                text: detail.width < 620 ? "Narrate" : "Record narration"
+                glyph: "mic"
+                onClicked: detail.ui.openCardNarration(detail.cardId)
+            }
             GlyphButton {
                 glyph: "more"; hint: "Card actions"
                 onClicked: cardMenu.open()

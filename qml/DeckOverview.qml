@@ -26,7 +26,6 @@ Item {
     ]))
     readonly property bool canSummarize: visible && paneOpen && !app.reviewing && !app.busy
         && !ui.modalOpen && !descriptionEditing && (selectedDeck.due || 0) > 0
-        && (ai.provider === "local" ? ai.localModelReady : ai.hasApiKey)
     property var summaryCache: ({})
     property string pendingSummaryKey: ""
     property string pendingSummaryDeck: ""
@@ -38,10 +37,9 @@ Item {
         property bool detailsOpen: true
         property real paneWidth: 360
     }
-    onSummaryKeyChanged: scheduleSummary()
-    onCanSummarizeChanged: scheduleSummary()
+    onSummaryKeyChanged: cancelOwnedSummary()
+    onCanSummarizeChanged: if (!canSummarize) cancelOwnedSummary()
     onVisibleChanged: if (!visible && graphDeckMenu) graphDeckMenu.close()
-    Component.onCompleted: scheduleSummary()
 
     function cancelOwnedSummary() {
         if (!pendingSummaryKey) return;
@@ -50,20 +48,15 @@ Item {
         pendingSummaryDeck = "";
         if (ai.busy && ai.summaryDeckId === ownedDeck) ai.cancel();
     }
-    function scheduleSummary() {
-        if (!summaryDelay) return;
-        summaryDelay.stop();
-        if (!canSummarize || pendingSummaryKey && pendingSummaryKey !== summaryKey)
-            cancelOwnedSummary();
-        if (canSummarize && !summaryCache[summaryKey] && !ai.busy)
-            summaryDelay.restart();
-    }
-    function retrySummary() {
+    function generateSummary() {
+        if (!canSummarize || ai.busy || !app.selectedDeckId)
+            return;
         const cache = Object.assign({}, summaryCache);
         delete cache[summaryKey];
         summaryCache = cache;
-        if (ai.provider === "local" && !ai.localModelReady) ai.prepareLocalModel();
-        scheduleSummary();
+        pendingSummaryKey = summaryKey;
+        pendingSummaryDeck = app.selectedDeckId;
+        ai.summarizeDeck(app.selectedDeckId);
     }
     function saveDescription(id, text) {
         if (app.busy) return;
@@ -98,16 +91,6 @@ Item {
         deckId: app.selectedDeckId
         active: overview.visible && overview.paneOpen
     }
-    Timer {
-        id: summaryDelay
-        interval: 700
-        onTriggered: {
-            if (!overview.canSummarize || ai.busy || overview.summaryCache[overview.summaryKey]) return;
-            overview.pendingSummaryKey = overview.summaryKey;
-            overview.pendingSummaryDeck = app.selectedDeckId;
-            ai.summarizeDeck(app.selectedDeckId);
-        }
-    }
     Connections {
         target: ai
         function onChanged() {
@@ -122,12 +105,10 @@ Item {
                 overview.pendingSummaryKey = "";
                 overview.pendingSummaryDeck = "";
             }
-            overview.scheduleSummary();
         }
         function onKeyChanged() {
             overview.cancelOwnedSummary();
             overview.summaryCache = ({});
-            overview.scheduleSummary();
         }
     }
     Connections {
@@ -284,18 +265,14 @@ Item {
             actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
             actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)
             saveExternally: true
-            summaryText: overview.summaryResult.text || (ai.provider === "local" && !ai.localModelReady
-                ? "Prepare the local language model to summarize the due cards."
-                : ai.provider === "remote" && !ai.hasApiKey
-                ? "Add your provider key in Settings / Language model to summarize the due cards."
-                : overview.summaryResult.error ? "" : "A summary of the due cards will appear here.")
-            summaryCaption: "Automatic summary"
-            summaryBusy: ai.busy && overview.pendingSummaryKey === overview.summaryKey || ai.provider === "local" && ai.localDownloading
+            summaryText: overview.summaryResult.text || ""
+            summaryCaption: "Deck summary"
+            summaryBusy: overview.pendingSummaryKey === overview.summaryKey
+                && (ai.busy || ai.provider === "local" && ai.localDownloading)
             summaryError: overview.summaryResult.error || (ai.provider === "local" ? ai.localError : "")
-            summaryRetryVisible: (overview.selectedDeck.due || 0) > 0
-                && (ai.provider === "local" ? !ai.localModelReady || !!overview.summaryResult.error : ai.hasApiKey && !!overview.summaryResult.error)
-            summaryRetryText: ai.provider === "local" && !ai.localModelReady ? "Download and summarize" : "Retry summary"
-            onSummaryRetryRequested: overview.retrySummary()
+            summaryRetryVisible: overview.canSummarize
+            summaryRetryText: overview.summaryResult.text ? "Regenerate summary" : "Generate summary"
+            onSummaryRetryRequested: overview.generateSummary()
             onDescriptionSaved: (id, text) => overview.saveDescription(id, text)
             onCollapseRequested: overview.preferences.detailsOpen = false
             onReviewRequested: id => {

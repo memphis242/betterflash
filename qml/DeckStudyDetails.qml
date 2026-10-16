@@ -426,14 +426,20 @@ Rectangle {
                         font.family: Theme.monoFont
                         font.pixelSize: 10
                     }
-                    Label {
+                    MarkdownPane {
+                        visible: pane.integer("due") > 0 && pane.summaryText.length > 0
                         Layout.fillWidth: true
-                        textFormat: Text.PlainText
-                        text: pane.integer("due") > 0 ? (pane.summaryText.length > 0 ? pane.summaryText : "No summary is available yet.") : "Nothing is due in this deck."
+                        markdown: pane.summaryText
+                        mediaRoot: pane.mediaRoot
+                        baseFontSize: 14
+                    }
+                    Label {
+                        visible: pane.integer("due") > 0 && pane.summaryText.length === 0 && !pane.summaryBusy && pane.summaryError.length === 0
+                        Layout.fillWidth: true
+                        text: "No summary has been generated for this deck."
                         color: Theme.inkMuted
                         font.family: Theme.contentFont
-                        font.pixelSize: 12
-                        lineHeight: 1.35
+                        font.pixelSize: 13
                         wrapMode: Text.Wrap
                     }
                     Label {

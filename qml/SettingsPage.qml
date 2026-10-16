@@ -229,6 +229,12 @@ Item {
                     ToolTip.visible: hovered
                     ToolTip.text: "Enable voice commands and spoken card review"
                 }
+                HelpButton {
+                    visible: settingsPage.section === 2
+                    label: "Voice Control"
+                    topic: "voice-control"
+                    onClicked: if (voiceSettings) voiceSettings.openHelp(topic)
+                }
                 SettingsButton {
                     objectName: "resetShortcuts"
                     visible: settingsPage.section === 1 && shortcuts.customized

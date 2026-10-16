@@ -39,6 +39,7 @@ ColumnLayout {
     }
 
     function clearSecretDraft() { if (sttKeyEditor) sttKeyEditor.clearSecretDraft(); if (ttsKeyEditor) ttsKeyEditor.clearSecretDraft() }
+    function openHelp(topic) { helpDialog.openTopic(topic) }
     readonly property bool localStt: voice.sttProvider !== "groq"
     readonly property bool localTts: voice.ttsProvider !== "remote"
     readonly property string sttState: voice.sttModelDownloading ? "busy" : !localStt ? "disabled" : voice.sttModelReady && !voice.sttTestError ? "ready" : voice.sttModelReady ? "degraded" : "missing"
