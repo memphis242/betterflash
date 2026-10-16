@@ -202,9 +202,17 @@ void Summarizer::testModel() {
             {QStringLiteral("content"), QStringLiteral("Return only one JSON object with a numeric answer field.")}},
         QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
             {QStringLiteral("content"), QStringLiteral("What is 2 + 2? Use the shape {\"answer\":4}.")}}};
-    const QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("temperature"), 0},
-        {QStringLiteral("max_tokens"), 64}, {QStringLiteral("messages"), messages},
+    const QUrl endpoint(m_endpoint);
+    const bool groqReasoningModel = m_provider == QStringLiteral("remote")
+        && endpoint.scheme() == QStringLiteral("https")
+        && endpoint.host() == QStringLiteral("api.groq.com")
+        && (endpoint.port() == -1 || endpoint.port() == 443)
+        && (m_model == QStringLiteral("openai/gpt-oss-20b") || m_model == QStringLiteral("openai/gpt-oss-120b"));
+    QJsonObject payload{{QStringLiteral("model"), m_model}, {QStringLiteral("temperature"), 0},
+        {QStringLiteral("max_tokens"), groqReasoningModel ? 512 : 64}, {QStringLiteral("messages"), messages},
         {QStringLiteral("response_format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_object")}}}};
+    if (groqReasoningModel)
+        payload.insert(QStringLiteral("reasoning_effort"), QStringLiteral("low"));
     m_testJob = complete(payload, this, [this](std::expected<QString, struct ProviderError> result) {
         m_testJob = 0; m_testBusy = false;
         if (!result) {

@@ -13,6 +13,7 @@
 #include "voice/VoiceController.h"
 #include "ui/TextFocusDismissal.h"
 #include "ui/LocalFilePaths.h"
+#include "ui/Clipboard.h"
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -70,6 +71,8 @@ int main(int argc, char **argv) {
     qmlRegisterType<RemoteModelCatalog>("BetterFlash.Native", 1, 0, "RemoteModelCatalog");
     qmlRegisterSingletonType<LocalFilePaths>("BetterFlash.Native", 1, 0, "LocalFilePaths",
         [](QQmlEngine *, QJSEngine *) -> QObject * { return new LocalFilePaths; });
+    qmlRegisterSingletonType<Clipboard>("BetterFlash.Native", 1, 0, "Clipboard",
+        [](QQmlEngine *, QJSEngine *) -> QObject * { return new Clipboard; });
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Native Markdown flashcards for focused review."));
     parser.addHelpOption();
