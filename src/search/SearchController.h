@@ -42,7 +42,6 @@ class SearchController final : public QObject {
     Q_PROPERTY(double downloadProgress READ downloadProgress NOTIFY changed)
     Q_PROPERTY(QString remoteEndpoint READ remoteEndpoint NOTIFY changed)
     Q_PROPERTY(QString remoteModel READ remoteModel NOTIFY changed)
-    Q_PROPERTY(bool useLanguageModelKey READ useLanguageModelKey NOTIFY changed)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY changed)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY changed)
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY changed)
@@ -72,7 +71,6 @@ public:
     double downloadProgress() const { return m_downloadProgress; }
     QString remoteEndpoint() const { return m_endpoint; }
     QString remoteModel() const { return m_model; }
-    bool useLanguageModelKey() const { return m_credentials && m_credentials->keyName() == QStringLiteral("language-model-api-key"); }
     bool hasApiKey() const;
     QString keyStorageStatus() const;
     QString keyStorageState() const;
@@ -93,7 +91,6 @@ public:
     Q_INVOKABLE void prepareModel();
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void retry();
-    Q_INVOKABLE bool setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key);
     Q_INVOKABLE bool setRemoteConnection(const QString &endpoint, const QString &model);
     Q_INVOKABLE void clearApiKey();
     Q_INVOKABLE void rebuildIndex();
@@ -146,7 +143,6 @@ private:
     void stopDownload();
     void resetTestReport();
     AppController *const m_app;
-    Summarizer *const m_ai;
     ApiKeyBinding *m_credentials = nullptr;
     ApiKeyRegistry *const m_registry;
     QSettings m_settings;

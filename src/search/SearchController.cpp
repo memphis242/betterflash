@@ -27,9 +27,9 @@ bool validEndpoint(const QUrl &url) {
 }
 
 SearchController::SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent, ApiKeyRegistry *registry)
-    : QObject(parent), m_app(app), m_ai(ai), m_registry(registry ? registry : (ai ? ai->credentialRegistry() : nullptr)),
+    : QObject(parent), m_app(app), m_registry(registry ? registry : (ai ? ai->credentialRegistry() : nullptr)),
       m_modelRoot(qEnvironmentVariable("BETTERFLASH_MODEL_DIR", QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/BetterFlash/models"))) {
-    Q_ASSERT(m_app && m_ai);
+    Q_ASSERT(m_app && m_registry);
     Q_ASSERT(m_registry);
     m_enabled = m_settings.value(QStringLiteral("search/semanticEnabled"), true).toBool();
     m_provider = m_settings.value(QStringLiteral("search/provider"), QStringLiteral("local")).toString();
@@ -165,40 +165,6 @@ void SearchController::setLocalProfile(const QString &profile) {
     if (profile == m_profile || (profile != QStringLiteral("automatic") && profile != QStringLiteral("desktop") && profile != QStringLiteral("compact"))) return;
     cancelTest(); resetTestReport(); stopDownload(); m_profile = profile; m_downloadCanceled = false;
     m_settings.setValue(QStringLiteral("search/localProfile"), profile); restartAll(); emit changed();
-}
-bool SearchController::setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key) {
-    const QString cleanEndpoint = endpoint.trimmed(); const QString cleanModel = model.trimmed();
-    const QUrl url(cleanEndpoint);
-    if (!validEndpoint(url)) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Enter an HTTPS embeddings endpoint, or HTTP on localhost, without credentials or query parameters.")); return false; }
-    if (cleanModel.isEmpty() || cleanModel.size() > 256) { setFailure(QStringLiteral("SEARCH_MODEL: Enter the provider's embedding model identifier.")); return false; }
-    if (key.size() > 4096 || key.contains(QLatin1Char('\n')) || key.contains(QLatin1Char('\r'))) { setFailure(QStringLiteral("SEARCH_KEY: Enter a single API key without line breaks.")); return false; }
-    const auto *const languageKey = qobject_cast<const ApiKeyBinding *>(m_ai->apiKey());
-    const QString languageKeyId = languageKey ? languageKey->selectedKeyId() : QString();
-    if (reuseKey && (!languageKey || languageKey->keyName() != QStringLiteral("language-model-api-key")
-        || !m_registry->canSelectKey(languageKeyId, cleanEndpoint))) {
-        setFailure(QStringLiteral("SEARCH_KEY_ORIGIN: Select a saved language-model-api-key for the same provider origin."));
-        return false;
-    }
-    m_endpoint = cleanEndpoint; m_model = cleanModel;
-    m_settings.setValue(QStringLiteral("search/endpoint"), m_endpoint);
-    m_settings.setValue(QStringLiteral("search/model"), m_model);
-    m_settings.setValue(QStringLiteral("search/reuseLlmKey"), reuseKey);
-    configureCredentials();
-    if (reuseKey) {
-        if (!m_credentials->selectKey(languageKeyId)) {
-            setFailure(QStringLiteral("SEARCH_KEY_ORIGIN: Select a language model key saved for the same provider origin."));
-            return false;
-        }
-    } else if (!m_credentials->selectKey(m_credentials->ownKeyId())) {
-        setFailure(QStringLiteral("SEARCH_KEY: The embedding key entry could not be selected."));
-        return false;
-    } else if (!key.trimmed().isEmpty() && !m_credentials->saveKey(key)) {
-        setFailure(QStringLiteral("SEARCH_KEY: The embedding key could not be saved."));
-        return false;
-    }
-    cancelTest(); resetTestReport();
-    restartAll(); emit changed();
-    return true;
 }
 bool SearchController::setRemoteConnection(const QString &endpoint, const QString &model) {
     const QString cleanEndpoint = endpoint.trimmed();
