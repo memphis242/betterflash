@@ -27,7 +27,9 @@ bool isValidCategory(const QString &category) {
 }
 
 bool isGroq(const QUrl &url) {
-    return url.host().compare(QStringLiteral("api.groq.com"), Qt::CaseInsensitive) == 0;
+    const bool https = url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0;
+    const bool defaultPort = url.port() < 0 || url.port() == 443;
+    return https && defaultPort && url.host().compare(QStringLiteral("api.groq.com"), Qt::CaseInsensitive) == 0;
 }
 
 bool isSpeechRecognitionModel(const QString &model) {
@@ -45,6 +47,15 @@ bool isEmbeddingModel(const QString &model) {
         || model.startsWith(QStringLiteral("bge-"), Qt::CaseInsensitive)
         || model.startsWith(QStringLiteral("nomic-embed"), Qt::CaseInsensitive)
         || model.contains(QStringLiteral("embedding"), Qt::CaseInsensitive);
+}
+
+bool isSafetyClassifierModel(const QString &model) {
+    return model.startsWith(QStringLiteral("meta-llama/llama-prompt-guard"), Qt::CaseInsensitive)
+        || model.startsWith(QStringLiteral("meta-llama/llama-guard"), Qt::CaseInsensitive)
+        || model.startsWith(QStringLiteral("llama-prompt-guard"), Qt::CaseInsensitive)
+        || model.startsWith(QStringLiteral("llama-guard"), Qt::CaseInsensitive)
+        || model.startsWith(QStringLiteral("openai/gpt-oss-safeguard"), Qt::CaseInsensitive)
+        || model.startsWith(QStringLiteral("gpt-oss-safeguard"), Qt::CaseInsensitive);
 }
 
 bool isAllowedModelId(const QString &model) {
@@ -83,7 +94,7 @@ QString modelHint(const QUrl &endpoint, const QString &category) {
         return QStringLiteral("Groq's combined list is filtered to known speech-output families. Model identifiers remain enterable manually.");
     if (category == QStringLiteral("embedding"))
         return QStringLiteral("Groq's combined list is filtered to known embedding-style identifiers. Model identifiers remain enterable manually.");
-    return QStringLiteral("Groq's combined list excludes known speech and embedding families for chat. Model identifiers remain enterable manually.");
+    return QStringLiteral("Groq's combined list excludes known speech, embedding, and safety-classifier families for chat. Model identifiers remain enterable manually.");
 }
 
 bool includeForCategory(const QString &model, const QString &category, const bool groq) {
@@ -91,7 +102,8 @@ bool includeForCategory(const QString &model, const QString &category, const boo
     if (category == QStringLiteral("speech-recognition")) return isSpeechRecognitionModel(model);
     if (category == QStringLiteral("speech-output")) return isSpeechOutputModel(model);
     if (category == QStringLiteral("embedding")) return isEmbeddingModel(model);
-    return !isSpeechRecognitionModel(model) && !isSpeechOutputModel(model) && !isEmbeddingModel(model);
+    return !isSpeechRecognitionModel(model) && !isSpeechOutputModel(model) && !isEmbeddingModel(model)
+        && !isSafetyClassifierModel(model);
 }
 }
 
