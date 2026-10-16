@@ -28,8 +28,10 @@ settings configured for `https://api.groq.com`. Model availability and account
 permissions still depend on the provider. A key alone does not enable an
 endpoint the provider does not offer.
 
-For remote Search, save the endpoint and model first, then select or enter
-its API key. A compatible embedding model is required; a chat model cannot
+For remote Search, save the endpoint first, then select or enter its API key.
+You can leave the model empty while configuring the key, fetch the model list,
+and save the connection again after choosing a model. A compatible embedding
+model is required for search; a chat model cannot
 substitute for one. Groq's public API reference does not document an embedding
 endpoint, so use local embeddings or a compatible embedding provider.
 [Groq API reference](https://console.groq.com/docs/api-reference)

@@ -10,7 +10,7 @@ class QNetworkReply;
 class QUrl;
 
 // Fetches the provider's model registry without exposing credentials to QML.
-class RemoteModelCatalog final : public QObject {
+class RemoteModelCatalog : public QObject {
     Q_OBJECT
     Q_PROPERTY(QObject *apiKey READ apiKey WRITE setApiKey NOTIFY configurationChanged)
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY configurationChanged)

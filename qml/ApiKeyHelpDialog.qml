@@ -83,7 +83,7 @@ Dialog {
             Label {
                 Layout.fillWidth: true
                 visible: dialog.reusingKey || dialog.reusesLanguageModelKey
-                text: "This service reuses " + (dialog.keyName.length > 0 ? dialog.keyName : "the credential") + (dialog.sourcePage.length > 0 ? " configured in " + dialog.sourcePage : " configured elsewhere") + ". The connection choice here only selects whether this service uses that credential; it does not provide a second credential field or manage another key."
+                text: "This service reuses " + (dialog.keyName.length > 0 ? dialog.keyName : "the credential") + (dialog.sourcePage.length > 0 ? " configured in " + dialog.sourcePage : " configured elsewhere") + ". To use a different key for this feature, type it in the masked field and choose " + dialog.saveAction + ". The shared key remains unchanged."
                 color: Theme.ink
                 font.family: Theme.contentFont
                 font.pixelSize: 16

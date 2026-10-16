@@ -35,7 +35,7 @@ ColumnLayout {
     function commitEditorText() {
         if (restoringEditor)
             return
-        const entered = String(modelEditor.editText || "").trim()
+        const entered = String(draftModelName || "").trim()
         if (entered.length === 0 || entered === lastCommittedModel)
             return
         draftModelName = entered
@@ -98,7 +98,7 @@ ColumnLayout {
             target: modelEditor.contentItem
             function onTextEdited() {
                 if (!picker.restoringEditor)
-                    picker.draftModelName = String(modelEditor.editText || "")
+                    picker.draftModelName = String(modelEditor.contentItem.text || "")
             }
             function onEditingFinished() {
                 picker.commitEditorText()
@@ -128,7 +128,7 @@ ColumnLayout {
 
     onVisibleChanged: if (!visible && modelEditor.popup.visible) modelEditor.popup.close()
 
-    onModelNameChanged: if (!modelEditor.activeFocus) {
+    onModelNameChanged: if (!editorActiveFocus) {
         draftModelName = modelName
         lastCommittedModel = modelName
         restoreEditorDraft()

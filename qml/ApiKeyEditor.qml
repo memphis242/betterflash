@@ -144,6 +144,7 @@ ColumnLayout {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         padding: 6
         onClosed: keyPickerList.currentIndex = -1
+        onHeightChanged: if (visible) Qt.callLater(editor.repositionKeyPicker)
 
         background: Rectangle {
             color: Theme.comboPopupFill
@@ -161,6 +162,19 @@ ColumnLayout {
             model: editor.binding ? (editor.binding.keyChoices || []) : []
             keyNavigationEnabled: true
             highlightFollowsCurrentItem: true
+            footer: Label {
+                visible: keyPickerList.count === 0
+                width: keyPickerList.width
+                height: visible ? implicitHeight : 0
+                padding: 12
+                text: editor.binding && String(editor.binding.error).startsWith("KEY_LOADING:")
+                    ? "Loading saved keys..."
+                    : "No compatible saved keys. Continue typing a new key in the field."
+                textFormat: Text.PlainText
+                color: Theme.inkMuted
+                font.pixelSize: 14
+                wrapMode: Text.Wrap
+            }
             delegate: Item {
                 id: keyRow
                 required property var modelData
