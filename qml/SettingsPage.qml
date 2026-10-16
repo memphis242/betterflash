@@ -504,6 +504,8 @@ Item {
                             }
                             Flow {
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 0
                                 spacing: 10
                                 SettingsButton {
                                     text: "Save key"
@@ -601,6 +603,8 @@ Item {
                             }
                             Flow {
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredWidth: 0
                                 spacing: 10
                                 SettingsButton {
                                     text: "Save token"

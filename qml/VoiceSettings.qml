@@ -179,6 +179,8 @@ ColumnLayout {
                 }
                 Flow {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: 0
                     spacing: 10
                     SettingsButton {
                         text: "Save key"
@@ -373,6 +375,8 @@ ColumnLayout {
                 TextField { id: ttsApiKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: voice.remoteTts.hasApiKey ? "Leave empty to keep the stored key" : "Provider API key"; font.pixelSize: 17; onVisibleChanged: if (!visible) text = "" }
                 Flow {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: 0
                     spacing: 10
                     SettingsButton { text: "Save key"; enabled: ttsApiKey.text.trim().length > 0; onClicked: { voice.remoteTts.setApiKey(ttsApiKey.text.trim()); ttsApiKey.text = "" } }
                     SettingsButton { visible: voice.remoteTts.hasApiKey || voice.remoteTts.keyStorageState === "removal-failed"; text: "Clear key"; onClicked: voice.remoteTts.clearApiKey() }

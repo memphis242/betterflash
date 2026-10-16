@@ -117,6 +117,8 @@ ColumnLayout {
     Flow {
         visible: settings.search.provider === "remote"
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        Layout.preferredWidth: 0
         spacing: 10
         SettingsButton {
             width: Math.min(implicitWidth, parent.width)
