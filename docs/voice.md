@@ -218,6 +218,9 @@ speech endpoints must accept the same JSON speech request and return PCM WAV aud
 For the two known Groq Orpheus models, the Voice dropdown offers that model's
 documented voices and restores a compatible voice when changing models. Custom
 providers and model identifiers retain a free-form voice field.
+Streamed PCM WAV responses may use unknown-length RIFF and final audio-chunk
+headers. The decoder bounds those chunks by the received response while retaining
+finite-length, format, and complete-frame validation.
 Long prompts are split into smaller requests to respect Groq's documented
 200-character input limit.
 [Groq speech-output documentation](https://console.groq.com/docs/text-to-speech/orpheus)
@@ -239,7 +242,7 @@ key. Availability and account permissions can change.
 | --- | --- | --- |
 | Language model | `allam-2-7b`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b` | All passed the native structured-answer model test. |
 | Speech recognition | `whisper-large-v3`, `whisper-large-v3-turbo` | Both transcribed the official spoken-digit recording correctly, using numeric-equivalent scoring. |
-| Speech output | English and Arabic Orpheus | Both returned `model_terms_required`; the native request path displayed the corresponding terms address. Audio synthesis remains unverified until acceptance. |
+| Speech output | English and Arabic Orpheus | After accepting English terms, native English synthesis, streamed WAV decoding, and conversion passed with about four seconds of audio. Arabic still returned `model_terms_required`. Audible playback remains a manual check. |
 | Embeddings | Provider model discovery and embeddings request | No embedding models were listed; the embeddings request returned HTTP 404. Keep local embeddings or use another compatible provider. |
 
 Groq's safety classifiers are excluded from suggested language models because

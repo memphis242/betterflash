@@ -72,7 +72,10 @@ Synchronization access tokens remain separate from the model API-key picker.
 
 ## Available remote models
 
-The button beside a remote model selector fetches the provider's model list.
+Opening an empty remote model selector fetches the provider's model list. The
+configured model remains visible while the available choices load. The button
+beside the selector also fetches or refreshes the list. Opening Settings alone
+does not start model discovery.
 Select a returned model or enter an identifier manually. Fetching the list
 does not run inference or change the configured model. Opening Settings does
 not fetch automatically.
