@@ -1,6 +1,9 @@
 #include "VoiceController.h"
 
 #include "VoiceWorker.h"
+#include "VoiceAudio.h"
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include "CustomSttTests.h"
 #include "TranscriptCorrector.h"
 #include "LocalTtsWorker.h"
@@ -603,7 +606,7 @@ void VoiceController::setModelTestState(const bool busy, const QString &status, 
 }
 
 void VoiceController::testSttModel() {
-    if (m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
+    if (m_narrationSession || m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
     m_sttTestBusy = true;
     m_pendingSttTest = true;
     m_sttTestError.clear();
@@ -630,7 +633,7 @@ void VoiceController::testSttModel() {
 }
 
 void VoiceController::testTtsModel() {
-    if (m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
+    if (m_narrationSession || m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return;
     m_ttsTestBusy = true;
     m_pendingTtsTest = true;
     m_ttsTestError.clear();
@@ -662,7 +665,7 @@ void VoiceController::continuePendingOperations() {
     if (m_pendingSttTest && sttModelReady() && m_fixtureDownload->ready()) beginSttTest();
     if (m_pendingTtsTest && ttsReady()) beginTtsTest();
     if (m_enabled && !m_worker && !m_sttTestBusy && sttModelReady()) beginWorker();
-    if (m_speaking && !m_ttsIssued && ttsReady()) beginSpeech();
+    if (m_speaking && !m_ttsIssued && (m_recordedPlayback || ttsReady())) beginSpeech();
 }
 
 void VoiceController::beginSttTest() {
@@ -821,6 +824,7 @@ void VoiceController::setReviewMode(const QString &mode) {
     m_wantsListening = m_enabled && value == QStringLiteral("always-on");
     setMicrophoneArmed(m_wantsListening);
     m_reviewMode = value;
+    if (m_narrationSession) { m_narrationSavedWantsListening = false; m_wantsListening = false; setMicrophoneArmed(false); }
     persistConfiguration();
     emit reviewModeChanged();
     if (m_enabled && !m_modelTestBusy) {
@@ -836,7 +840,7 @@ void VoiceController::setReviewMode(const QString &mode) {
 }
 
 void VoiceController::setEnabled(const bool enabled) {
-    if (!enabled) cancelTranscriptCorrection();
+    if (!enabled) { cancelTranscriptCorrection(); m_narrationSavedWantsListening = false; }
     if (m_enabled == enabled) return;
     if (enabled && m_sttProvider == QStringLiteral("groq") && !m_secret->hasKey()) {
         setError(QStringLiteral("GROQ_KEY_MISSING"), QStringLiteral("Add a Groq API key in Voice settings before enabling speech recognition."));
@@ -977,6 +981,7 @@ void VoiceController::retireWorker() {
         m_retiringWorkerThread = thread;
         connect(thread, &QThread::finished, this, [this, thread] {
             if (m_retiringWorkerThread == thread) m_retiringWorkerThread = nullptr;
+            if (m_speaking && !m_ttsIssued) { m_captureSuspended = true; beginSpeech(); }
             if (m_workerRestartPending && m_enabled) {
                 m_workerRestartPending = false;
                 beginWorker();
@@ -1012,7 +1017,7 @@ void VoiceController::restartWorker() {
 
 void VoiceController::updateCapture() {
     if (!m_worker || !m_ready) return;
-    const bool shouldListen = m_enabled && m_wantsListening && !m_speaking && !m_echoTail;
+    const bool shouldListen = m_enabled && m_wantsListening && !m_speaking && !m_echoTail && !m_narrationSession;
     const quint64 epoch = m_captureEpoch;
     const QPointer<VoiceWorker> worker = m_worker;
     QMetaObject::invokeMethod(worker, [worker, shouldListen, epoch] {
@@ -1033,6 +1038,7 @@ void VoiceController::cancelPendingRecognition() {
 }
 
 void VoiceController::startListening() {
+    if (m_narrationSession) return;
     if (!m_enabled) return;
     if (m_reviewMode == QStringLiteral("trigger")) return;
     m_wantsListening = true;
@@ -1052,6 +1058,7 @@ void VoiceController::stopListening() {
 }
 
 void VoiceController::triggerMicrophone() {
+    if (m_narrationSession) return;
     if (!m_enabled) {
         setEnabled(true);
         if (!m_enabled) return;
@@ -1081,7 +1088,7 @@ void VoiceController::triggerMicrophone() {
 }
 
 void VoiceController::processTranscript(const QString &transcript) {
-    if (m_modelTestBusy) return;
+    if (m_modelTestBusy || m_narrationSession) return;
     const QString text = transcript.trimmed();
     if (text.isEmpty()) return;
     if (text.size() > 16384) {
@@ -1125,7 +1132,7 @@ void VoiceController::processTranscript(const QString &transcript) {
 }
 
 void VoiceController::speak(const QString &text) {
-    if (!m_enabled || m_modelTestBusy || text.trimmed().isEmpty()) return;
+    if (!m_enabled || m_modelTestBusy || m_narrationSession || text.trimmed().isEmpty()) return;
     if (m_reviewMode == QStringLiteral("trigger")) {
         m_wantsListening = false;
         setMicrophoneArmed(false);
@@ -1152,8 +1159,90 @@ void VoiceController::speak(const QString &text) {
     });
 }
 
+void VoiceController::reportNarrationError(const QString &message) {
+    setError(QStringLiteral("CARD_NARRATION_UNAVAILABLE"), message);
+}
+
+bool VoiceController::beginNarrationSession() {
+    if (m_narrationSession || m_modelTestBusy || m_customSttTests->busy() || m_customSttTests->recording()) return false;
+    m_narrationSavedWantsListening = m_enabled && m_reviewMode == QStringLiteral("always-on") && m_wantsListening;
+    m_narrationSession = true;
+    m_customSttTests->setInteractionBlocked(true);
+    stopSpeaking();
+    stopListening();
+    if (m_worker && m_ready) m_captureSuspended = false;
+    updateCapture();
+    return true;
+}
+
+void VoiceController::endNarrationSession() {
+    if (!m_narrationSession) return;
+    stopSpeaking();
+    m_narrationSession = false;
+    m_customSttTests->setInteractionBlocked(false);
+    m_wantsListening = m_narrationSavedWantsListening && m_enabled && m_reviewMode == QStringLiteral("always-on");
+    m_narrationSavedWantsListening = false;
+    setMicrophoneArmed(m_wantsListening);
+    updateCapture();
+}
+
+bool VoiceController::narrationCaptureReady() const {
+    return m_narrationSession && m_captureSuspended && !m_retiringWorkerThread;
+}
+
+bool VoiceController::playRecordedPcm(const QByteArray &pcm) {
+    if (m_modelTestBusy || pcm.isEmpty() || pcm.size() % 2 != 0 || pcm.size() > VoiceUtteranceBuffer::MaxBytes) return false;
+    const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+    const QAudioFormat format = device.preferredFormat();
+    if (device.isNull() || !format.isValid() || !device.isFormatSupported(format)) {
+        setError(QStringLiteral("NARRATION_OUTPUT_UNAVAILABLE"), QStringLiteral("Connect an audio output and select it in system sound settings."));
+        return false;
+    }
+    cancelTranscriptCorrection();
+    stopSpeaking();
+    m_echoTail = false;
+    m_recordedPlayback = true;
+    m_pendingRecordedPcm = pcm;
+    m_playbackFormat = format;
+    m_ttsStarted = false;
+    m_ttsIssued = false;
+    setSpeakingState(true);
+    setStatus(QStringLiteral("Preparing saved narration"));
+    ++m_captureEpoch;
+    m_processing = false;
+    m_captureSuspended = (!m_worker || !m_ready) && !m_retiringWorkerThread;
+    updateCapture();
+    if (m_captureSuspended) beginSpeech();
+    return true;
+}
+
 void VoiceController::beginSpeech() {
-    if ((!m_enabled && !m_ttsTestBusy) || !m_speaking || !m_captureSuspended || m_ttsIssued || m_pendingSpeech.isEmpty()) return;
+    if (!m_speaking || !m_captureSuspended || m_ttsIssued) return;
+    if (m_recordedPlayback) {
+        if (m_pendingRecordedPcm.isEmpty()) return;
+        m_ttsIssued = true;
+        const quint64 request = m_speechGeneration;
+        const QByteArray pcm = std::exchange(m_pendingRecordedPcm, {});
+        const QAudioFormat destination = m_playbackFormat;
+        const double seconds = static_cast<double>(pcm.size()) / (16000.0 * 2.0);
+        auto *const watcher = new QFutureWatcher<QByteArray>(this);
+        connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, watcher, request, seconds] {
+            const QByteArray converted = watcher->result();
+            watcher->deleteLater();
+            if (request != m_speechGeneration || !m_recordedPlayback || !m_speaking) return;
+            if (converted.isEmpty()) { speechError(QStringLiteral("The saved narration could not be converted for this audio output.")); return; }
+            startLocalPlayback(converted, request, seconds);
+        });
+        watcher->setFuture(QtConcurrent::run([pcm, destination] {
+            QAudioFormat source;
+            source.setSampleRate(16000);
+            source.setChannelCount(1);
+            source.setSampleFormat(QAudioFormat::Int16);
+            return voiceConvertPcm(pcm, source, destination);
+        }));
+        return;
+    }
+    if ((!m_enabled && !m_ttsTestBusy) || m_pendingSpeech.isEmpty() || m_narrationSession) return;
     if (m_ttsProvider == QStringLiteral("local")) { beginLocalSpeech(); return; }
     if (m_ttsProvider == QStringLiteral("remote")) {
         if (!m_remoteTts->ready()) { speechError(m_remoteTts->status()); return; }
@@ -1243,7 +1332,7 @@ void VoiceController::beginLocalSpeech() {
 }
 
 void VoiceController::startLocalPlayback(const QByteArray &pcm, const quint64 request, const double seconds) {
-    if (request != m_speechGeneration || !m_speaking || (!m_enabled && !m_ttsTestBusy)) return;
+    if (request != m_speechGeneration || !m_speaking || (!m_enabled && !m_ttsTestBusy && !m_recordedPlayback)) return;
     if (pcm.isEmpty() || pcm.size() % m_playbackFormat.bytesPerFrame() != 0) {
         speechError(QStringLiteral("The local voice returned malformed audio. Try another voice.")); return;
     }
@@ -1335,6 +1424,8 @@ void VoiceController::finishSpeech() {
         setMicrophoneArmed(false);
     }
     m_remoteTts->cancel();
+    m_recordedPlayback = false;
+    m_pendingRecordedPcm.clear();
     m_pendingSpeech.clear();
     m_ttsStarted = false;
     m_ttsIssued = false;
@@ -1365,6 +1456,8 @@ void VoiceController::stopSpeaking() {
         setMicrophoneArmed(false);
     }
     ++m_speechGeneration;
+    m_recordedPlayback = false;
+    m_pendingRecordedPcm.clear();
     m_remoteTts->cancel();
     m_synthesisCancelled->store(true);
     if (m_audioSink) { m_audioSink->disconnect(this); m_audioSink->stop(); m_audioSink->deleteLater(); m_audioSink = nullptr; }

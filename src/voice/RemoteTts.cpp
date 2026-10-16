@@ -1,4 +1,5 @@
 #include "RemoteTts.h"
+#include "VoiceAudio.h"
 #include "integrations/ApiKeyBinding.h"
 #include "integrations/ApiKeyRegistry.h"
 
@@ -53,41 +54,6 @@ qint16 sampleToInt16(const char *const source, const quint16 bits) {
     }
 }
 
-QByteArray convertPcm(const QByteArray &source, const QAudioFormat &from, const QAudioFormat &to) {
-    if (from.sampleFormat() != QAudioFormat::Int16 || from.channelCount() <= 0 || to.channelCount() <= 0
-        || from.sampleRate() <= 0 || to.sampleRate() <= 0 || to.bytesPerFrame() <= 0) return {};
-    const qint64 sourceFrames = source.size() / from.bytesPerFrame();
-    const qint64 targetFrames = static_cast<qint64>(std::ceil(static_cast<double>(sourceFrames) * to.sampleRate() / from.sampleRate()));
-    const qint64 bytes = targetFrames * to.bytesPerFrame();
-    if (sourceFrames <= 0 || bytes <= 0 || bytes > 64 * 1024 * 1024) return {};
-    QByteArray result(static_cast<qsizetype>(bytes), '\0');
-    auto sampleAt = [&source, &from](const qint64 frame, const int channel) {
-        qint16 sample = 0;
-        const qint64 index = frame * from.channelCount() + std::min(channel, from.channelCount() - 1);
-        std::memcpy(&sample, source.constData() + index * sizeof(sample), sizeof(sample));
-        return static_cast<float>(sample) / 32767.0F;
-    };
-    char *destination = result.data();
-    for (qint64 frame = 0; frame < targetFrames; ++frame) {
-        const double position = std::min(static_cast<double>(sourceFrames - 1), static_cast<double>(frame) * from.sampleRate() / to.sampleRate());
-        const qint64 lower = static_cast<qint64>(position);
-        const qint64 upper = std::min(lower + 1, sourceFrames - 1);
-        const float fraction = static_cast<float>(position - lower);
-        for (int channel = 0; channel < to.channelCount(); ++channel) {
-            const int sourceChannel = from.channelCount() == 1 ? 0 : channel % from.channelCount();
-            const float value = std::clamp(sampleAt(lower, sourceChannel) * (1.0F - fraction) + sampleAt(upper, sourceChannel) * fraction, -1.0F, 1.0F);
-            switch (to.sampleFormat()) {
-            case QAudioFormat::UInt8: { const quint8 sample = static_cast<quint8>(std::lround((value + 1.0F) * 127.5F)); std::memcpy(destination, &sample, 1); destination += 1; break; }
-            case QAudioFormat::Int16: { const qint16 sample = static_cast<qint16>(std::lround(value * 32767.0F)); std::memcpy(destination, &sample, 2); destination += 2; break; }
-            case QAudioFormat::Int32: { const qint32 sample = static_cast<qint32>(std::llround(static_cast<double>(value) * std::numeric_limits<qint32>::max())); std::memcpy(destination, &sample, 4); destination += 4; break; }
-            case QAudioFormat::Float: std::memcpy(destination, &value, 4); destination += 4; break;
-            case QAudioFormat::Unknown:
-            case QAudioFormat::NSampleFormats: return {};
-            }
-        }
-    }
-    return result;
-}
 
 QString defaultVoiceFor(const QUrl &endpoint, const QString &model) {
     if (endpoint.scheme() == QStringLiteral("https")
@@ -477,7 +443,7 @@ void RemoteTts::handleReply(QNetworkReply *const reply, const QByteArray &payloa
         struct DecodedAudio decoded;
         decoded.valid = RemoteTts::decodeWav(payloadCopy, &decoded.pcm, &decoded.format, &decoded.seconds, &decoded.error);
         if (decoded.valid) {
-            const QByteArray converted = convertPcm(decoded.pcm, decoded.format, preferredFormat);
+            const QByteArray converted = voiceConvertPcm(decoded.pcm, decoded.format, preferredFormat);
             if (converted.isEmpty()) { decoded.valid = false; decoded.error = QStringLiteral("The remote speech format could not be converted for the selected audio output."); }
             else { decoded.pcm = converted; decoded.format = preferredFormat; }
         }

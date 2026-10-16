@@ -398,6 +398,7 @@ void CustomSttTests::runTests() {
 }
 
 void CustomSttTests::runTest(const QString &id) {
+    if (m_interactionBlocked) { setState(false, QStringLiteral("Voice activity unavailable."), QStringLiteral("Close the card narration editor before starting speech tests or recording a test sample.")); return; }
     if (m_busy || m_recording) return;
     m_queue.clear();
     for (const struct Entry &entry : m_entries) {
@@ -453,6 +454,7 @@ void CustomSttTests::startRecording() {
 }
 
 void CustomSttTests::startRecordingForSlot(const QString &id) {
+    if (m_interactionBlocked) { setState(false, QStringLiteral("Voice activity unavailable."), QStringLiteral("Close the card narration editor before starting speech tests or recording a test sample.")); return; }
     if (m_busy || m_recording || !find(id)) return;
     const QAudioDevice device = QMediaDevices::defaultAudioInput();
     if (device.isNull()) { setState(false, QStringLiteral("Recording unavailable."), QStringLiteral("No microphone is available.")); return; }
