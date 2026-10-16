@@ -354,46 +354,13 @@ Item {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
-                        Repeater {
-                            model: settingsPage.ui.shortcutCommands
-                            delegate: ItemDelegate {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 0
-                                height: settingsContent.width < 520 ? 76 : 46
-                                onClicked: settingsPage.ui.openRebind(modelData.action)
-                                contentItem: RowLayout {
-                                    spacing: 14
-                                    Label {
-                                        textFormat: Text.PlainText
-                                        text: modelData.label
-                                        color: Theme.ink
-                                        wrapMode: Text.Wrap
-                                        Layout.fillWidth: true
-                                        Layout.minimumWidth: 0
-                                    }
-                                    Label {
-                                        textFormat: Text.PlainText
-                                        text: shortcuts.bindings[modelData.action] || ""
-                                        color: Theme.inkMuted
-                                        font.family: Theme.monoFont
-                                        font.pixelSize: 11
-                                        Layout.minimumWidth: 0
-                                        Layout.preferredWidth: Math.min(150, settingsContent.width * 0.38)
-                                        horizontalAlignment: Text.AlignRight
-                                        wrapMode: Text.Wrap
-                                    }
-                                }
-                                background: Rectangle {
-                                    color: parent.hovered || parent.activeFocus ? Theme.accentSoft : Theme.transparent
-                                    Rectangle {
-                                        anchors.bottom: parent.bottom
-                                        width: parent.width
-                                        height: 1
-                                        color: Theme.rule
-                                    }
-                                }
-                            }
+                        KeyBindingsTable {
+                            Layout.alignment: Qt.AlignLeft
+                            Layout.maximumWidth: settingsContent.width
+                            maxBodyHeight: Math.max(180, settingsScroll.availableHeight - 110)
+                            commands: settingsPage.ui.shortcutCommands
+                            bindings: shortcuts.bindings
+                            onCommandActivated: settingsPage.ui.openRebind(action)
                         }
                     }
                     ColumnLayout {
