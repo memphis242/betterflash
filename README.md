@@ -300,12 +300,16 @@ provider. Names such as
 [API-key reuse](docs/api-keys.md), [voice setup](docs/voice.md)
 and [local model support](docs/local-models.md).
 
-The Review landing page summarizes a selected deck's due prompts, including
-descendants, using the configured local language model when its assets are
-ready. Remote providers remain available after explicit configuration. The
-summary waits briefly after selection and caches unchanged results for the
-session; during a review, the remaining-queue summary is generated on request.
+The Review landing page offers **Generate summary** for a selected deck's due
+prompts, including descendants. It uses the configured language model only
+when requested and renders the result as Markdown. Unchanged results are cached
+for the session; selecting a deck never runs the model. During a review,
+**Summarize remaining cards** generates the remaining-queue summary on request.
 Neither summary grades answers nor alters scheduling. See [deck summaries](docs/deck-graph-studies.md#main-app-integration).
+
+Each saved card can also have recorded narration for its question and answer.
+Recordings override automatic speech for that review direction. Automatic
+speech skips code blocks. See [card narration](docs/voice.md#card-narration).
 
 Atomicize proposes two through five focused cards from one saved note, or
 recommends keeping a related list or procedure together. Review and edit the
@@ -316,7 +320,7 @@ configuration and retains the original's review history. See
 ## Sync and Android
 
 The local sync server is dependency free Python with SQLite and authenticated
-image transfer. See [the sync protocol](docs/sync.md). VPS deployment is deferred.
+media transfer. See [the sync protocol](docs/sync.md). VPS deployment is deferred.
 
 The Android draft reuses the same native core and responsive QML. Its manifest
 and build script are in `android/` and `scripts/build-android.sh`. A Qt Android

@@ -9,25 +9,26 @@ Control {
     property bool compact: false
     readonly property var tests: voice.customSttTests
     readonly property bool narrationRecording: !!control.narration && control.narration.recording
+    readonly property bool narrationWaiting: !!control.narration && control.narration.waitingForCapture
     readonly property bool recording: (!!tests && tests.recording) || narrationRecording
     readonly property bool paused: narrationRecording ? control.narration.recordingPaused : recording && tests.recordingPaused
     readonly property bool capturing: recording ? !paused : voice.listening
     readonly property bool armed: !!voice.microphoneArmed
-    readonly property color stateColor: capturing ? Theme.success : paused ? Theme.warning : Theme.inkMuted
-    readonly property string stateText: recording ? (paused ? "Recording paused" : "Recording")
+    readonly property color stateColor: narrationWaiting ? Theme.warning : capturing ? Theme.success : paused ? Theme.warning : Theme.inkMuted
+    readonly property string stateText: narrationWaiting ? "Waiting for microphone" : recording ? (paused ? "Recording paused" : "Recording")
         : voice.listening ? "Listening" : armed ? "Mic armed" : "Mic inactive"
     readonly property string durationText: {
         const seconds = recording ? Math.floor(narrationRecording ? control.narration.recordingDuration : tests.recordingDuration) : 0
         return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")
     }
-    readonly property string description: recording
+    readonly property string description: narrationWaiting ? "Waiting for Voice Control to release the microphone before recording card narration" : recording
         ? (paused ? "Microphone recording is paused; paused audio is not saved" : narrationRecording ? "Microphone is recording card narration" : "Microphone is listening and recording this custom test")
         : voice.listening ? "Microphone is listening for Voice Control commands and answers"
         : armed ? (voice.reviewMode === "always-on"
             ? "Microphone is preparing to listen continuously"
             : "Microphone is preparing to listen for one voice utterance")
         : "Microphone is not listening. " + voice.status
-    visible: narrationRecording || recording || voice.enabled || armed
+    visible: narrationWaiting || narrationRecording || recording || voice.enabled || armed
     implicitWidth: content.implicitWidth + leftPadding + rightPadding
     implicitHeight: 44
     leftPadding: compact ? 6 : 10
@@ -83,7 +84,7 @@ Control {
             implicitWidth: control.compact ? 30 : 38
             implicitHeight: implicitWidth
             glyph: "stop"
-            hint: "Stop and save this recording"
+            hint: control.narrationRecording ? "Stop recording and preview before saving" : "Stop and save this recording"
             onClicked: control.narrationRecording ? control.narration.finishRecording() : control.tests.stopRecording()
         }
     }

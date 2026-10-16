@@ -8,6 +8,8 @@ Dialog {
     required property var narration
     property string requestedCardId: ""
     property bool discardPromptOpen: false
+    readonly property bool capturePending: narration.waitingForCapture
+    readonly property bool captureInProgress: narration.recording || capturePending
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -21,14 +23,18 @@ Dialog {
 
     function openFor(id) {
         requestedCardId = String(id || "")
-        if (!requestedCardId || !narration.openFor(requestedCardId))
+        if (!requestedCardId)
             return
+        if (!narration.openFor(requestedCardId)) {
+            ui.showError("NARRATION_EDITOR_UNAVAILABLE", narration.error || "Finish the current recording or speech test before opening card narration.", "")
+            return
+        }
         open()
     }
     function requestClose() {
         if (narration.busy)
             return
-        if (narration.recording || narration.hasDraft) {
+        if (captureInProgress || narration.hasDraft) {
             discardPrompt.open()
             return
         }
@@ -52,9 +58,9 @@ Dialog {
             font.weight: Font.DemiBold
         }
         Label {
-            visible: narration.recording
-            text: narration.recordingPaused ? "Paused" : "Microphone active"
-            color: narration.recordingPaused ? Theme.warning : Theme.success
+            visible: dialog.captureInProgress
+            text: dialog.capturePending ? "Waiting for microphone" : narration.recordingPaused ? "Paused" : "Microphone active"
+            color: dialog.capturePending || narration.recordingPaused ? Theme.warning : Theme.success
             font.family: Theme.monoFont
             font.pixelSize: 13
         }
@@ -77,7 +83,7 @@ Dialog {
                     const entries = narration.variants || []
                     return Math.max(0, entries.findIndex(entry => String(entry.key) === key))
                 }
-                enabled: !narration.busy && !narration.recording && !narration.hasDraft
+                enabled: !narration.busy && !dialog.captureInProgress && !narration.hasDraft
                 onActivated: narration.variantKey = model[index].key
             }
             Item { Layout.fillWidth: true }
@@ -161,7 +167,7 @@ Dialog {
                                         ? (narration.recordingPaused ? "Resume" : "Pause") : modelData.hasRecording ? "Record again" : "Record"
                                     glyph: narration.recording && narration.recordingSide === modelData.side
                                         ? (narration.recordingPaused ? "play" : "pause") : "mic"
-                                    enabled: !narration.busy && !narration.hasDraft && (!narration.recording || narration.recordingSide === modelData.side)
+                                    enabled: !narration.busy && !narration.hasDraft && !dialog.capturePending && (!narration.recording || narration.recordingSide === modelData.side)
                                     onClicked: {
                                         if (narration.recording && narration.recordingSide === modelData.side) {
                                             if (narration.recordingPaused) narration.resumeRecording()
@@ -178,7 +184,7 @@ Dialog {
                                     onClicked: narration.finishRecording()
                                 }
                                 AppButton {
-                                    visible: (modelData.hasRecording || narration.hasDraft && narration.draftSide === modelData.side) && !narration.recording
+                                    visible: (modelData.hasRecording || narration.hasDraft && narration.draftSide === modelData.side) && !dialog.captureInProgress
                                     text: "Play"
                                     glyph: "play"
                                     enabled: !narration.busy
@@ -192,7 +198,7 @@ Dialog {
                                     onClicked: narration.stopPlayback()
                                 }
                                 AppButton {
-                                    visible: modelData.hasRecording && !narration.recording
+                                    visible: modelData.hasRecording && !dialog.captureInProgress
                                     text: "Remove"
                                     enabled: !narration.busy && !narration.hasDraft
                                     onClicked: narration.remove(modelData.side)
@@ -224,8 +230,11 @@ Dialog {
         id: discardPrompt
         parent: Overlay.overlay
         anchors.centerIn: parent
+        width: Math.min(480, dialog.ui.width - 2 * dialog.ui.gutter)
+        padding: 20
         modal: true
         title: "Discard narration?"
+        background: Rectangle { radius: 16; color: Theme.surface; border.color: Theme.ledgerRule }
         contentItem: Label {
             padding: 20
             text: "The current recording has not been saved. Discard it and close the editor?"

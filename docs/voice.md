@@ -16,13 +16,40 @@ does not start a microphone or load inference models.
 Voice Control uses **Keyboard trigger** by default. Enabling Voice Control in
 Settings prepares recognition without opening the microphone. Press the
 configured microphone shortcut (M by default) to enable voice if needed and arm
-one utterance. Press the shortcut again to cancel. The utterance ends after
-silence and the microphone stops. The shortcut can be changed under Settings >
+one utterance. Press the shortcut again to cancel. After speech begins, about
+900 ms of silence submits the utterance and stops the microphone. Continuous
+speech is bounded to 60 seconds. Pressing M again cancels the capture instead
+of submitting it. The question-mark button beside **Enable Voice Control**
+explains this behavior in the application. The shortcut can be changed under Settings >
 Key bindings; its current binding is shown in the Voice Control settings help.
 
 **Always on** is an explicit opt-in mode. While Voice Control is enabled, it
 listens between utterances. The review microphone control starts or pauses the
 continuous listener, and disabling Voice Control in Settings stops it.
+
+## Card narration
+
+Open a saved card's detail view and choose **Record narration**. Record the
+question and answer separately, pause or resume as needed, then stop, preview,
+and save the recording. Each side can contain up to 60 seconds of audio;
+silence does not automatically finish a narration recording. Saving a new
+recording replaces that side's previous narration. Removing a recording restores
+automatic speech for that side.
+
+A saved recording takes precedence over text-to-speech during Voice Control.
+Automatic narration skips fenced and indented code blocks, retaining the prose
+around them. Inline code remains part of the spoken prose. A side containing
+only a code block is silent unless it has a saved narration.
+
+Recordings belong to a particular review form. Reversed cards and each numbered
+cloze group have separate question and answer recordings, so a masked question
+never inherits a recording of the unmasked source. New cards proposed by
+Atomicize do not inherit the original recording.
+
+Card narration is collection media, stored as content-addressed PCM WAV audio
+alongside images. Collection backups and sync include the referenced recordings.
+Opening the narration editor suspends the review microphone and automatic
+reading so recording or previewing does not compete with Voice Control.
 
 ## Managed local speech
 
@@ -297,7 +324,7 @@ speech works from the profile selector alone.
 | `repeat` | Read the currently visible question or answer. |
 | `pause` | Pause review while retaining command listening. |
 | `resume` | Resume the paused review. |
-| `end review` or `stop` | End the review session. |
+| `end review`, `end the review`, `finish review`, or `stop` | End the review session. |
 | `summarize remaining cards` | Request and read the configured language model's deck summary. |
 
 The prefix `flashcard` is optional for every command. Commands must match the whole utterance; words such as “good” or “partial” inside an answer stay part of that answer. Partial recall accepts digit or English number forms from zero to one hundred, with a positive denominator and recalled points no greater than total points. Postponement accepts days or weeks within 3650 days. Answers are not semantically graded: the user chooses a grade after hearing the answer.

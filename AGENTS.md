@@ -16,6 +16,10 @@ automatic agent co-author attribution, or a remote session label.
   optional BYOK connections. Download on first use, expose preparation and model
   checks in Settings, cap inference resources, and release idle models. Keep keys out
   of Markdown, backups, SQLite collection tables, sync payloads, and logs.
+- Run model inference only for a user-requested operation or an explicitly
+  enabled interaction such as Voice Control. Selecting a deck, opening a pane,
+  or launching the app must not generate a summary. Provide an explicit
+  Generate summary action and render its result as Markdown.
 - UI defaults to the warm dark theme. Keep left navigation collapsible and
   pinned, page actions visible, and lists bounded.
 - Images imported by the user are stored by SHA-256. Never read arbitrary local

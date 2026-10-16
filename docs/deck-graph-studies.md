@@ -49,7 +49,7 @@ to match its edge. The pane contains:
 - Average recall, outcome distribution and average response time. With a
   working collection these use the deck's records in the latest 200 collection
   reviews, not a lifetime aggregate.
-- A preview of an automatic summary of remaining material.
+- An explicitly requested summary of remaining material.
 - An editable deck description: its I-beam cursor indicates inline editing.
   Double-click, Enter, F2 or touch long-press starts editing in place.
   Ctrl+Enter saves, Escape cancels, and Enter inserts a newline. Compact Save
@@ -72,9 +72,10 @@ collapsible, keeps its chosen width, and uses the same menu/dock controls as
 the left navigation. Narrow windows show the deck tree or details at full
 width; collapse details to return to the tree.
 
-With a prepared local language model, selecting a deck automatically summarizes
-its due review prompts after a short delay. An explicitly configured remote
-provider is also supported. Results are cached in memory for
+**Generate summary** summarizes the selected deck's due review prompts using
+the configured local or remote language model. Selecting a deck, opening its
+details, and changing model settings never start inference. Generated Markdown
+is rendered in the pane. Results are cached in memory for
 up to twelve deck/content/provider combinations, preventing repeat requests
 when revisiting unchanged decks. Leaving the view or starting a review cancels
 its pending request. The request uses due variants including descendants,

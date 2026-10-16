@@ -89,7 +89,7 @@ Dialog {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "Speech is first transcribed by the selected speech recognition model. Deterministic commands such as next card, reveal, pause, and end review are handled directly. If transcript correction is enabled, the selected language model may correct the submitted transcript after the user speaks."
+                    text: "Speech is first transcribed by the selected speech recognition model. Commands such as next card, reveal answer, pause, and end review are handled directly. If transcript correction is enabled, the selected language model may correct submitted answers after the user speaks."
                     color: Theme.inkMuted
                     wrapMode: Text.Wrap
                     font.pixelSize: 16

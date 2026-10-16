@@ -68,12 +68,24 @@ session metadata, leaving their copies as estimated groups after an upgrade.
 The sync protocol does not yet negotiate client capabilities. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
-Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically.
+Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Narration WAV files must contain nonempty, canonical 16 kHz mono signed 16-bit PCM audio of at most 60 seconds.
 Upload referenced assets before sending a card event. A card and a received page
-can reference at most 64 unique images and 64 MiB of attached data. The server
+can reference at most 64 unique media assets and 64 MiB of attached data. The server
 splits event pages at those bounds, and the client validates a page before fetching
 its assets. Damaged local copies are preserved under a `.damaged-UUID` suffix
 when sync downloads a verified replacement.
+
+Cards can contain a `narrations` object mapping a review variant and side, such
+as `forward/front`, `reverse/back`, or `c1/front`, to a SHA-256 WAV filename.
+Markdown `media:` references remain image-only. A narration change emits an
+ordinary `card.upsert` without changing the review schedule. An incoming legacy
+card event without `narrations` preserves compatible saved recordings; an explicit
+empty object clears them. Upgrade the server and clients before using audio
+narration, since older versions cannot transfer or play WAV attachments.
+
+New collection backups use version 3 for narration metadata and audio media.
+The application still imports version 2 backups. Provider credentials
+remain excluded from every backup version.
 
 ## Conflict behavior and scope
 
