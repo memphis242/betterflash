@@ -43,6 +43,10 @@ automatic agent co-author attribution, or a remote session label.
   existing draft and save policy without submitting the surrounding form.
   Clicking inside the field or its scrollbars preserves editing; another
   control taking focus must not be required to leave editing.
+- A dropdown's opening control also closes it. Keep that control inside the
+  popup's dismissal boundary so an outside-press handler cannot close the popup
+  before the same click reopens it. Use a single outer frame for editable
+  dropdowns; their text editor does not draw a second textbox border.
 - Default to editing existing text in place. The text area shows an I-beam
   cursor, and double-clicking turns that same area into an editor. Apply this
   to deck descriptions and comparable text fields throughout the application.

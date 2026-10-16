@@ -115,7 +115,7 @@ ComboBox {
         font: control.font
         color: control.enabled ? Theme.ink : Theme.inkMuted
         selectionColor: Theme.accent
-        selectedTextColor: Theme.ink
+        selectedTextColor: Theme.onAccent
         verticalAlignment: Text.AlignVCenter
         leftPadding: 0
         rightPadding: 0

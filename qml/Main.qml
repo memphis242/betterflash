@@ -2048,7 +2048,7 @@ ApplicationWindow {
                 }
                 Label {
                     text: errorDialog.copyFeedback
-                    color: Theme.positive
+                    color: Theme.success
                     font.pixelSize: 12
                     visible: text.length > 0
                 }

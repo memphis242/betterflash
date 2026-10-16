@@ -215,9 +215,20 @@ entered in another model settings page for the same provider address, such as
 `speech-recognition-api-key`. The defaults use
 Groq's `canopylabs/orpheus-v1-english` model with the `troy` voice. Compatible
 speech endpoints must accept the same JSON speech request and return PCM WAV audio.
+For the two known Groq Orpheus models, the Voice dropdown offers that model's
+documented voices and restores a compatible voice when changing models. Custom
+providers and model identifiers retain a free-form voice field.
 Long prompts are split into smaller requests to respect Groq's documented
 200-character input limit.
 [Groq speech-output documentation](https://console.groq.com/docs/text-to-speech/orpheus)
+
+Groq can reject a speech request with HTTP 400 and `model_terms_required` until
+the organization administrator accepts the selected model's terms in the Groq
+playground. English and Arabic models require their own acceptance. BetterFlash
+shows the appropriate terms address in the error report. Known provider errors
+use safe recovery messages; arbitrary response text is not displayed because it
+may repeat submitted content or credentials. Error text is selectable, and the
+error dialog's Copy button copies the complete displayed report.
 
 The remote connection sends the text being read to the selected service only
 when speech or its explicit model test is requested. Selecting Remote or

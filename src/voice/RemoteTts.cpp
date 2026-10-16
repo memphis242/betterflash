@@ -191,7 +191,7 @@ QString RemoteTts::sanitizedProviderError(const QByteArray &payload, const int h
     if (code == QStringLiteral("model_terms_required") && !availableVoices().isEmpty()) {
         const QString termsUrl = QStringLiteral("https://console.groq.com/playground?model=")
             + QString::fromLatin1(QUrl::toPercentEncoding(m_model));
-        return QStringLiteral("HTTP %1: The organization administrator must accept the selected model's terms at %2.")
+        return QStringLiteral("HTTP %1 (model_terms_required): The organization administrator must accept the selected model's terms at %2.")
             .arg(httpStatus).arg(termsUrl);
     }
     const QHash<QString, QString> recoveries{
@@ -204,7 +204,7 @@ QString RemoteTts::sanitizedProviderError(const QByteArray &payload, const int h
         {QStringLiteral("authentication_error"), QStringLiteral("The speech output API key was rejected. Choose or enter a valid key.")},
     };
     const auto recovery = recoveries.constFind(code);
-    return recovery == recoveries.cend() ? QString() : QStringLiteral("HTTP %1: %2").arg(httpStatus).arg(recovery.value());
+    return recovery == recoveries.cend() ? QString() : QStringLiteral("HTTP %1 (%2): %3").arg(httpStatus).arg(code, recovery.value());
 }
 
 bool RemoteTts::ready() const {

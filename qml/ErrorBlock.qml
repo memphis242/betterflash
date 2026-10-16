@@ -28,7 +28,7 @@ ColumnLayout {
         activeFocusOnPress: true
         selectionColor: Theme.accentSoft
         selectedTextColor: Theme.ink
-        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
+        Layout.preferredHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
     TextEdit {
         id: messageText
@@ -44,7 +44,7 @@ ColumnLayout {
         activeFocusOnPress: true
         selectionColor: Theme.accentSoft
         selectedTextColor: Theme.ink
-        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
+        Layout.preferredHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
     AppButton {
         font.pixelSize: block.textSize
@@ -68,6 +68,6 @@ ColumnLayout {
         activeFocusOnPress: true
         selectionColor: Theme.accentSoft
         selectedTextColor: Theme.ink
-        implicitHeight: Math.max(contentHeight, font.pixelSize * 1.35)
+        Layout.preferredHeight: Math.max(contentHeight, font.pixelSize * 1.35)
     }
 }
