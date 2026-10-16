@@ -77,6 +77,8 @@ public:
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,
                               int pointCount = 1);
+    Q_INVOKABLE bool setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
+                                      const QString &mediaName, const QString &requestId = {});
     Q_INVOKABLE void deleteCard(const QString &id);
     Q_INVOKABLE bool moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     Q_INVOKABLE void resetDeck(const QString &id);
@@ -122,6 +124,8 @@ signals:
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
+                            const QString &requestId, bool success);
 
 private:
     bool invoke(const std::function<void(DatabaseWorker *)> &call);

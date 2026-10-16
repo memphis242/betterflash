@@ -21,7 +21,8 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
     if (!original) return std::unexpected(original.error());
     const auto sourceImages = betterflash::model::mediaReferences({*original});
     if (!sourceImages) return std::unexpected(sourceImages.error());
-    QSet<QString> allowedImages(sourceImages->cbegin(), sourceImages->cend());
+    QSet<QString> allowedImages;
+    for (const QString &name : *sourceImages) if (betterflash::model::validImageName(name)) allowedImages.insert(name);
     QSet<QString> usedImages, distinctQuestions;
     QVariantList result;
     for (const QVariant &value : values) {
@@ -53,6 +54,7 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
         const auto images = betterflash::model::mediaReferences({card});
         if (!images) return std::unexpected(images.error());
         for (const QString &name : *images) {
+            if (!betterflash::model::validImageName(name)) continue;
             if (!allowedImages.contains(name))
                 return std::unexpected(QStringLiteral("A proposal references an image that is not in the original card."));
             usedImages.insert(name);
