@@ -1,12 +1,13 @@
 #include "RemoteTts.h"
-
-#include "integrations/SecretStore.h"
+#include "integrations/ApiKeyBinding.h"
+#include "integrations/ApiKeyRegistry.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTimer>
@@ -85,11 +86,19 @@ QByteArray convertPcm(const QByteArray &source, const QAudioFormat &from, const 
 }
 }
 
-RemoteTts::RemoteTts(QObject *parent)
-    : QObject(parent), m_secret(new SecretStore(QStringLiteral("speech-output"),
-          QStringLiteral("GROQ_TTS_API_KEY"), this)),
+RemoteTts::RemoteTts(QObject *parent, ApiKeyRegistry *registry)
+    : QObject(parent), m_secret((registry ? registry : new ApiKeyRegistry(this))->binding(QStringLiteral("speech-output"), this)),
       m_network(new QNetworkAccessManager(this)), m_timeout(new QTimer(this)),
       m_overallTimeout(new QTimer(this)) {
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("voice"));
+    settings.beginGroup(QStringLiteral("remoteTts"));
+    m_endpoint = settings.value(QStringLiteral("endpoint"), m_endpoint).toString().trimmed();
+    m_model = settings.value(QStringLiteral("model"), m_model).toString().trimmed();
+    m_voice = settings.value(QStringLiteral("voice"), m_voice).toString().trimmed();
+    settings.endGroup();
+    settings.endGroup();
+    m_secret->setEndpoint(m_endpoint);
     m_lastKey = m_secret->key();
     m_timeout->setSingleShot(true);
     m_overallTimeout->setSingleShot(true);
@@ -106,7 +115,7 @@ RemoteTts::RemoteTts(QObject *parent)
             emit failed(QStringLiteral("Remote speech output exceeded the overall network deadline."), request);
         }
     });
-    connect(m_secret, &SecretStore::changed, this, [this] {
+    connect(m_secret, &ApiKeyBinding::changed, this, [this] {
         emit keyChanged();
         const QString key = m_secret->key();
         if (key != m_lastKey) {
@@ -139,13 +148,14 @@ QString RemoteTts::status() const {
 }
 
 bool RemoteTts::hasApiKey() const { return m_secret->hasKey(); }
-QString RemoteTts::keyStorageStatus() const { return m_secret->status(); }
+QString RemoteTts::keyStorageStatus() const { return m_secret->storageStatus(); }
 QString RemoteTts::keyStorageState() const { return m_secret->storageState(); }
 
 void RemoteTts::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();
     if (value == m_endpoint) return;
     m_endpoint = value;
+    m_secret->setEndpoint(m_endpoint);
     cancel();
     emit configurationChanged();
     emit readinessChanged();
@@ -169,8 +179,11 @@ void RemoteTts::setVoice(const QString &voice) {
     emit readinessChanged();
 }
 
-void RemoteTts::setApiKey(const QString &key) { m_secret->setKey(key); }
-void RemoteTts::clearApiKey() { m_secret->clear(); }
+void RemoteTts::setApiKey(const QString &key) {
+    if (key.trimmed().isEmpty()) m_secret->clearKey();
+    else m_secret->saveKey(key);
+}
+void RemoteTts::clearApiKey() { m_secret->clearKey(); }
 
 QList<struct RemoteTts::Chunk> RemoteTts::splitText(const QString &text) {
     QList<struct Chunk> chunks;

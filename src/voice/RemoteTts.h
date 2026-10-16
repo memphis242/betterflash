@@ -1,5 +1,6 @@
 #pragma once
 
+#include "integrations/ApiKeyBinding.h"
 #include <QAudioFormat>
 #include <QByteArray>
 #include <QNetworkReply>
@@ -12,7 +13,7 @@
 class QNetworkAccessManager;
 template<typename T> class QFutureWatcher;
 class QTimer;
-class SecretStore;
+class ApiKeyRegistry;
 
 class RemoteTts final : public QObject {
     Q_OBJECT
@@ -24,8 +25,9 @@ class RemoteTts final : public QObject {
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
+    Q_PROPERTY(QObject *apiKey READ apiKey CONSTANT)
 public:
-    explicit RemoteTts(QObject *parent = nullptr);
+    explicit RemoteTts(QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr);
     ~RemoteTts() override;
 
     [[nodiscard]] QString endpoint() const { return m_endpoint; }
@@ -36,6 +38,7 @@ public:
     [[nodiscard]] bool hasApiKey() const;
     [[nodiscard]] QString keyStorageStatus() const;
     [[nodiscard]] QString keyStorageState() const;
+    [[nodiscard]] QObject *apiKey() const { return m_secret; }
 
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
@@ -69,7 +72,7 @@ private:
     QString m_endpoint = QStringLiteral("https://api.groq.com/openai/v1/audio/speech");
     QString m_model = QStringLiteral("canopylabs/orpheus-v1-english");
     QString m_voice = QStringLiteral("troy");
-    SecretStore *const m_secret;
+    ApiKeyBinding *const m_secret;
     QNetworkAccessManager *const m_network;
     QPointer<QNetworkReply> m_reply;
     QTimer *const m_timeout;

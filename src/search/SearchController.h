@@ -1,5 +1,6 @@
 #pragma once
 
+#include "integrations/ApiKeyBinding.h"
 #include "LocalEmbedder.h"
 #include <QCryptographicHash>
 #include <QNetworkAccessManager>
@@ -17,7 +18,7 @@
 
 class AppController;
 class Summarizer;
-class SecretStore;
+class ApiKeyRegistry;
 class SearchWorker;
 class QNetworkReply;
 
@@ -45,12 +46,13 @@ class SearchController final : public QObject {
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY changed)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY changed)
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY changed)
+    Q_PROPERTY(QObject *apiKey READ apiKey CONSTANT)
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
     Q_PROPERTY(QString testStatus READ testStatus NOTIFY testChanged)
     Q_PROPERTY(QString testError READ testError NOTIFY testChanged)
     Q_PROPERTY(QVariantMap testReport READ testReport NOTIFY testChanged)
 public:
-    explicit SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent = nullptr);
+    explicit SearchController(AppController *app, Summarizer *ai, const QString &dataDirectory, QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr);
     ~SearchController() override;
     QVariantList results() const { return m_channels[0].results; }
     bool busy() const { return m_channels[0].busy; }
@@ -70,10 +72,11 @@ public:
     double downloadProgress() const { return m_downloadProgress; }
     QString remoteEndpoint() const { return m_endpoint; }
     QString remoteModel() const { return m_model; }
-    bool useLanguageModelKey() const { return m_reuseKey; }
+    bool useLanguageModelKey() const { return m_credentials && m_credentials->keyName() == QStringLiteral("language-model-api-key"); }
     bool hasApiKey() const;
     QString keyStorageStatus() const;
     QString keyStorageState() const;
+    QObject *apiKey() const { return m_credentials; }
     bool testBusy() const { return m_testBusy; }
     QString testStatus() const { return m_testStatus; }
     QString testError() const { return m_testError; }
@@ -91,6 +94,7 @@ public:
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void retry();
     Q_INVOKABLE bool setRemoteConfiguration(const QString &endpoint, const QString &model, bool reuseKey, const QString &key);
+    Q_INVOKABLE bool setRemoteConnection(const QString &endpoint, const QString &model);
     Q_INVOKABLE void clearApiKey();
     Q_INVOKABLE void rebuildIndex();
     Q_INVOKABLE void testModel();
@@ -143,7 +147,8 @@ private:
     void resetTestReport();
     AppController *const m_app;
     Summarizer *const m_ai;
-    SecretStore *m_credentials = nullptr;
+    ApiKeyBinding *m_credentials = nullptr;
+    ApiKeyRegistry *const m_registry;
     QSettings m_settings;
     const QString m_modelRoot;
     std::array<struct QueryState, 2> m_channels;
@@ -160,7 +165,6 @@ private:
     QString m_profile;
     QString m_endpoint;
     QString m_model;
-    bool m_reuseKey = false;
     QList<struct ModelAsset> m_downloadAssets;
     int m_assetIndex = 0;
     qint64 m_downloadBytes = 0;
@@ -175,7 +179,9 @@ private:
     bool m_testBusy = false;
     QString m_testStatus;
     QString m_testError;
+    QString m_lastCredentialId;
     QString m_lastCredentialKey;
     QVariantMap m_testReport;
     bool m_testAfterDownload = false;
+    bool m_initialized = false;
 };

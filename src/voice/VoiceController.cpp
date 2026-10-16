@@ -5,7 +5,8 @@
 #include "TranscriptCorrector.h"
 #include "LocalTtsWorker.h"
 #include "RemoteTts.h"
-#include "integrations/SecretStore.h"
+#include "integrations/ApiKeyBinding.h"
+#include "integrations/ApiKeyRegistry.h"
 #include "models/ModelDownload.h"
 
 #include <QAudioDevice>
@@ -100,10 +101,12 @@ void validationScore(const QString &expected, const QString &actual, int *substi
 
 }
 
-VoiceController::VoiceController(QObject *parent)
-    : QObject(parent), m_remoteTts(new RemoteTts(this)),
-      m_secret(new SecretStore(QStringLiteral("groq"), QStringLiteral("GROQ_API_KEY"), this)),
+VoiceController::VoiceController(QObject *parent, ApiKeyRegistry *registry)
+    : QObject(parent), m_registry(registry ? registry : new ApiKeyRegistry(this)),
+      m_remoteTts(new RemoteTts(this, m_registry)),
+      m_secret(m_registry->binding(QStringLiteral("speech-recognition"), this)),
       m_speech(nullptr), m_customSttTests(new CustomSttTests(this)), m_corrector(new TranscriptCorrector(this)) {
+    m_secret->setEndpoint(QStringLiteral("https://api.groq.com/openai/v1/audio/transcriptions"));
     connect(m_corrector, &TranscriptCorrector::configurationChanged, this, [this] { cancelTranscriptCorrection(); });
     m_localDirectory = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("models/voice"));
     m_sttDownload = new ModelDownload(QDir(m_localDirectory).filePath(QStringLiteral("stt")), this);
@@ -195,7 +198,7 @@ VoiceController::VoiceController(QObject *parent)
             if (m_enabled) { m_wantsListening = m_testSavedWantsListening; setMicrophoneArmed(m_wantsListening); updateCapture(); }
         }
     });
-    connect(m_secret, &SecretStore::changed, this, [this] {
+    connect(m_secret, &ApiKeyBinding::changed, this, [this] {
         emit hasApiKeyChanged();
         emit keyStorageStatusChanged();
         const QString key = m_secret->key();
@@ -267,7 +270,7 @@ VoiceController::~VoiceController() {
 }
 
 bool VoiceController::hasApiKey() const { return m_secret->hasKey(); }
-QString VoiceController::keyStorageStatus() const { return m_secret->status(); }
+QString VoiceController::keyStorageStatus() const { return m_secret->storageStatus(); }
 QString VoiceController::keyStorageState() const { return m_secret->storageState(); }
 QObject *VoiceController::customSttTests() const { return m_customSttTests; }
 QObject *VoiceController::remoteTts() const { return m_remoteTts; }
@@ -793,8 +796,11 @@ void VoiceController::resetTtsTestReport() {
     emit modelTestChanged();
 }
 
-void VoiceController::setApiKey(const QString &key) { m_secret->setKey(key); }
-void VoiceController::clearApiKey() { m_secret->clear(); }
+void VoiceController::setApiKey(const QString &key) {
+    if (key.trimmed().isEmpty()) m_secret->clearKey();
+    else m_secret->saveKey(key);
+}
+void VoiceController::clearApiKey() { m_secret->clearKey(); }
 
 void VoiceController::setMicrophoneArmed(const bool armed) {
     if (m_microphoneArmed == armed) return;
