@@ -51,14 +51,17 @@ ColumnLayout {
         if (!Overlay.overlay)
             return
         const fieldTopLeft = secretField.mapToItem(Overlay.overlay, 0, 0)
+        const editorTopLeft = editor.mapToItem(Overlay.overlay, 0, 0)
         const margin = 12
         keyPicker.width = Math.min(secretField.width, Math.max(180, Overlay.overlay.width - 2 * margin))
-        keyPicker.x = Math.max(margin, Math.min(fieldTopLeft.x, Overlay.overlay.width - keyPicker.width - margin))
+        const popupX = Math.max(margin, Math.min(fieldTopLeft.x, Overlay.overlay.width - keyPicker.width - margin))
         const below = fieldTopLeft.y + secretField.height + 4
         const above = fieldTopLeft.y - keyPicker.height - 4
-        keyPicker.y = below + keyPicker.height <= Overlay.overlay.height - margin
+        const popupY = below + keyPicker.height <= Overlay.overlay.height - margin
             ? below
             : Math.max(margin, above)
+        keyPicker.x = popupX - editorTopLeft.x
+        keyPicker.y = popupY - editorTopLeft.y
     }
 
     function openKeyPicker(fromKeyboard) {
@@ -103,7 +106,12 @@ ColumnLayout {
             hoverFill: Theme.accentSoft
             outline: Theme.rule
             font.pixelSize: 15
-            onClicked: editor.openKeyPicker(true)
+            onClicked: {
+                if (keyPicker.visible)
+                    keyPicker.close()
+                else
+                    editor.openKeyPicker(true)
+            }
         }
     }
 
@@ -138,10 +146,10 @@ ColumnLayout {
 
     Popup {
         id: keyPicker
-        parent: Overlay.overlay
+        parent: editor
         modal: false
         focus: false
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
         padding: 6
         onClosed: keyPickerList.currentIndex = -1
         onHeightChanged: if (visible) Qt.callLater(editor.repositionKeyPicker)

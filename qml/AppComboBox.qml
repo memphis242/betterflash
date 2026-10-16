@@ -92,10 +92,36 @@ ComboBox {
                                : control.popup.visible ? Theme.comboOpen
                                : control.hovered ? Theme.comboHover
                                : Theme.comboFill
-        border.width: control.activeFocus || control.popup.visible ? 2 : 1
+        border.width: control.activeFocus || control.contentItem.activeFocus || control.popup.visible ? 2 : 1
         border.color: !control.enabled ? Theme.rule
-                                       : control.activeFocus || control.popup.visible ? Theme.accent
+                                       : control.activeFocus || control.contentItem.activeFocus || control.popup.visible ? Theme.accent
                                        : Theme.rule
+    }
+
+    // Keep the editable form as one control. The outer ComboBox owns the
+    // border, while this text field supplies editing, selection, and the
+    // standard ComboBox editText connection without drawing a second frame.
+    contentItem: TextField {
+        id: editableText
+        implicitWidth: contentWidth
+        implicitHeight: contentHeight
+        text: control.editable ? control.editText : control.displayText
+        enabled: control.editable
+        readOnly: control.down
+        autoScroll: control.editable
+        selectByMouse: control.selectTextByMouse
+        inputMethodHints: control.inputMethodHints
+        validator: control.validator
+        font: control.font
+        color: control.enabled ? Theme.ink : Theme.inkMuted
+        selectionColor: Theme.accent
+        selectedTextColor: Theme.ink
+        verticalAlignment: Text.AlignVCenter
+        leftPadding: 0
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
+        background: null
     }
 
     popup.background: Rectangle {
