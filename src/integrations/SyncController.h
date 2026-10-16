@@ -14,6 +14,7 @@ class SyncController final : public QObject {
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY configurationChanged)
     Q_PROPERTY(bool hasToken READ hasToken NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
+    Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QString lastSync READ lastSync NOTIFY changed)
@@ -23,6 +24,7 @@ public:
     QString endpoint() const { return m_endpoint; }
     bool hasToken() const { return m_credentials->hasKey(); }
     QString keyStorageStatus() const { return m_credentials->status(); }
+    QString keyStorageState() const { return m_credentials->storageState(); }
     QString status() const { return m_status; }
     QString error() const { return m_error; }
     QString lastSync() const { return m_lastSync; }

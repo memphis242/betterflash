@@ -44,6 +44,7 @@ class SearchController final : public QObject {
     Q_PROPERTY(bool useLanguageModelKey READ useLanguageModelKey NOTIFY changed)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY changed)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY changed)
+    Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY changed)
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
     Q_PROPERTY(QString testStatus READ testStatus NOTIFY testChanged)
     Q_PROPERTY(QString testError READ testError NOTIFY testChanged)
@@ -72,6 +73,7 @@ public:
     bool useLanguageModelKey() const { return m_reuseKey; }
     bool hasApiKey() const;
     QString keyStorageStatus() const;
+    QString keyStorageState() const;
     bool testBusy() const { return m_testBusy; }
     QString testStatus() const { return m_testStatus; }
     QString testError() const { return m_testError; }

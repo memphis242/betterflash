@@ -144,6 +144,7 @@ bool SearchController::modelReady() const {
 }
 bool SearchController::hasApiKey() const { return m_reuseKey ? m_ai->hasApiKey() : m_credentials && m_credentials->hasKey(); }
 QString SearchController::keyStorageStatus() const { return m_reuseKey ? m_ai->keyStorageStatus() : m_credentials ? m_credentials->status() : QString(); }
+QString SearchController::keyStorageState() const { return m_reuseKey ? m_ai->keyStorageState() : m_credentials ? m_credentials->storageState() : QStringLiteral("loading"); }
 void SearchController::configureCredentials() {
     if (m_credentials) { m_credentials->disconnect(this); m_credentials->deleteLater(); }
     const QUrl url(m_endpoint);

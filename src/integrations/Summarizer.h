@@ -42,6 +42,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(QVariantMap testReport READ testReport NOTIFY testChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
+    Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
@@ -70,6 +71,7 @@ public:
     QVariantMap testReport() const { return m_testReport; }
     bool hasApiKey() const { return m_credentials->hasKey(); }
     QString keyStorageStatus() const { return m_credentials->status(); }
+    QString keyStorageState() const { return m_credentials->storageState(); }
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
     QString error() const { return m_error; }

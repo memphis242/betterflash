@@ -13,6 +13,7 @@ SecretStore::SecretStore(QString service, QString environmentVariable, QObject *
         if (m_key.size() > 4096 || m_key.contains(QLatin1Char('\n')) || m_key.contains(QLatin1Char('\r'))) m_key.clear();
         if (!m_key.isEmpty()) {
             m_status = QStringLiteral("Using a key from the environment.");
+            m_storageState = QStringLiteral("environment");
             return;
         }
     }
@@ -78,7 +79,11 @@ void SecretStore::load() {
         if (code == 0 && !clean.isEmpty() && clean.size() <= 4096 && !clean.contains('\n') && !clean.contains('\r')) {
             m_key = QString::fromUtf8(output).trimmed();
             m_status = QStringLiteral("Stored in the desktop keyring.");
-        } else m_status = QStringLiteral("Enter a key to enable this service.");
+            m_storageState = QStringLiteral("saved");
+        } else {
+            m_status = QStringLiteral("Enter a key to enable this service.");
+            m_storageState = QStringLiteral("missing");
+        }
         emit changed();
     });
 }
@@ -87,19 +92,26 @@ void SecretStore::setKey(const QString &key) {
     if (cleaned.isEmpty()) { clear(); return; }
     if (cleaned.size() > 4096 || cleaned.contains(QLatin1Char('\n')) || cleaned.contains(QLatin1Char('\r'))) {
         m_status = QStringLiteral("KEY_INVALID: Enter a single API key without line breaks.");
+        m_storageState = QStringLiteral("invalid");
         emit changed();
         return;
     }
     m_key = cleaned;
     const quint64 revision = ++m_revision;
     m_status = QStringLiteral("Saving to the desktop keyring.");
+    m_storageState = QStringLiteral("saving");
     emit changed();
     run({QStringLiteral("store"), QStringLiteral("--label=BetterFlash ") + m_service,
          QStringLiteral("application"), QStringLiteral("betterflash"), QStringLiteral("service"), m_service},
          cleaned.toUtf8() + '\n', [this, revision](int code, const QByteArray &) {
         if (revision != m_revision) return;
-        m_status = code == 0 ? QStringLiteral("Stored in the desktop keyring.")
-            : QStringLiteral("Kept for this session. Unlock the desktop keyring to save the key.");
+        if (code == 0) {
+            m_status = QStringLiteral("Stored in the desktop keyring.");
+            m_storageState = QStringLiteral("saved");
+        } else {
+            m_status = QStringLiteral("Kept for this session. Unlock the desktop keyring to save the key.");
+            m_storageState = QStringLiteral("session-only");
+        }
         emit changed();
     });
 }
@@ -107,12 +119,18 @@ void SecretStore::clear() {
     m_key.clear();
     const quint64 revision = ++m_revision;
     m_status = QStringLiteral("Removing the stored key.");
+    m_storageState = QStringLiteral("removing");
     emit changed();
     run({QStringLiteral("clear"), QStringLiteral("application"), QStringLiteral("betterflash"),
          QStringLiteral("service"), m_service}, {}, [this, revision](int code, const QByteArray &) {
         if (revision != m_revision) return;
-        m_status = code == 0 ? QStringLiteral("Key removed.")
-            : QStringLiteral("Key cleared for this session. Remove the saved key in your desktop keyring.");
+        if (code == 0) {
+            m_status = QStringLiteral("Key removed.");
+            m_storageState = QStringLiteral("removed");
+        } else {
+            m_status = QStringLiteral("Key cleared for this session. Remove the saved key in your desktop keyring.");
+            m_storageState = QStringLiteral("removal-failed");
+        }
         emit changed();
     });
 }

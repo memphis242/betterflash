@@ -66,6 +66,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString modelTestStatus READ modelTestStatus NOTIFY modelTestChanged)
     Q_PROPERTY(QString modelTestError READ modelTestError NOTIFY modelTestChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyStorageStatusChanged)
+    Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyStorageStatusChanged)
     Q_PROPERTY(QObject *customSttTests READ customSttTests CONSTANT)
     Q_PROPERTY(QObject *remoteTts READ remoteTts CONSTANT)
 public:
@@ -112,6 +113,7 @@ public:
     [[nodiscard]] QString modelTestStatus() const { return m_modelTestStatus; }
     [[nodiscard]] QString modelTestError() const { return m_modelTestError; }
     [[nodiscard]] QString keyStorageStatus() const;
+    [[nodiscard]] QString keyStorageState() const;
     [[nodiscard]] QObject *customSttTests() const;
     [[nodiscard]] QObject *remoteTts() const;
 

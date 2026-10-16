@@ -140,6 +140,7 @@ QString RemoteTts::status() const {
 
 bool RemoteTts::hasApiKey() const { return m_secret->hasKey(); }
 QString RemoteTts::keyStorageStatus() const { return m_secret->status(); }
+QString RemoteTts::keyStorageState() const { return m_secret->storageState(); }
 
 void RemoteTts::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();

@@ -268,6 +268,7 @@ VoiceController::~VoiceController() {
 
 bool VoiceController::hasApiKey() const { return m_secret->hasKey(); }
 QString VoiceController::keyStorageStatus() const { return m_secret->status(); }
+QString VoiceController::keyStorageState() const { return m_secret->storageState(); }
 QObject *VoiceController::customSttTests() const { return m_customSttTests; }
 QObject *VoiceController::remoteTts() const { return m_remoteTts; }
 QObject *VoiceController::transcriptCorrector() const { return m_corrector; }

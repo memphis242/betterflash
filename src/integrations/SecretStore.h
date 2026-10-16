@@ -14,6 +14,7 @@ public:
     QString key() const { return m_key; }
     bool hasKey() const { return !m_key.isEmpty(); }
     QString status() const { return m_status; }
+    QString storageState() const { return m_storageState; }
     void setKey(const QString &key);
     void clear();
 signals:
@@ -32,6 +33,7 @@ private:
     QQueue<struct Operation> m_operations;
     QString m_key;
     QString m_status;
+    QString m_storageState = QStringLiteral("loading");
     quint64 m_revision = 0;
     bool m_running = false;
 };

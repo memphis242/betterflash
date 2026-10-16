@@ -23,6 +23,7 @@ class RemoteTts final : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY readinessChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY keyChanged)
     Q_PROPERTY(QString keyStorageStatus READ keyStorageStatus NOTIFY keyChanged)
+    Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
 public:
     explicit RemoteTts(QObject *parent = nullptr);
     ~RemoteTts() override;
@@ -34,6 +35,7 @@ public:
     [[nodiscard]] QString status() const;
     [[nodiscard]] bool hasApiKey() const;
     [[nodiscard]] QString keyStorageStatus() const;
+    [[nodiscard]] QString keyStorageState() const;
 
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
