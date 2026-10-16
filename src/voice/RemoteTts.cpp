@@ -4,11 +4,13 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTimer>
 #include <algorithm>
@@ -21,6 +23,7 @@ constexpr qsizetype kMaximumResponseBytes = 20 * 1024 * 1024;
 constexpr qsizetype kMaximumTextCharacters = 8192;
 constexpr int kRequestTimeoutMs = 45 * 1000;
 constexpr int kOverallTimeoutMs = 180 * 1000;
+constexpr qsizetype kMaximumProviderErrorBytes = 64 * 1024;
 
 quint32 readLe32(const char *const p) {
     return static_cast<quint32>(static_cast<unsigned char>(p[0]))
@@ -84,6 +87,16 @@ QByteArray convertPcm(const QByteArray &source, const QAudioFormat &from, const 
     }
     return result;
 }
+
+QString defaultVoiceFor(const QUrl &endpoint, const QString &model) {
+    if (endpoint.scheme() == QStringLiteral("https")
+        && endpoint.host().compare(QStringLiteral("api.groq.com"), Qt::CaseInsensitive) == 0
+        && (endpoint.port(-1) == -1 || endpoint.port(-1) == 443)) {
+        if (model == QStringLiteral("canopylabs/orpheus-arabic-saudi")) return QStringLiteral("fahad");
+        if (model == QStringLiteral("canopylabs/orpheus-v1-english")) return QStringLiteral("troy");
+    }
+    return {};
+}
 }
 
 RemoteTts::RemoteTts(QObject *parent, ApiKeyRegistry *registry)
@@ -98,6 +111,9 @@ RemoteTts::RemoteTts(QObject *parent, ApiKeyRegistry *registry)
     m_voice = settings.value(QStringLiteral("voice"), m_voice).toString().trimmed();
     settings.endGroup();
     settings.endGroup();
+    const QStringList configuredVoices = availableVoices();
+    if (!configuredVoices.isEmpty() && !configuredVoices.contains(m_voice))
+        m_voice = defaultVoiceFor(QUrl(m_endpoint), m_model);
     m_secret->setEndpoint(m_endpoint);
     m_lastKey = m_secret->key();
     m_timeout->setSingleShot(true);
@@ -136,14 +152,74 @@ bool RemoteTts::validEndpoint(const QUrl &url) {
     return false;
 }
 
+QStringList RemoteTts::voicesFor(const QUrl &endpoint, const QString &model) {
+    if (endpoint.scheme() != QStringLiteral("https")
+        || endpoint.host().compare(QStringLiteral("api.groq.com"), Qt::CaseInsensitive) != 0
+        || (endpoint.port(-1) != -1 && endpoint.port(-1) != 443))
+        return {};
+    if (model == QStringLiteral("canopylabs/orpheus-v1-english"))
+        return {QStringLiteral("autumn"), QStringLiteral("diana"), QStringLiteral("hannah"),
+            QStringLiteral("austin"), QStringLiteral("daniel"), QStringLiteral("troy")};
+    if (model == QStringLiteral("canopylabs/orpheus-arabic-saudi"))
+        return {QStringLiteral("abdullah"), QStringLiteral("fahad"), QStringLiteral("sultan"),
+            QStringLiteral("lulwa"), QStringLiteral("noura"), QStringLiteral("aisha")};
+    return {};
+}
+
+QStringList RemoteTts::availableVoices() const {
+    return voicesFor(QUrl(m_endpoint), m_model);
+}
+
+QString RemoteTts::sanitizedProviderError(const QByteArray &payload, const int httpStatus) const {
+    const QJsonDocument document = QJsonDocument::fromJson(payload.left(kMaximumProviderErrorBytes));
+    if (!document.isObject()) return {};
+    const QJsonObject root = document.object();
+    QJsonObject errorObject;
+    const QJsonValue errorValue = root.value(QStringLiteral("error"));
+    if (errorValue.isObject()) errorObject = errorValue.toObject();
+    const auto valueText = [](const QJsonValue &value) {
+        return value.isString() ? value.toString() : QString();
+    };
+    QString code = valueText(errorObject.value(QStringLiteral("code")));
+    if (code.isEmpty()) code = valueText(root.value(QStringLiteral("code")));
+    const auto sanitizeCode = [](QString value) {
+        value.replace(QRegularExpression(QStringLiteral("[\\x00-\\x1F\\x7F]")), QStringLiteral(" "));
+        value.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+        return value.trimmed().left(128);
+    };
+    code = sanitizeCode(code);
+    if (code == QStringLiteral("model_terms_required") && !availableVoices().isEmpty()) {
+        const QString termsUrl = QStringLiteral("https://console.groq.com/playground?model=")
+            + QString::fromLatin1(QUrl::toPercentEncoding(m_model));
+        return QStringLiteral("HTTP %1: The organization administrator must accept the selected model's terms at %2.")
+            .arg(httpStatus).arg(termsUrl);
+    }
+    const QHash<QString, QString> recoveries{
+        {QStringLiteral("model_not_found"), QStringLiteral("The selected speech model was not found. Refresh the model list and choose an available model.")},
+        {QStringLiteral("invalid_api_key"), QStringLiteral("The speech output API key was rejected. Choose or enter a valid key.")},
+        {QStringLiteral("insufficient_quota"), QStringLiteral("The speech provider account has insufficient quota. Check its billing or spend limit.")},
+        {QStringLiteral("rate_limit_exceeded"), QStringLiteral("The speech provider rate limit was reached. Wait and try again later.")},
+        {QStringLiteral("blocked_api_access"), QStringLiteral("Speech API access is blocked by the provider account's spend or access limit.")},
+        {QStringLiteral("model_permission_blocked"), QStringLiteral("The provider account is not permitted to use this speech model.")},
+        {QStringLiteral("authentication_error"), QStringLiteral("The speech output API key was rejected. Choose or enter a valid key.")},
+    };
+    const auto recovery = recoveries.constFind(code);
+    return recovery == recoveries.cend() ? QString() : QStringLiteral("HTTP %1: %2").arg(httpStatus).arg(recovery.value());
+}
+
 bool RemoteTts::ready() const {
-    return m_secret->hasKey() && !m_model.isEmpty() && !m_voice.isEmpty() && validEndpoint(QUrl(m_endpoint));
+    const QStringList voices = availableVoices();
+    return m_secret->hasKey() && !m_model.isEmpty() && !m_voice.isEmpty()
+        && (voices.isEmpty() || voices.contains(m_voice)) && validEndpoint(QUrl(m_endpoint));
 }
 
 QString RemoteTts::status() const {
     if (!validEndpoint(QUrl(m_endpoint))) return QStringLiteral("Choose an HTTPS endpoint or localhost HTTP endpoint");
     if (m_model.isEmpty()) return QStringLiteral("Enter a remote speech model identifier");
     if (m_voice.isEmpty()) return QStringLiteral("Enter a remote voice identifier");
+    const QStringList voices = availableVoices();
+    if (!voices.isEmpty() && !voices.contains(m_voice))
+        return QStringLiteral("Choose a voice supported by the selected Groq speech model");
     return m_secret->hasKey() ? QStringLiteral("Remote speech output is ready") : QStringLiteral("Add a speech output API key");
 }
 
@@ -155,9 +231,13 @@ void RemoteTts::setEndpoint(const QString &endpoint) {
     const QString value = endpoint.trimmed();
     if (value == m_endpoint) return;
     m_endpoint = value;
+    const QStringList voices = availableVoices();
+    if (!voices.isEmpty() && !voices.contains(m_voice))
+        m_voice = defaultVoiceFor(QUrl(m_endpoint), m_model);
     m_secret->setEndpoint(m_endpoint);
     cancel();
     emit configurationChanged();
+    emit availableVoicesChanged();
     emit readinessChanged();
 }
 
@@ -165,8 +245,12 @@ void RemoteTts::setModel(const QString &model) {
     const QString value = model.trimmed().left(128);
     if (value == m_model) return;
     m_model = value;
+    const QStringList voices = availableVoices();
+    if (!voices.isEmpty() && !voices.contains(m_voice))
+        m_voice = defaultVoiceFor(QUrl(m_endpoint), m_model);
     cancel();
     emit configurationChanged();
+    emit availableVoicesChanged();
     emit readinessChanged();
 }
 
@@ -319,11 +403,39 @@ void RemoteTts::handleReply(QNetworkReply *const reply, const QByteArray &payloa
     if (generation != m_generation) return;
     const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     reply->deleteLater();
-    if (redirected) { emit failed(QStringLiteral("The remote speech service redirected the request. Check the configured endpoint."), m_request); return; }
-    if (m_responseTooLarge) { emit failed(QStringLiteral("The remote speech response is too large."), m_request); return; }
-    if (!networkError.isEmpty()) { emit failed(QStringLiteral("Remote speech output failed: %1").arg(networkError), m_request); return; }
-    if (httpStatus >= 400) { emit failed(QStringLiteral("Remote speech service returned HTTP %1. Check the model, voice, and API key.").arg(httpStatus), m_request); return; }
-    if (payload.size() > kMaximumResponseBytes) { emit failed(QStringLiteral("The remote speech response is too large."), m_request); return; }
+    if (redirected) {
+        m_overallTimeout->stop();
+        emit failed(QStringLiteral("The remote speech service redirected the request. Check the configured endpoint."), m_request);
+        return;
+    }
+    if (m_responseTooLarge) {
+        m_overallTimeout->stop();
+        emit failed(QStringLiteral("The remote speech response is too large."), m_request);
+        return;
+    }
+    if (httpStatus >= 400) {
+        const QString providerError = sanitizedProviderError(payload, httpStatus);
+        const QString recovery = httpStatus == 401 || httpStatus == 403
+            ? QStringLiteral("Check the speech output API key and whether the account can use this model.")
+            : httpStatus == 429
+            ? QStringLiteral("Check the provider rate limit or spend limit, then try again.")
+            : QStringLiteral("Check the selected model, voice, and API key.");
+        m_overallTimeout->stop();
+        emit failed(providerError.isEmpty()
+                ? QStringLiteral("Remote speech service rejected the request (HTTP %1). %2").arg(httpStatus).arg(recovery)
+                : QStringLiteral("Remote speech service rejected the request: %1").arg(providerError), m_request);
+        return;
+    }
+    if (!networkError.isEmpty()) {
+        m_overallTimeout->stop();
+        emit failed(QStringLiteral("Remote speech output could not reach the provider. Check the network connection and configured endpoint."), m_request);
+        return;
+    }
+    if (payload.size() > kMaximumResponseBytes) {
+        m_overallTimeout->stop();
+        emit failed(QStringLiteral("The remote speech response is too large."), m_request);
+        return;
+    }
     const quint64 requestId = m_request;
     auto *const watcher = new QFutureWatcher<struct DecodedAudio>(this);
     m_decodeWatcher = watcher;

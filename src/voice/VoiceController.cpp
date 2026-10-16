@@ -1393,8 +1393,12 @@ void VoiceController::speechError(const QString &message) {
     stopSpeaking();
     if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Speech output validation failed"), message);
     const QString detail = message.trimmed();
+    const bool remoteFailure = m_ttsProvider == QStringLiteral("remote")
+        && (detail.startsWith(QStringLiteral("Remote speech service"))
+            || detail.startsWith(QStringLiteral("Remote speech output")));
     setError(QStringLiteral("VOICE_TTS_UNAVAILABLE"), detail.isEmpty()
         ? QStringLiteral("Speech output is unavailable. Choose a local voice in Settings > Voice and check the audio output.")
+        : remoteFailure ? detail
         : QStringLiteral("Speech output failed: %1 Check the selected voice and audio output.").arg(detail));
 }
 
