@@ -6,6 +6,7 @@
 #include "integrations/RemoteModelCatalog.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/Summarizer.h"
+#include "integrations/CheckpointSummary.h"
 #include "search/SearchController.h"
 #include "integrations/SyncController.h"
 #include "render/MarkdownView.h"
@@ -210,6 +211,7 @@ int main(int argc, char **argv) {
     Summarizer ai(&app, nullptr, &apiKeys);
     SearchController librarySearch(&app, &ai, dataDirectory, nullptr, &apiKeys);
     Atomicizer atomic(&app, &ai);
+    CheckpointSummary checkpointSummary(&ai);
     SyncController sync(&app, media.rootPath());
     VoiceController voice(nullptr, &apiKeys);
     CardNarration narration(&app, &voice, dataDirectory, &application);
@@ -229,6 +231,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
     engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
+    engine.rootContext()->setContextProperty(QStringLiteral("checkpointSummary"), &checkpointSummary);
     engine.rootContext()->setContextProperty(QStringLiteral("sync"), &sync);
     engine.rootContext()->setContextProperty(QStringLiteral("media"), &media);
     engine.rootContext()->setContextProperty(QStringLiteral("shortcuts"), &shortcuts);

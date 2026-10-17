@@ -74,6 +74,13 @@ public:
     Q_INVOKABLE void updateDeck(const QString &id, const QString &name, const QString &description = {}, const QString &parentId = {});
     Q_INVOKABLE bool moveDeck(const QString &id, const QString &parentId = {});
     Q_INVOKABLE void deleteDeck(const QString &id);
+    Q_INVOKABLE bool loadDeckCheckpoints(const QString &deckId, const QString &requestId);
+    Q_INVOKABLE bool loadCheckpointChanges(const QString &deckId, const QString &checkpointId, const QString &requestId);
+    Q_INVOKABLE bool createDeckCheckpoint(const QString &deckId, const QString &note, const QString &summary,
+                                         const QString &expectedToken, const QString &requestId);
+    Q_INVOKABLE bool deleteDeckCheckpoint(const QString &deckId, const QString &checkpointId, const QString &requestId);
+    Q_INVOKABLE bool restoreDeckCheckpoint(const QString &deckId, const QString &checkpointId,
+                                          const QString &expectedToken, const QString &requestId);
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,
                               int pointCount = 1, const QString &requestId = {});
@@ -126,6 +133,11 @@ signals:
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void deckCheckpointsReady(const QString &deckId, const QVariantMap &result, const QString &requestId);
+    void checkpointChangesReady(const QString &deckId, const QString &checkpointId,
+                                const QVariantMap &result, const QString &requestId);
+    void deckCheckpointFinished(const QString &deckId, const QString &checkpointId,
+                                const QString &action, bool success, const QString &requestId);
     // Success reports durable persistence. Check the refreshed snapshot and
     // lastError before navigating to the saved card.
     void cardSaved(const QString &cardId, const QString &requestId, bool success);

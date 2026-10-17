@@ -192,6 +192,12 @@ def validate_review(record):
 
 
 def validate_payload(kind, payload):
+    if "restore" in payload and (kind not in ("deck.upsert", "card.upsert") or type(payload["restore"]) is not bool):
+        raise ProtocolError("INVALID_EVENT", "Restore intent must be a boolean on a deck or card upsert.")
+    if "freshVariantIds" in payload and (kind != "card.upsert" or not payload.get("restore", False) or not isinstance(payload["freshVariantIds"], list)):
+        raise ProtocolError("INVALID_EVENT", "Fresh variant identifiers belong only to an explicit card restore.")
+    if "restoreDependency" in payload and (kind != "deck.upsert" or not payload.get("restore", False) or type(payload["restoreDependency"]) is not bool):
+        raise ProtocolError("INVALID_EVENT", "A restore dependency must be a boolean on an explicit deck restore.")
     match kind:
         case "deck.upsert":
             deck = payload.get("deck")
@@ -215,6 +221,13 @@ def validate_payload(kind, payload):
                 if variant["cardId"] != card["id"] or variant["key"] not in expected or variant["key"] in keys:
                     raise ProtocolError("INVALID_EVENT", "Card variant dependencies are invalid or duplicated.")
                 keys.add(variant["key"])
+            if payload.get("restore", False):
+                fresh = payload.get("freshVariantIds")
+                variant_ids = {variant["id"] for variant in variants}
+                if (not isinstance(fresh, list) or len(fresh) > len(variants)
+                        or any(not isinstance(value, str) or value not in variant_ids for value in fresh)
+                        or len(set(fresh)) != len(fresh)):
+                    raise ProtocolError("INVALID_EVENT", "Fresh variant identifiers must be unique identifiers from this card's variants.")
         case "review.add" | "review.correct":
             review = payload.get("review")
             validate_review(review)

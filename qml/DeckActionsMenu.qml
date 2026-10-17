@@ -66,17 +66,13 @@ AppMenu {
     AppMenuSeparator {}
     AppMenuItem { glyph: "pin"
         text: "Checkpoint"
-        enabled: menu.deckAvailable
-        ToolTip.visible: hovered
-        ToolTip.text: "Deck checkpoints are planned and inactive for now."
-        onTriggered: {}
+        enabled: menu.deckAvailable && !app.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckCheckpoint(menu.deckId, false) }
     }
     AppMenuItem { glyph: "clock"
         text: "Restore to known checkpoint"
-        enabled: menu.deckAvailable
-        ToolTip.visible: hovered
-        ToolTip.text: "Checkpoint restoration is planned and inactive for now."
-        onTriggered: {}
+        enabled: menu.deckAvailable && !app.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckCheckpoint(menu.deckId, true) }
     }
     AppMenuSeparator {}
     AppMenuItem { glyph: "close"; danger: true

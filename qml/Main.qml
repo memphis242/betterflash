@@ -88,7 +88,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool modalOpen: deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool modalOpen: checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -2292,6 +2292,13 @@ ApplicationWindow {
                 details: globalErrorDetails
             }
         }
+    }
+    DeckCheckpointDialog {
+        id: checkpointDialog
+        ui: window
+    }
+    function openDeckCheckpoint(deckId, restore) {
+        checkpointDialog.openFor(deckId, restore)
     }
     AtomicizeDialog {
         id: atomicDialog

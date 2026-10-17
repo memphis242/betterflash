@@ -53,6 +53,17 @@ For an isolated demonstration:
 ./scripts/run-desktop.sh --data-dir /workspace/betterflash-demo --demo
 ```
 
+## Deck checkpoints
+
+Right-click a deck in Library or Review to create a checkpoint with an optional
+note. Changes are computed deterministically; a language-model annotation is an
+explicit optional action. Restore uses an evenly spaced, scrollable timeline
+with change previews and a confirmation. A recovery checkpoint preserves the
+content being replaced. Review history and retained schedules are preserved.
+Checkpoints include child decks, managed images, and narration, and travel in
+portable backups. Checkpoint history is local; restored content queues sync
+changes. See [deck checkpoints](docs/checkpoints.md).
+
 ## Cards and review
 
 The Review page uses **Branch ledger**: circular deck nodes form a scrollable

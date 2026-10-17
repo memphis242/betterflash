@@ -30,6 +30,9 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
+    connect(m_worker,&DatabaseWorker::deckCheckpointsReady,this,&AppController::deckCheckpointsReady);
+    connect(m_worker,&DatabaseWorker::checkpointChangesReady,this,&AppController::checkpointChangesReady);
+    connect(m_worker,&DatabaseWorker::deckCheckpointFinished,this,&AppController::deckCheckpointFinished);
     connect(m_worker,&DatabaseWorker::cardSaved,this,&AppController::cardSaved);
     connect(m_worker,&DatabaseWorker::cardNarrationSaved,this,&AppController::cardNarrationSaved);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
@@ -82,6 +85,46 @@ bool AppController::moveDeck(const QString &id, const QString &parentId)
 }
 void AppController::deleteDeck(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteDeck(id);}); }
+bool AppController::loadDeckCheckpoints(const QString &deckId, const QString &requestId)
+{
+    return QMetaObject::invokeMethod(m_worker, [worker = m_worker, deckId, requestId] {
+        worker->loadDeckCheckpoints(deckId, requestId);
+    }, Qt::QueuedConnection);
+}
+bool AppController::loadCheckpointChanges(const QString &deckId, const QString &checkpointId, const QString &requestId)
+{
+    return QMetaObject::invokeMethod(m_worker, [worker = m_worker, deckId, checkpointId, requestId] {
+        worker->loadCheckpointChanges(deckId, checkpointId, requestId);
+    }, Qt::QueuedConnection);
+}
+bool AppController::createDeckCheckpoint(const QString &deckId, const QString &note, const QString &summary,
+                                         const QString &expectedToken, const QString &requestId)
+{
+    if (m_busy) return false;
+    return invoke([=](DatabaseWorker *worker) {
+        worker->createDeckCheckpoint(deckId, note, summary, expectedToken, requestId);
+    });
+}
+bool AppController::deleteDeckCheckpoint(const QString &deckId, const QString &checkpointId, const QString &requestId)
+{
+    if (m_busy) return false;
+    return invoke([=](DatabaseWorker *worker) {
+        worker->deleteDeckCheckpoint(deckId, checkpointId, requestId);
+    });
+}
+bool AppController::restoreDeckCheckpoint(const QString &deckId, const QString &checkpointId,
+                                          const QString &expectedToken, const QString &requestId)
+{
+    if (m_busy) return false;
+    if (m_reviewing) {
+        setError({{"code", "CHECKPOINT_REVIEW_ACTIVE"},
+                  {"message", "End the current review before restoring a checkpoint."}, {"detail", QString()}});
+        return false;
+    }
+    return invoke([=](DatabaseWorker *worker) {
+        worker->restoreDeckCheckpoint(deckId, checkpointId, expectedToken, requestId);
+    });
+}
 bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
     const struct betterflash::model::Card candidate{id.isEmpty()?betterflash::model::uuid():id,deckId,kind,front,back,tags,points};

@@ -82,6 +82,7 @@ struct Collection {
     QList<struct Review> reviews;
     QList<struct DeletedRecord> deleted;
     QList<struct MediaAttachment> media;
+    QList<QVariantMap> checkpoints;
 };
 
 QString uuid();
@@ -106,6 +107,7 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &value);
 std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct Card &source,const QVariantList &proposals);
 std::expected<struct Variant, QString> variantFromMap(const QVariantMap &value);
 std::expected<struct Review, QString> reviewFromMap(const QVariantMap &value);
+std::expected<QVariantMap, QString> checkpointFromMap(const QVariantMap &value);
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &value);
 
 }

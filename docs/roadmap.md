@@ -15,9 +15,13 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Deferred desktop work
 
-- **Deck checkpoints and restore:** replace the inactive menu entries with a
-  simple versioning workflow. Define what is captured, how changes are compared,
-  and what restoring does to cards, media, hierarchy, and review state.
+- **Checkpoint follow-ups:** checkpoint creation and content restoration are
+  implemented, including child decks, deterministic changes, optional model
+  annotations, recovery checkpoints, and portable backups. Checkpoint history
+  is local to the collection; synchronizing that history remains deferred.
+  Restored content uses sync events. A browser for checkpoints of entirely
+  deleted root decks and larger portable-backup formats are also follow-ups.
+  See [deck checkpoints](checkpoints.md).
 - **Undo and returning to context:** design undo for card edits and review
   actions, including its scope and persistence. Preserve selection, scroll,
   zoom, filters, and pane state across navigation. Existing rating corrections
@@ -103,7 +107,7 @@ audio lifecycle behavior when that milestone begins.
 - Cover edits during recording and saving, confirmation rejection after text
   or audio changes, and confirmation followed by another edit.
 - Cover legacy sync fields versus explicit clears, schema 5 to 6 migration,
-  and version 4 backup round trips with per-side baselines.
+  and version 5 backup round trips with per-side baselines and checkpoints.
 - Cover five-minute narration capture, playback and transfer, and request-scoped
   editor saves returning to the correct card only after persistence succeeds.
 

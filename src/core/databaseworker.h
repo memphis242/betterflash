@@ -23,6 +23,13 @@ public:
     void updateDeck(const QString &id, const QString &name, const QString &description, const QString &parentId);
     void moveDeck(const QString &id, const QString &parentId);
     void deleteDeck(const QString &id);
+    void loadDeckCheckpoints(const QString &deckId, const QString &requestId);
+    void loadCheckpointChanges(const QString &deckId, const QString &checkpointId, const QString &requestId);
+    void createDeckCheckpoint(const QString &deckId, const QString &note, const QString &summary,
+                              const QString &expectedToken, const QString &requestId);
+    void restoreDeckCheckpoint(const QString &deckId, const QString &checkpointId,
+                               const QString &expectedToken, const QString &requestId);
+    void deleteDeckCheckpoint(const QString &deckId, const QString &checkpointId, const QString &requestId);
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
                   const QString &front, const QString &back, const QString &tags, int points,
                   const QString &requestId = {});
@@ -53,6 +60,11 @@ signals:
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void deckCheckpointsReady(const QString &deckId, const QVariantMap &result, const QString &requestId);
+    void checkpointChangesReady(const QString &deckId, const QString &checkpointId,
+                                const QVariantMap &result, const QString &requestId);
+    void deckCheckpointFinished(const QString &deckId, const QString &checkpointId,
+                                const QString &action, bool success, const QString &requestId);
     // Success reports a committed card, schedules, and outbox event. Refresh
     // errors are reported separately through operationFinished.
     void cardSaved(const QString &cardId, const QString &requestId, bool success);
@@ -131,6 +143,7 @@ private:
                          const QList<struct betterflash::model::Variant> &variants);
     bool tombstone(const QString &type, const QString &id, qint64 seq = 0);
     bool isDeleted(const QString &type, const QString &id);
+    qint64 deletionSequence(const QString &type, const QString &id);
     bool eraseCard(const QString &id, qint64 seq = 0);
     bool eraseDeck(const QString &id, qint64 seq = 0);
     bool validDeckParent(const QString &id, const QString &parentId);
@@ -142,6 +155,8 @@ private:
     bool applyRemoteEvent(const QVariantMap &event, qint64 seq, bool &applied);
     bool retryRemoteEvents();
     bool pendingEntity(const QString &type, const QString &id);
+    bool pendingRestore(const QString &type, const QString &id, bool authoritativeOnly = false);
+    bool applyDeckDelete(const QString &id, qint64 seq, bool &applied);
     qint64 entitySequence(const QString &type, const QString &id);
     bool recordSequence(const QString &type, const QString &id, qint64 seq);
     bool eventEffects(const QVariantMap &event, qint64 seq, bool executeEffects, bool &applied);

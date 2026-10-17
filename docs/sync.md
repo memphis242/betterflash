@@ -93,9 +93,22 @@ without this field preserves a stored baseline only for the same attached
 audio asset; it never marks changed text as confirmed. An explicit empty
 object clears the baselines, leaving attached recordings unverified.
 
-New collection backups use version 4 for narration text baselines and audio media.
-The application still imports version 2 and 3 backups. Provider credentials
+New collection backups use version 5 for deck checkpoints, including historical
+image and narration assets. Narration text baselines remain included. The
+application still imports version 2, 3, and 4 backups. Provider credentials
 remain excluded from every backup version.
+
+Checkpoint history is local to a collection and travels in portable backups;
+it is not uploaded as sync history. Restoring a checkpoint emits deck/card
+content mutations in the same transaction as the restoration and its recovery
+checkpoint. An explicit `restore: true` flag on an upsert authorizes bringing
+back a deleted deck or card. Ordinary upserts retain deletion protection. All
+clients should be upgraded before syncing checkpoint restores; older clients
+ignore the flag and keep deleted records deleted. Checkpoint restoration does
+not rewind review history or retained variant schedules. Newly created variant
+identifiers are explicit in `freshVariantIds`; ordinary upserts cannot set this
+field. Restore dependency events recreate missing ancestor folders without
+overwriting live ancestor metadata. See [deck checkpoints](checkpoints.md).
 
 ## Conflict behavior and scope
 

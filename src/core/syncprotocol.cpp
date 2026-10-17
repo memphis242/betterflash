@@ -28,6 +28,21 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
         ||json(event).toUtf8().size()>model::maxSyncEventBytes) {detail="Sync event envelope is invalid or exceeds its size limit.";return false;}
     const QString type=event.value("type").toString();
     const QVariantMap payload=object(event,"payload");
+    if (payload.contains("restore")
+        && ((type != QStringLiteral("deck.upsert") && type != QStringLiteral("card.upsert"))
+            || payload.value("restore").metaType().id() != QMetaType::Bool)) {
+        detail="Restore intent must be a boolean on a deck or card upsert."; return false;
+    }
+    if (payload.contains("freshVariantIds")
+        && (type != QStringLiteral("card.upsert") || !payload.value("restore").toBool()
+            || payload.value("freshVariantIds").metaType().id() != QMetaType::QVariantList)) {
+        detail="Fresh variant identifiers belong only to an explicit card restore."; return false;
+    }
+    if (payload.contains("restoreDependency")
+        && (type != QStringLiteral("deck.upsert") || !payload.value("restore").toBool()
+            || payload.value("restoreDependency").metaType().id() != QMetaType::Bool)) {
+        detail="A restore dependency must be a boolean on an explicit deck restore."; return false;
+    }
     if (type==QStringLiteral("deck.upsert")) {
         const auto record=model::deckFromMap(object(payload,"deck"));
         if (!record) {detail=record.error();return false;}return true;
@@ -48,6 +63,21 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             if (!schedule) {detail=schedule.error();return false;}
             if (schedule->cardId!=record->id||!expected.contains(schedule->key)||keys.contains(schedule->key)||ids.contains(schedule->id)) {detail="Variant source or key is duplicated or invalid.";return false;}
             keys.insert(schedule->key);ids.insert(schedule->id);
+        }
+        if (payload.value("restore").toBool()) {
+            if (payload.value("freshVariantIds").metaType().id()!=QMetaType::QVariantList) {
+                detail="A card restore must identify its newly created review variants."; return false;
+            }
+            const QVariantList fresh = payload.value("freshVariantIds").toList();
+            if (fresh.size()>variants.size()) {detail="A card restore has too many fresh variant identifiers.";return false;}
+            QSet<QString> seen;
+            for (const QVariant &value : fresh) {
+                const QString id=value.toString();
+                if (value.metaType().id()!=QMetaType::QString||!ids.contains(id)||seen.contains(id)) {
+                    detail="Fresh variant identifiers must be unique identifiers from this card's variants.";return false;
+                }
+                seen.insert(id);
+            }
         }
         return true;
     }

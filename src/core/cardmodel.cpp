@@ -1,8 +1,10 @@
 #include "cardmodel.h"
 #include "mediabackup.h"
+#include "deckcheckpoints.h"
 
 #include <QCryptographicHash>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUuid>
@@ -328,12 +330,37 @@ std::expected<struct Review, QString> reviewFromMap(const QVariantMap &m)
     }
     return Review{m.value("id").toString(),m.value("cardId").toString(),m.value("variantId").toString(),m.value("deckName").toString(),m.value("grade").toInt(),m.value("recallFraction").toDouble(),m.value("responseSeconds").toDouble(),*reviewed,*due,sessionId,sessionDeckName,sessionStartedAt};
 }
+std::expected<QVariantMap, QString> checkpointFromMap(const QVariantMap &value)
+{
+    if (!validUuid(value.value("id").toString()) || !validUuid(value.value("deckId").toString())
+        || !text(value,"createdAt",40,true) || !text(value,"note",checkpoints::maxNoteLength)
+        || !text(value,"summary",checkpoints::maxSummaryLength)
+        || value.value("snapshot").metaType().id() != QMetaType::QVariantMap
+        || value.value("changes").metaType().id() != QMetaType::QVariantMap)
+        return std::unexpected(QStringLiteral("Checkpoint metadata is invalid or exceeds its limits."));
+    const auto createdAt = utcInstant(value.value("createdAt").toString());
+    if (!createdAt) return std::unexpected(createdAt.error());
+    const auto snapshot = checkpoints::validateSnapshot(value.value("snapshot").toMap());
+    if (!snapshot) return std::unexpected(snapshot.error());
+    if (snapshot->rootId != value.value("deckId").toString())
+        return std::unexpected(QStringLiteral("Checkpoint root does not match its deck identifier."));
+    const QVariantMap changes = value.value("changes").toMap();
+    if (QJsonDocument(QJsonObject::fromVariantMap(changes)).toJson(QJsonDocument::Compact).size() > checkpoints::maxSnapshotBytes)
+        return std::unexpected(QStringLiteral("Checkpoint changes exceed the 64 MiB limit."));
+    const auto validChanges = checkpoints::validateChanges(changes);
+    if (!validChanges) return std::unexpected(validChanges.error());
+    return QVariantMap{{"id",value.value("id")},{"deckId",value.value("deckId")},
+        {"createdAt",*createdAt},{"note",value.value("note")},{"summary",value.value("summary")},
+        {"snapshot",checkpoints::snapshotMap(*snapshot)},{"changes",changes}};
+}
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {
     const int version = object.value("version").toInt();
-    if (version < 2 || version > 4 || !object.value("decks").isArray()
+    if (version < 2 || version > 5 || !object.value("decks").isArray()
         || !object.value("cards").isArray() || !object.value("variants").isArray() || !object.value("history").isArray())
-        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, or 4 collection with decks, cards, variants, and history arrays."));
+        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, 4, or 5 collection with decks, cards, variants, and history arrays."));
+    if (object.contains("checkpoints") && (version != 5 || !object.value("checkpoints").isArray()))
+        return std::unexpected(QStringLiteral("Checkpoint entries require a version 5 collection and an array."));
     int count = 0;
     for (const QString &key : {QStringLiteral("decks"),QStringLiteral("cards"),QStringLiteral("variants"),QStringLiteral("history")}) {
         count += object.value(key).toArray().size();
@@ -416,11 +443,32 @@ std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &
     }
     if (object.contains("media")&&!object.value("media").isArray())
         return std::unexpected(QStringLiteral("Media entries must be an array."));
-    if (count+result.deleted.size()+object.value("media").toArray().size()>maxCollectionRecords)
+    if (count+result.deleted.size()+object.value("media").toArray().size()+object.value("checkpoints").toArray().size()>maxCollectionRecords)
         return std::unexpected(QStringLiteral("Collection exceeds 100000 records."));
+    QList<struct Card> mediaCards = result.cards;
+    QSet<QString> checkpointIds;
+    qint64 checkpointRecords = 0;
+    for (const QJsonValue &value : object.value("checkpoints").toArray()) {
+        if (!value.isObject()) return std::unexpected(QStringLiteral("Checkpoint entry must be an object."));
+        const auto record = checkpointFromMap(value.toObject().toVariantMap());
+        if (!record) return std::unexpected(record.error());
+        const QString id = record->value("id").toString();
+        if (checkpointIds.contains(id)) return std::unexpected(QStringLiteral("Duplicate checkpoint identifier."));
+        const QVariantMap snapshot = record->value("snapshot").toMap();
+        checkpointRecords += snapshot.value("cards").toList().size() + snapshot.value("decks").toList().size();
+        if (checkpointRecords > maxCollectionRecords)
+            return std::unexpected(QStringLiteral("Checkpoint snapshots exceed 100000 stored deck and card records."));
+        for (const QVariant &cardValue : snapshot.value("cards").toList()) {
+            const auto card = cardFromMap(cardValue.toMap());
+            assert(card.has_value());
+            mediaCards.append(*card);
+        }
+        checkpointIds.insert(id);
+        result.checkpoints.append(*record);
+    }
     const auto media=mediaFromJson(object.value("media").toArray());
     if (!media) return std::unexpected(media.error());
-    const auto references=mediaReferences(result.cards);
+    const auto references=mediaReferences(mediaCards);
     if (!references) return std::unexpected(references.error());
     QSet<QString> mediaNames;for (const struct MediaAttachment &image:*media) mediaNames.insert(image.name);
     for (const QString &name:*references)

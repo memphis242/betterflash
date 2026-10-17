@@ -33,6 +33,10 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "refresh":
+            c.arc(9, 9, 6, -0.5, 4.8)
+            c.moveTo(9.5, 2.2); c.lineTo(10, 5.6); c.lineTo(6.6, 5.2)
+            break
         case "help":
             c.moveTo(5.5, 6)
             c.bezierCurveTo(5.5, 1.5, 13, 1.5, 13, 6)
