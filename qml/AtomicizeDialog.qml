@@ -184,7 +184,7 @@ Dialog {
             Layout.fillWidth: true
             enabled: !dialog.applying
             onCurrentIndexChanged: dialog.loadDraft()
-            TabButton {
+            AppTabButton {
                 text: "Source"
                 font.pixelSize: 12
                 padding: 5
@@ -192,7 +192,7 @@ Dialog {
             }
             Repeater {
                 model: dialog.drafts.length
-                delegate: TabButton {
+                delegate: AppTabButton {
                     required property int index
                     text: "Card " + (index + 1)
                     font.pixelSize: 12

@@ -20,9 +20,9 @@ QtObject {
     readonly property color accent: dark ? "#e7a17d" : "#a34b34"
     readonly property color onAccent: dark ? "#211722" : "#fffaf1"
     readonly property color accentSoft: dark ? "#563b3f" : "#f1d9cd"
-    readonly property color editorTabActive: dark ? "#c6b2e3" : "#e5d4eb"
+    readonly property color editorTabActive: dark ? "#c6b2e3" : "#c9b2d3"
     readonly property color editorTabActiveInk: dark ? "#211722" : "#322832"
-    readonly property color editorTabInactive: dark ? "#3b2e3a" : "#ede5dc"
+    readonly property color editorTabInactive: dark ? "#3b2e3a" : "#f0e9e4"
     readonly property color editorField: dark ? "#241c28" : "#fffdf8"
     readonly property color comboFill: editorField
     readonly property color comboHover: dark ? "#463144" : "#f7eee1"

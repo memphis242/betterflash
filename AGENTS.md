@@ -38,6 +38,11 @@ automatic agent co-author attribution, or a remote session label.
 
 ## GUI interaction preferences
 
+- Selected tabs stand out before hover: bold text and a stronger background,
+  darker in the light theme and lighter in the dark theme. Inactive tabs use
+  muted text and a faded background. Use AppTabButton for new standard tabs
+  rather than inheriting the platform's default selection colors.
+
 - Editable text fields are visibly bounded in their idle state, with a
   persistent label, distinct background or border, internal padding, and an
   I-beam cursor. Focus strengthens the outline; read-only states remain legible

@@ -357,21 +357,21 @@ Dialog {
                 id: detailsTabs
                 visible: !!dialog.preview.token
                 Layout.fillWidth: true
-                TabButton {
+                AppTabButton {
                     text: dialog.narrow ? "Cards" : "Cards (" + (dialog.preview.changes || []).length + ")"
                     width: dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * (dialog.restoreMode ? 2 : 1)) / (dialog.restoreMode ? 3 : 2) : implicitWidth + 20
                     font.pixelSize: dialog.narrow ? 12 : 14
                     ToolTip.visible: hovered && dialog.narrow
                     ToolTip.text: "Card changes: " + (dialog.preview.changes || []).length
                 }
-                TabButton {
+                AppTabButton {
                     text: dialog.narrow ? "Decks" : "Decks (" + (dialog.preview.deckChanges || []).length + ")"
                     width: dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * (dialog.restoreMode ? 2 : 1)) / (dialog.restoreMode ? 3 : 2) : implicitWidth + 20
                     font.pixelSize: dialog.narrow ? 12 : 14
                     ToolTip.visible: hovered && dialog.narrow
                     ToolTip.text: "Deck changes: " + (dialog.preview.deckChanges || []).length
                 }
-                TabButton {
+                AppTabButton {
                     visible: dialog.restoreMode
                     text: dialog.narrow ? "Details" : "Checkpoint details"
                     width: visible ? dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * 2) / 3 : implicitWidth + 20 : 0
