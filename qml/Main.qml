@@ -58,12 +58,15 @@ ApplicationWindow {
     property var knownDeckIds: []
     property int imageCursor: 0
     property int editorSession: 0
-    property bool narrationSavePending: false
-    property string pendingNarrationCardId: ""
-    property int pendingNarrationSession: -1
-    property var pendingNarrationFields: ({})
+    property bool editorSavePending: false
+    property string editorSaveCardId: ""
+    property int editorSaveSession: -1
+    property var editorSaveFields: ({})
+    property string editorSaveDestination: ""
+    property string editorSaveRequestId: ""
+    property int editorSaveSerial: 0
     readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
-                                           && !narrationFieldsMatch(editingCard(), currentCardDraft())
+                                           && !cardFieldsMatch(editingCard(), currentCardDraft())
     readonly property var editorNarrationWarnings: {
         if (!editingCardId || !cardDialog.visible || !cardNarrationController)
             return {hasStale: false, front: false, back: false, count: 0}
@@ -405,6 +408,8 @@ ApplicationWindow {
         deckDialog.open()
     }
     function openCardEditor(id) {
+        if (editorSavePending)
+            return
         if (!app.decks.length) {
             openDeckEditor("")
             return
@@ -417,11 +422,17 @@ ApplicationWindow {
         if (target.length > 0)
             narrationDialog.openFor(target)
     }
-    function clearPendingNarration() {
-        narrationSavePending = false
-        pendingNarrationCardId = ""
-        pendingNarrationSession = -1
-        pendingNarrationFields = ({})
+    function clearPendingEditorSave() {
+        editorSavePending = false
+        editorSaveCardId = ""
+        editorSaveSession = -1
+        editorSaveFields = ({})
+        editorSaveDestination = ""
+        editorSaveRequestId = ""
+    }
+    function failEditorSave(code, message) {
+        clearPendingEditorSave()
+        localCardError = code + ": " + message
     }
     function currentCardDraft() {
         const parts = splitSource(editorSource.text)
@@ -456,53 +467,90 @@ ApplicationWindow {
         }
         return draft
     }
-    function narrationFieldsMatch(card, fields) {
+    function cardFieldsMatch(card, fields) {
         return card.id && card.deckId === fields.deckId && card.kind === fields.kind
                 && card.front === fields.front && card.back === fields.back
                 && (card.tags || "") === fields.tags && Number(card.pointCount || 1) === Number(fields.points)
     }
-    function maybeOpenPendingNarration() {
-        if (!narrationSavePending || !cardDialog.visible
-                || pendingNarrationSession !== editorSession || pendingNarrationCardId !== editingCardId)
+    function finishEditorSave(cardId, requestId, success) {
+        if (!editorSavePending || requestId !== editorSaveRequestId)
             return
-        if (app.busy)
+        if (!cardDialog.visible || editorSaveSession !== editorSession || editorSaveCardId !== editingCardId) {
+            clearPendingEditorSave()
             return
+        }
+        if (!success) {
+            failEditorSave(app.lastError.code || "CARD_SAVE", app.lastError.message
+                           || "Could not save this card. Check the card fields and storage, then try again.")
+            return
+        }
+        if (!cardId || (editorSaveCardId && cardId !== editorSaveCardId)) {
+            failEditorSave("CARD_SAVE_TARGET", "The saved card could not be identified. Refresh the collection before saving again.")
+            return
+        }
+        if (!editorSaveCardId)
+            editingCardId = cardId
         if (app.lastError.message) {
-            clearPendingNarration()
+            failEditorSave(app.lastError.code || "CARD_SAVE_REFRESH", app.lastError.message)
             return
         }
-        const saved = cardById(pendingNarrationCardId)
-        if (!narrationFieldsMatch(saved, pendingNarrationFields)) {
-            clearPendingNarration()
-            localCardError = "CARD_SAVE: The saved card did not match the narration request. Try again."
+        const saved = cardById(cardId)
+        if (!saved.id) {
+            failEditorSave("CARD_SAVE_REFRESH", "The saved card is unavailable in the refreshed collection. Refresh the collection before trying again.")
             return
         }
-        const target = pendingNarrationCardId
-        clearPendingNarration()
-        openCardNarration(target)
+        if (!cardFieldsMatch(saved, editorSaveFields)) {
+            failEditorSave("CARD_SAVE_CHANGED", "The saved card differs from this draft. Review the card fields and try saving again.")
+            return
+        }
+        const destination = editorSaveDestination
+        const deckId = editorSaveFields.deckId
+        clearPendingEditorSave()
+        if (destination === "narration") {
+            openCardNarration(cardId)
+            return
+        }
+        if (app.selectedDeckId && deckId !== app.selectedDeckId)
+            setDeck(deckId, true)
+        pickCard(cardId)
+        cardDialog.close()
+        openSelectedDetail()
+    }
+    function beginEditorSave(submission, destination) {
+        if (!cardDialog.visible || editorSavePending || app.busy || media.busy)
+            return
+        const target = editingCardId
+        const requestId = "card-editor-" + Date.now() + "-" + (++editorSaveSerial)
+        const fields = Object.freeze({
+            deckId: submission.deckId, kind: submission.kind,
+            front: submission.front, back: submission.back,
+            tags: submission.tags, points: submission.points
+        })
+        localCardError = ""
+        editorSaveCardId = target
+        editorSaveSession = editorSession
+        editorSaveFields = fields
+        editorSaveDestination = destination
+        editorSaveRequestId = requestId
+        editorSavePending = true
+        const queued = app.saveCard(target, fields.deckId, fields.kind, fields.front, fields.back,
+                                   fields.tags, fields.points, requestId)
+        if (!queued && editorSaveRequestId === requestId)
+            failEditorSave(app.lastError.code || "CARD_SAVE_QUEUE", app.lastError.message
+                           || "Could not queue this save. Restart the application and try again.")
     }
     function requestCardNarration() {
-        if (!editingCardId || narrationSavePending || app.busy || media.busy)
+        if (!editingCardId || editorSavePending || app.busy || media.busy)
             return
         const submission = cardSubmission()
         if (!submission)
             return
         const stored = editingCard()
-        if (narrationFieldsMatch(stored, submission)) {
+        if (cardFieldsMatch(stored, submission)) {
             openCardNarration(editingCardId)
             return
         }
-        const target = editingCardId
-        const session = editorSession
-        pendingNarrationCardId = target
-        pendingNarrationSession = session
-        pendingNarrationFields = submission
-        narrationSavePending = true
-        if (!app.saveCard(target, submission.deckId, submission.kind, submission.front, submission.back, submission.tags, submission.points)) {
-            clearPendingNarration()
-            return
-        }
-        maybeOpenPendingNarration()
+        beginEditorSave(submission, "narration")
     }
     function openMoveCard(id) {
         if (!cardById(id).id)
@@ -599,16 +647,12 @@ ApplicationWindow {
         imageDialog.open()
     }
     function submitCard() {
-        if (narrationSavePending)
+        if (editorSavePending || app.busy || media.busy)
             return
         const submission = cardSubmission()
         if (!submission)
             return
-        if (app.saveCard(editingCardId, submission.deckId, submission.kind, submission.front, submission.back, submission.tags, submission.points)) {
-            if (submission.deckId !== app.selectedDeckId)
-                setDeck(submission.deckId)
-            cardDialog.close()
-        }
+        beginEditorSave(submission, "detail")
     }
     function submitDeck() {
         if (!deckName.text.trim()) {
@@ -666,7 +710,7 @@ ApplicationWindow {
     }
     function shortcutAllowed(action) {
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
-            return cardDialog.visible && !narrationSavePending && !narrationDialog.visible
+            return cardDialog.visible && !editorSavePending && !narrationDialog.visible
                     && !imageDialog.visible && !errorDialog.visible
                     && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
@@ -1244,6 +1288,7 @@ ApplicationWindow {
         id: cardDialog
         objectName: "cardDialog"
         title: editingCardId ? "Edit card" : "New card"
+        closePolicy: editorSavePending ? Popup.NoAutoClose : Popup.CloseOnEscape
         width: Math.min(1120, window.width - 2 * window.gutter)
         height: Math.min(800, window.height - 2 * window.gutter)
         padding: cardDialog.width < 650 ? 14 : 24
@@ -1274,24 +1319,25 @@ ApplicationWindow {
                     objectName: "cardNarrationButton"
                     glyph: "mic"
                     visible: !!editingCardId
-                    text: narrationSavePending ? "Saving card..." : editorDraftDirty
+                    text: editorSavePending ? "Saving card..." : editorDraftDirty
                           ? (window.width < 600 ? "Save + narrate" : "Save and record narration")
                           : (window.width < 600 ? "Narrate" : "Record narration")
-                    hint: narrationSavePending ? "Saving card before opening narration"
+                    hint: editorSavePending ? (editorSaveDestination === "narration"
+                          ? "Saving card before opening narration" : "Saving card before opening detail")
                           : editorDraftDirty ? "Save this card, then record narration"
                           : "Record narration for this card"
-                    enabled: !narrationSavePending && !app.busy && !media.busy
+                    enabled: !editorSavePending && !app.busy && !media.busy
                     onClicked: requestCardNarration()
                 }
                 NarrationWarning {
                     shown: window.editorNarrationWarnings.hasStale
                     reason: "A narration may no longer match the edited card text. Save the card, then confirm each affected side in Record narration."
                 }
-                GlyphButton { glyph: "close"; hint: "Close card editor"; enabled: !narrationSavePending; onClicked: cardDialog.close() }
+                GlyphButton { glyph: "close"; hint: "Close card editor"; enabled: !editorSavePending; onClicked: cardDialog.close() }
             }
         }
         onOpened: {
-            clearPendingNarration()
+            clearPendingEditorSave()
             window.editorSession += 1
             const c = editingCard()
             localCardError = ""
@@ -1307,10 +1353,10 @@ ApplicationWindow {
         }
         onClosed: {
             window.imageSession = -1
-            clearPendingNarration()
+            clearPendingEditorSave()
         }
         contentItem: ColumnLayout {
-            enabled: !narrationSavePending
+            enabled: !editorSavePending
             spacing: 10
             Instantiator {
                 model: ["editorSplit", "editorCloze", "editorImage", "saveCard"]
@@ -1641,15 +1687,15 @@ ApplicationWindow {
             }
             AppButton {
                 text: "Cancel"
-                enabled: !narrationSavePending
+                enabled: !editorSavePending
                 onClicked: cardDialog.close()
             }
             AppButton {
                 objectName: "saveCard"
-                text: "Save card"
+                text: editorSavePending ? "Saving card..." : "Save card"
                 primary: true
                 hint: shortcuts.bindings.saveCard
-                enabled: !media.busy && !narrationSavePending && !app.busy
+                enabled: !media.busy && !editorSavePending && !app.busy
                 onClicked: submitCard()
             }
         }
@@ -2428,16 +2474,13 @@ ApplicationWindow {
                 window.selectedCardId = ""
                 window.detailOpen = false
             }
-            Qt.callLater(function() { window.maybeOpenPendingNarration() })
         }
-        function onBusyChanged() {
-            Qt.callLater(function() { window.maybeOpenPendingNarration() })
+        function onCardSaved(cardId, requestId, success) {
+            window.finishEditorSave(cardId, requestId, success)
         }
         function onLastErrorChanged() {
             if (app.lastError.message) {
                 window.pendingDeckName = ""
-                if (window.narrationSavePending)
-                    window.clearPendingNarration()
                 window.showError(app.lastError.code || "APP_ERROR", app.lastError.message, app.lastError.detail || app.lastError.details || "")
             }
         }

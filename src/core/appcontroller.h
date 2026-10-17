@@ -76,7 +76,7 @@ public:
     Q_INVOKABLE void deleteDeck(const QString &id);
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,
-                              int pointCount = 1);
+                              int pointCount = 1, const QString &requestId = {});
     Q_INVOKABLE bool setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
                                       const QString &mediaName, const QString &requestId = {}, const QString &fingerprint = {});
     Q_INVOKABLE bool confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
@@ -126,6 +126,7 @@ signals:
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);
 

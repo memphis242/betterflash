@@ -680,11 +680,14 @@ void DatabaseWorker::deleteDeck(const QString &id)
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck deleted");
 }
-void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points)
+void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
-    if (!ready()) return;
-    const auto previous = id.isEmpty() ? std::optional<struct model::Card>{} : card(id);
     const QString recordId = id.isEmpty() ? model::uuid() : id;
+    if (!ready()) { emit cardSaved(recordId,requestId,false); return; }
+    const auto failRequest = [&] (const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code,message,detail); emit cardSaved(recordId,requestId,false);
+    };
+    const auto previous = id.isEmpty() ? std::optional<struct model::Card>{} : card(id);
     const struct model::Card draft{recordId,deckId,kind,front,back,tags,points,previous?previous->narrations:QVariantMap{},previous?previous->narrationFingerprints:QVariantMap{}};
     QVariantMap narrations;
     QVariantMap fingerprints;
@@ -699,10 +702,10 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
     }
     const struct model::Card record{recordId,deckId,kind,front,back,tags,points,narrations,fingerprints};
     const auto valid=model::cardFromMap(model::toMap(record));
-    if (!valid) {fail(kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD","Could not save the card. Correct the card fields.",valid.error());return;}
-    if (!validateMedia(record)) {fail("CARD_MEDIA","Could not save the card images. Restore missing images, insert them again, or split cards containing more than 64 MiB of images.",m_sqlDetail);return;}
-    if (!deck(deckId) || isDeleted("deck",deckId)) {fail("DECK_NOT_FOUND","Choose an existing deck for this card.",m_sqlDetail);return;}
-    if (!id.isEmpty() && (!card(id) || isDeleted("card",id))) {fail("CARD_NOT_FOUND","This card no longer exists. Refresh the collection.",m_sqlDetail);return;}
+    if (!valid) {failRequest(kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD","Could not save the card. Correct the card fields.",valid.error());return;}
+    if (!validateMedia(record)) {failRequest("CARD_MEDIA","Could not save the card images. Restore missing images, insert them again, or split cards containing more than 64 MiB of images.",m_sqlDetail);return;}
+    if (!deck(deckId) || isDeleted("deck",deckId)) {failRequest("DECK_NOT_FOUND","Choose an existing deck for this card.",m_sqlDetail);return;}
+    if (!id.isEmpty() && (!card(id) || isDeleted("card",id))) {failRequest("CARD_NOT_FOUND","This card no longer exists. Refresh the collection.",m_sqlDetail);return;}
     QList<struct model::Variant> schedules;
     const QList<struct model::Variant> existing=cardVariants(record.id);
     for (const QString &key : *model::variantKeys(record)) {
@@ -710,9 +713,10 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
         const auto found=std::find_if(existing.begin(),existing.end(),[&](const struct model::Variant &v){return v.id==variantId;});
         schedules.append(found==existing.end()?model::Variant{variantId,record.id,key,model::nowUtc()}:*found);
     }
-    if (!mutate([&]{return upsertCard(record)&&replaceVariants(record,schedules)&&enqueue("card.upsert",cardPayload(record));})) {fail("CARD_SAVE","Could not save the card. Check storage and try again.",m_sqlDetail);return;}
+    if (!mutate([&]{return upsertCard(record)&&replaceVariants(record,schedules)&&enqueue("card.upsert",cardPayload(record));})) {failRequest("CARD_SAVE","Could not save the card. Check storage and try again.",m_sqlDetail);return;}
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card saved");
+    emit cardSaved(recordId,requestId,true);
 }
 void DatabaseWorker::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
 {
