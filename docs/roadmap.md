@@ -1,5 +1,46 @@
 # Roadmap
 
+## Agreed sequence
+
+Recorded 2026-10-17:
+
+1. Address the deferred desktop work below and refine the application.
+2. Spend a week using the desktop application and make any needed refinements.
+3. When requested, add thorough behavioral tests to preserve the accepted
+   baseline and conduct focused bug hunts. Testing remains paused until then.
+4. Complete Android, then Windows, then iOS support.
+
+The desktop list is an inventory, not an instruction to implement every item
+at once. Feature details and priorities remain to be agreed as work resumes.
+
+## Deferred desktop work
+
+- **Deck checkpoints and restore:** replace the inactive menu entries with a
+  simple versioning workflow. Define what is captured, how changes are compared,
+  and what restoring does to cards, media, hierarchy, and review state.
+- **Undo and returning to context:** design undo for card edits and review
+  actions, including its scope and persistence. Preserve selection, scroll,
+  zoom, filters, and pane state across navigation. Existing rating corrections
+  and timeline return buttons do not constitute general undo.
+- **Weak-area study guidance:** define an explainable ranking using recall,
+  difficulty, timing, and trends, with appropriate treatment of sparse history
+  and independently scheduled variants. Optional language-model assistance can
+  help with explanations and independent study. See
+  [study support ideas](study-support-ideas.md).
+- **Generate like this:** propose analogous problem cards, with a review and
+  answer-verification workflow before saving. See the same study-support notes.
+- **Learning statistics:** refine the provisional library/deck learning score,
+  coverage, and consistency measures; account for unreviewed material rather
+  than scoring only the cards already reviewed. See
+  [the provisional learning overview](learning-overview.md).
+- **Typography:** compare proportional and monospace text across the interface.
+  Inline code already has a distinct background. See
+  [GUI follow-ups](gui-follow-ups.md).
+- **Voice and model refinement:** finish the hands-free behavior, model/hardware
+  refinements, and usage-help ideas described below. Summaries, atomicization,
+  transcript correction, and custom narration already exist; refine their real
+  use rather than treating them as unimplemented features.
+
 ## Android completion
 
 - Build with a real Qt Android kit, SDK, NDK, JDK, and arm64 OpenSSL package.
@@ -19,6 +60,13 @@ for Linux-only integrations such as Secret Service, `/proc` memory detection,
 and the current local speech packages. The Windows build should be treated as a
 separate compatibility milestone after Android device verification.
 
+## iOS support
+
+iOS follows Windows. It is a future port, with no completed build or device
+verification. Plan the Apple development toolchain, signing and packaging,
+credential storage, model/runtime compatibility, microphone permissions, and
+audio lifecycle behavior when that milestone begins.
+
 ## Later local-model work
 
 - Add more hardware profiles and memory telemetry after testing on target
@@ -29,8 +77,9 @@ separate compatibility milestone after Android device verification.
 
 ## Future hands-free voice review
 
-- Add a fully hands-free mode with a wake phrase and clear controls for false
-  activations, background noise, microphone device changes, and lifecycle state.
+- Refine the existing always-on review mode and wake-word handling into a
+  complete hands-free experience, with clear controls for false activations,
+  background noise, microphone device changes, and lifecycle state.
 - Define how hands-free voice review behaves across application navigation and
   other screens before enabling it outside review.
 
@@ -45,9 +94,22 @@ separate compatibility milestone after Android device verification.
   help prompts. Guidance and any future user-requested actions need separate
   interaction design; this feature is a to-do, not an implemented help panel.
 
-## Narration checks when testing resumes
+## Baseline verification when testing resumes
 
+- After the week of use and any refinements, add behavioral coverage and conduct
+  bug hunts across the accepted desktop baseline, including persistence,
+  scheduling, search, synchronization, model integration, and voice lifecycle.
+  Prefer behavior over incidental text or layout assertions.
 - Cover edits during recording and saving, confirmation rejection after text
   or audio changes, and confirmation followed by another edit.
 - Cover legacy sync fields versus explicit clears, schema 5 to 6 migration,
   and version 4 backup round trips with per-side baselines.
+- Cover five-minute narration capture, playback and transfer, and request-scoped
+  editor saves returning to the correct card only after persistence succeeds.
+
+## Separate server work
+
+VPS deployment details remain deferred. HTTPS hosting, separate accounts, log
+compaction, client capability negotiation, and replaying concurrent reviews into
+a combined schedule are distinct infrastructure decisions. See
+[the sync protocol](sync.md).
