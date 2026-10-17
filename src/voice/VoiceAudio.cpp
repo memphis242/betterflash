@@ -179,11 +179,11 @@ QByteArray voiceConvertPcm(const QByteArray &source, const QAudioFormat &from, c
         || from.sampleRate() < 8000 || from.sampleRate() > 192000
         || to.sampleRate() < 8000 || to.sampleRate() > 192000
         || to.bytesPerFrame() <= 0 || from.bytesPerFrame() <= 0
-        || source.size() > 64 * 1024 * 1024 || source.size() % from.bytesPerFrame() != 0) return {};
+        || source.size() > betterflash::audio::MaxConversionBytes || source.size() % from.bytesPerFrame() != 0) return {};
     const qint64 sourceFrames = source.size() / from.bytesPerFrame();
     const qint64 targetFrames = static_cast<qint64>(std::ceil(static_cast<double>(sourceFrames) * to.sampleRate() / from.sampleRate()));
     const qint64 bytes = targetFrames * to.bytesPerFrame();
-    if (sourceFrames <= 0 || bytes <= 0 || bytes > 64 * 1024 * 1024) return {};
+    if (sourceFrames <= 0 || bytes <= 0 || bytes > betterflash::audio::MaxConversionBytes) return {};
     QByteArray result(static_cast<qsizetype>(bytes), '\0');
     auto sampleAt = [&source, &from](const qint64 frame, const int channel) {
         qint16 sample = 0;

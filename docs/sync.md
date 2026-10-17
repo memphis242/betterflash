@@ -69,6 +69,8 @@ The sync protocol does not yet negotiate client capabilities. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Narration WAV files must contain nonempty, canonical 16 kHz mono signed 16-bit PCM audio of at most 5 minutes.
+Upgrade all clients and the server to the five-minute narration build before
+syncing recordings longer than 60 seconds; older builds reject those attachments.
 Upload referenced assets before sending a card event. A card and a received page
 can reference at most 64 unique media assets and 64 MiB of attached data. The server
 splits event pages at those bounds, and the client validates a page before fetching
