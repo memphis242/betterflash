@@ -38,6 +38,53 @@
 namespace {
 constexpr int kCurrentSttProfileVersion = 3;
 
+std::optional<QAudioFormat> narrationPlaybackFormat(const QByteArray &pcm, const QAudioDevice &device,
+    const QAudioFormat &preferred) {
+    Q_ASSERT(!pcm.isEmpty() && pcm.size() % 2 == 0);
+    const qint64 sourceFrames = pcm.size() / 2;
+    const auto fits = [sourceFrames](const QAudioFormat &format) {
+        if (!format.isValid() || format.bytesPerFrame() <= 0 || format.sampleRate() < 8000 || format.sampleRate() > 192000
+            || format.channelCount() < 1 || format.channelCount() > 8) return false;
+        switch (format.sampleFormat()) {
+        case QAudioFormat::UInt8:
+        case QAudioFormat::Int16:
+        case QAudioFormat::Int32:
+        case QAudioFormat::Float:
+            break;
+        case QAudioFormat::Unknown:
+        case QAudioFormat::NSampleFormats:
+            return false;
+        }
+        const qint64 targetFrames = (sourceFrames * format.sampleRate() + betterflash::audio::CanonicalSampleRate - 1)
+            / betterflash::audio::CanonicalSampleRate;
+        return targetFrames > 0 && targetFrames <= betterflash::audio::MaxConversionBytes / format.bytesPerFrame()
+            && targetFrames * format.bytesPerFrame() <= betterflash::audio::MaxConversionBytes;
+    };
+    const auto supported = [&device, &fits](const QAudioFormat &format) {
+        return fits(format) && device.isFormatSupported(format);
+    };
+    if (supported(preferred)) return preferred;
+
+    const QList<int> channels = {preferred.channelCount(), 2, 1};
+    const QList<int> rates = {preferred.sampleRate(), 48000, 44100, 32000, 24000, 22050, 16000, 12000, 8000};
+    const QList<QAudioFormat::SampleFormat> sampleFormats = {
+        QAudioFormat::Int16, QAudioFormat::Float, QAudioFormat::Int32, QAudioFormat::UInt8};
+    for (const QAudioFormat::SampleFormat sampleFormat : sampleFormats) {
+        for (const int channelCount : channels) {
+            if (channelCount < 1 || channelCount > 8) continue;
+            for (const int sampleRate : rates) {
+                if (sampleRate < 8000 || sampleRate > 192000) continue;
+                QAudioFormat candidate;
+                candidate.setSampleRate(sampleRate);
+                candidate.setChannelCount(channelCount);
+                candidate.setSampleFormat(sampleFormat);
+                if (supported(candidate)) return candidate;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 QString managedSttModelDirectory(const QString &root, const QString &profile) {
     Q_ASSERT(profile == QStringLiteral("small-en") || profile == QStringLiteral("balanced-en") || profile == QStringLiteral("whisper-turbo"));
     if (profile == QStringLiteral("whisper-turbo")) return QDir(root).filePath(QStringLiteral("whisper/ggml-large-v3-turbo-q8_0.bin"));
@@ -1191,11 +1238,16 @@ bool VoiceController::narrationCaptureReady() const {
 }
 
 bool VoiceController::playRecordedPcm(const QByteArray &pcm) {
-    if (m_modelTestBusy || pcm.isEmpty() || pcm.size() % 2 != 0 || pcm.size() > VoiceUtteranceBuffer::MaxBytes) return false;
+    if (m_modelTestBusy || pcm.isEmpty() || pcm.size() % 2 != 0 || pcm.size() > betterflash::audio::NarrationMaxPcmBytes) return false;
     const QAudioDevice device = QMediaDevices::defaultAudioOutput();
-    const QAudioFormat format = device.preferredFormat();
-    if (device.isNull() || !format.isValid() || !device.isFormatSupported(format)) {
+    const QAudioFormat preferred = device.preferredFormat();
+    if (device.isNull() || !preferred.isValid()) {
         setError(QStringLiteral("NARRATION_OUTPUT_UNAVAILABLE"), QStringLiteral("Connect an audio output and select it in system sound settings."));
+        return false;
+    }
+    const auto format = narrationPlaybackFormat(pcm, device, preferred);
+    if (!format) {
+        setError(QStringLiteral("NARRATION_OUTPUT_UNAVAILABLE"), QStringLiteral("The selected audio output has no supported format for this narration."));
         return false;
     }
     cancelTranscriptCorrection();
@@ -1203,7 +1255,7 @@ bool VoiceController::playRecordedPcm(const QByteArray &pcm) {
     m_echoTail = false;
     m_recordedPlayback = true;
     m_pendingRecordedPcm = pcm;
-    m_playbackFormat = format;
+    m_playbackFormat = *format;
     m_ttsStarted = false;
     m_ttsIssued = false;
     setSpeakingState(true);

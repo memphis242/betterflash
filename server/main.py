@@ -25,6 +25,11 @@ BODY_LIMIT = 4 * 1024 * 1024
 EVENT_BYTES = 3 * 1024 * 1024
 RESPONSE_BYTES = 6 * 1024 * 1024
 MEDIA_LIMIT = 20 * 1024 * 1024
+NARRATION_SAMPLE_RATE = 16000
+NARRATION_CHANNELS = 1
+NARRATION_BYTES_PER_SAMPLE = 2
+NARRATION_MAX_SECONDS = 5 * 60
+NARRATION_MAX_PCM_BYTES = NARRATION_SAMPLE_RATE * NARRATION_CHANNELS * NARRATION_BYTES_PER_SAMPLE * NARRATION_MAX_SECONDS
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
@@ -274,13 +279,15 @@ def event_media(event):
 
 def valid_media_bytes(name, data):
     if name.endswith(".wav"):
-        if len(data) < 44 or len(data) > 44 + 60 * 16000 * 2 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        if len(data) < 44 or len(data) > 44 + NARRATION_MAX_PCM_BYTES or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
             return False
         u16 = lambda at: int.from_bytes(data[at:at + 2], "little")
         u32 = lambda at: int.from_bytes(data[at:at + 4], "little")
         return (u32(4) == len(data) - 8 and data[12:16] == b"fmt " and u32(16) == 16
-                and u16(20) == 1 and u16(22) == 1 and u32(24) == 16000 and u32(28) == 32000
-                and u16(32) == 2 and u16(34) == 16 and data[36:40] == b"data"
+                and u16(20) == 1 and u16(22) == NARRATION_CHANNELS and u32(24) == NARRATION_SAMPLE_RATE
+                and u32(28) == NARRATION_SAMPLE_RATE * NARRATION_CHANNELS * NARRATION_BYTES_PER_SAMPLE
+                and u16(32) == NARRATION_CHANNELS * NARRATION_BYTES_PER_SAMPLE and u16(34) == NARRATION_BYTES_PER_SAMPLE * 8
+                and data[36:40] == b"data"
                 and u32(40) == len(data) - 44 and u32(40) > 0 and u32(40) % 2 == 0)
     return True
 

@@ -111,7 +111,7 @@ Dialog {
         }
         Label {
             Layout.fillWidth: true
-            text: "Record up to 60 seconds for each side. A saved recording is used instead of automatic speech output for this card form."
+            text: "Record up to 5 minutes for each side. A saved recording is used instead of automatic speech output for this card form."
             color: Theme.inkMuted
             wrapMode: Text.Wrap
             font.pixelSize: 14
