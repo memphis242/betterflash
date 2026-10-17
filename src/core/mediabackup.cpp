@@ -1,4 +1,5 @@
 #include "mediabackup.h"
+#include "audiolimits.h"
 
 #include <QCryptographicHash>
 #include <QBuffer>
@@ -98,10 +99,10 @@ std::expected<void,QString> validateMediaImage(const QString &name,const QByteAr
 }
 std::expected<void,QString> validateNarrationWave(const QString &name,const QByteArray &bytes)
 {
-    constexpr qsizetype headerSize = 44;
-    constexpr qsizetype maxPcmBytes = 60 * 16000 * 2;
+    constexpr qsizetype headerSize = betterflash::audio::WavHeaderBytes;
+    constexpr qsizetype maxPcmBytes = betterflash::audio::NarrationMaxPcmBytes;
     if (!validNarrationMediaName(name) || bytes.size() < headerSize || bytes.size() > headerSize + maxPcmBytes || !matchingHash(name,bytes))
-        return std::unexpected(QStringLiteral("Narration %1 must be a content-addressed WAV of at most 60 seconds.").arg(name));
+        return std::unexpected(QStringLiteral("Narration %1 must be a content-addressed WAV of at most 5 minutes.").arg(name));
     const auto u16 = [&bytes](qsizetype at) -> quint16 {
         return quint16(quint8(bytes.at(at))) | (quint16(quint8(bytes.at(at + 1))) << 8);
     };
@@ -111,8 +112,11 @@ std::expected<void,QString> validateNarrationWave(const QString &name,const QByt
     };
     if (bytes.mid(0,4) != QByteArrayLiteral("RIFF") || bytes.mid(8,4) != QByteArrayLiteral("WAVE")
         || u32(4) != quint32(bytes.size() - 8) || bytes.mid(12,4) != QByteArrayLiteral("fmt ")
-        || u32(16) != 16 || u16(20) != 1 || u16(22) != 1 || u32(24) != 16000
-        || u32(28) != 32000 || u16(32) != 2 || u16(34) != 16 || bytes.mid(36,4) != QByteArrayLiteral("data")
+        || u32(16) != 16 || u16(20) != 1 || u16(22) != betterflash::audio::CanonicalChannels
+        || u32(24) != betterflash::audio::CanonicalSampleRate
+        || u32(28) != betterflash::audio::CanonicalSampleRate * betterflash::audio::CanonicalChannels * betterflash::audio::CanonicalBytesPerSample
+        || u16(32) != betterflash::audio::CanonicalChannels * betterflash::audio::CanonicalBytesPerSample
+        || u16(34) != betterflash::audio::CanonicalBytesPerSample * 8 || bytes.mid(36,4) != QByteArrayLiteral("data")
         || u32(40) != quint32(bytes.size() - headerSize) || u32(40) == 0 || (u32(40) % 2) != 0)
         return std::unexpected(QStringLiteral("Narration %1 is not canonical 16 kHz mono PCM audio.").arg(name));
     return {};

@@ -151,7 +151,7 @@ void VoiceUtteranceBuffer::reset() {
 }
 
 QByteArray voiceWav(const QByteArrayView pcm) {
-    Q_ASSERT(pcm.size() % 2 == 0 && pcm.size() <= VoiceUtteranceBuffer::MaxBytes);
+    Q_ASSERT(pcm.size() % 2 == 0 && pcm.size() <= betterflash::audio::MaxConversionBytes - betterflash::audio::WavHeaderBytes);
     QByteArray result;
     result.reserve(44 + pcm.size());
     const auto append32 = [&result](const quint32 value) {
@@ -164,8 +164,10 @@ QByteArray voiceWav(const QByteArrayView pcm) {
     };
     result.append("RIFF", 4); append32(36 + static_cast<quint32>(pcm.size()));
     result.append("WAVEfmt ", 8); append32(16); append16(1); append16(1);
-    append32(VoiceUtteranceBuffer::SampleRate); append32(VoiceUtteranceBuffer::SampleRate * 2);
-    append16(2); append16(16); result.append("data", 4); append32(static_cast<quint32>(pcm.size()));
+    append32(betterflash::audio::CanonicalSampleRate);
+    append32(betterflash::audio::CanonicalSampleRate * betterflash::audio::CanonicalChannels * betterflash::audio::CanonicalBytesPerSample);
+    append16(betterflash::audio::CanonicalChannels * betterflash::audio::CanonicalBytesPerSample);
+    append16(betterflash::audio::CanonicalBytesPerSample * 8); result.append("data", 4); append32(static_cast<quint32>(pcm.size()));
     result.append(pcm.data(), pcm.size());
     Q_ASSERT(result.size() == pcm.size() + 44);
     return result;

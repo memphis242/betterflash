@@ -4,6 +4,7 @@
 #include "../core/appcontroller.h"
 #include "../core/cardmodel.h"
 #include "../core/mediabackup.h"
+#include "../core/audiolimits.h"
 
 #include <QAudioDevice>
 #include <QAudioSource>
@@ -21,8 +22,10 @@
 #include <utility>
 
 namespace {
-constexpr qsizetype kMaxPcmBytes = VoiceUtteranceBuffer::MaxBytes;
-static_assert(kMaxPcmBytes == 16000 * 2 * 60);
+constexpr qsizetype kMaxPcmBytes = betterflash::audio::NarrationMaxPcmBytes;
+static_assert(kMaxPcmBytes == betterflash::audio::CanonicalSampleRate
+    * betterflash::audio::CanonicalChannels * betterflash::audio::CanonicalBytesPerSample
+    * betterflash::audio::NarrationMaxSeconds);
 
 bool validSide(const QString &side) {
     return side == QStringLiteral("front") || side == QStringLiteral("back");
@@ -330,7 +333,7 @@ void CardNarration::beginCapture(const QString &side) {
     m_meterTimer->setInterval(100);
     connect(m_meterTimer, &QTimer::timeout, this, [this] { m_recordingLevel *= 0.85; emit stateChanged(); });
     m_meterTimer->start();
-    setState(QStringLiteral("Recording. Stop when the narration is complete, up to 60 seconds."));
+    setState(QStringLiteral("Recording. Stop when the narration is complete, up to 5 minutes."));
 }
 
 void CardNarration::readCapture() {
@@ -374,7 +377,7 @@ void CardNarration::resumeRecording() {
     m_recordingPaused = false;
     m_source->resume();
     if (!m_recording || !m_source) return;
-    setState(QStringLiteral("Recording. Stop when the narration is complete, up to 60 seconds."));
+    setState(QStringLiteral("Recording. Stop when the narration is complete, up to 5 minutes."));
 }
 
 void CardNarration::stopCapture() {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../core/audiolimits.h"
 #include <QAudioFormat>
 #include <QByteArray>
 #include <QByteArrayView>
