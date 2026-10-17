@@ -126,6 +126,8 @@ signals:
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    // Success reports durable persistence. Check the refreshed snapshot and
+    // lastError before navigating to the saved card.
     void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);

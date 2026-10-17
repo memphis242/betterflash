@@ -15,5 +15,5 @@ inline constexpr qsizetype MaxConversionBytes = 64 * 1024 * 1024;
 
 static_assert(NarrationMaxPcmBytes == 9'600'000);
 static_assert(NarrationMaxPcmBytes + WavHeaderBytes <= 20 * 1024 * 1024);
-static_assert(WavHeaderBytes + NarrationMaxPcmBytes < static_cast<qsizetype>(std::numeric_limits<quint32>::max()));
+static_assert(static_cast<quint64>(WavHeaderBytes + NarrationMaxPcmBytes) <= std::numeric_limits<quint32>::max());
 }

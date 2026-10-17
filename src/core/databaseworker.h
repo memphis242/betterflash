@@ -53,6 +53,8 @@ signals:
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    // Success reports a committed card, schedules, and outbox event. Refresh
+    // errors are reported separately through operationFinished.
     void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);
