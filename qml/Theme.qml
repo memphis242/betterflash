@@ -65,6 +65,7 @@ QtObject {
         property bool reducedMotion: false
         property bool savedDark: true
         property bool hasThemeChoice: false
+        property bool showUndoRedo: true
     }
     function toggle() {
         preferences.savedDark = !dark

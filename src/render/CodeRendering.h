@@ -35,6 +35,7 @@ public:
     void setLightTheme(const QString &name);
     void setLanguageServerEnabled(bool enabled);
     Q_INVOKABLE bool setClangdPath(const QString &path);
+    bool restoreClangdPath(const QString &path);
     void setVisibleSources(QObject *view, const QSet<QString> &keys);
     KSyntaxHighlighting::Theme theme(bool dark) const;
     QList<struct CodeSpan> highlight(const QString &language, const QString &source, bool dark, bool requestSemantic, bool &semanticAccepted);

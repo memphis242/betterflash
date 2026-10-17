@@ -125,6 +125,14 @@ bool CodeRendering::setClangdPath(const QString &path) {
     emit changed();
     return true;
 }
+bool CodeRendering::restoreClangdPath(const QString &path) {
+    if (!path.isEmpty()) return setClangdPath(path);
+    m_clangdPath.clear();
+    m_settings.setValue(QStringLiteral("codeRendering/clangdPath"), m_clangdPath);
+    m_server.configure(m_serverEnabled, m_clangdPath);
+    emit changed();
+    return true;
+}
 void CodeRendering::setVisibleSources(QObject *const view, const QSet<QString> &keys) {
     Q_ASSERT(view);
     if (!m_visibleSources.contains(view)) {

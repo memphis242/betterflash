@@ -22,10 +22,13 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   Restored content uses sync events. A browser for checkpoints of entirely
   deleted root decks and larger portable-backup formats are also follow-ups.
   See [deck checkpoints](checkpoints.md).
-- **Undo and returning to context:** design undo for card edits and review
-  actions, including its scope and persistence. Preserve selection, scroll,
-  zoom, filters, and pane state across navigation. Existing rating corrections
-  and timeline return buttons do not constitute general undo.
+- **Undo and returning to context:** a five-action linear undo/redo history now
+  covers saved library changes, review actions, checkpoints, narration, and
+  ordinary settings. Refine individual actions during manual use, then add
+  behavioral coverage when testing resumes. History currently lasts for the
+  application session; checkpoints provide persistent content recovery. See
+  [undo and redo](undo.md). Continue refining selection, scroll, zoom, filters,
+  and pane context across navigation.
 - **Weak-area study guidance:** define an explainable ranking using recall,
   difficulty, timing, and trends, with appropriate treatment of sparse history
   and independently scheduled variants. Optional language-model assistance can

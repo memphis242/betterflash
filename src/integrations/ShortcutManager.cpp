@@ -1,10 +1,15 @@
 #include "ShortcutManager.h"
 #include <QKeySequence>
+#include <QMetaType>
+#include <QSet>
 #include <QStringList>
 
 QVariantMap ShortcutManager::defaultBindings() {
     return {
         {QStringLiteral("commandPalette"), QStringLiteral("Ctrl+K")},
+        {QStringLiteral("undo"), QStringLiteral("Ctrl+Z")},
+        {QStringLiteral("redo"), QStringLiteral("Ctrl+Y")},
+        {QStringLiteral("redoAlternate"), QStringLiteral("Ctrl+Shift+Z")},
         {QStringLiteral("deckSearch"), QStringLiteral("Ctrl+L")},
         {QStringLiteral("newCard"), QStringLiteral("Ctrl+N")},
         {QStringLiteral("newDeck"), QStringLiteral("Ctrl+Shift+N")},
@@ -35,6 +40,19 @@ ShortcutManager::ShortcutManager(QObject *parent) : QObject(parent), m_bindings(
     const QVariantMap stored = m_settings.value(QStringLiteral("keyboard/bindings")).toMap();
     for (auto it = stored.cbegin(); it != stored.cend(); ++it) {
         if (m_bindings.contains(it.key())) m_bindings[it.key()] = it.value();
+    }
+    const QStringList historyActions = {QStringLiteral("undo"), QStringLiteral("redo"), QStringLiteral("redoAlternate")};
+    for (const QString &action : historyActions) {
+        if (stored.contains(action)) continue;
+        const QString candidate = m_bindings.value(action).toString();
+        bool used = false;
+        for (auto it = m_bindings.cbegin(); it != m_bindings.cend(); ++it) {
+            if (it.key() != action && it.value().toString() == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (used) m_bindings[action] = QString{};
     }
     const QString microphoneAction = QStringLiteral("microphone");
     const QString microphoneBinding = m_bindings.value(microphoneAction).toString();
@@ -92,6 +110,26 @@ bool ShortcutManager::rebind(const QString &action, const QString &sequence) {
     m_bindings[action] = canonical;
     m_settings.setValue(QStringLiteral("keyboard/bindings"), m_bindings);
     emit changed(); return true;
+}
+bool ShortcutManager::restoreBindings(const QVariantMap &bindings) {
+    if (bindings.keys() != defaultBindings().keys()) return false;
+    QSet<QString> assigned;
+    for (auto it = bindings.cbegin(); it != bindings.cend(); ++it) {
+        if (it.value().metaType().id() != QMetaType::QString) return false;
+        const QString sequence = it.value().toString();
+        if (sequence.isEmpty()) continue;
+        const QKeySequence parsed = QKeySequence::fromString(sequence, QKeySequence::PortableText);
+        const QString canonical = parsed.toString(QKeySequence::PortableText);
+        if (parsed.isEmpty() || parsed.count() != 1 || canonical != sequence
+            || parsed[0].key() == Qt::Key_unknown || parsed[0].key() == Qt::Key_Escape
+            || assigned.contains(canonical)) return false;
+        assigned.insert(canonical);
+    }
+    m_bindings = bindings;
+    m_lastError.clear();
+    m_settings.setValue(QStringLiteral("keyboard/bindings"), m_bindings);
+    emit changed();
+    return true;
 }
 void ShortcutManager::reset() {
     m_bindings = defaultBindings();

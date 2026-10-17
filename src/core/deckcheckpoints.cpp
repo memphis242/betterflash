@@ -552,6 +552,8 @@ void DatabaseWorker::loadCheckpointChanges(const QString &deckId, const QString 
 void DatabaseWorker::createDeckCheckpoint(const QString &deckId, const QString &note, const QString &summary,
                                          const QString &expectedToken, const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Create checkpoint"));
+    if (!history) { emit deckCheckpointFinished(deckId,{},QStringLiteral("create"),false,requestId); return; }
     const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
         fail(code, message, detail);
         emit deckCheckpointFinished(deckId, {}, QStringLiteral("create"), false, requestId);
@@ -599,6 +601,8 @@ void DatabaseWorker::createDeckCheckpoint(const QString &deckId, const QString &
 void DatabaseWorker::restoreDeckCheckpoint(const QString &deckId, const QString &checkpointId,
                                           const QString &expectedToken, const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Restore checkpoint"));
+    if (!history) { emit deckCheckpointFinished(deckId,checkpointId,QStringLiteral("restore"),false,requestId); return; }
     const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
         fail(code, message, detail);
         emit deckCheckpointFinished(deckId, checkpointId, QStringLiteral("restore"), false, requestId);
@@ -743,6 +747,8 @@ void DatabaseWorker::restoreDeckCheckpoint(const QString &deckId, const QString 
 
 void DatabaseWorker::deleteDeckCheckpoint(const QString &deckId, const QString &checkpointId, const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Delete checkpoint"));
+    if (!history) { emit deckCheckpointFinished(deckId,checkpointId,QStringLiteral("delete"),false,requestId); return; }
     const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
         fail(code, message, detail);
         emit deckCheckpointFinished(deckId, checkpointId, QStringLiteral("delete"), false, requestId);
@@ -759,7 +765,10 @@ void DatabaseWorker::deleteDeckCheckpoint(const QString &deckId, const QString &
     if (!*target) { reject("CHECKPOINT_NOT_FOUND", "This checkpoint no longer exists. Refresh the checkpoint timeline."); return; }
     if (!mutate([&] {
         if (!execute("DELETE FROM deck_checkpoints WHERE deck_id=? AND id=?", {deckId, checkpointId})) return false;
-        QSet<QString> retainedMedia;
+        QSet<QString> retainedMedia = historyMediaNames();
+        const auto targetNames = model::mediaReferences((*target)->snapshot.cards);
+        if (!targetNames) { m_sqlDetail = targetNames.error(); return false; }
+        for (const QString &name : *targetNames) retainedMedia.insert(name);
         QSqlQuery snapshots(m_db);
         snapshots.setForwardOnly(true);
         if (!snapshots.exec("SELECT snapshot FROM deck_checkpoints ORDER BY position")) {

@@ -8,6 +8,7 @@ import BetterFlash.Native 1.0 as Native
 
 ApplicationWindow {
     id: window
+    Component.onCompleted: actionHistory.watchProperties(Theme.preferences, "Change appearance", ["reducedMotion", "savedDark", "hasThemeChoice", "showUndoRedo"])
     objectName: "mainWindow"
     visible: true
     width: 1320
@@ -92,7 +93,25 @@ ApplicationWindow {
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
+    Binding {
+        target: app
+        property: "navigationContext"
+        value: ({page: window.page, card: window.selectedCardId, detail: window.detailOpen,
+                 libraryY: window.libraryScrollY, search: window.cardSearchText})
+    }
     readonly property var shortcutCommands: [
+        {
+            action: "undo",
+            label: "Undo last action"
+        },
+        {
+            action: "redo",
+            label: "Redo last undone action"
+        },
+        {
+            action: "redoAlternate",
+            label: "Redo last undone action (alternate)"
+        },
         {
             action: "commandPalette",
             label: "Open command palette"
@@ -195,6 +214,14 @@ ApplicationWindow {
         }
     ]
     readonly property var paletteCommands: [
+        {
+            action: "undo",
+            label: "Undo last action"
+        },
+        {
+            action: "redo",
+            label: "Redo last undone action"
+        },
         {
             action: "deckSearch",
             label: "Find a deck"
@@ -708,7 +735,21 @@ ApplicationWindow {
             lines.push("\nDetails:\n" + globalErrorDetails.trim())
         return lines.join("\n")
     }
+    function historyActionAllowed(action) {
+        if (typing || modalOpen || app.busy || actionHistory.busy)
+            return false
+        return action === "undo" ? actionHistory.canUndo : actionHistory.canRedo
+    }
+    function historyActionHint(action) {
+        const undo = action === "undo"
+        const label = undo ? actionHistory.undoLabel : actionHistory.redoLabel
+        const bindings = undo ? [shortcuts.bindings.undo] : [shortcuts.bindings.redo, shortcuts.bindings.redoAlternate]
+        const keys = bindings.filter(value => !!value).join(" / ")
+        return (undo ? "Undo" : "Redo") + (label ? ": " + label : "") + (keys ? " (" + keys + ")" : "")
+    }
     function shortcutAllowed(action) {
+        if (action === "undo" || action === "redo" || action === "redoAlternate")
+            return historyActionAllowed(action)
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
             return cardDialog.visible && !editorSavePending && !narrationDialog.visible
                     && !imageDialog.visible && !errorDialog.visible
@@ -755,6 +796,15 @@ ApplicationWindow {
     }
     function runAction(action) {
         switch (action) {
+        case "undo":
+            if (historyActionAllowed(action))
+                actionHistory.undo()
+            break
+        case "redo":
+        case "redoAlternate":
+            if (historyActionAllowed(action))
+                actionHistory.redo()
+            break
         case "commandPalette":
             commandPalette.open()
             break
@@ -862,7 +912,11 @@ ApplicationWindow {
     }
     function paletteResults(query) {
         const text = query.trim().toLowerCase()
-        const actions = paletteCommands.filter(c => c.label.toLowerCase().indexOf(text) >= 0 && (c.action !== "summary" || app.reviewing) && (c.action !== "atomicize" || !!selectedCard.id))
+        const actions = paletteCommands.filter(c => c.label.toLowerCase().indexOf(text) >= 0
+            && (c.action !== "summary" || app.reviewing)
+            && (c.action !== "atomicize" || !!selectedCard.id)
+            && (c.action !== "undo" || actionHistory.canUndo)
+            && (c.action !== "redo" || actionHistory.canRedo))
         const decks = app.decks.filter(d => d.name.toLowerCase().indexOf(text) >= 0).map(d => ({
                     action: "deck:" + d.id,
                     label: d.name,
@@ -899,6 +953,27 @@ ApplicationWindow {
         }
     }
 
+    component HistoryActionButton: Item {
+        id: historyControl
+        required property string action
+        implicitWidth: 38
+        implicitHeight: 38
+        readonly property bool available: window.historyActionAllowed(action)
+        readonly property string hint: window.historyActionHint(action)
+        GlyphButton {
+            id: historyButton
+            anchors.fill: parent
+            glyph: historyControl.action
+            hint: historyControl.hint
+            enabled: historyControl.available
+            opacity: enabled ? 1 : 0.4
+            ToolTip.visible: false
+            onClicked: window.runAction(historyControl.action)
+        }
+        HoverHandler { id: historyHover }
+        ToolTip.visible: historyHover.hovered || historyButton.activeFocus
+        ToolTip.text: hint
+    }
     header: ToolBar {
         objectName: "globalHeader"
         height: 76
@@ -975,6 +1050,16 @@ ApplicationWindow {
                 glyph: Theme.dark ? "sun" : "moon"
                 hint: Theme.dark ? "Switch to light theme" : "Switch to dark theme"
                 onClicked: Theme.toggle()
+            }
+            HistoryActionButton {
+                objectName: "undoButton"
+                visible: Theme.preferences.showUndoRedo
+                action: "undo"
+            }
+            HistoryActionButton {
+                objectName: "redoButton"
+                visible: Theme.preferences.showUndoRedo
+                action: "redo"
             }
         }
     }
@@ -2485,6 +2570,20 @@ ApplicationWindow {
         function onCardSaved(cardId, requestId, success) {
             window.finishEditorSave(cardId, requestId, success)
         }
+        function onHistoryNavigationRequested(context) {
+            if (context.page !== undefined)
+                window.page = context.page
+            if (context.card !== undefined) {
+                window.selectedCardId = window.cardById(context.card).id ? context.card : ""
+                window.detailOpen = !!context.detail && !!window.selectedCardId
+            }
+            if (context.search !== undefined)
+                window.cardSearchText = context.search
+            if (context.libraryY !== undefined) {
+                window.libraryScrollY = context.libraryY
+                Qt.callLater(function () { library.restoreScroll(window.libraryScrollY) })
+            }
+        }
         function onLastErrorChanged() {
             if (app.lastError.message) {
                 window.pendingDeckName = ""
@@ -2504,7 +2603,8 @@ ApplicationWindow {
             required property string modelData
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
-            autoRepeat: modelData !== "microphone"
+            autoRepeat: modelData !== "microphone" && modelData !== "undo"
+                && modelData !== "redo" && modelData !== "redoAlternate"
             enabled: window.shortcutAllowed(modelData)
             onActivated: window.runAction(modelData)
         }

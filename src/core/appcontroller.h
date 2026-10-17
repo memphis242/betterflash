@@ -39,6 +39,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList pendingCards READ pendingCards NOTIFY reviewStateChanged)
     Q_PROPERTY(QVariantList reviewCards READ reviewCards NOTIFY reviewStateChanged)
     Q_PROPERTY(QVariantMap pendingGradeCorrection READ pendingGradeCorrection NOTIFY pendingGradeCorrectionChanged)
+    Q_PROPERTY(QVariantMap navigationContext READ navigationContext WRITE setNavigationContext)
 public:
     explicit AppController(const QString &storageDir, QObject *parent = nullptr);
     ~AppController() override;
@@ -68,6 +69,8 @@ public:
     QVariantList pendingCards() const { return m_pendingCards; }
     QVariantList reviewCards() const { return m_reviewCards; }
     QVariantMap pendingGradeCorrection() const { return m_pendingGradeCorrection; }
+    QVariantMap navigationContext() const { return m_navigationContext; }
+    void setNavigationContext(const QVariantMap &context) { m_navigationContext=context; }
 
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
     Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
@@ -115,6 +118,11 @@ public:
     Q_INVOKABLE void loadStudyAnalytics(const QStringList &deckIds = {}, const QString &requestId = {});
     Q_INVOKABLE void requestSyncBatch(const QString &requestId = {});
     Q_INVOKABLE void applySyncResponse(const QVariantMap &response);
+    bool applyHistory(const QString &id, bool redo);
+    void forgetHistory(const QStringList &ids);
+    [[nodiscard]] QVariantMap historyContext() const;
+    void restoreHistoryContext(const QVariantMap &context);
+    void reportHistoryError(const QString &code, const QString &message);
 
 signals:
     void decksChanged(); void cardsChanged(); void historyChanged(); void reviewSessionsChanged();
@@ -143,9 +151,14 @@ signals:
     void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);
+    void actionRecorded(const QString &id, const QString &label, const QVariantMap &beforeContext,
+                        const QVariantMap &afterContext);
+    void historyApplied(const QString &id, bool redo, bool success);
+    void historyNavigationRequested(const QVariantMap &context);
+    void historyInvalidated();
 
 private:
-    bool invoke(const std::function<void(DatabaseWorker *)> &call);
+    bool invoke(const std::function<void(DatabaseWorker *)> &call, const QVariantMap &context = {});
     void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
     void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
@@ -176,6 +189,10 @@ private:
     int m_reviewedCount = 0;
     int m_sessionTotal = 0;
     int m_pendingOperations = 1;
+    int m_pendingCompletions = 0;
+    QList<QVariantMap> m_operationContexts{QVariantMap{}};
+    QVariantMap m_completedOperationContext;
+    QVariantMap m_navigationContext;
     double m_responseSeconds = 0.0;
     double m_accumulatedSeconds = 0.0;
     QElapsedTimer m_elapsed;

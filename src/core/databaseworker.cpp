@@ -86,7 +86,7 @@ bool DatabaseWorker::mutate(const std::function<bool()> &work)
     assertThread();
     if (!m_db.transaction()) { m_sqlDetail = m_db.lastError().text(); return false; }
     if (!work()) { m_db.rollback(); return false; }
-    if (m_db.commit()) return true;
+    if (m_db.commit()) { if (m_historyCapturing) m_historyCommitted = true; return true; }
     m_sqlDetail = m_db.lastError().text();
     m_db.rollback();
     return false;
@@ -102,7 +102,7 @@ void DatabaseWorker::initialize()
     m_db.setDatabaseName(m_path);
     if (!m_db.open()) { fail("STORAGE_OPEN","Could not open storage. Check the data directory permissions.",m_db.lastError().text());return; }
     if (!execute("PRAGMA foreign_keys=ON") || !execute("PRAGMA journal_mode=WAL")
-        || !execute("PRAGMA busy_timeout=5000") || !migrate()) {
+        || !execute("PRAGMA busy_timeout=5000") || !migrate() || !initializeHistory()) {
         fail("STORAGE_SCHEMA","Could not initialize storage. Preserve the database and inspect the details.",m_sqlDetail);
         shutdown();return;
     }
@@ -324,10 +324,44 @@ bool DatabaseWorker::replaceVariants(const struct model::Card &record, const QLi
 }
 QVariantMap DatabaseWorker::cardPayload(const struct model::Card &record)
 { return {{"card",model::toMap(record)},{"variants",variantMaps(cardVariants(record.id))}}; }
-bool DatabaseWorker::enqueue(const QString &type, const QVariantMap &payload)
+bool DatabaseWorker::enqueue(const QString &type, const QVariantMap &suppliedPayload)
 {
+    QVariantMap payload=suppliedPayload;
+    if (m_historyCapturing && !payload.value("restore").toBool()
+        && (type==QStringLiteral("deck.upsert") || type==QStringLiteral("card.upsert"))) {
+        const bool deckEvent=type==QStringLiteral("deck.upsert");
+        const QString entity=deckEvent?QStringLiteral("deck"):QStringLiteral("card");
+        const QVariantMap record=object(payload,entity);
+        const QString entityId=record.value("id").toString();
+        QSqlQuery created(m_db);
+        created.prepare("SELECT 1 FROM temp.history_capture WHERE entity=? AND id=? AND before_row IS NULL AND after_row IS NOT NULL");
+        created.addBindValue(entity);created.addBindValue(entityId);
+        if (!created.exec()) {m_sqlDetail=created.lastError().text();return false;}
+        if (created.next()) {
+            QString parentId=record.value(deckEvent?QStringLiteral("parentId"):QStringLiteral("deckId")).toString();
+            QList<struct model::Deck> ancestors;
+            QSet<QString> visited;
+            while (!parentId.isEmpty()) {
+                if (visited.contains(parentId)) {m_sqlDetail=QStringLiteral("The creation dependency contains a deck cycle.");return false;}
+                visited.insert(parentId);
+                const auto parent=deck(parentId);
+                if (!parent) {if (m_sqlDetail.isEmpty()) m_sqlDetail=QStringLiteral("The creation dependency refers to a missing parent deck.");return false;}
+                ancestors.prepend(*parent);parentId=parent->parentId;
+            }
+            for (const struct model::Deck &ancestor:ancestors)
+                if (!enqueue("deck.upsert",{{"deck",model::toMap(ancestor)},{"restore",true},{"restoreDependency",true}})) return false;
+            payload.insert("restore",true);
+            if (deckEvent) payload.insert("restoreDependency",true);
+            else {
+                QVariantList ids;
+                for (const QVariant &value:payload.value("variants").toList()) ids.append(value.toMap().value("id"));
+                payload.insert("freshVariantIds",ids);
+            }
+        }
+    }
     QString targetType,targetId;
-    if (type.startsWith(QStringLiteral("deck."))) {targetType="deck";targetId=type.endsWith(QStringLiteral("delete"))?payload.value("id").toString():object(payload,"deck").value("id").toString();}
+    if (type==QStringLiteral("history.apply")) {targetType="history";targetId=object(payload.value("changes").toList().first().toMap(),"after").value("id").toString();if (targetId.isEmpty()) targetId=payload.value("changes").toList().first().toMap().value("id").toString();}
+    else if (type.startsWith(QStringLiteral("deck."))) {targetType="deck";targetId=type.endsWith(QStringLiteral("delete"))?payload.value("id").toString():object(payload,"deck").value("id").toString();}
     else if (type.startsWith(QStringLiteral("card."))) {targetType="card";targetId=type.endsWith(QStringLiteral("delete"))?payload.value("id").toString():object(payload,"card").value("id").toString();}
     else if (type==QStringLiteral("review.add")&&payload.value("historyOnly").toBool()) {targetType="history";targetId=object(payload,"review").value("id").toString();}
     else {targetType="variant";targetId=object(payload,"variant").value("id").toString();}
@@ -628,6 +662,8 @@ void DatabaseWorker::advanceReview(const QString &variantId)
 
 void DatabaseWorker::createDeck(const QString &name, const QString &description, const QString &parentId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Create deck"));
+    if (!history) return;
     if (!ready()) return;
     const struct model::Deck record{model::uuid(),name.trimmed(),description,model::nowUtc(),parentId};
     const auto valid=model::deckFromMap(model::toMap(record));
@@ -638,6 +674,8 @@ void DatabaseWorker::createDeck(const QString &name, const QString &description,
 }
 void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QString &description, const QString &parentId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Edit deck"));
+    if (!history) return;
     if (!ready()) return;
     const auto existing=deck(id);
     if (!existing) {fail("DECK_NOT_FOUND","This deck no longer exists. Refresh the collection.",m_sqlDetail);return;}
@@ -651,6 +689,8 @@ void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QS
 }
 void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Move deck"));
+    if (!history) { emit moveDeckFinished(false,id,parentId); return; }
     if (!ready()) { emit moveDeckFinished(false, id, parentId); return; }
     const auto existing = deck(id);
     if (!existing) { fail("DECK_NOT_FOUND", "This deck no longer exists. Refresh the collection.", m_sqlDetail); emit moveDeckFinished(false, id, parentId); return; }
@@ -668,6 +708,8 @@ void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
 }
 void DatabaseWorker::deleteDeck(const QString &id)
 {
+    const struct HistoryScope history(this, QStringLiteral("Delete deck"));
+    if (!history) return;
     if (!ready()) return;
     if (!model::validUuid(id)) {fail("INVALID_DECK_ID","Choose a valid deck to delete.");return;}
     QSqlQuery hierarchy(m_db);hierarchy.prepare("WITH RECURSIVE descendants(id,parent_id) AS (SELECT id,parent_id FROM decks WHERE id=? UNION SELECT d.id,d.parent_id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,parent_id FROM descendants");hierarchy.addBindValue(id);
@@ -694,6 +736,8 @@ void DatabaseWorker::deleteDeck(const QString &id)
 }
 void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Save card"));
+    if (!history) { emit cardSaved(id,requestId,false); return; }
     const QString recordId = id.isEmpty() ? model::uuid() : id;
     if (!ready()) { emit cardSaved(recordId,requestId,false); return; }
     const auto failRequest = [&] (const QString &code, const QString &message, const QString &detail = QString()) {
@@ -732,6 +776,8 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
 }
 void DatabaseWorker::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
 {
+    const struct HistoryScope history(this, QStringLiteral("Change card narration"));
+    if (!history) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
     if (!ready()) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
     const auto failRequest = [&] (const QString &code, const QString &message, const QString &detail = QString()) {
         fail(code,message,detail); emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
@@ -764,6 +810,8 @@ void DatabaseWorker::setCardNarration(const QString &cardId,const QString &varia
 }
 void DatabaseWorker::confirmCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &expectedFingerprint,const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Confirm card narration"));
+    if (!history) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
     if (!ready()) { emit cardNarrationSaved(cardId,variantKey,side,requestId,false); return; }
     QString failureCode = QStringLiteral("NARRATION_CONFIRM_FAILED");
     QString failureMessage = QStringLiteral("Could not confirm the narration. Check storage and try again.");
@@ -807,6 +855,8 @@ void DatabaseWorker::confirmCardNarration(const QString &cardId,const QString &v
 }
 void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals)
 {
+    const struct HistoryScope history(this, QStringLiteral("Atomicize card"));
+    if (!history) { emit atomicSplitApplied(expectedSource.value("id").toString(),false,{}); return; }
     const QString sourceId=expectedSource.value("id").toString();
     if (!ready()) {emit atomicSplitApplied(sourceId,false,{});return;}
     const auto reject=[&](const QString &code,const QString &message,const QString &detail={}) {
@@ -842,6 +892,8 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
 }
 void DatabaseWorker::deleteCard(const QString &id)
 {
+    const struct HistoryScope history(this, QStringLiteral("Delete card"));
+    if (!history) return;
     if (!ready()) return;
     if (!model::validUuid(id)) {fail("INVALID_CARD_ID","Choose a valid card to delete.");return;}
     if (!mutate([&]{return eraseCard(id)&&enqueue("card.delete",{{"id",id}});})) {fail("CARD_DELETE","Could not delete the card. Check storage and try again.",m_sqlDetail);return;}
@@ -850,6 +902,8 @@ void DatabaseWorker::deleteCard(const QString &id)
 }
 void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Move cards"));
+    if (!history) { emit moveCardsFinished(false,destinationDeckId,requestId); return; }
     if (!ready()) { emit moveCardsFinished(false, destinationDeckId, requestId); return; }
     const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
         fail(code, message, detail);
@@ -901,6 +955,8 @@ void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &desti
 }
 void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
 {
+    const struct HistoryScope history(this, QStringLiteral("Reset review state"));
+    if (!history) return;
     if (!ready()) return;
 #ifndef BETTERFLASH_DEVELOPMENT_TOOLS
     Q_UNUSED(id);
@@ -948,6 +1004,8 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
 }
 void DatabaseWorker::beginReview(const QString &deckId)
 {
+    const struct HistoryScope history(this, QStringLiteral("Start review"));
+    if (!history) return;
     if (!ready()) return;
     if (!deckId.isEmpty() && (!model::validUuid(deckId)||!deck(deckId))) {fail("DECK_NOT_FOUND","Choose an existing deck to review.");return;}
     const QString sessionId=model::uuid();
@@ -965,6 +1023,7 @@ void DatabaseWorker::beginReview(const QString &deckId)
     m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();m_selectedVariant.clear();m_queueDirty=true;while (q.next()) { const QString id=q.value(0).toString(); m_queue.append(id); m_sessionOrder.append(id); }
     if (!m_queue.isEmpty()) m_selectedVariant=m_queue.first();
     m_sessionTotal=m_queue.size();m_sessionActive=!m_queue.isEmpty();
+    m_historyRuntimeChanged=true;
     if (publishQueue(true)) done(m_queue.isEmpty()?"No cards are due in this deck":"Review started");
 }
 void DatabaseWorker::selectReviewCard(const QString &variantId)
@@ -989,13 +1048,18 @@ void DatabaseWorker::selectReviewCard(const QString &variantId)
 }
 void DatabaseWorker::endReview()
 {
+    const struct HistoryScope history(this, QStringLiteral("End review"));
+    if (!history) return;
     if (!ready()) return;
     m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
     m_sessionActive=false;m_selectedVariant.clear();m_queueDirty=true;
+    m_historyRuntimeChanged=true;
     emit reviewQueueReady({},m_sessionTotal,true,{},false,{});done("Review ended");
 }
 void DatabaseWorker::defer()
 {
+    const struct HistoryScope history(this, QStringLiteral("Defer card"));
+    if (!history) return;
     if (!ready()) return;
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before deferring a card.");return;}
     const qsizetype position=m_queue.indexOf(m_selectedVariant);
@@ -1007,10 +1071,13 @@ void DatabaseWorker::defer()
     assert(sessionPosition>=0);
     m_sessionOrder.removeAt(sessionPosition);m_sessionOrder.append(deferred);
     if (m_selectedVariant.isEmpty()) m_selectedVariant=deferred;
+    m_historyRuntimeChanged=true;
     if (publishQueue(true)) done("Card moved to the queue end");
 }
 void DatabaseWorker::postpone(const QString &date)
 {
+    const struct HistoryScope history(this, QStringLiteral("Postpone card"));
+    if (!history) return;
     if (!ready()) return;
     const QDate day=QDate::fromString(date,Qt::ISODate);
     if (!day.isValid()||date!=day.toString(Qt::ISODate)||day<=QDate::currentDate()) {fail("INVALID_POSTPONE_DATE","Choose a later date in YYYY-MM-DD format.");return;}
@@ -1028,6 +1095,8 @@ void DatabaseWorker::postpone(const QString &date)
 }
 void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QString &expectedVariant)
 {
+    const struct HistoryScope history(this, QStringLiteral("Grade card"));
+    if (!history) return;
     if (!ready()) return;
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
     if (!m_sessionActive||!m_sessionOrder.contains(expectedVariant)||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
@@ -1082,6 +1151,8 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
 
 bool DatabaseWorker::pendingEntity(const QString &type,const QString &id)
 {
+    if (pendingHistoryEntity(type,id)) return true;
+    if (!m_sqlDetail.isEmpty()) return false;
     QSqlQuery q(m_db);
     if (type==QStringLiteral("variant")) {
         q.prepare("SELECT 1 FROM local_events WHERE echoed=0 AND ((target_type='variant' AND target_id=?) OR (target_type='card' AND target_id=(SELECT card_id FROM review_variants WHERE id=?))) LIMIT 1");
@@ -1092,6 +1163,8 @@ bool DatabaseWorker::pendingEntity(const QString &type,const QString &id)
 }
 bool DatabaseWorker::pendingRestore(const QString &type,const QString &id,bool authoritativeOnly)
 {
+    if (!(type==QStringLiteral("deck") && authoritativeOnly) && pendingHistoryEntity(type,id,true)) return true;
+    if (!m_sqlDetail.isEmpty()) return false;
     QSqlQuery query(m_db);
     query.prepare("SELECT 1 FROM local_events WHERE echoed=0 AND target_type=? AND target_id=? AND json_extract(event,'$.payload.restore')=1"
                   + QString(authoritativeOnly ? " AND COALESCE(json_extract(event,'$.payload.restoreDependency'),0)=0" : "") + " LIMIT 1");
@@ -1192,6 +1265,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
     applied=true;
     const QString type=event.value("type").toString();
     const QVariantMap payload=object(event,"payload");
+    if (type==QStringLiteral("history.apply")) return historyEventEffects(payload.value("changes").toList(),seq,executeEffects,applied);
     if (type==QStringLiteral("deck.delete")) {
         const QString id=payload.value("id").toString();
         return (!executeEffects||applyDeckDelete(id,seq,applied))
@@ -1461,14 +1535,27 @@ void DatabaseWorker::requestSyncBatch(const QString &requestId)
         if (events.size()>=100||bytes+size+1>model::maxSyncBatchBytes) {hasMoreLocal=true;break;}
         const auto valid=betterflash::protocol::validateEvent(event);
         if (!valid) {reject("SYNC_STORAGE","A stored sync change is invalid. Preserve the database and inspect details.",valid.error());return;}
-        if (event.value("type")==QStringLiteral("card.upsert")) {
-            const auto note=model::cardFromMap(object(object(event,"payload"),"card"));
-            if (!note) {reject("SYNC_STORAGE","A stored card change is invalid. Preserve the database and inspect details.",note.error());return;}
-            const auto names=model::cardMediaReferences(*note);
-            if (!names) {reject("SYNC_MEDIA","A stored card has invalid image references. Preserve the database and inspect details.",names.error());return;}
+        if (event.value("type")==QStringLiteral("card.upsert") || event.value("type")==QStringLiteral("history.apply")) {
+            QStringList names;
+            QVariantList cardMaps;
+            const QVariantMap eventPayload=object(event,"payload");
+            if (event.value("type")==QStringLiteral("card.upsert")) cardMaps.append(object(eventPayload,"card"));
+            else for (const QVariant &value:eventPayload.value("changes").toList()) {
+                const QVariantMap change=value.toMap();
+                if (change.value("entity")!=QStringLiteral("card")) continue;
+                for (const QString &side:{QStringLiteral("after")})
+                    if (change.value(side).metaType().id()==QMetaType::QVariantMap) cardMaps.append(change.value(side));
+            }
+            for (const QVariant &value:cardMaps) {
+                const auto note=model::cardFromMap(value.toMap());
+                if (!note) {reject("SYNC_STORAGE","A stored card change is invalid. Preserve the database and inspect details.",note.error());return;}
+                const auto references=model::cardMediaReferences(*note);
+                if (!references) {reject("SYNC_MEDIA","A stored card has invalid image references. Preserve the database and inspect details.",references.error());return;}
+                for (const QString &name:*references) if (!names.contains(name)) names.append(name);
+            }
             QSet<QString> combined=mediaNames;
             QStringList additional;
-            for (const QString &name:*names) if (!combined.contains(name)) {combined.insert(name);additional.append(name);}
+            for (const QString &name:names) if (!combined.contains(name)) {combined.insert(name);additional.append(name);}
             if (combined.size()>model::maxSyncImages) {hasMoreLocal=true;break;}
             const auto images=model::readBackupMedia(mediaDirectory,additional);
             if (!images) {reject("SYNC_MEDIA","Could not prepare referenced images. Restore the affected images or insert them again before syncing.",images.error());return;}
@@ -1503,6 +1590,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     QSet<QString> acceptedIds;for (const QVariant &id:response.value("acceptedIds").toList()) acceptedIds.insert(id.toString());
     bool hasPendingOutbox=false;
     m_syncReviewConflicts.clear();
+    m_syncHistoryConflicts.clear();
     const bool ok=mutate([&] {
         for (const QVariant &value : events) {
             const QVariantMap wrapper=value.toMap();
@@ -1521,7 +1609,8 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     m_cursor=cursor;m_queueDirty=true;
     const bool hasMore=response.value("hasMore").toBool()||hasPendingOutbox;
     if (publishSnapshot()&&publishQueue(false)) {
-        if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
+        if (!m_syncHistoryConflicts.isEmpty()) fail("SYNC_UNDO_CONFLICT","Sync finished with an undo or redo conflict. Changed records were preserved; review them before repeating the action.","Record identifiers: "+m_syncHistoryConflicts.join(", "));
+        else if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
         else fail("SYNC_REVIEW_CONFLICT","Sync finished with conflicting review schedules. The latest review results are in History; a newer or explicitly changed schedule was preserved. End this review session before grading these cards again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
     }
     appliedSignal(true,hasMore);
@@ -1662,6 +1751,8 @@ bool DatabaseWorker::importRecords(const struct model::Collection &records)
 }
 void DatabaseWorker::importCollection(const QString &path)
 {
+    const struct HistoryScope history(this, QStringLiteral("Import collection"));
+    if (!history) return;
     if (!ready()) return;
     QFile file(path);
     if (path.trimmed().isEmpty()||path.size()>4096||!file.open(QIODevice::ReadOnly)) {fail("IMPORT_READ","Could not open the collection. Choose a readable JSON file.",file.errorString());return;}
@@ -2116,6 +2207,8 @@ void DatabaseWorker::loadStudyAnalytics(const QStringList &deckIds, const QStrin
 
 void DatabaseWorker::loadExample()
 {
+    const struct HistoryScope history(this, QStringLiteral("Add example deck"));
+    if (!history) return;
     if (!ready()) return;
     const struct model::Deck example{model::uuid(),"BetterFlash examples","Markdown, code, mathematics, partial recall, reverse cards, and grouped cloze deletion.",model::nowUtc()};
     QList<struct model::Card> notes;

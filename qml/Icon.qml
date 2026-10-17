@@ -33,6 +33,16 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "undo":
+        case "redo":
+            if (kind === "redo") {
+                c.translate(18, 0)
+                c.scale(-1, 1)
+            }
+            c.moveTo(7, 3); c.lineTo(3, 7); c.lineTo(7, 11)
+            c.moveTo(3, 7); c.lineTo(11, 7)
+            c.bezierCurveTo(16.5, 7, 16.5, 15, 11, 15)
+            break
         case "refresh":
             c.arc(9, 9, 6, -0.5, 4.8)
             c.moveTo(9.5, 2.2); c.lineTo(10, 5.6); c.lineTo(6.6, 5.2)

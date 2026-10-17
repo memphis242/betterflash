@@ -338,6 +338,16 @@ Item {
                             font.pixelSize: 16
                         }
                         SettingsSwitch {
+                            objectName: "showUndoRedo"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            text: "Show Undo and Redo in the top bar"
+                            checked: Theme.preferences.showUndoRedo
+                            onToggled: Theme.preferences.showUndoRedo = checked
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Keep the recent-action controls visible. Their keyboard shortcuts remain available when hidden."
+                        }
+                        SettingsSwitch {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             text: "Reduce motion"

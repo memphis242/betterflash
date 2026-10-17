@@ -32,6 +32,8 @@ public:
     ~CustomSttTests() override;
 
     [[nodiscard]] QVariantList entries() const;
+    [[nodiscard]] QVariant userConfiguration() const;
+    bool restoreUserConfiguration(const QVariant &configuration);
     [[nodiscard]] bool busy() const { return m_busy; }
     [[nodiscard]] bool recording() const { return m_recording; }
     [[nodiscard]] bool recordingPaused() const { return m_recordingPaused; }
@@ -72,6 +74,8 @@ private:
         QString id;
         QString label;
         QString path;
+        // Immutable canonical audio shares storage with the bounded in-memory action history.
+        QByteArray waveBytes;
         QString expected;
         QString transcript;
         QString rawTranscript;
@@ -105,7 +109,7 @@ private:
     void finishCurrent(quint64 generation, quint64 workerEpoch, const QString &id, const QString &transcript, const QString &workerError);
     void startNext(quint64 generation);
     void retireWorker();
-    bool importWave(const QUrl &source, QString *path, double *duration, QString *error) const;
+    bool importWave(const QUrl &source, QString *path, double *duration, QByteArray *waveBytes, QString *error) const;
     static void score(const QString &expected, const QString &actual, int *substitutions,
         int *deletions, int *insertions, double *wer);
 

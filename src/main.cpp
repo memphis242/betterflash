@@ -1,4 +1,5 @@
 #include "core/appcontroller.h"
+#include "core/actionhistory.h"
 #include "core/cardmodel.h"
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
@@ -13,6 +14,7 @@
 #include "render/CodeRendering.h"
 #include "voice/VoiceController.h"
 #include "voice/CardNarration.h"
+#include "voice/CustomSttTests.h"
 #include "ui/TextFocusDismissal.h"
 #include "ui/LocalFilePaths.h"
 #include "ui/Clipboard.h"
@@ -216,6 +218,43 @@ int main(int argc, char **argv) {
     VoiceController voice(nullptr, &apiKeys);
     CardNarration narration(&app, &voice, dataDirectory, &application);
     voice.attachLanguageModel(&ai);
+    ActionHistory actionHistory(&app);
+    actionHistory.watchProperties(&ai, QStringLiteral("Change language model settings"),
+        {"provider", "localProfile", "acceleration", "endpoint", "model"});
+    actionHistory.watchProperties(&voice, QStringLiteral("Change Voice Control settings"),
+        {"sttProvider", "sttProfile", "sttModel", "sttAcceleration", "modelPath",
+         "recognitionVocabulary", "ttsProvider", "ttsProfile", "reviewMode", "enabled"});
+    actionHistory.watchProperties(voice.remoteTts(), QStringLiteral("Change speech output settings"),
+        {"endpoint", "model", "voice"});
+    actionHistory.watchProperties(voice.transcriptCorrector(), QStringLiteral("Change transcript correction"),
+        {"enabled", "vocabulary"});
+    actionHistory.watchProperties(&sync, QStringLiteral("Change sync settings"), {"endpoint"});
+    actionHistory.watchProperties(&librarySearch, QStringLiteral("Change search settings"),
+        {"semanticEnabled", "provider", "localProfile"});
+    actionHistory.watchState(&librarySearch, QStringLiteral("Change embedding connection"),
+        [&librarySearch]() -> QVariant { return QVariantMap{{"endpoint", librarySearch.remoteEndpoint()}, {"model", librarySearch.remoteModel()}}; },
+        [&librarySearch](const QVariant &value) {
+            const QVariantMap state = value.toMap();
+            return librarySearch.setRemoteConnection(state.value("endpoint").toString(), state.value("model").toString());
+        });
+    QObject::connect(&librarySearch, &SearchController::changed, &actionHistory, &ActionHistory::observe);
+    auto *const rendering = CodeRendering::instance();
+    actionHistory.watchProperties(rendering, QStringLiteral("Change code rendering settings"),
+        {"darkTheme", "lightTheme", "languageServerEnabled"});
+    actionHistory.watchState(rendering, QStringLiteral("Change language server path"),
+        [rendering]() -> QVariant { return rendering->clangdPath(); },
+        [rendering](const QVariant &value) { return rendering->restoreClangdPath(value.toString()); });
+    QObject::connect(rendering, &CodeRendering::changed, &actionHistory, &ActionHistory::observe);
+    actionHistory.watchState(&shortcuts, QStringLiteral("Change key bindings"),
+        [&shortcuts]() -> QVariant { return shortcuts.bindings(); },
+        [&shortcuts](const QVariant &value) { return shortcuts.restoreBindings(value.toMap()); });
+    QObject::connect(&shortcuts, &ShortcutManager::changed, &actionHistory, &ActionHistory::observe);
+    auto *const customTests = qobject_cast<CustomSttTests *>(voice.customSttTests());
+    Q_ASSERT(customTests);
+    actionHistory.watchState(customTests, QStringLiteral("Change custom speech recording"),
+        [customTests]() -> QVariant { return customTests->userConfiguration(); },
+        [customTests](const QVariant &value) { return customTests->restoreUserConfiguration(value); });
+    QObject::connect(customTests, &CustomSttTests::entriesChanged, &actionHistory, &ActionHistory::observe);
 #ifdef Q_OS_ANDROID
     QObject::connect(&application, &QGuiApplication::applicationStateChanged, &voice,
         [&voice](Qt::ApplicationState state) {
@@ -225,6 +264,7 @@ int main(int argc, char **argv) {
     qmlRegisterType<MarkdownView>("BetterFlash.Native", 1, 0, "MarkdownView");
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("app"), &app);
+    engine.rootContext()->setContextProperty(QStringLiteral("actionHistory"), &actionHistory);
     engine.rootContext()->setContextProperty(QStringLiteral("voice"), &voice);
     engine.rootContext()->setContextProperty(QStringLiteral("narration"), &narration);
     engine.rootContext()->setContextProperty(QStringLiteral("ai"), &ai);

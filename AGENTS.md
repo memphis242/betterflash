@@ -70,6 +70,8 @@ automatic agent co-author attribution, or a remote session label.
 - Make returning to the active or previous context easy after exploration.
   Preserve selection, scroll, zoom and pane state where appropriate; provide
   explicit return controls such as the timeline's Today button.
-- Treat undo for card edits and review-session actions as a planned interaction
-  requirement. Its behavior remains to be designed; do not imply that a
-  general undo system exists because individual rating corrections do.
+- Saved library mutations and review actions participate in the shared
+  five-action undo/redo history. Keep grouped operations atomic, preserve
+  review timestamps and independent schedules, and never replay a model call
+  during redo. Text editors retain their native draft undo. See docs/undo.md
+  for current scope and limits; tests remain paused until requested.

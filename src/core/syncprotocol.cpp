@@ -21,6 +21,116 @@ bool integer(const QVariant &value,qint64 minimum,qint64 maximum)
     const double n=value.toDouble();
     return std::isfinite(n)&&n>=static_cast<double>(minimum)&&n<=static_cast<double>(maximum)&&std::floor(n)==n;
 }
+bool historyNull(const QVariant &value)
+{
+    return !value.isValid() || value.metaType().id() == QMetaType::Nullptr;
+}
+bool historyRecord(const QString &entity, const QString &id, const QVariant &value, QString &detail)
+{
+    if (historyNull(value)) return true;
+    if (value.metaType().id() != QMetaType::QVariantMap) {
+        detail = "History states must be objects or explicit null values."; return false;
+    }
+    const QVariantMap record = value.toMap();
+    if (record.value("id").metaType().id() != QMetaType::QString || record.value("id").toString() != id) {
+        detail = "History state identifiers must match their change identifier."; return false;
+    }
+    const QStringList entities{QStringLiteral("deck"), QStringLiteral("card"), QStringLiteral("variant"),
+                               QStringLiteral("review"), QStringLiteral("owner")};
+    switch (entities.indexOf(entity)) {
+    case 0: {
+        const auto valid = model::deckFromMap(record);
+        if (!valid) { detail = valid.error(); return false; }
+        return true;
+    }
+    case 1: {
+        if (record.value("deckId").metaType().id() != QMetaType::QString) {
+            detail = "History card deck identifiers must be UUID strings."; return false;
+        }
+        const auto valid = model::cardFromMap(record);
+        if (!valid) { detail = valid.error(); return false; }
+        return true;
+    }
+    case 2: {
+        if (record.value("cardId").metaType().id() != QMetaType::QString) {
+            detail = "History variant card identifiers must be UUID strings."; return false;
+        }
+        const auto valid = model::variantFromMap(record);
+        if (!valid) { detail = valid.error(); return false; }
+        return true;
+    }
+    case 3: {
+        if (record.value("cardId").metaType().id() != QMetaType::QString
+            || record.value("variantId").metaType().id() != QMetaType::QString) {
+            detail = "History review dependencies must be UUID strings."; return false;
+        }
+        const auto valid = model::reviewFromMap(record);
+        if (!valid) { detail = valid.error(); return false; }
+        return true;
+    }
+    case 4:
+        if (record.size() != 2 || record.value("reviewId").metaType().id() != QMetaType::QString
+            || !model::validUuid(record.value("reviewId").toString())) {
+            detail = "History schedule ownership must contain its variant and review identifiers."; return false;
+        }
+        return true;
+    default:
+        detail = "History changes contain an unsupported entity."; return false;
+    }
+}
+bool historyChanges(const QVariantMap &payload, QString &detail)
+{
+    if (payload.value("changes").metaType().id() != QMetaType::QVariantList) {
+        detail = "History events must contain a changes array."; return false;
+    }
+    const QVariantList changes = payload.value("changes").toList();
+    if (changes.isEmpty() || changes.size() > model::maxCollectionRecords) {
+        detail = "History events must contain between 1 and 100000 changes."; return false;
+    }
+    const QSet<QString> entities{QStringLiteral("deck"), QStringLiteral("card"), QStringLiteral("variant"),
+                                 QStringLiteral("review"), QStringLiteral("owner")};
+    QSet<QString> seen, contextVariants, contextOwners;
+    for (const QVariant &value : changes) {
+        if (value.metaType().id() != QMetaType::QVariantMap) {
+            detail = "Each history change must be an object."; return false;
+        }
+        const QVariantMap change = value.toMap();
+        const QString entity = change.value("entity").toString();
+        const QString id = change.value("id").toString();
+        if (change.value("entity").metaType().id() != QMetaType::QString || !entities.contains(entity)
+            || change.value("id").metaType().id() != QMetaType::QString || !model::validUuid(id)
+            || !change.contains("before") || !change.contains("after")) {
+            detail = "History changes require an entity, UUID, and explicit before and after states."; return false;
+        }
+        const QString identity = entity + QLatin1Char('/') + id;
+        if (seen.contains(identity)) {
+            detail = "History changes must identify each entity only once."; return false;
+        }
+        seen.insert(identity);
+        const QVariant before = change.value("before");
+        const QVariant after = change.value("after");
+        if (change.contains("contextOnly")) {
+            if (change.value("contextOnly").metaType().id() != QMetaType::Bool
+                || !change.value("contextOnly").toBool()
+                || (entity != QStringLiteral("variant") && entity != QStringLiteral("owner"))
+                || !historyNull(before) || historyNull(after)) {
+                detail = "History context must be an explicit creation context for a variant or its owner."; return false;
+            }
+            if (entity == QStringLiteral("variant")) contextVariants.insert(id);
+            else contextOwners.insert(id);
+        }
+        if ((historyNull(before) && historyNull(after)) || before == after) {
+            detail = "Each history change must change at least one existing state."; return false;
+        }
+        if (!historyRecord(entity, id, before, detail) || !historyRecord(entity, id, after, detail)) return false;
+    }
+    for (const QString &id : contextOwners) {
+        if (!contextVariants.contains(id)) {
+            detail = "History owner context requires matching variant context in the same event."; return false;
+        }
+    }
+    return true;
+}
 bool validateEventImpl(const QVariantMap &event, QString &detail)
 {
     if (!model::validUuid(event.value("id").toString())||!model::validUuid(event.value("deviceId").toString())
@@ -43,6 +153,12 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             || payload.value("restoreDependency").metaType().id() != QMetaType::Bool)) {
         detail="A restore dependency must be a boolean on an explicit deck restore."; return false;
     }
+    if (payload.contains("historyOnly")
+        && ((type != QStringLiteral("review.add") && type != QStringLiteral("review.correct"))
+            || payload.value("historyOnly").metaType().id() != QMetaType::Bool)) {
+        detail="historyOnly must be a boolean on a review event."; return false;
+    }
+    if (type == QStringLiteral("history.apply")) return historyChanges(payload, detail);
     if (type==QStringLiteral("deck.upsert")) {
         const auto record=model::deckFromMap(object(payload,"deck"));
         if (!record) {detail=record.error();return false;}return true;

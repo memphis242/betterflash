@@ -64,6 +64,16 @@ Checkpoints include child decks, managed images, and narration, and travel in
 portable backups. Checkpoint history is local; restored content queues sync
 changes. See [deck checkpoints](docs/checkpoints.md).
 
+## Undo and redo
+
+The last five actions can be undone with Ctrl+Z and redone with Ctrl+Y or
+Ctrl+Shift+Z. New changes discard the unused redo branch. Top-right controls
+show the available action; hide them in Settings > Appearance if preferred.
+Textboxes keep their native draft undo. Saved cards, decks, review actions,
+recordings, checkpoints, and ordinary settings share the application history.
+History lasts for the current application session. See [undo and redo](docs/undo.md)
+for scope and sync behavior.
+
 ## Cards and review
 
 The Review page uses **Branch ledger**: circular deck nodes form a scrollable

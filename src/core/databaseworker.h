@@ -50,12 +50,18 @@ public:
     void exportCollection(const QString &path);
     void importCollection(const QString &path);
     void loadExample();
+    void applyHistory(const QString &id, bool redo);
+    void recordReviewUiAction(const QString &label);
+    void forgetHistory(const QStringList &ids);
     void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
     void loadStudyAnalytics(const QStringList &deckIds = {}, const QString &requestId = {});
     void requestSyncBatch(const QString &requestId);
     void applySyncResponse(const QVariantMap &response);
 
 signals:
+    void actionRecorded(const QString &id, const QString &label);
+    void historyError(const QString &code, const QString &message, const QString &detail);
+    void historyApplied(const QString &id, bool redo, bool success);
     void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
@@ -113,6 +119,57 @@ private:
     QString m_sessionDeckName;
     QString m_sessionStartedAt;
     QString m_sqlDetail;
+    struct HistorySession {
+        QStringList queue;
+        QStringList order;
+        QHash<QString, struct SessionGrade> grades;
+        QString selected;
+        int total = 0;
+        bool active = false;
+        QString id;
+        QString deckName;
+        QString startedAt;
+    };
+    struct HistoryFrame {
+        QString id;
+        QString label;
+        QSet<QString> checkpointMedia;
+        struct HistorySession beforeSession;
+        struct HistorySession afterSession;
+        bool applied = true;
+    };
+    struct HistoryScope {
+        DatabaseWorker *worker = nullptr;
+        bool valid = true;
+        explicit operator bool() const { return valid; }
+        HistoryScope(DatabaseWorker *value, const QString &label);
+        ~HistoryScope();
+        HistoryScope(const struct HistoryScope &) = delete;
+        struct HistoryScope &operator=(const struct HistoryScope &) = delete;
+    };
+    QHash<QString, struct HistoryFrame> m_historyFrames;
+    QStringList m_historyOrder;
+    QString m_historyLabel;
+    struct HistorySession m_historyBeforeSession;
+    bool m_historyCapturing = false;
+    bool m_historyReady = false;
+    bool m_historyCommitted = false;
+    bool m_historyRuntimeChanged = false;
+    QStringList m_syncHistoryConflicts;
+    bool m_historyValidationFailure = false;
+
+    bool initializeHistory();
+    struct HistoryScope historyScope(const QString &label);
+    void finishHistory();
+    struct HistorySession historySession() const;
+    void restoreHistorySession(const struct HistorySession &session);
+    QSet<QString> historyMediaNames() const;
+    QVariantMap historyRow(const QString &entity, const QString &id);
+    bool applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq = 0);
+    bool historyEventEffects(const QVariantList &changes, qint64 seq, bool executeEffects, bool &applied);
+    bool enqueueHistory(const QVariantList &changes);
+    bool pendingHistoryEntity(const QString &type, const QString &id, bool restoreOnly = false);
+
 
     void assertThread() const;
     bool ready();

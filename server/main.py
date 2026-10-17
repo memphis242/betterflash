@@ -33,7 +33,7 @@ NARRATION_MAX_PCM_BYTES = NARRATION_SAMPLE_RATE * NARRATION_CHANNELS * NARRATION
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
-EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert"))
+EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert", "history.apply"))
 MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
 
 
@@ -191,6 +191,70 @@ def validate_review(record):
     review_session(record)
 
 
+def validate_deck(record):
+    identifiers(record, "id")
+    text(record, "name", 256, True)
+    text(record, "description", 65536)
+    instant(text(record, "createdAt", 40, True))
+    parent_id = record.get("parentId", "")
+    if not isinstance(parent_id, str) or (parent_id and not valid_uuid(parent_id)) or parent_id == record["id"]:
+        raise ProtocolError("INVALID_EVENT", "A deck parent identifier is invalid.")
+
+
+def validate_history_record(entity, identifier, record):
+    if record is None:
+        return
+    if not isinstance(record, dict):
+        raise ProtocolError("INVALID_EVENT", "History states must be objects or explicit null values.")
+    if record.get("id") != identifier:
+        raise ProtocolError("INVALID_EVENT", "History state identifiers must match their change identifier.")
+    match entity:
+        case "deck":
+            validate_deck(record)
+        case "card":
+            card_keys(record)
+        case "variant":
+            validate_variant(record)
+        case "review":
+            validate_review(record)
+        case "owner":
+            if set(record) != {"id", "reviewId"}:
+                raise ProtocolError("INVALID_EVENT", "History schedule ownership must contain its variant and review identifiers.")
+            identifiers(record, "id", "reviewId")
+        case _:
+            raise ProtocolError("INVALID_EVENT", "History changes contain an unsupported entity.")
+
+
+def validate_history(payload):
+    changes = payload.get("changes")
+    if not isinstance(changes, list) or not 1 <= len(changes) <= 100000:
+        raise ProtocolError("INVALID_EVENT", "History events must contain between 1 and 100000 changes.")
+    seen, context_variants, context_owners = set(), set(), set()
+    for change in changes:
+        if not isinstance(change, dict):
+            raise ProtocolError("INVALID_EVENT", "Each history change must be an object.")
+        entity, identifier = change.get("entity"), change.get("id")
+        if (entity not in ("deck", "card", "variant", "review", "owner") or not valid_uuid(identifier)
+                or "before" not in change or "after" not in change):
+            raise ProtocolError("INVALID_EVENT", "History changes require an entity, UUID, and explicit before and after states.")
+        identity = (entity, identifier)
+        if identity in seen:
+            raise ProtocolError("INVALID_EVENT", "History changes must identify each entity only once.")
+        seen.add(identity)
+        before, after = change["before"], change["after"]
+        if "contextOnly" in change:
+            if (type(change["contextOnly"]) is not bool or not change["contextOnly"]
+                    or entity not in ("variant", "owner") or before is not None or after is None):
+                raise ProtocolError("INVALID_EVENT", "History context must be an explicit creation context for a variant or its owner.")
+            (context_variants if entity == "variant" else context_owners).add(identifier)
+        if before == after:
+            raise ProtocolError("INVALID_EVENT", "Each history change must change at least one existing state.")
+        validate_history_record(entity, identifier, before)
+        validate_history_record(entity, identifier, after)
+    if not context_owners <= context_variants:
+        raise ProtocolError("INVALID_EVENT", "History owner context requires matching variant context in the same event.")
+
+
 def validate_payload(kind, payload):
     if "restore" in payload and (kind not in ("deck.upsert", "card.upsert") or type(payload["restore"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "Restore intent must be a boolean on a deck or card upsert.")
@@ -198,16 +262,11 @@ def validate_payload(kind, payload):
         raise ProtocolError("INVALID_EVENT", "Fresh variant identifiers belong only to an explicit card restore.")
     if "restoreDependency" in payload and (kind != "deck.upsert" or not payload.get("restore", False) or type(payload["restoreDependency"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "A restore dependency must be a boolean on an explicit deck restore.")
+    if "historyOnly" in payload and (kind not in ("review.add", "review.correct") or type(payload["historyOnly"]) is not bool):
+        raise ProtocolError("INVALID_EVENT", "historyOnly must be a boolean on a review event.")
     match kind:
         case "deck.upsert":
-            deck = payload.get("deck")
-            identifiers(deck, "id")
-            text(deck, "name", 256, True)
-            text(deck, "description", 65536)
-            instant(text(deck, "createdAt", 40, True))
-            parent_id = deck.get("parentId", "")
-            if not isinstance(parent_id, str) or (parent_id and not valid_uuid(parent_id)) or parent_id == deck["id"]:
-                raise ProtocolError("INVALID_EVENT", "A deck parent identifier is invalid.")
+            validate_deck(payload.get("deck"))
         case "deck.delete" | "card.delete":
             identifiers(payload, "id")
         case "card.upsert":
@@ -253,6 +312,8 @@ def validate_payload(kind, payload):
                         raise ProtocolError("INVALID_EVENT", "A correction must preserve the review identity, time, response duration, and review count.")
         case "variant.upsert":
             validate_variant(payload.get("variant"))
+        case "history.apply":
+            validate_history(payload)
 
 
 def validate_event(event, device):
@@ -274,10 +335,7 @@ def validate_event(event, device):
     return canonical
 
 
-def event_media(event):
-    if event["type"] != "card.upsert":
-        return set()
-    card = event["payload"]["card"]
+def card_media(card):
     image_names = set(MEDIA_REFERENCE.findall(card["front"]) + MEDIA_REFERENCE.findall(card["back"]))
     if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif)", name) for name in image_names):
         raise ProtocolError("MEDIA_REFERENCE", "Attach images using valid collection media filenames.")
@@ -288,6 +346,20 @@ def event_media(event):
     if any(not re.fullmatch(r"[0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav)", name) for name in names):
         raise ProtocolError("MEDIA_REFERENCE", "Attach images and narration using valid collection media filenames.")
     return names
+
+
+def event_media(event):
+    match event["type"]:
+        case "card.upsert":
+            return card_media(event["payload"]["card"])
+        case "history.apply":
+            names = set()
+            for change in event["payload"]["changes"]:
+                if change["entity"] == "card" and change["after"] is not None:
+                    names.update(card_media(change["after"]))
+            return names
+        case _:
+            return set()
 
 
 def valid_media_bytes(name, data):
@@ -338,20 +410,28 @@ class Store:
 
     @staticmethod
     def record_review_session(database, event):
-        if event["type"] not in ("review.add", "review.correct"):
-            return
-        session = review_session(event["payload"]["review"])
-        if session is None:
-            return
-        session_id, deck_name, started = session
-        started_at = started.isoformat(timespec="milliseconds")
-        existing = database.execute("SELECT deck_name,started_at FROM review_sessions WHERE session_id=?",
-                                    (session_id,)).fetchone()
-        if existing and (existing["deck_name"] != deck_name or existing["started_at"] != started_at):
-            raise ProtocolError("SESSION_CONFLICT", "This session identifier already has a different deck or start time. Refresh the originating client before syncing again.", 409)
-        if not existing:
-            database.execute("INSERT INTO review_sessions(session_id,deck_name,started_at) VALUES(?,?,?)",
-                             (session_id, deck_name, started_at))
+        match event["type"]:
+            case "review.add" | "review.correct":
+                reviews = [event["payload"]["review"]]
+            case "history.apply":
+                reviews = [change[side] for change in event["payload"]["changes"]
+                           if change["entity"] == "review" for side in ("before", "after")
+                           if change[side] is not None]
+            case _:
+                return
+        for review in reviews:
+            session = review_session(review)
+            if session is None:
+                continue
+            session_id, deck_name, started = session
+            started_at = started.isoformat(timespec="milliseconds")
+            existing = database.execute("SELECT deck_name,started_at FROM review_sessions WHERE session_id=?",
+                                        (session_id,)).fetchone()
+            if existing and (existing["deck_name"] != deck_name or existing["started_at"] != started_at):
+                raise ProtocolError("SESSION_CONFLICT", "This session identifier already has a different deck or start time. Refresh the originating client before syncing again.", 409)
+            if not existing:
+                database.execute("INSERT INTO review_sessions(session_id,deck_name,started_at) VALUES(?,?,?)",
+                                 (session_id, deck_name, started_at))
 
     def media_sizes(self, event):
         result = {}

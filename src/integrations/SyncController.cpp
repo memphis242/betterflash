@@ -26,11 +26,23 @@ std::expected<QStringList, QString> mediaReferences(const QVariantList &events, 
     QList<struct betterflash::model::Card> cards;
     for (const QVariant &value : events) {
         const QVariantMap event = wrapped ? value.toMap().value(QStringLiteral("event")).toMap() : value.toMap();
-        if (event.value(QStringLiteral("type")).toString() != QStringLiteral("card.upsert")) continue;
-        const auto card = betterflash::model::cardFromMap(event.value(QStringLiteral("payload")).toMap()
-                                                        .value(QStringLiteral("card")).toMap());
-        if (!card) return std::unexpected(card.error());
-        cards.append(*card);
+        const QString type = event.value(QStringLiteral("type")).toString();
+        const QVariantMap payload = event.value(QStringLiteral("payload")).toMap();
+        QVariantList records;
+        if (type == QStringLiteral("card.upsert")) records.append(payload.value(QStringLiteral("card")));
+        else if (type == QStringLiteral("history.apply")) {
+            for (const QVariant &entry : payload.value(QStringLiteral("changes")).toList()) {
+                const QVariantMap change = entry.toMap();
+                if (change.value(QStringLiteral("entity")) == QStringLiteral("card")
+                    && change.value(QStringLiteral("after")).metaType().id() == QMetaType::QVariantMap)
+                    records.append(change.value(QStringLiteral("after")));
+            }
+        }
+        for (const QVariant &record : records) {
+            const auto card = betterflash::model::cardFromMap(record.toMap());
+            if (!card) return std::unexpected(card.error());
+            cards.append(*card);
+        }
     }
     const auto names = betterflash::model::mediaReferences(cards);
     if (!names) return std::unexpected(names.error());

@@ -170,7 +170,7 @@ bool SearchController::setRemoteConnection(const QString &endpoint, const QStrin
     const QString cleanEndpoint = endpoint.trimmed();
     const QString cleanModel = model.trimmed();
     const QUrl url(cleanEndpoint);
-    if (!validEndpoint(url)) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Enter an HTTPS embeddings endpoint, or HTTP on localhost, without credentials or query parameters.")); return false; }
+    if (!cleanEndpoint.isEmpty() && !validEndpoint(url)) { setFailure(QStringLiteral("SEARCH_ENDPOINT: Enter an HTTPS embeddings endpoint, or HTTP on localhost, without credentials or query parameters.")); return false; }
     if (cleanModel.size() > 256) { setFailure(QStringLiteral("SEARCH_MODEL: Use a model identifier of at most 256 characters.")); return false; }
     m_endpoint = cleanEndpoint; m_model = cleanModel;
     m_settings.setValue(QStringLiteral("search/endpoint"), m_endpoint);

@@ -35,6 +35,14 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::deckCheckpointFinished,this,&AppController::deckCheckpointFinished);
     connect(m_worker,&DatabaseWorker::cardSaved,this,&AppController::cardSaved);
     connect(m_worker,&DatabaseWorker::cardNarrationSaved,this,&AppController::cardNarrationSaved);
+    connect(m_worker,&DatabaseWorker::actionRecorded,this,[this](const QString &id,const QString &label) {
+        emit actionRecorded(id,label,m_completedOperationContext,historyContext());
+    });
+    connect(m_worker,&DatabaseWorker::historyApplied,this,&AppController::historyApplied);
+    connect(m_worker,&DatabaseWorker::historyError,this,[this](const QString &code,const QString &message,const QString &detail) {
+        emit historyInvalidated();
+        setError({{"code",code},{"message",message},{"detail",detail}});
+    });
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
     connect(&m_elapsedTick,&QTimer::timeout,this,&AppController::updateElapsed);
@@ -48,12 +56,21 @@ AppController::~AppController()
     m_thread->quit();m_thread->wait();
 }
 QString AppController::mediaPath() const { return QDir(QFileInfo(m_storagePath).absolutePath()).filePath(QStringLiteral("media")); }
-bool AppController::invoke(const std::function<void(DatabaseWorker *)> &call)
+bool AppController::invoke(const std::function<void(DatabaseWorker *)> &call,const QVariantMap &context)
 {
     assert(thread()==QThread::currentThread());
-    ++m_pendingOperations;setBusy(true);
-    const bool queued=QMetaObject::invokeMethod(m_worker,[worker=m_worker,call]{call(worker);},Qt::QueuedConnection);
+    m_operationContexts.append(context.isEmpty()?historyContext():context);
+    ++m_pendingOperations;++m_pendingCompletions;setBusy(true);
+    const bool queued=QMetaObject::invokeMethod(m_worker,[this,worker=m_worker,call]{
+        call(worker);
+        QMetaObject::invokeMethod(this,[this]{
+            assert(m_pendingCompletions>0);
+            --m_pendingCompletions;
+            setBusy(m_pendingOperations>0||m_pendingCompletions>0);
+        },Qt::QueuedConnection);
+    },Qt::QueuedConnection);
     if (!queued) {
+        --m_pendingCompletions;
         handleOperation(false,"Could not queue the operation. Restart the application.",{{"code","WORKER_UNAVAILABLE"},{"message","Could not queue the operation. Restart the application."},{"detail",QString()}});
         return false;
     }
@@ -228,9 +245,10 @@ bool AppController::replaceCardWithAtomicCards(const QVariantMap &expectedSource
 void AppController::startReview(const QString &deckId)
 {
     if (m_busy) return;
+    const QVariantMap context=historyContext();
     m_reviewedCount=0;m_sessionTotal=0;m_spokenAnswer.clear();m_paused=false;m_leftReviewedVariants.clear();clearPendingGradeCorrection();
     emit spokenAnswerChanged();emit pausedChanged();emit reviewStateChanged();
-    invoke([=](DatabaseWorker *worker){worker->beginReview(deckId);});
+    invoke([=](DatabaseWorker *worker){worker->beginReview(deckId);},context);
 }
 void AppController::selectReviewCard(const QString &variantId)
 {
@@ -281,7 +299,9 @@ bool AppController::reviewActionReady(bool needsAnswer, bool allowPaused)
 void AppController::revealAnswer()
 {
     if (!reviewActionReady(false)||m_answerRevealed) return;
+    QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     freezeElapsed();m_answerRevealed=true;emit answerRevealedChanged();
+    invoke([](DatabaseWorker *worker){worker->recordReviewUiAction(QStringLiteral("Reveal answer"));},context);
 }
 void AppController::grade(int grade,double recall)
 {
@@ -337,15 +357,19 @@ void AppController::postponeDays(int days)
 }
 void AppController::pauseReview()
 {
-    if (!m_reviewing||m_paused) return;
+    if (m_busy||!m_reviewing||m_paused) return;
+    QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     clearPendingGradeCorrection();freezeElapsed();m_paused=true;emit pausedChanged();
+    invoke([](DatabaseWorker *worker){worker->recordReviewUiAction(QStringLiteral("Pause review"));},context);
 }
 void AppController::resumeReview()
 {
-    if (!m_reviewing||!m_paused) return;
+    if (m_busy||!m_reviewing||!m_paused) return;
+    QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     m_paused=false;
     if (!m_answerRevealed&&!m_reviewingCompletedCard&&m_currentCard.value("sessionGrade",-1).toInt()<0) {m_elapsed.start();m_elapsedTick.start();}
     emit pausedChanged();
+    invoke([](DatabaseWorker *worker){worker->recordReviewUiAction(QStringLiteral("Resume review"));},context);
 }
 void AppController::stopReview()
 {
@@ -402,11 +426,57 @@ void AppController::handleSnapshot(const QVariantList &decks,const QVariantList 
 }
 void AppController::handleOperation(bool ok,const QString &message,const QVariantMap &error)
 {
-    assert(m_pendingOperations>0);--m_pendingOperations;setBusy(m_pendingOperations>0);
+    assert(!m_operationContexts.isEmpty());
+    m_completedOperationContext=m_operationContexts.takeFirst();
+    assert(m_pendingOperations>0);--m_pendingOperations;setBusy(m_pendingOperations>0||m_pendingCompletions>0);
     if (!message.isEmpty()) {m_statusMessage=message;emit statusMessageChanged();}
-    if (!ok) setError(error);
+    if (!ok) {
+        if (m_completedOperationContext.value("restoreOnFailure").toBool()) restoreHistoryContext(m_completedOperationContext);
+        setError(error);
+    }
     else if (!m_lastError.isEmpty()) {m_lastError.clear();emit lastErrorChanged();}
 }
+QVariantMap AppController::historyContext() const
+{
+    QStringList left=m_leftReviewedVariants.values();
+    std::sort(left.begin(),left.end());
+    const double seconds=m_elapsed.isValid()?std::min(86400.0,m_accumulatedSeconds+m_elapsed.nsecsElapsed()/1.0e9):m_responseSeconds;
+    return {{"selectedDeck",m_selectedDeckId},{"variant",m_currentCard.value("variantId")},
+            {"revealed",m_answerRevealed},{"paused",m_paused},{"seconds",seconds},
+            {"spokenAnswer",m_spokenAnswer},{"leftReviewed",left},{"navigation",m_navigationContext}};
+}
+void AppController::restoreHistoryContext(const QVariantMap &context)
+{
+    if (context.isEmpty()) return;
+    const QString deck=context.value("selectedDeck").toString();
+    if (deck.isEmpty()||std::any_of(m_decks.cbegin(),m_decks.cend(),[&deck](const QVariant &value){return value.toMap().value("id").toString()==deck;}))
+        setSelectedDeckId(deck);
+    clearPendingGradeCorrection();
+    emit historyNavigationRequested(context.value("navigation").toMap());
+    if (context.value("variant").toString()!=m_currentCard.value("variantId").toString()) return;
+    m_elapsed.invalidate();m_elapsedTick.stop();
+    m_answerRevealed=m_reviewing&&context.value("revealed").toBool();
+    m_paused=m_reviewing&&context.value("paused").toBool();
+    m_spokenAnswer=context.value("spokenAnswer").toString();
+    m_leftReviewedVariants.clear();
+    for (const QString &id:context.value("leftReviewed").toStringList()) m_leftReviewedVariants.insert(id);
+    m_accumulatedSeconds=std::clamp(context.value("seconds").toDouble(),0.0,86400.0);
+    m_responseSeconds=m_accumulatedSeconds;
+    if (m_reviewing&&!m_paused&&!m_answerRevealed&&!m_reviewingCompletedCard) {m_elapsed.start();m_elapsedTick.start();}
+    emit answerRevealedChanged();emit pausedChanged();emit spokenAnswerChanged();emit responseSecondsChanged();
+}
+bool AppController::applyHistory(const QString &id,bool redo)
+{
+    if (m_busy) return false;
+    clearPendingGradeCorrection();freezeElapsed();
+    return invoke([=](DatabaseWorker *worker){worker->applyHistory(id,redo);});
+}
+void AppController::forgetHistory(const QStringList &ids)
+{
+    QMetaObject::invokeMethod(m_worker,[worker=m_worker,ids]{worker->forgetHistory(ids);},Qt::QueuedConnection);
+}
+void AppController::reportHistoryError(const QString &code,const QString &message)
+{ setError({{"code",code},{"message",message},{"detail",QString{}}}); }
 void AppController::handleQueue(const QVariantList &cards,int total,bool resetCurrent,const QVariantMap &selectedCard,
                                 bool inspecting,const QString &cursorVariantId)
 {

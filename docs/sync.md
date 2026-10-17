@@ -37,6 +37,18 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 | `review.add` | initial `review` and its updated `variant` |
 | `review.correct` | corrected `review` and recalculated `variant`, with `previousReview` and `previousVariant` snapshots; review identity, timestamp, response duration, and review count are preserved |
 | `variant.upsert` | `variant`, including a postponed due date |
+| `history.apply` | Flat `changes` list of `{entity, id, before, after}` compensations for decks, cards, variants, reviews, and review owners |
+
+Undo and redo enqueue `history.apply` after a strict local expected-state check.
+Remote changes follow server event order, with independent review history and
+schedule ownership. Compensating card writes can restore deleted cards; deck
+metadata writes restore only their folder. A change with `contextOnly: true`
+supplies a missing variant or its owner without replacing an existing schedule.
+Only target card states contribute media references. Large operations split at
+dependency-complete card boundaries, with parent decks before child content and
+deck deletions after it. Checkpoints themselves remain local. All clients and
+the server must support this event before using synchronized undo; capability
+negotiation remains deferred. See [undo and redo](undo.md) for the full policy.
 
 Imported historical reviews can use `historyOnly: true` without changing a
 schedule. Variant identifiers are UUID version 5 values derived from the source

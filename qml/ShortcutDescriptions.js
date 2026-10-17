@@ -1,6 +1,9 @@
 .pragma library
 
 const descriptions = {
+    undo: "Undo the latest saved action. Up to five actions are retained. While editing text, this shortcut undoes text changes instead.",
+    redo: "Reapply the latest undone action. Making a new action discards the remaining redo branch. While editing text, this shortcut redoes text changes instead.",
+    redoAlternate: "An alternative shortcut for Redo. While editing text, it redoes text changes instead of a saved application action.",
     commandPalette: "Open the searchable command, deck, and card launcher.",
     deckSearch: "Find a deck by name in the Library.",
     newCard: "Create a new flashcard.",

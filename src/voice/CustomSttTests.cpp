@@ -13,9 +13,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMediaDevices>
+#include <QMetaType>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
@@ -31,6 +33,17 @@ constexpr int MaxEntries = 5;
 static_assert(MaxRecordingBytes % 2 == 0);
 static_assert(MaxSourceBytes >= MaxRecordingBytes);
 
+bool managedDestination(const QString &directory, const QString &path) {
+    const QFileInfo rootInfo(directory);
+    const QFileInfo candidateInfo(path);
+    const QString root = rootInfo.canonicalFilePath();
+    static const QRegularExpression fileName(QStringLiteral(R"(^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.wav$)"));
+    return !root.isEmpty() && rootInfo.isDir() && !candidateInfo.isSymLink()
+        && path == QDir(directory).absoluteFilePath(candidateInfo.fileName())
+        && QFileInfo(candidateInfo.absolutePath()).canonicalFilePath() == root
+        && fileName.match(candidateInfo.fileName()).hasMatch();
+}
+
 bool managedPath(const QString &directory, const QString &path) {
     const QFileInfo rootInfo(QDir::cleanPath(directory));
     const QFileInfo candidateInfo(QDir::cleanPath(path));
@@ -39,6 +52,16 @@ bool managedPath(const QString &directory, const QString &path) {
     static const QRegularExpression fileName(QStringLiteral(R"(^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.wav$)"));
     return !root.isEmpty() && !candidate.isEmpty() && candidateInfo.isFile() && !candidateInfo.isSymLink()
         && candidate.startsWith(root) && fileName.match(candidateInfo.fileName()).hasMatch();
+}
+
+bool canonicalRecording(const QByteArray &wave, double *duration) {
+    const qsizetype pcmSize = wave.size() - 44;
+    if (pcmSize < VoiceUtteranceBuffer::FrameBytes || pcmSize > MaxRecordingBytes || pcmSize % 2 != 0)
+        return false;
+    const QByteArrayView pcm = QByteArrayView(wave).sliced(44);
+    if (voiceWav(pcm) != wave) return false;
+    if (duration) *duration = static_cast<double>(pcmSize) / (VoiceUtteranceBuffer::SampleRate * 2.0);
+    return true;
 }
 
 QString normalizedWords(const QString &text) {
@@ -167,6 +190,112 @@ QVariantList CustomSttTests::entries() const {
     return result;
 }
 
+QVariant CustomSttTests::userConfiguration() const {
+    Q_ASSERT(m_entries.size() == MaxEntries);
+    QVariantList result;
+    result.reserve(m_entries.size());
+    for (const struct Entry &entry : m_entries) {
+        result.append(QVariantMap{{QStringLiteral("id"), entry.id}, {QStringLiteral("label"), entry.label},
+            {QStringLiteral("path"), entry.path}, {QStringLiteral("expected"), entry.expected},
+            {QStringLiteral("duration"), entry.duration}, {QStringLiteral("waveBytes"), entry.waveBytes}});
+    }
+    return result;
+}
+
+bool CustomSttTests::restoreUserConfiguration(const QVariant &configuration) {
+    if (m_busy || m_recording || m_interactionBlocked) {
+        setState(m_busy, QStringLiteral("Custom recordings cannot change now."),
+            QStringLiteral("VOICE_CUSTOM_BUSY: Finish recording, testing, or editing narration before undoing custom recordings."));
+        return false;
+    }
+    const auto reject = [this](const QString &message) {
+        setState(false, QStringLiteral("Custom recordings could not be restored."), message);
+        return false;
+    };
+    if (configuration.metaType().id() != QMetaType::QVariantList)
+        return reject(QStringLiteral("VOICE_CUSTOM_HISTORY: The saved recording configuration is invalid."));
+    const QVariantList items = configuration.toList();
+    if (items.size() != MaxEntries || m_entries.size() != MaxEntries)
+        return reject(QStringLiteral("VOICE_CUSTOM_HISTORY: The saved recording slots do not match this session."));
+    const QStringList fields{QStringLiteral("duration"), QStringLiteral("expected"), QStringLiteral("id"),
+        QStringLiteral("label"), QStringLiteral("path"), QStringLiteral("waveBytes")};
+    QVector<struct Entry> restored;
+    restored.reserve(MaxEntries);
+    QSet<QString> paths;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        if (items.at(i).metaType().id() != QMetaType::QVariantMap)
+            return reject(QStringLiteral("VOICE_CUSTOM_HISTORY: A saved recording slot is invalid."));
+        const QVariantMap item = items.at(i).toMap();
+        if (item.keys() != fields || item.value(QStringLiteral("id")).metaType().id() != QMetaType::QString
+            || item.value(QStringLiteral("label")).metaType().id() != QMetaType::QString
+            || item.value(QStringLiteral("path")).metaType().id() != QMetaType::QString
+            || item.value(QStringLiteral("expected")).metaType().id() != QMetaType::QString
+            || item.value(QStringLiteral("duration")).metaType().id() != QMetaType::Double
+            || item.value(QStringLiteral("waveBytes")).metaType().id() != QMetaType::QByteArray)
+            return reject(QStringLiteral("VOICE_CUSTOM_HISTORY: A saved recording slot has invalid fields."));
+        const QString id = item.value(QStringLiteral("id")).toString();
+        const QString path = item.value(QStringLiteral("path")).toString();
+        const QString expected = item.value(QStringLiteral("expected")).toString();
+        const QByteArray wave = item.value(QStringLiteral("waveBytes")).toByteArray();
+        const double duration = item.value(QStringLiteral("duration")).toDouble();
+        double actualDuration = 0.0;
+        if (id != m_entries.at(i).id || !std::isfinite(duration)
+            || expected.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts).size() > 512
+            || (path.isEmpty() ? (!wave.isEmpty() || duration != 0.0)
+                : (!managedDestination(m_directory, path) || paths.contains(path)
+                    || !canonicalRecording(wave, &actualDuration) || std::abs(duration - actualDuration) > 0.000001)))
+            return reject(QStringLiteral("VOICE_CUSTOM_HISTORY: A saved recording is invalid or exceeds the 60-second limit."));
+        if (!path.isEmpty()) paths.insert(path);
+        struct Entry entry = m_entries.at(i);
+        if (entry.path != path || entry.expected != expected || entry.waveBytes != wave) {
+            entry = Entry{};
+            entry.id = id;
+            entry.status = path.isEmpty() ? QStringLiteral("Need recording")
+                : expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
+        }
+        entry.label = item.value(QStringLiteral("label")).toString();
+        entry.path = path;
+        entry.expected = expected;
+        entry.duration = duration;
+        entry.waveBytes = wave;
+        restored.append(std::move(entry));
+    }
+    QStringList created;
+    const auto removeCreated = [&created] { for (const QString &path : created) QFile::remove(path); };
+    for (const struct Entry &entry : std::as_const(restored)) {
+        if (entry.path.isEmpty()) continue;
+        if (QFileInfo::exists(entry.path)) {
+            QFile file(entry.path);
+            if (!managedPath(m_directory, entry.path) || !file.open(QIODevice::ReadOnly)
+                || file.size() != entry.waveBytes.size() || file.read(MaxRecordingBytes + 45) != entry.waveBytes) {
+                removeCreated();
+                return reject(QStringLiteral("VOICE_CUSTOM_HISTORY_CONFLICT: A recording file changed outside the application. Restore it before retrying."));
+            }
+            continue;
+        }
+        QSaveFile file(entry.path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(entry.waveBytes) != entry.waveBytes.size() || !file.commit()) {
+            file.cancelWriting();
+            removeCreated();
+            return reject(QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage permissions and available space."));
+        }
+        created.append(entry.path);
+    }
+    const QVector<struct Entry> previous = m_entries;
+    m_entries = std::move(restored);
+    if (!persist()) {
+        m_entries = previous;
+        persist();
+        removeCreated();
+        return reject(QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage permissions and available space."));
+    }
+    for (const struct Entry &entry : previous)
+        if (!entry.path.isEmpty() && !paths.contains(entry.path) && managedPath(m_directory, entry.path)) QFile::remove(entry.path);
+    notifyEntries();
+    setState(false, QStringLiteral("Custom recording configuration restored."));
+    return true;
+}
+
 bool CustomSttTests::canRun() const {
     if (m_busy || m_recording || m_entries.isEmpty()) return false;
     if (m_provider == QStringLiteral("local") && !localModelReady(m_modelPath)) return false;
@@ -283,8 +412,9 @@ void CustomSttTests::replaceRecording(const QString &id, const QUrl &source) {
     if (!entry) return;
     QString path;
     double duration = 0.0;
+    QByteArray waveBytes;
     QString error;
-    if (!importWave(source, &path, &duration, &error)) {
+    if (!importWave(source, &path, &duration, &waveBytes, &error)) {
         setState(false, QStringLiteral("Recording import failed."), error);
         return;
     }
@@ -294,6 +424,7 @@ void CustomSttTests::replaceRecording(const QString &id, const QUrl &source) {
     entry->label = QFileInfo(source.toLocalFile()).completeBaseName();
     if (entry->label.isEmpty()) entry->label = oldLabel;
     entry->path = path;
+    entry->waveBytes = std::move(waveBytes);
     entry->duration = duration;
     entry->transcript.clear();
     entry->rawTranscript.clear();
@@ -360,8 +491,9 @@ void CustomSttTests::setLabel(const QString &id, const QString &text) {
     if (!entry) return;
     const QString value = text.trimmed();
     if (value.isEmpty() || entry->label == value) return;
+    const QString previous = entry->label;
     entry->label = value;
-    if (!persist()) { setState(false, QStringLiteral("Label could not be saved."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
+    if (!persist()) { entry->label = previous; setState(false, QStringLiteral("Label could not be saved."), QStringLiteral("VOICE_CUSTOM_SAVE: Check application storage.")); return; }
     notifyEntries();
 }
 
@@ -371,6 +503,7 @@ void CustomSttTests::removeRecording(const QString &id) {
     if (!entry) return;
     const struct Entry previous = *entry;
     entry->path.clear();
+    entry->waveBytes.clear();
     entry->label.clear();
     entry->duration = 0.0;
     entry->transcript.clear();
@@ -535,9 +668,11 @@ void CustomSttTests::stopRecording() {
     const struct Entry previous = *entry;
     const QString oldPath = previous.path;
     const QString path = QDir(m_directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".wav"));
+    const QByteArray waveBytes = voiceWav(m_recordedPcm);
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(voiceWav(m_recordedPcm)) != 44 + m_recordedPcm.size() || !file.commit()) { file.cancelWriting(); QFile::remove(path); m_recordedPcm.clear(); m_recordingId.clear(); resetRecordingMetrics(); setState(false, QStringLiteral("Recording could not be saved."), QStringLiteral("Check available application storage.")); return; }
+    if (!file.open(QIODevice::WriteOnly) || file.write(waveBytes) != waveBytes.size() || !file.commit()) { file.cancelWriting(); QFile::remove(path); m_recordedPcm.clear(); m_recordingId.clear(); resetRecordingMetrics(); setState(false, QStringLiteral("Recording could not be saved."), QStringLiteral("Check available application storage.")); return; }
     entry->path = path;
+    entry->waveBytes = waveBytes;
     entry->label = QStringLiteral("Microphone recording %1").arg(static_cast<int>(std::distance(m_entries.data(), entry)) + 1);
     entry->duration = static_cast<double>(m_recordedPcm.size()) / (VoiceUtteranceBuffer::SampleRate * 2.0);
     entry->transcript.clear(); entry->rawTranscript.clear(); entry->correctedTranscript.clear(); entry->correctionStatus.clear(); entry->correctionError.clear(); entry->error.clear(); entry->wordErrorRate = -1.0;
@@ -589,6 +724,7 @@ void CustomSttTests::load() {
     QSettings settings;
     settings.beginGroup(QStringLiteral("voice/customTests"));
     const QStringList ids = settings.value(QStringLiteral("ids")).toStringList();
+    bool unavailableRecording = false;
     for (const QString &id : ids) {
         struct Entry entry;
         entry.id = id;
@@ -600,8 +736,27 @@ void CustomSttTests::load() {
         entry.correctedTranscript = settings.value(id + QStringLiteral("/correctedTranscript")).toString();
         entry.correctionStatus = settings.value(id + QStringLiteral("/correctionStatus")).toString();
         entry.correctionError = settings.value(id + QStringLiteral("/correctionError")).toString();
-        if (!entry.path.isEmpty() && (!managedPath(m_directory, entry.path) || !QFileInfo::exists(entry.path))) entry.path.clear();
+        if (!entry.path.isEmpty()) {
+            QFile recordingFile(entry.path);
+            if (!managedPath(m_directory, entry.path) || !managedDestination(m_directory, entry.path)
+                || !recordingFile.open(QIODevice::ReadOnly) || recordingFile.size() > MaxRecordingBytes + 44) {
+                entry.path.clear();
+                unavailableRecording = true;
+            } else {
+                entry.waveBytes = recordingFile.read(MaxRecordingBytes + 45);
+                if (!canonicalRecording(entry.waveBytes, nullptr)) {
+                    entry.path.clear();
+                    entry.waveBytes.clear();
+                    unavailableRecording = true;
+                }
+            }
+        }
         entry.duration = settings.value(id + QStringLiteral("/duration")).toDouble();
+        if (!entry.path.isEmpty()) {
+            const bool valid = canonicalRecording(entry.waveBytes, &entry.duration);
+            Q_ASSERT(valid);
+            Q_UNUSED(valid);
+        }
         entry.status = entry.path.isEmpty() ? QStringLiteral("Need recording") : entry.expected.isEmpty() ? QStringLiteral("Needs expected transcript") : QStringLiteral("Ready");
         entry.transcript = entry.rawTranscript;
         entry.error = settings.value(id + QStringLiteral("/error")).toString();
@@ -619,6 +774,7 @@ void CustomSttTests::load() {
         if (entry.status == QStringLiteral("Queued") || entry.status == QStringLiteral("Running")) entry.status = QStringLiteral("Canceled");
         if (entry.id.isEmpty()) entry.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         if (entry.path.isEmpty()) {
+            entry.waveBytes.clear();
             entry.label.clear();
             entry.duration = 0.0;
             entry.transcript.clear();
@@ -645,6 +801,9 @@ void CustomSttTests::load() {
         m_entries.append(std::move(entry));
     }
     persist();
+    if (unavailableRecording)
+        setState(false, QStringLiteral("A custom recording is unavailable."),
+            QStringLiteral("VOICE_CUSTOM_RECORDING: Add the affected recording again. Its managed WAV file is missing or invalid."));
 }
 
 bool CustomSttTests::persist() {
@@ -716,8 +875,8 @@ void CustomSttTests::updateRecordingMetrics() {
 void CustomSttTests::notifyEntries() { emit entriesChanged(); emit stateChanged(); }
 void CustomSttTests::setState(const bool busy, QString status, QString error) { m_busy = busy; m_status = std::move(status); m_error = std::move(error); emit stateChanged(); }
 
-bool CustomSttTests::importWave(const QUrl &source, QString *path, double *duration, QString *error) const {
-    if (!path || !duration || !source.isLocalFile()) { if (error) *error = QStringLiteral("Choose a local WAV recording."); return false; }
+bool CustomSttTests::importWave(const QUrl &source, QString *path, double *duration, QByteArray *waveBytes, QString *error) const {
+    if (!path || !duration || !waveBytes || !source.isLocalFile()) { if (error) *error = QStringLiteral("Choose a local WAV recording."); return false; }
     QFile sourceFile(source.toLocalFile());
     if (!sourceFile.open(QIODevice::ReadOnly) || sourceFile.size() > MaxSourceBytes) { if (error) *error = QStringLiteral("The recording could not be opened or is too large."); return false; }
     WaveData wave;
@@ -726,11 +885,13 @@ bool CustomSttTests::importWave(const QUrl &source, QString *path, double *durat
     if (!converter.configure(wave.format)) { if (error) *error = QStringLiteral("The WAV format is not supported."); return false; }
     QByteArray pcm = converter.convert(wave.bytes);
     if (pcm.size() > MaxRecordingBytes || pcm.size() < VoiceUtteranceBuffer::FrameBytes) { if (error) *error = QStringLiteral("The recording must be between 20 ms and 60 seconds."); return false; }
+    const QByteArray normalizedWave = voiceWav(pcm);
     const QString target = QDir(m_directory).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".wav"));
     QSaveFile targetFile(target);
-    if (!targetFile.open(QIODevice::WriteOnly) || targetFile.write(voiceWav(pcm)) != 44 + pcm.size() || !targetFile.commit()) { targetFile.cancelWriting(); QFile::remove(target); if (error) *error = QStringLiteral("The normalized recording could not be saved."); return false; }
+    if (!targetFile.open(QIODevice::WriteOnly) || targetFile.write(normalizedWave) != normalizedWave.size() || !targetFile.commit()) { targetFile.cancelWriting(); QFile::remove(target); if (error) *error = QStringLiteral("The normalized recording could not be saved."); return false; }
     *path = target;
     *duration = static_cast<double>(pcm.size()) / (VoiceUtteranceBuffer::SampleRate * 2.0);
+    *waveBytes = normalizedWave;
     return true;
 }
 

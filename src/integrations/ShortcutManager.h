@@ -18,6 +18,7 @@ public:
     bool customized() const { return m_bindings != defaultBindings(); }
     Q_INVOKABLE QString get(const QString &action) const;
     Q_INVOKABLE bool rebind(const QString &action, const QString &sequence);
+    bool restoreBindings(const QVariantMap &bindings);
     Q_INVOKABLE QString sequenceForKey(int key, int modifiers) const;
     Q_INVOKABLE void reset();
 signals:
