@@ -219,7 +219,7 @@ Dialog {
                 const sections = [introduction, timelineSection, emptyState, changeHeading, detailsTabs,
                                   annotationSection, loadingLabel, checkpointError, confirmationPanel]
                 let total = 0
-                let count = changePreview.visible ? 1 : 0
+                let count = changePreviewSection.visible ? 1 : 0
                 for (const section of sections) {
                     if (!section.visible) continue
                     total += section.implicitHeight
@@ -360,14 +360,16 @@ Dialog {
                 AppTabButton {
                     text: dialog.narrow ? "Cards" : "Cards (" + (dialog.preview.changes || []).length + ")"
                     width: dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * (dialog.restoreMode ? 2 : 1)) / (dialog.restoreMode ? 3 : 2) : implicitWidth + 20
-                    font.pixelSize: dialog.narrow ? 12 : 14
+                    font.pixelSize: dialog.narrow ? 15 : 17
+                    implicitHeight: dialog.narrow ? 44 : 48
                     ToolTip.visible: hovered && dialog.narrow
                     ToolTip.text: "Card changes: " + (dialog.preview.changes || []).length
                 }
                 AppTabButton {
                     text: dialog.narrow ? "Decks" : "Decks (" + (dialog.preview.deckChanges || []).length + ")"
                     width: dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * (dialog.restoreMode ? 2 : 1)) / (dialog.restoreMode ? 3 : 2) : implicitWidth + 20
-                    font.pixelSize: dialog.narrow ? 12 : 14
+                    font.pixelSize: dialog.narrow ? 15 : 17
+                    implicitHeight: dialog.narrow ? 44 : 48
                     ToolTip.visible: hovered && dialog.narrow
                     ToolTip.text: "Deck changes: " + (dialog.preview.deckChanges || []).length
                 }
@@ -375,50 +377,59 @@ Dialog {
                     visible: dialog.restoreMode
                     text: dialog.narrow ? "Details" : "Checkpoint details"
                     width: visible ? dialog.narrow ? (detailsTabs.width - detailsTabs.spacing * 2) / 3 : implicitWidth + 20 : 0
-                    font.pixelSize: dialog.narrow ? 12 : 14
+                    font.pixelSize: dialog.narrow ? 15 : 17
+                    implicitHeight: dialog.narrow ? 44 : 48
                     ToolTip.visible: hovered && dialog.narrow
                     ToolTip.text: "Checkpoint details"
                 }
             }
-            StackLayout {
-                id: changePreview
+            Rectangle {
+                id: changePreviewSection
                 visible: !!dialog.preview.token
                 Layout.fillWidth: true
                 Layout.minimumHeight: Layout.preferredHeight
-                Layout.preferredHeight: Math.max(160, bodyScroll.availableHeight - bodyLayout.chromeHeight)
+                Layout.preferredHeight: Math.max(190, bodyScroll.availableHeight - bodyLayout.chromeHeight)
                 Layout.maximumHeight: Layout.preferredHeight
-                currentIndex: detailsTabs.currentIndex
-                Item {
-                    CheckpointChangeList { anchors.fill: parent; changes: dialog.preview.changes || [] }
-                    Label { visible: !(dialog.preview.changes || []).length; anchors.centerIn: parent; text: "No card changes"; color: Theme.inkMuted }
-                }
-                Item {
-                    CheckpointChangeList { anchors.fill: parent; changes: dialog.preview.deckChanges || []; deckChanges: true }
-                    Label { visible: !(dialog.preview.deckChanges || []).length; anchors.centerIn: parent; text: "No deck changes"; color: Theme.inkMuted }
-                }
-                ScrollView {
-                    id: checkpointDetails
-                    clip: true; contentWidth: availableWidth
-                    ColumnLayout {
-                        width: checkpointDetails.availableWidth
-                        spacing: 12
-                        GridLayout {
-                            columns: dialog.narrow ? 1 : 2
-                            Layout.fillWidth: true
-                            Label { text: "Saved " + dialog.stamp(dialog.selected.createdAt); color: Theme.ink; font.pixelSize: 15; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                            AppButton {
-                                text: "Delete checkpoint"
-                                foreground: Theme.error
-                                Layout.alignment: Qt.AlignRight
-                                enabled: !dialog.submitting
-                                onClicked: { dialog.deleting = true; dialog.confirming = true }
+                radius: 9
+                color: Theme.editorField
+                border.color: Theme.ledgerRule
+                StackLayout {
+                    id: changePreview
+                    anchors.fill: parent
+                    anchors.margins: dialog.narrow ? 10 : 16
+                    currentIndex: detailsTabs.currentIndex
+                    Item {
+                        CheckpointChangeList { anchors.fill: parent; changes: dialog.preview.changes || [] }
+                        Label { visible: !(dialog.preview.changes || []).length; anchors.centerIn: parent; text: "No card changes"; color: Theme.inkMuted }
+                    }
+                    Item {
+                        CheckpointChangeList { anchors.fill: parent; changes: dialog.preview.deckChanges || []; deckChanges: true }
+                        Label { visible: !(dialog.preview.deckChanges || []).length; anchors.centerIn: parent; text: "No deck changes"; color: Theme.inkMuted }
+                    }
+                    ScrollView {
+                        id: checkpointDetails
+                        clip: true; contentWidth: availableWidth
+                        ColumnLayout {
+                            width: checkpointDetails.availableWidth
+                            spacing: 12
+                            GridLayout {
+                                columns: dialog.narrow ? 1 : 2
+                                Layout.fillWidth: true
+                                Label { text: "Saved " + dialog.stamp(dialog.selected.createdAt); color: Theme.ink; font.pixelSize: 15; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                AppButton {
+                                    text: "Delete checkpoint"
+                                    foreground: Theme.error
+                                    Layout.alignment: Qt.AlignRight
+                                    enabled: !dialog.submitting
+                                    onClicked: { dialog.deleting = true; dialog.confirming = true }
+                                }
                             }
+                            Label { text: dialog.brief(dialog.historic.first !== undefined ? dialog.historic : dialog.selected); color: Theme.inkMuted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label { visible: !!dialog.selected.note; text: "Note"; font.bold: true; color: Theme.ink }
+                            TextEdit { visible: !!dialog.selected.note; text: dialog.selected.note || ""; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.ink; font.pixelSize: 14; Layout.fillWidth: true }
+                            Label { visible: !!dialog.selected.summary; text: "Summary of changes"; font.bold: true; color: Theme.ink }
+                            Native.MarkdownView { visible: !!dialog.selected.summary; markdown: dialog.selected.summary || ""; foreground: Theme.ink; darkMode: Theme.dark; codeBackground: Theme.editorField; accent: Theme.accent; baseFontSize: 14; mediaRoot: app.mediaPath; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
                         }
-                        Label { text: dialog.brief(dialog.historic.first !== undefined ? dialog.historic : dialog.selected); color: Theme.inkMuted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                        Label { visible: !!dialog.selected.note; text: "Note"; font.bold: true; color: Theme.ink }
-                        TextEdit { visible: !!dialog.selected.note; text: dialog.selected.note || ""; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.ink; font.pixelSize: 14; Layout.fillWidth: true }
-                        Label { visible: !!dialog.selected.summary; text: "Summary of changes"; font.bold: true; color: Theme.ink }
-                        Native.MarkdownView { visible: !!dialog.selected.summary; markdown: dialog.selected.summary || ""; foreground: Theme.ink; darkMode: Theme.dark; codeBackground: Theme.editorField; accent: Theme.accent; baseFontSize: 14; mediaRoot: app.mediaPath; Layout.fillWidth: true; Layout.preferredHeight: implicitHeight }
                     }
                 }
             }
