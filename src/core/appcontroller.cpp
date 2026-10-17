@@ -30,6 +30,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
+    connect(m_worker,&DatabaseWorker::cardSaved,this,&AppController::cardSaved);
     connect(m_worker,&DatabaseWorker::cardNarrationSaved,this,&AppController::cardNarrationSaved);
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
@@ -81,14 +82,18 @@ bool AppController::moveDeck(const QString &id, const QString &parentId)
 }
 void AppController::deleteDeck(const QString &id)
 { invoke([=](DatabaseWorker *worker){worker->deleteDeck(id);}); }
-bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points)
+bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
     const struct betterflash::model::Card candidate{id.isEmpty()?betterflash::model::uuid():id,deckId,kind,front,back,tags,points};
     const auto valid=betterflash::model::cardFromMap(betterflash::model::toMap(candidate));
     if (!valid) {
-        setError({{"code",kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD"},{"message","Could not save the card. Correct the card fields."},{"detail",valid.error()}});return false;
+        setError({{"code",kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD"},{"message","Could not save the card. Correct the card fields."},{"detail",valid.error()}});
+        emit cardSaved(id,requestId,false);
+        return false;
     }
-    invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,tags,points);});return true;
+    const bool queued = invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,tags,points,requestId);});
+    if (!queued) emit cardSaved(id,requestId,false);
+    return queued;
 }
 bool AppController::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
 {

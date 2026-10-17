@@ -24,7 +24,8 @@ public:
     void moveDeck(const QString &id, const QString &parentId);
     void deleteDeck(const QString &id);
     void saveCard(const QString &id, const QString &deckId, const QString &kind,
-                  const QString &front, const QString &back, const QString &tags, int points);
+                  const QString &front, const QString &back, const QString &tags, int points,
+                  const QString &requestId = {});
     void setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
                           const QString &mediaName, const QString &requestId, const QString &fingerprint = {});
     void confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
@@ -52,6 +53,7 @@ signals:
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
+    void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);
     void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
