@@ -48,6 +48,14 @@ AppMenu {
         }
     }
     AppMenuSeparator {}
+    AppMenuItem { glyph: "cards"
+        text: "Generate like this"
+        enabled: menu.cardAvailable && !app.busy
+        onTriggered: {
+            menu.beforeAction()
+            menu.ui.openGenerateLike(menu.cardId)
+        }
+    }
     AppMenuItem { glyph: "atom"
         text: "Atomicize card"
         enabled: menu.cardAvailable

@@ -34,8 +34,10 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   model guidance are implemented. Refine weights and thresholds during use;
   deck topic grouping and completed-run rankings remain follow-ups. See
   [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
-- **Generate like this:** propose analogous problem cards, with a review and
-  answer-verification workflow before saving. See the same study-support notes.
+- **Generate like this:** one-card model drafts are available in Review and
+  Library, with Markdown preview and editing before saving. Independent answer
+  verification and optional difficulty controls remain follow-ups. See the same
+  study-support notes.
 - **Learning statistics:** refine the provisional library/deck learning score,
   coverage, and consistency measures; account for unreviewed material rather
   than scoring only the cards already reviewed. See

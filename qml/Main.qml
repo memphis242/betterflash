@@ -51,6 +51,8 @@ ApplicationWindow {
     property string editingDeckId: ""
     property string editingDeckParentId: ""
     property string editingCardId: ""
+    property var generatedCardDraft: null
+    readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible
     property bool cardInverted: false
     property bool initializingDeckParent: false
     property string localCardError: ""
@@ -89,7 +91,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
@@ -1406,14 +1408,15 @@ ApplicationWindow {
         onOpened: {
             clearPendingEditorSave()
             window.editorSession += 1
-            const c = editingCard()
+            const c = generatedCardDraft || editingCard()
             localCardError = ""
             cardDeck.currentIndex = cardDeck.indexOfValue(c.deckId || app.selectedDeckId)
             cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
             cardInverted = c.kind === "reverse"
-            editorSource.text = c.id ? c.front + (c.back ? "\n\n---\n\n" + c.back : "") : "\n\n---\n\n"
+            editorSource.text = (c.id || generatedCardDraft) ? c.front + (c.back ? "\n\n---\n\n" + c.back : "") : "\n\n---\n\n"
             cardTags.text = c.tags || ""
             cardPoints.value = c.pointCount || 1
+            generatedCardDraft = null
             editorTabs.currentIndex = 0
             editorSource.cursorPosition = 0
             window.focusEditorSource()
@@ -2367,6 +2370,10 @@ ApplicationWindow {
     function openDeckCheckpoint(deckId, restore) {
         checkpointDialog.openFor(deckId, restore)
     }
+    GenerateCardDialog {
+        id: generateCardDialog
+        ui: window
+    }
     AtomicizeDialog {
         id: atomicDialog
         ui: window
@@ -2631,6 +2638,16 @@ ApplicationWindow {
     }
     function openPartial() {
         partialDialog.open()
+    }
+    function openGenerateLike(cardId) {
+        if (!app.busy && cardId)
+            generateCardDialog.openFor(cardId)
+    }
+    function editGeneratedCard(draft) {
+        if (detailDialog.visible)
+            detailDialog.close()
+        generatedCardDraft = draft
+        openCardEditor("")
     }
     function openStudyGuidance(cardId, variantId) {
         if (app.busy || !cardId)

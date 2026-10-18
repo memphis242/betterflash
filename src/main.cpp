@@ -3,6 +3,7 @@
 #include "core/cardmodel.h"
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
+#include "integrations/CardGenerator.h"
 #include "integrations/ApiKeyRegistry.h"
 #include "integrations/RemoteModelCatalog.h"
 #include "integrations/ShortcutManager.h"
@@ -214,6 +215,7 @@ int main(int argc, char **argv) {
     Summarizer ai(&app, nullptr, &apiKeys);
     SearchController librarySearch(&app, &ai, dataDirectory, nullptr, &apiKeys);
     Atomicizer atomic(&app, &ai);
+    CardGenerator cardGenerator(&app, &ai);
     CheckpointSummary checkpointSummary(&ai);
     StudyAssistant studyAssistant(&ai, &app);
     SyncController sync(&app, media.rootPath());
@@ -274,6 +276,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
     engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
+    engine.rootContext()->setContextProperty(QStringLiteral("cardGenerator"), &cardGenerator);
     engine.rootContext()->setContextProperty(QStringLiteral("checkpointSummary"), &checkpointSummary);
     engine.rootContext()->setContextProperty(QStringLiteral("studyAssistant"), &studyAssistant);
     engine.rootContext()->setContextProperty(QStringLiteral("sync"), &sync);

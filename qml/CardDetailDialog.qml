@@ -152,7 +152,10 @@ Dialog {
                     font.pixelSize: 12
                 }
             }
-            RowLayout {
+            Flow {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.preferredWidth: 650
                 Layout.row: detail.width < 900 ? 1 : 0
                 Layout.column: detail.width < 900 ? 0 : 1
                 Layout.columnSpan: detail.width < 900 ? 2 : 1
@@ -170,6 +173,13 @@ Dialog {
                     hint: "See this card's recall evidence, recall strength and suggested study steps. Ask the language model for help only if you choose."
                     enabled: typeof detail.ui.openStudyGuidance === "function"
                     onClicked: detail.ui.openStudyGuidance(detail.cardId, "")
+                }
+                AppButton {
+                    text: detail.width < 900 ? "Generate" : "Generate like this"
+                    glyph: "cards"
+                    hint: "Draft a varied card testing the same concept with the configured language model. Review it before saving."
+                    enabled: !app.busy
+                    onClicked: detail.ui.openGenerateLike(detail.cardId)
                 }
                 AppButton {
                     text: detail.width < 620 ? "Narrate" : "Record narration"

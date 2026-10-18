@@ -238,6 +238,11 @@ Item {
                             text: "Edit current card"
                             onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id)
                         }
+                        AppMenuItem { glyph: "cards"
+                            text: "Generate like this"
+                            enabled: !app.busy && page.hasCard
+                            onTriggered: ui.openGenerateLike(app.currentCard.cardId || app.currentCard.id)
+                        }
                         AppMenuItem { glyph: "book"
                             text: "Recall & study help"
                             enabled: !app.busy && page.hasCard
@@ -820,6 +825,13 @@ Item {
                                             assessment: page.weakness
                                             visible: !!page.weakness.assessed
                                         }
+                                    }
+                                    AppButton {
+                                        text: page.ui.width < 700 ? "Generate" : "Generate like this"
+                                        glyph: "cards"
+                                        hint: "Draft a varied card testing the same concept. Review it before saving."
+                                        enabled: !app.busy && page.hasCard
+                                        onClicked: ui.openGenerateLike(app.currentCard.cardId || app.currentCard.id)
                                     }
                                     AppButton {
                                         text: page.ui.width < 700 ? "Recall & help" : "Recall & study help"

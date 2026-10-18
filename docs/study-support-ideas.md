@@ -58,12 +58,28 @@ not decide a weakness formula or change the spaced-repetition algorithm.
 
 ## Generate like this
 
-Deferred BYOK language-model idea: start from an existing problem card and
-generate a similar practice card targeting the same concept. Examples include
-derivatives, integrals and applications of a topic, varying the numbers,
-expressions or combinations so the user can practice beyond a single example.
+Available from the card detail view, card action menus and the active review
+card: **Generate like this** opens a preview of the source. Press **Generate
+card** to ask the configured local or remote language model for one new basic
+card targeting the same concept with a different question, example or numbers.
+The request includes the front, back, deck name, tags and answer-point count.
+It does not include recordings, schedules, other cards or credentials.
 
-Working action name: **Generate like this**. The generated card should include
-the new problem and its corresponding answer. Quantity, difficulty controls,
-answer verification and how the user reviews and saves suggestions remain to
-be designed. No generation action is implemented in this Library iteration.
+The model is instructed to solve the new problem independently and preserve
+Markdown, code and LaTeX. The response must pass strict field, size, media and
+duplicate-question checks. A model may decline when the source cannot be varied
+responsibly. These checks do not verify factual or mathematical correctness.
+
+The result appears as rendered Markdown. **Generate another** replaces the
+unsaved suggestion. **Edit and save draft** opens the regular card editor with
+the source deck and tags preselected; only **Save card** persists it. The source
+card and its history stay intact. The new card gets a fresh schedule and normal
+undo support. Custom narration is not copied to the new text.
+
+Generation pauses an active review and preserves its current card. Closing the
+generation/editor/detail workflow resumes only a review that was running when
+the workflow opened, on the same review direction. An already paused review
+stays paused. Closing the generation window cancels its outstanding request.
+Source edits or removal invalidate the suggestion.
+
+Follow-ups: independent answer verification, quantity and difficulty controls.
