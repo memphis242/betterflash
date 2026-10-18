@@ -18,10 +18,10 @@ QString tier(const double score, const bool assessed)
 
 QString label(const QString &value)
 {
-    if (value == QStringLiteral("needs-study")) return QStringLiteral("Needs study");
-    if (value == QStringLiteral("fragile")) return QStringLiteral("Fragile");
-    if (value == QStringLiteral("watch")) return QStringLiteral("Watch");
-    if (value == QStringLiteral("steady")) return QStringLiteral("Steady");
+    if (value == QStringLiteral("needs-study")) return QStringLiteral("Very low");
+    if (value == QStringLiteral("fragile")) return QStringLiteral("Low");
+    if (value == QStringLiteral("watch")) return QStringLiteral("Moderate");
+    if (value == QStringLiteral("steady")) return QStringLiteral("Strong");
     return QStringLiteral("Not assessed");
 }
 }
@@ -36,10 +36,10 @@ QVariantMap assess(const QString &variantId, const QString &variantKey,
     assert(evidence.size() <= 12);
     const bool assessed = !evidence.isEmpty();
     if (!assessed) {
-        return {{"score", 0.0}, {"tier", QStringLiteral("unassessed")},
+        return {{"score", 0.0}, {"recallStrength", QVariant{}}, {"tier", QStringLiteral("unassessed")},
                 {"label", QStringLiteral("Not assessed")}, {"reviewCount", reviewCount},
                 {"sampleCount", 0}, {"provisional", true}, {"reasons", QStringList{}},
-                {"recommendation", QStringLiteral("Build a little review history before interpreting weakness.")},
+                {"recommendation", QStringLiteral("Review this card to establish its recall strength.")},
                 {"variantId", variantId}, {"variantKey", variantKey},
                 {"factors", QVariantList{}}, {"assessed", false}};
     }
@@ -135,7 +135,7 @@ QVariantMap assess(const QString &variantId, const QString &variantKey,
     } else {
         recommendation = QStringLiteral("Keep the scheduled reviews. These observations do not indicate a need for extra study.");
     }
-    return {{"score", score}, {"tier", weaknessTier}, {"label", label(weaknessTier)},
+    return {{"score", score}, {"recallStrength", 100.0 - score}, {"tier", weaknessTier}, {"label", label(weaknessTier)},
             {"reviewCount", reviewCount}, {"sampleCount", evidence.size()},
             {"provisional", evidence.size() < 3}, {"reasons", reasons},
             {"recommendation", recommendation}, {"variantId", variantId},

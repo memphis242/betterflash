@@ -1,18 +1,19 @@
 # Study guidance
 
 BetterFlash ranks study priority deterministically from saved review results.
-The score is a provisional heuristic, not a probability of mastery or a diagnosis
+The displayed recall-strength score runs from 0 (weakest) to 100 (strongest).
+It is a provisional heuristic, not a probability of mastery or a diagnosis
 of missing foundational knowledge. No model is needed to calculate it.
 
 ## Using it
 
-- Library shows outlined Watch, Fragile and Needs study badges on weak cards.
+- Library shows outlined Moderate, Low and Very low recall-strength badges on weaker cards.
   Enable **Weakest first** to rank a deck or the whole library. Search result
   groups retain their relevance order; weakness sorts only inside each group.
-- Open a card's detail and choose **Study guidance** for the reasons and a
+- Open a card's detail and choose **Recall & study help** for the reasons and a
   suggested independent study step.
 - During Review the badge and card outline describe the exact active review
-  direction. **Study guidance** opens the same explanation and pauses the timer;
+  direction. **Recall & study help** opens the same explanation and pauses the timer;
   closing it returns to that card and resumes a review that was running.
 - The Review page's **Review order** selector defaults to **Weakest first**.
   It orders only cards already eligible for that review, including new cards.
@@ -20,17 +21,21 @@ of missing foundational knowledge. No model is needed to calculate it.
   session start and persists locally; it does not alter any due date.
 - **Ask language model** is optional. It uses the configured local or remote
   language model to suggest an explanation, study steps and a self-check.
-  Opening the dialog never starts inference. The dialog identifies the model
-  and, for a remote model, the endpoint receiving the card data.
+  Opening the dialog never starts inference. The button tooltip identifies the
+  model and, for a remote model, the endpoint receiving the card data.
+
+The dialog centers a prominent tier and score, followed by a short evidence
+summary and study suggestion. Its question-mark window explains the scale
+and contributing signals; lengthy explanations stay out of the main view.
 
 ## Evidence and independent directions
 
 Each forward, reverse and numbered cloze variant is assessed independently.
-Library uses the highest score among assessed directions and names that direction
-in the guidance dialog. An unreviewed direction does not inherit another
+Library uses the lowest recall strength among assessed directions; Review
+shows the active direction. The question-mark window explains this distinction. An unreviewed direction does not inherit another
 direction's history or imply weakness. Cards with no observed reviews are
-**Not assessed**. Fewer than three observed reviews are marked **early** and
-provisional, including a single missed card.
+**Not assessed**. Fewer than three observed reviews are described as an early estimate,
+including a single missed card.
 
 The model uses up to the latest twelve available observations, ordered by review
 timestamp and then review ID. The current schedule's review counter bounds that
@@ -39,9 +44,8 @@ historical events remain visible in the timeline. Undoing a reset restores the
 schedule counter and the associated evidence. Reviews of deleted cards or
 removed directions do not enter live rankings.
 
-The displayed review count comes from the current schedule. Evidence samples
-show how many retained observations actually contributed, which can be lower
-than that counter for imported or incomplete history. Old observations do not
+The displayed observation count shows how many retained reviews contributed,
+which can be lower than the schedule counter for imported or incomplete history. Old observations do not
 change merely because the app is left open. Overdue status is handled by the
 scheduler, separately from measured weakness.
 
@@ -66,15 +70,19 @@ Missed `0` through Easy `4`.
 
 `score = clamp(70 * recall loss + 20 * difficulty + 10 * deterioration + speed points, 0, 100)`.
 
-| Score | Tier |
-| --- | --- |
-| Below 25 | Steady |
-| 25 to below 50 | Watch |
-| 50 to below 75 | Fragile |
-| 75 and above | Needs study |
+The internal `score` remains study priority for sorting. The public
+`recallStrength` is `100 - score` for assessed cards and null for unassessed
+cards; no history is represented as neither zero strength nor perfect strength.
 
-Repeated full-recall Hard results reach Watch. Repeated half-recall Partial
-results reach Fragile. Misses reach Needs study. Speed by itself cannot promote
+| Recall strength | Tier |
+| --- | --- |
+| Above 75 | Strong |
+| Above 50 to 75 | Moderate |
+| Above 25 to 50 | Low |
+| 0 to 25 | Very low |
+
+Repeated full-recall Hard results reach Moderate. Repeated half-recall Partial
+results reach Low. Misses reach Very low. Speed by itself cannot promote
 otherwise perfect Good or Easy responses into a weak tier. These thresholds
 are deliberately exposed for refinement during ordinary use.
 

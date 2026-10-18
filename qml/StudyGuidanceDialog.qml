@@ -15,16 +15,6 @@ Dialog {
             return card.variantWeaknesses[variantId];
         return card.weakness || ({});
     }
-    function directionName(key) {
-        switch (String(key || "")) {
-        case "forward":
-            return "Forward";
-        case "reverse":
-            return "Reverse";
-        default:
-            return /^c\d+$/.test(String(key)) ? "Cloze " + String(key).slice(1) : String(key || "");
-        }
-    }
     property bool asking: false
     property string errorText: ""
     property string answerMarkdown: ""
@@ -57,6 +47,7 @@ Dialog {
         answerForCardId = "";
         answerForVariantId = "";
         stale = false;
+        tierHelp.close();
         if (typeof studyAssistant !== "undefined" && studyAssistant && studyAssistant.clear)
             studyAssistant.clear();
         open();
@@ -97,6 +88,90 @@ Dialog {
             }
         }
     }
+    Popup {
+        id: tierHelp
+        parent: guidance.contentItem
+        anchors.centerIn: parent
+        width: Math.min(480, parent.width - 16)
+        height: Math.min(440, parent.height - 16)
+        padding: 20
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            radius: 12
+            color: Theme.surfaceRaised
+            border.color: Theme.rule
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "About recall strength"
+                    Layout.fillWidth: true
+                    color: Theme.ink
+                    font.pixelSize: 18
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                }
+                GlyphButton {
+                    glyph: "close"
+                    hint: "Close explanation"
+                    onClicked: tierHelp.close()
+                }
+            }
+            ScrollView {
+                id: helpScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    width: helpScroll.availableWidth
+                    spacing: 14
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Higher means stronger recall, based on recent grades, remembered answers and changes in your response times."
+                        color: Theme.ink
+                        font.pixelSize: 14
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Strong: above 75\nModerate: above 50 to 75\nLow: above 25 to 50\nVery low: 0 to 25"
+                        color: Theme.ink
+                        font.pixelSize: 14
+                        lineHeight: 1.5
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: !guidance.assessment.assessed ? "No reviews yet; there is no rating to interpret." : guidance.assessment.provisional ? "A few more reviews will make this estimate more reliable." : "This estimates recall, not your understanding of the topic."
+                        color: Theme.inkMuted
+                        font.pixelSize: 14
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: !!guidance.assessment.assessed
+                        text: guidance.variantId ? "This rating is for the side you are reviewing." : "This rating reflects the least-recalled side of this card."
+                        color: Theme.inkMuted
+                        font.pixelSize: 14
+                        wrapMode: Text.Wrap
+                    }
+                    Repeater {
+                        model: guidance.assessment.reasons || []
+                        delegate: Label {
+                            required property string modelData
+                            Layout.fillWidth: true
+                            text: modelData
+                            color: Theme.ink
+                            font.pixelSize: 14
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+            }
+        }
+    }
     contentItem: ColumnLayout {
         spacing: 16
         ColumnLayout {
@@ -119,17 +194,51 @@ Dialog {
                     onClicked: guidance.close()
                 }
             }
-            WeaknessBadge {
-                assessment: guidance.assessment
-                visible: !!guidance.assessment.tier
-            }
         }
-        Label {
+        ColumnLayout {
             Layout.fillWidth: true
-            text: "See how your recent grades and response times contribute to this card's weakness rating, then choose a study step. Below, you can ask your configured language model for an explanation or practice ideas. Opening this view does not contact a model."
-            color: Theme.inkMuted
-            wrapMode: Text.Wrap
-            font.pixelSize: 13
+            Layout.topMargin: 8
+            Layout.bottomMargin: 8
+            spacing: 12
+            Label {
+                Layout.alignment: Qt.AlignHCenter
+                text: "Recall strength"
+                color: Theme.inkMuted
+                font.pixelSize: 16
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+                Item {
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 38
+                }
+                WeaknessBadge {
+                    assessment: guidance.assessment
+                    prominent: true
+                    visible: true
+                }
+                GlyphButton {
+                    glyph: "help"
+                    hint: "How recall strength is calculated"
+                    onClicked: tierHelp.visible ? tierHelp.close() : tierHelp.open()
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: {
+                    const count = Number(guidance.assessment.sampleCount || 0);
+                    if (!guidance.assessment.assessed)
+                        return "Review this card to see how well you recall it.";
+                    if (guidance.assessment.provisional)
+                        return "Early estimate based on " + count + (count === 1 ? " review." : " reviews.");
+                    return "Based on your last " + count + " reviews.";
+                }
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                font.pixelSize: 14
+            }
         }
         ScrollView {
             id: guidanceScroll
@@ -150,139 +259,20 @@ Dialog {
                     color: Theme.ink
                     font.pixelSize: 16
                 }
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: reasonContent.implicitHeight + 32
-                    radius: 8
-                    color: Theme.ledgerSurface
-                    border.color: Theme.rule
-                    ColumnLayout {
-                        id: reasonContent
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: 16
-                        spacing: 9
-                        Label {
-                            text: "Why this card has this tier"
-                            color: Theme.ink
-                            font.pixelSize: 15
-                            font.bold: true
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: guidance.assessment.recommendation || "There is not enough review history to assess this card yet."
-                            color: Theme.inkMuted
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 13
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            visible: !!guidance.assessment.variantKey || !!guidance.assessment.variantId
-                            text: (guidance.variantId ? "Review direction: " : "Weakest reviewed direction: ") + guidance.directionName(guidance.assessment.variantKey)
-                            color: Theme.ink
-                            font.pixelSize: 13
-                            font.weight: Font.DemiBold
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: {
-                                const reviewCount = Number(guidance.assessment.reviewCount || 0);
-                                const sampleCount = Number(guidance.assessment.sampleCount || 0);
-                                const score = Number(guidance.assessment.score);
-                                const parts = [];
-                                if (guidance.assessment.assessed && Number.isFinite(score))
-                                    parts.push("Priority score: " + Math.round(score) + "/100");
-                                if (reviewCount > 0)
-                                    parts.push("Reviews: " + reviewCount);
-                                if (sampleCount > 0)
-                                    parts.push("Evidence samples: " + sampleCount);
-                                return parts.join("  |  ");
-                            }
-                            visible: text.length > 0
-                            color: Theme.inkMuted
-                            font.family: Theme.monoFont
-                            font.pixelSize: 12
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            visible: !!guidance.assessment.provisional
-                            text: "Provisional: this estimate has fewer than three review observations."
-                            color: Theme.weaknessWatch
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 13
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Repeater {
-                                model: guidance.assessment.reasons || []
-                                delegate: Label {
-                                    required property string modelData
-                                    Layout.fillWidth: true
-                                    text: modelData
-                                    color: Theme.ink
-                                    wrapMode: Text.Wrap
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 13
-                                    padding: 7
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: Theme.surfaceRaised
-                                        border.color: Theme.rule
-                                    }
-                                }
-                            }
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-                            visible: (guidance.assessment.factors || []).length > 0
-                            Label {
-                                text: "Factors"
-                                color: Theme.ink
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                            }
-                            Repeater {
-                                model: guidance.assessment.factors || []
-                                delegate: Label {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    text: modelData.label + ": " + Math.round(Number(modelData.value || 0)) + "/100  -  " + (modelData.detail || "")
-                                    color: Theme.inkMuted
-                                    wrapMode: Text.Wrap
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 12
-                                }
-                            }
-                        }
-                    }
-                }
                 Label {
                     Layout.fillWidth: true
-                    text: "Tiers: Steady below 25, Watch from 25, Fragile from 50, Needs study from 75. The score combines recent recall, difficult ratings, deterioration and a small personal-speed signal."
+                    visible: !!guidance.assessment.assessed
+                    text: guidance.assessment.recommendation || ""
                     color: Theme.inkMuted
                     wrapMode: Text.Wrap
-                    font.pixelSize: 12
-                }
-                Label {
-                    text: "Language model assistance"
-                    color: Theme.ink
-                    font.pixelSize: 15
-                    font.bold: true
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: ai.provider === "local" ? "On this device using " + ai.localModelLabel + ". The model receives this card's question, answer, deck name, tags and review signals when you ask." : "Sends this card's question, answer, deck name, tags and review signals to " + ai.endpoint + " using " + ai.model + " when you ask."
-                    color: Theme.inkMuted
-                    wrapMode: Text.Wrap
+                    font.pixelSize: 14
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     AppButton {
                         text: guidance.asking ? "Working..." : (guidance.answerMarkdown ? "Regenerate guidance" : "Ask language model")
                         primary: true
+                        hint: ai.provider === "local" ? "Ask " + ai.localModelLabel + " on this device for an explanation and study ideas using this card and its review results." : "Send this card and its review results to " + ai.endpoint + " using " + ai.model + " for an explanation and study ideas."
                         enabled: !guidance.asking
                         onClicked: guidance.askLanguageModel()
                     }

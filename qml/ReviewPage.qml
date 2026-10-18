@@ -825,7 +825,7 @@ Item {
                                         text: page.ui.width < 700 ? "Recall & help" : "Recall & study help"
                                         glyph: "book"
                                         Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                        hint: "See this card's recall evidence, weakness rating and suggested study steps. Ask the language model for help only if you choose."
+                                        hint: "See this card's recall evidence, recall strength and suggested study steps. Ask the language model for help only if you choose."
                                         enabled: !app.busy && page.hasCard
                                         onClicked: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
                                     }
