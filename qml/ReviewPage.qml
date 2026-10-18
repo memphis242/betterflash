@@ -239,7 +239,7 @@ Item {
                             onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id)
                         }
                         AppMenuItem { glyph: "book"
-                            text: "Study guidance"
+                            text: "Recall & study help"
                             enabled: !app.busy && page.hasCard
                             onTriggered: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
                         }
@@ -798,24 +798,34 @@ Item {
                                         }
                                     }
                                 }
-                                Flow {
+                                RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 12
-                                    Label {
-                                        textFormat: Text.PlainText
-                                        text: "Question"
-                                        color: Theme.inkMuted
-                                        font.family: Theme.monoFont
-                                        font.pixelSize: 15
-                                    }
-                                    WeaknessBadge {
-                                        id: currentWeakness
-                                        assessment: page.weakness
-                                        visible: !!page.weakness.assessed
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                        Layout.alignment: Qt.AlignVCenter
+                                        spacing: 12
+                                        Label {
+                                            textFormat: Text.PlainText
+                                            text: "Question"
+                                            color: Theme.inkMuted
+                                            font.family: Theme.monoFont
+                                            font.pixelSize: 15
+                                            height: currentWeakness.visible ? currentWeakness.implicitHeight : implicitHeight
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        WeaknessBadge {
+                                            id: currentWeakness
+                                            assessment: page.weakness
+                                            visible: !!page.weakness.assessed
+                                        }
                                     }
                                     AppButton {
-                                        text: page.ui.width < 700 ? "Study" : "Study guidance"
-                                        hint: "Explain this direction's weakness signals and optionally ask the language model for help"
+                                        text: page.ui.width < 700 ? "Recall & help" : "Recall & study help"
+                                        glyph: "book"
+                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                        hint: "See this card's recall evidence, weakness rating and suggested study steps. Ask the language model for help only if you choose."
                                         enabled: !app.busy && page.hasCard
                                         onClicked: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
                                     }

@@ -165,9 +165,9 @@ Dialog {
                     onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
                 }
                 AppButton {
-                    text: detail.width < 700 ? "Study" : "Study guidance"
+                    text: detail.width < 700 ? "Recall & help" : "Recall & study help"
                     glyph: "book"
-                    hint: "Review the deterministic weakness factors and optionally ask the language model for help"
+                    hint: "See this card's recall evidence, weakness rating and suggested study steps. Ask the language model for help only if you choose."
                     enabled: typeof detail.ui.openStudyGuidance === "function"
                     onClicked: detail.ui.openStudyGuidance(detail.cardId, "")
                 }

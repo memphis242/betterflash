@@ -105,7 +105,7 @@ Dialog {
             RowLayout {
                 Layout.fillWidth: true
                 Label {
-                    text: "Study guidance"
+                    text: "Recall & study help"
                     color: Theme.ink
                     font.pixelSize: 21
                     font.bold: true
@@ -115,7 +115,7 @@ Dialog {
                 }
                 GlyphButton {
                     glyph: "close"
-                    hint: "Close study guidance"
+                    hint: "Close recall and study help"
                     onClicked: guidance.close()
                 }
             }
@@ -126,7 +126,7 @@ Dialog {
         }
         Label {
             Layout.fillWidth: true
-            text: "A bounded, deterministic estimate based on this card's review history. It helps choose what to study next; it does not measure understanding directly."
+            text: "See how your recent grades and response times contribute to this card's weakness rating, then choose a study step. Below, you can ask your configured language model for an explanation or practice ideas. Opening this view does not contact a model."
             color: Theme.inkMuted
             wrapMode: Text.Wrap
             font.pixelSize: 13
