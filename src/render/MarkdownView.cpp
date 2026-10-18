@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
@@ -19,6 +20,7 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextImageFormat>
+#include <QTextList>
 #include <QTextFrame>
 #include <QBitArray>
 #include <QUuid>
@@ -386,9 +388,27 @@ void MarkdownView::rebuild() {
             token.mergeCharFormat(span.format);
         }
     }
+    qreal listIndentWidth = 40.0;
     for (QTextBlock block = m_document.begin(); block.isValid(); block = block.next()) {
         QTextCursor cursor(block);
         QTextBlockFormat format = block.blockFormat();
+        if (const QTextList *const list = block.textList()) {
+            const QFontMetrics metrics(block.charFormat().font());
+            qreal markerWidth = metrics.horizontalAdvance(list->itemText(block));
+            switch (list->format().style()) {
+            case QTextListFormat::ListDisc:
+            case QTextListFormat::ListCircle:
+            case QTextListFormat::ListSquare:
+                markerWidth = metrics.lineSpacing() / 3;
+                break;
+            default:
+                break;
+            }
+            if (format.marker() != QTextBlockFormat::MarkerType::NoMarker)
+                markerWidth += 2 * (metrics.lineSpacing() / 6) + 1;
+            // List markers are painted before their text, including a space between them.
+            listIndentWidth = std::max(listIndentWidth, markerWidth + metrics.horizontalAdvance(u' ') + 1);
+        }
         if (cursor.currentFrame()->frameFormat().boolProperty(codeFrameProperty)) {
             format.setTopMargin(0);
             format.setBottomMargin(0);
@@ -433,6 +453,7 @@ void MarkdownView::rebuild() {
             }
         }
     }
+    m_document.setIndentWidth(listIndentWidth);
     if (!error.isEmpty() && error != m_renderError) { m_renderError = error; emit renderErrorChanged(); }
     setImplicitHeight(std::ceil(m_document.size().height()) + 2);
     update();
