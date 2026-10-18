@@ -56,8 +56,10 @@ struct CaptureTable {
 constexpr std::array captureTables{
     CaptureTable{"decks", "deck", "id", "1", "'id',%1.id,'name',%1.name,'description',%1.description,'createdAt',%1.created_at,'parentId',%1.parent_id"},
     CaptureTable{"notes", "card", "id", "1", "'id',%1.id,'deckId',%1.deck_id,'kind',%1.kind,'front',%1.front,'back',%1.back,'tags',%1.tags,'pointCount',%1.point_count,'narrations',json(%1.narrations),'narrationFingerprints',json(%1.narration_fingerprints)"},
-    CaptureTable{"review_variants", "variant", "id", "1", "'id',%1.id,'cardId',%1.card_id,'key',%1.variant_key,'due',%1.due,'reviewCount',%1.review_count,'stability',%1.stability,'difficulty',%1.difficulty"},
-    CaptureTable{"reviews", "review", "id", "1", "'id',%1.id,'cardId',%1.card_id,'variantId',%1.variant_id,'deckName',%1.deck_name,'grade',%1.grade,'recallFraction',%1.recall_fraction,'responseSeconds',%1.response_seconds,'reviewedAt',%1.reviewed_at,'due',%1.due,'sessionId',%1.session_id,'sessionDeckName',%1.session_deck_name,'sessionStartedAt',%1.session_started_at"},
+    // Explicit full-precision JSON numbers preserve stored REAL values for exact
+    // history conflict checks and restoration of schedules and response times.
+    CaptureTable{"review_variants", "variant", "id", "1", "'id',%1.id,'cardId',%1.card_id,'key',%1.variant_key,'due',%1.due,'reviewCount',%1.review_count,'stability',json(printf('%!.26g',%1.stability)),'difficulty',json(printf('%!.26g',%1.difficulty))"},
+    CaptureTable{"reviews", "review", "id", "1", "'id',%1.id,'cardId',%1.card_id,'variantId',%1.variant_id,'deckName',%1.deck_name,'grade',%1.grade,'recallFraction',json(printf('%!.26g',%1.recall_fraction)),'responseSeconds',json(printf('%!.26g',%1.response_seconds)),'reviewedAt',%1.reviewed_at,'due',%1.due,'sessionId',%1.session_id,'sessionDeckName',%1.session_deck_name,'sessionStartedAt',%1.session_started_at"},
     CaptureTable{"metadata", "owner", "substr(%1.key,14)", "substr(%1.key,1,13)='review_owner:'", "'id',substr(%1.key,14),'reviewId',%1.value"},
     CaptureTable{"deck_checkpoints", "checkpoint", "id", "1", "'id',%1.id,'position',%1.position,'deckId',%1.deck_id,'createdAt',%1.created_at,'note',%1.note,'summary',%1.summary,'snapshot',json(%1.snapshot),'changes',json(%1.changes)"}
 };
