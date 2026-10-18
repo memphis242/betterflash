@@ -89,7 +89,8 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool modalOpen: checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || detailDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
@@ -736,7 +737,7 @@ ApplicationWindow {
         return lines.join("\n")
     }
     function historyActionAllowed(action) {
-        if (typing || modalOpen || app.busy || actionHistory.busy)
+        if (typing || historyBlockingModalOpen || detailDialog.actionMenuOpen || app.busy || actionHistory.busy)
             return false
         return action === "undo" ? actionHistory.canUndo : actionHistory.canRedo
     }
@@ -953,27 +954,6 @@ ApplicationWindow {
         }
     }
 
-    component HistoryActionButton: Item {
-        id: historyControl
-        required property string action
-        implicitWidth: 38
-        implicitHeight: 38
-        readonly property bool available: window.historyActionAllowed(action)
-        readonly property string hint: window.historyActionHint(action)
-        GlyphButton {
-            id: historyButton
-            anchors.fill: parent
-            glyph: historyControl.action
-            hint: historyControl.hint
-            enabled: historyControl.available
-            opacity: enabled ? 1 : 0.4
-            ToolTip.visible: false
-            onClicked: window.runAction(historyControl.action)
-        }
-        HoverHandler { id: historyHover }
-        ToolTip.visible: historyHover.hovered || historyButton.activeFocus
-        ToolTip.text: hint
-    }
     header: ToolBar {
         objectName: "globalHeader"
         height: 76
@@ -1053,11 +1033,13 @@ ApplicationWindow {
             }
             HistoryActionButton {
                 objectName: "undoButton"
+                ui: window
                 visible: Theme.preferences.showUndoRedo
                 action: "undo"
             }
             HistoryActionButton {
                 objectName: "redoButton"
+                ui: window
                 visible: Theme.preferences.showUndoRedo
                 action: "redo"
             }
@@ -2571,9 +2553,14 @@ ApplicationWindow {
             window.finishEditorSave(cardId, requestId, success)
         }
         function onHistoryNavigationRequested(context) {
+            const detailCardId = detailDialog.visible && window.cardById(detailDialog.cardId).id
+                ? detailDialog.cardId : ""
             if (context.page !== undefined)
                 window.page = context.page
-            if (context.card !== undefined) {
+            if (detailCardId) {
+                window.selectedCardId = detailCardId
+                window.detailOpen = true
+            } else if (context.card !== undefined) {
                 window.selectedCardId = window.cardById(context.card).id ? context.card : ""
                 window.detailOpen = !!context.detail && !!window.selectedCardId
             }
@@ -2601,11 +2588,11 @@ ApplicationWindow {
         model: window.shortcutCommands.filter(c => c.action.indexOf("editor") !== 0 && c.action !== "saveCard").map(c => c.action)
         delegate: Shortcut {
             required property string modelData
+            readonly property bool historyShortcut: modelData === "undo" || modelData === "redo" || modelData === "redoAlternate"
             sequence: shortcuts.bindings[modelData] || ""
             context: Qt.WindowShortcut
-            autoRepeat: modelData !== "microphone" && modelData !== "undo"
-                && modelData !== "redo" && modelData !== "redoAlternate"
-            enabled: window.shortcutAllowed(modelData)
+            autoRepeat: modelData !== "microphone" && !historyShortcut
+            enabled: window.shortcutAllowed(modelData) && (!historyShortcut || !detailDialog.visible)
             onActivated: window.runAction(modelData)
         }
     }

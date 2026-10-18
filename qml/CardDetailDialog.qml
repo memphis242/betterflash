@@ -1,11 +1,13 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml
 
 Dialog {
     id: detail
     required property var ui
     property string cardId: ""
+    readonly property bool actionMenuOpen: cardMenu.visible
     readonly property var card: ui.cardById(cardId)
     readonly property var narrationWarnings: card && card.id && ui.cardNarrationController
         ? ui.cardNarrationController.warningsForCard(card) : ({hasStale: false, front: false, back: false, count: 0})
@@ -50,9 +52,22 @@ Dialog {
     height: Math.min(800, ui.height - 2 * ui.gutter)
     padding: width < 650 ? 14 : 24
     modal: true
+    focus: true
     closePolicy: Popup.CloseOnEscape
     background: Rectangle { radius: 16; color: Theme.surface; border.color: Theme.ledgerRule }
     Overlay.modal: Rectangle { color: Theme.scrim }
+
+    Instantiator {
+        model: ["undo", "redo", "redoAlternate"]
+        delegate: Shortcut {
+            required property string modelData
+            sequence: shortcuts.bindings[modelData] || ""
+            context: Qt.WindowShortcut
+            autoRepeat: false
+            enabled: detail.visible && detail.ui.historyActionAllowed(modelData)
+            onActivated: detail.ui.runAction(modelData)
+        }
+    }
 
     function openFor(id) { cardId = id; open() }
     function load(older) {
@@ -106,11 +121,16 @@ Dialog {
 
     contentItem: ColumnLayout {
         spacing: 14
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 12
+            columns: detail.width < 900 ? 2 : 3
+            columnSpacing: 12
+            rowSpacing: 12
             ColumnLayout {
+                Layout.row: 0
+                Layout.column: 0
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: 5
                 Label { text: "Card detail"; font.pixelSize: 20; font.bold: true; color: Theme.ink; Layout.fillWidth: true; elide: Text.ElideRight; Layout.minimumWidth: 0 }
                 Label {
@@ -122,33 +142,57 @@ Dialog {
                     font.pixelSize: 12
                 }
             }
-            AppButton {
-                text: detail.width < 500 ? "Edit" : "Edit card"
-                glyph: "edit"
-                primary: true
-                onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
-            }
-            AppButton {
-                text: detail.width < 620 ? "Narrate" : "Record narration"
-                glyph: "mic"
-                onClicked: detail.ui.openCardNarration(detail.cardId)
-            }
-            NarrationWarning {
-                shown: detail.narrationWarnings.hasStale
-                reason: "A narration may no longer match the card text. Open Record narration and confirm each affected side."
-            }
-            GlyphButton {
-                glyph: "more"; hint: "Card actions"
-                onClicked: cardMenu.open()
-                CardActionsMenu {
-                    id: cardMenu
-                    y: parent.height
-                    ui: detail.ui
-                    cardId: detail.cardId
-                    onBeforeAction: detail.close()
+            RowLayout {
+                Layout.row: detail.width < 900 ? 1 : 0
+                Layout.column: detail.width < 900 ? 0 : 1
+                Layout.columnSpan: detail.width < 900 ? 2 : 1
+                Layout.alignment: Qt.AlignRight
+                spacing: 12
+                AppButton {
+                    text: detail.width < 500 ? "Edit" : "Edit card"
+                    glyph: "edit"
+                    primary: true
+                    onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
+                }
+                AppButton {
+                    text: detail.width < 620 ? "Narrate" : "Record narration"
+                    glyph: "mic"
+                    onClicked: detail.ui.openCardNarration(detail.cardId)
+                }
+                NarrationWarning {
+                    shown: detail.narrationWarnings.hasStale
+                    reason: "A narration may no longer match the card text. Open Record narration and confirm each affected side."
+                }
+                GlyphButton {
+                    glyph: "more"; hint: "Card actions"
+                    onClicked: cardMenu.open()
+                    CardActionsMenu {
+                        id: cardMenu
+                        y: parent.height
+                        ui: detail.ui
+                        cardId: detail.cardId
+                        onBeforeAction: detail.close()
+                    }
                 }
             }
-            GlyphButton { glyph: "close"; hint: "Close card detail"; onClicked: detail.close() }
+            RowLayout {
+                Layout.row: 0
+                Layout.column: detail.width < 900 ? 1 : 2
+                spacing: 12
+                HistoryActionButton {
+                    objectName: "cardDetailUndoButton"
+                    ui: detail.ui
+                    visible: Theme.preferences.showUndoRedo
+                    action: "undo"
+                }
+                HistoryActionButton {
+                    objectName: "cardDetailRedoButton"
+                    ui: detail.ui
+                    visible: Theme.preferences.showUndoRedo
+                    action: "redo"
+                }
+                GlyphButton { glyph: "close"; hint: "Close card detail"; onClicked: detail.close() }
+            }
         }
         ScrollView {
             id: detailBody

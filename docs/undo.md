@@ -11,6 +11,9 @@ the next action in their tooltips and fade when unavailable. Appearance settings
 can hide the buttons without disabling the shortcuts. The bindings are editable
 in Keyboard settings. A focused textbox retains its own native draft undo/redo;
 application history is unavailable while editing or confirming a modal action.
+The saved card detail dialog supports the same shortcuts and undo/redo buttons.
+Undoing or redoing an edit keeps that card open and refreshes its content and
+timeline. If an undo removes the displayed card, its detail dialog closes.
 
 ## Included actions
 
