@@ -105,7 +105,8 @@ checked against the user's study sources; model output is not verified proof.
 
 Calculations and database reads run on the database worker. A temporary
 transactional invalidation table tracks affected directions across all writes,
-including sync and undo. The initial snapshot populates the cache; later
+including sync and undo. Trigger inserts explicitly exclude already-dirty IDs
+so duplicate invalidations remain safe inside an enclosing upsert. The initial snapshot populates the cache; later
 refreshes recompute only changed directions. An indexed, correlated query
 retrieves at most twelve rows per changed direction and does not scan its
 complete history. Scores are derived data, with no collection schema
@@ -115,7 +116,8 @@ settings participate in the ordinary five-action undo history.
 Automated testing remains paused. The changes receive compilation and source
 review before manual use. When testing resumes, cover independent directions,
 partial grades, sparse and incomplete history, zero-duration responses,
-corrections, deletion/atomicization, reset and undo/redo, stable due eligibility,
+corrections, repeated invalidation during grading/upserts, deletion/atomicization,
+reset and undo/redo, stable due eligibility,
 and stale/canceled local and remote responses.
 
 Deck-level topic grouping, rankings of completed review runs, automatically

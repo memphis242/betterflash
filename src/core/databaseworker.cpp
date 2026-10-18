@@ -460,16 +460,18 @@ bool DatabaseWorker::validDeckParent(const QString &id,const QString &parentId)
 bool DatabaseWorker::initializeStudyGuidance()
 {
     assertThread();
+    // Trigger writes must avoid duplicates explicitly: an enclosing upsert can
+    // override a trigger statement's conflict-resolution policy.
     const QStringList statements{
         QStringLiteral("CREATE TEMP TABLE IF NOT EXISTS betterflash_study_dirty_variants(id TEXT PRIMARY KEY)"),
         QStringLiteral("INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) SELECT id FROM review_variants"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_insert AFTER INSERT ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.variant_id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_update AFTER UPDATE ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.variant_id); INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.variant_id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_delete AFTER DELETE ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.variant_id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_insert AFTER INSERT ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_update AFTER UPDATE ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.id); INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_delete AFTER DELETE ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.id); END"),
-        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_notes_update AFTER UPDATE OF front,back,kind,point_count ON main.notes BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) SELECT id FROM main.review_variants WHERE card_id=NEW.id; END")
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_insert AFTER INSERT ON main.reviews BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT NEW.variant_id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=NEW.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_update AFTER UPDATE ON main.reviews BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT OLD.variant_id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=OLD.variant_id); INSERT INTO betterflash_study_dirty_variants(id) SELECT NEW.variant_id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=NEW.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_delete AFTER DELETE ON main.reviews BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT OLD.variant_id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=OLD.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_insert AFTER INSERT ON main.review_variants BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT NEW.id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=NEW.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_update AFTER UPDATE ON main.review_variants BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT OLD.id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=OLD.id); INSERT INTO betterflash_study_dirty_variants(id) SELECT NEW.id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=NEW.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_delete AFTER DELETE ON main.review_variants BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT OLD.id WHERE NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants WHERE id=OLD.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_notes_update AFTER UPDATE OF front,back,kind,point_count ON main.notes BEGIN INSERT INTO betterflash_study_dirty_variants(id) SELECT v.id FROM main.review_variants v WHERE v.card_id=NEW.id AND NOT EXISTS(SELECT 1 FROM betterflash_study_dirty_variants d WHERE d.id=v.id); END")
     };
     for (const QString &statement : statements) {
         if (!execute(statement)) return false;
