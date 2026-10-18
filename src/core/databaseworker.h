@@ -41,7 +41,7 @@ public:
     void moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     void resetReviewState(const QString &id, bool deckScope);
     void replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
-    void beginReview(const QString &deckId);
+    void beginReview(const QString &deckId, const QString &order = QStringLiteral("due"));
     void selectReviewCard(const QString &variantId);
     void endReview();
     void defer();
@@ -103,6 +103,7 @@ private:
     QStringList m_queue;
     QStringList m_sessionOrder;
     QHash<QString,QVariantMap> m_queueCache;
+    QHash<QString,QVariantMap> m_weaknessByVariant;
     struct SessionGrade {
         struct betterflash::model::Variant baseline;
         struct betterflash::model::Variant savedSchedule;
@@ -180,6 +181,8 @@ private:
     void fail(const QString &code, const QString &message, const QString &detail = {});
     void done(const QString &message = {});
     bool publishSnapshot();
+    bool initializeStudyGuidance();
+    bool refreshStudyGuidance();
     bool publishQueue(bool resetCurrent);
     void advanceAfterRemoval(qsizetype position);
     void advanceReview(const QString &variantId);

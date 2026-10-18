@@ -263,6 +263,9 @@ Item {
             onActivityRetryRequested: deckActivity.reload()
             busy: app.busy
             actionText: (overview.selectedDeck.total || 0) === 0 ? "Add card" : "Start review"
+            reviewOrderAvailable: (overview.selectedDeck.total || 0) > 0
+            reviewOrderValue: app.reviewOrder
+            onReviewOrderChosen: value => app.reviewOrder = value
             actionEnabled: !!overview.selectedDeck.id && ((overview.selectedDeck.total || 0) === 0 || (overview.selectedDeck.due || 0) > 0)
             saveExternally: true
             summaryText: overview.summaryResult.text || ""

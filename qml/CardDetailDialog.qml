@@ -9,6 +9,15 @@ Dialog {
     property string cardId: ""
     readonly property bool actionMenuOpen: cardMenu.visible
     readonly property var card: ui.cardById(cardId)
+    readonly property var weaknessAssessment: {
+        if (!card || !card.id) return ({})
+        if (card.weakness && typeof card.weakness === "object") return card.weakness
+        const variants = card.variantWeaknesses
+        if (!variants || typeof variants !== "object") return ({})
+        const ranks = ({ unassessed: 0, steady: 1, watch: 2, fragile: 3, "needs-study": 4 })
+        return Object.keys(variants).map(key => variants[key]).filter(value => value && typeof value === "object")
+            .sort((a, b) => (ranks[b.tier] || 0) - (ranks[a.tier] || 0) || Number(b.score || 0) - Number(a.score || 0))[0] || ({})
+    }
     readonly property var narrationWarnings: card && card.id && ui.cardNarrationController
         ? ui.cardNarrationController.warningsForCard(card) : ({hasStale: false, front: false, back: false, count: 0})
     property var recordedEvents: []
@@ -133,6 +142,7 @@ Dialog {
                 Layout.minimumWidth: 0
                 spacing: 5
                 Label { text: "Card detail"; font.pixelSize: 20; font.bold: true; color: Theme.ink; Layout.fillWidth: true; elide: Text.ElideRight; Layout.minimumWidth: 0 }
+                WeaknessBadge { assessment: detail.weaknessAssessment; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
                 Label {
                     Layout.fillWidth: true
                     text: detail.ui.deckById(detail.card.deckId || "").name || ""
@@ -153,6 +163,13 @@ Dialog {
                     glyph: "edit"
                     primary: true
                     onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
+                }
+                AppButton {
+                    text: detail.width < 700 ? "Study" : "Study guidance"
+                    glyph: "book"
+                    hint: "Review the deterministic weakness factors and optionally ask the language model for help"
+                    enabled: typeof detail.ui.openStudyGuidance === "function"
+                    onClicked: detail.ui.openStudyGuidance(detail.cardId, "")
                 }
                 AppButton {
                     text: detail.width < 620 ? "Narrate" : "Record narration"

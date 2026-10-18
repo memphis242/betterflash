@@ -12,6 +12,8 @@ Rectangle {
     property bool busy: false
     property string actionText: "Start review"
     property bool actionEnabled: true
+    property bool reviewOrderAvailable: false
+    property string reviewOrderValue: "weakest"
     property string summaryText: String(deck && deck.summary !== undefined ? deck.summary : "")
     property string summaryCaption: "Automatic summary"
     property string summaryError: ""
@@ -28,6 +30,7 @@ Rectangle {
     signal collapseRequested()
     signal descriptionSaved(string deckId, string description)
     signal reviewRequested(string deckId)
+    signal reviewOrderChosen(string value)
     signal summaryRetryRequested()
     signal heatmapRequested(string deckId)
     signal activityRetryRequested()
@@ -722,6 +725,27 @@ Rectangle {
             Layout.bottomMargin: 14
             Layout.preferredHeight: 1
             color: pane.panelRule
+        }
+        RowLayout {
+            visible: pane.reviewOrderAvailable
+            Layout.fillWidth: true
+            Layout.bottomMargin: 12
+            spacing: 10
+            Label {
+                text: "Review order"
+                color: Theme.inkMuted
+                font.pixelSize: 13
+            }
+            AppComboBox {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 140
+                model: [{label: "Weakest first", value: "weakest"}, {label: "Due date", value: "due"}]
+                textRole: "label"
+                valueRole: "value"
+                currentIndex: pane.reviewOrderValue === "due" ? 1 : 0
+                comboHint: "Order cards already due for the next review. Weakest first uses recent recall, difficulty, trends and personal response times. Future dates stay unchanged."
+                onActivated: pane.reviewOrderChosen(currentValue)
+            }
         }
         AppButton {
             Layout.fillWidth: true

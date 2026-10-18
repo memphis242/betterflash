@@ -179,8 +179,12 @@ and Easy reviews. Open an illustrative calendar preview with:
 
 See [card timeline studies](docs/card-timeline-studies.md) for keyboard controls
 and the limits of creation/edit history in existing collections.
-Deferred ideas for weakness ranking and optional language-model study support
-are recorded in [study support ideas](docs/study-support-ideas.md).
+Study guidance ranks weak cards using recall, difficulty, trends and personal
+response times. Library and Review show tiered badges, and reviews default to
+weakest-first ordering among due cards. Card guidance explains the evidence and
+can request optional language-model help. See [study guidance](docs/study-guidance.md)
+for the formula and current limits; broader ideas remain in
+[study support ideas](docs/study-support-ideas.md).
 
 ### Review history
 

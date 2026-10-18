@@ -33,6 +33,7 @@ Item {
     property bool deckSearchVisible: librarySettings.deckSearchVisible
     property bool deckContentSearchVisible: librarySettings.deckContentSearchVisible
     property bool cardSearchVisible: librarySettings.cardSearchVisible
+    property bool weakestFirst: librarySettings.weakestFirst
     property bool restoringSearchSelection: false
     property string searchPageAnchorId: ""
     property bool resetSearchPage: false
@@ -81,6 +82,7 @@ Item {
         property bool deckSearchVisible: false
         property bool deckContentSearchVisible: false
         property bool cardSearchVisible: false
+        property bool weakestFirst: false
         property string cardFilterTags: "[]"
         property string cardFilterKind: ""
         property string cardFilterState: ""
@@ -113,6 +115,7 @@ Item {
     onDeckSearchVisibleChanged: librarySettings.deckSearchVisible = deckSearchVisible
     onDeckContentSearchVisibleChanged: librarySettings.deckContentSearchVisible = deckContentSearchVisible
     onCardSearchVisibleChanged: librarySettings.cardSearchVisible = cardSearchVisible
+    onWeakestFirstChanged: { librarySettings.weakestFirst = weakestFirst; resetPage() }
     onDeckSearchTextChanged: {
         librarySettings.deckQuery = deckSearchText
         searchCollapsedDecks = ({})
@@ -134,6 +137,21 @@ Item {
     }
     function cardTags(card) {
         return String(card.tags || "").split(",").map(tag => tag.trim()).filter(tag => tag.length > 0)
+    }
+    function cardAssessment(card) {
+        if (!card) return ({})
+        if (card.weakness && typeof card.weakness === "object") return card.weakness
+        const variants = card.variantWeaknesses
+        if (!variants || typeof variants !== "object") return ({})
+        const assessments = Object.keys(variants).map(key => variants[key]).filter(value => value && typeof value === "object")
+        if (!assessments.length) return ({})
+        const ranks = ({ unassessed: 0, steady: 1, watch: 2, fragile: 3, "needs-study": 4 })
+        return assessments.sort((a, b) => (ranks[b.tier] || 0) - (ranks[a.tier] || 0) || Number(b.score || 0) - Number(a.score || 0))[0]
+    }
+    function weaknessRank(card) {
+        const assessment = cardAssessment(card)
+        const ranks = ({ unassessed: 0, steady: 1, watch: 2, fragile: 3, "needs-study": 4 })
+        return (ranks[assessment.tier] || 0) * 1000 + Number(assessment.score || 0)
     }
     function collectTags() {
         const counts = new Map()
@@ -157,13 +175,20 @@ Item {
         }
     }
     function filteredCards() {
-        const result = []
-        let previousGroup = ""
+        const groups = []
+        const groupIndexes = ({})
         for (const card of sourceCards) {
             if (!matchesCardFilter(card)) continue
             const group = card.searchGroup || ""
-            result.push(Object.assign({}, card, { groupStart: !!group && group !== previousGroup }))
-            previousGroup = group
+            const groupKey = group || "\u0000normal"
+            if (groupIndexes[groupKey] === undefined) { groupIndexes[groupKey] = groups.length; groups.push([]) }
+            groups[groupIndexes[groupKey]].push(Object.assign({}, card, { groupStart: false }))
+        }
+        const result = []
+        for (const group of groups) {
+            if (weakestFirst) group.sort((a, b) => weaknessRank(b) - weaknessRank(a))
+            for (let index = 0; index < group.length; ++index)
+                result.push(Object.assign({}, group[index], { groupStart: !!group[index].searchGroup && (index === 0 || group[index].searchGroup !== group[index - 1].searchGroup) }))
         }
         return result
     }
@@ -1063,6 +1088,15 @@ Item {
                         hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
                         onClicked: cardFilters.visible ? cardFilters.close() : cardFilters.open()
                     }
+                    AppButton {
+                        text: "Weakest first"
+                        glyph: "review-ledger"
+                        fill: library.weakestFirst ? Theme.accentSoft : Theme.transparent
+                        outline: library.weakestFirst ? Theme.accent : Theme.rule
+                        foreground: library.weakestFirst ? Theme.accent : Theme.ink
+                        hint: library.weakestFirst ? "Return cards to their normal order" : "Sort cards by weakness within each search group"
+                        onClicked: library.weakestFirst = !library.weakestFirst
+                    }
                 }
                 RowLayout {
                     Layout.fillWidth: true; visible: library.cardSearchVisible; spacing: 6
@@ -1210,7 +1244,10 @@ Item {
                             }
                             contentItem: ColumnLayout {
                                 spacing: 5
-                                Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
+                                RowLayout { Layout.fillWidth: true; spacing: 8
+                                    Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    WeaknessBadge { assessment: library.cardAssessment(cardRow.modelData); compact: true; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
+                                }
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label {

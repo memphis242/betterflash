@@ -2,6 +2,7 @@
 #include "scheduler.h"
 #include "mediabackup.h"
 #include "syncprotocol.h"
+#include "studyguidance.h"
 
 #include <QDate>
 #include <QDir>
@@ -39,6 +40,25 @@ QVariantList variantMaps(const QList<struct model::Variant> &variants)
     QVariantList result;
     for (const struct model::Variant &v : variants) result.append(model::toMap(v));
     return result;
+}
+
+QVariantMap aggregateWeakness(const QList<struct model::Variant> &variants,
+                              const QHash<QString, QVariantMap> &byVariant)
+{
+    QVariantMap best{{"score", 0.0}, {"tier", QStringLiteral("unassessed")},
+                     {"label", QStringLiteral("Not assessed")}, {"reviewCount", 0},
+                     {"sampleCount", 0}, {"provisional", true}, {"reasons", QStringList{}},
+                     {"recommendation", QStringLiteral("Build a little review history before interpreting weakness.")},
+                     {"variantId", QString()}, {"variantKey", QString()}, {"factors", QVariantList{}}, {"assessed", false}};
+    for (const struct model::Variant &variant : variants) {
+        const QVariantMap candidate = byVariant.value(variant.id);
+        if (candidate.value("score").toDouble() > best.value("score").toDouble()
+            || (!best.value("assessed").toBool() && candidate.value("assessed").toBool())) best = candidate;
+    }
+    QVariantMap all;
+    for (const struct model::Variant &variant : variants) all.insert(variant.id, byVariant.value(variant.id));
+    best.insert("_variantWeaknesses", all);
+    return best;
 }
 
 }
@@ -102,7 +122,9 @@ void DatabaseWorker::initialize()
     m_db.setDatabaseName(m_path);
     if (!m_db.open()) { fail("STORAGE_OPEN","Could not open storage. Check the data directory permissions.",m_db.lastError().text());return; }
     if (!execute("PRAGMA foreign_keys=ON") || !execute("PRAGMA journal_mode=WAL")
-        || !execute("PRAGMA busy_timeout=5000") || !migrate() || !initializeHistory()) {
+        || !execute("PRAGMA busy_timeout=5000") || !migrate()
+        || !execute("CREATE INDEX IF NOT EXISTS reviews_variant_recent ON reviews(variant_id,card_id,reviewed_at DESC,id DESC)")
+        || !initializeHistory() || !initializeStudyGuidance()) {
         fail("STORAGE_SCHEMA","Could not initialize storage. Preserve the database and inspect the details.",m_sqlDetail);
         shutdown();return;
     }
@@ -435,9 +457,33 @@ bool DatabaseWorker::validDeckParent(const QString &id,const QString &parentId)
     return true;
 }
 
+bool DatabaseWorker::initializeStudyGuidance()
+{
+    assertThread();
+    const QStringList statements{
+        QStringLiteral("CREATE TEMP TABLE IF NOT EXISTS betterflash_study_dirty_variants(id TEXT PRIMARY KEY)"),
+        QStringLiteral("INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) SELECT id FROM review_variants"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_insert AFTER INSERT ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_update AFTER UPDATE ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.variant_id); INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_reviews_delete AFTER DELETE ON main.reviews BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.variant_id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_insert AFTER INSERT ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_update AFTER UPDATE ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.id); INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(NEW.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_variants_delete AFTER DELETE ON main.review_variants BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) VALUES(OLD.id); END"),
+        QStringLiteral("CREATE TEMP TRIGGER IF NOT EXISTS betterflash_study_notes_update AFTER UPDATE OF front,back,kind,point_count ON main.notes BEGIN INSERT OR IGNORE INTO betterflash_study_dirty_variants(id) SELECT id FROM main.review_variants WHERE card_id=NEW.id; END")
+    };
+    for (const QString &statement : statements) {
+        if (!execute(statement)) return false;
+    }
+    return true;
+}
+
 bool DatabaseWorker::publishSnapshot()
 {
     assertThread();
+    if (!refreshStudyGuidance()) {
+        fail("STUDY_GUIDANCE_LOAD", "Study guidance could not be refreshed. Any change already saved remains saved. Refresh the library; if it keeps failing, inspect the details.", m_sqlDetail);
+        return false;
+    }
     QVariantList decks,cards,history;
     const QString now=model::nowUtc();
     QSqlQuery q(m_db);
@@ -476,7 +522,17 @@ bool DatabaseWorker::publishSnapshot()
         const struct model::Card note=readCard(q);
         QVariantMap map=model::toMap(note);
         const QList<struct model::Variant> schedules=variants.value(note.id);
-        map.insert("variants",variantMaps(schedules));
+        QVariantList scheduleMaps;
+        for (const struct model::Variant &schedule : schedules) {
+            QVariantMap scheduleMap=model::toMap(schedule);
+            scheduleMap.insert("weakness",m_weaknessByVariant.value(schedule.id));
+            scheduleMaps.append(scheduleMap);
+        }
+        map.insert("variants",scheduleMaps);
+        QVariantMap cardWeakness=aggregateWeakness(schedules,m_weaknessByVariant);
+        const QVariant variantWeaknesses=cardWeakness.take("_variantWeaknesses");
+        map.insert("weakness",cardWeakness);
+        map.insert("variantWeaknesses",variantWeaknesses);
         QString earliest;qint64 reviewCount=0;int dueCount=0;
         for (const struct model::Variant &v:schedules) {
             if (earliest.isEmpty()||v.due<earliest) earliest=v.due;
@@ -493,6 +549,84 @@ bool DatabaseWorker::publishSnapshot()
     const auto sessions=reviewSessions();
     if (!sessions) { fail("STORAGE_READ","Could not load review sessions. Try refreshing.",sessions.error()); return false; }
     emit snapshotReady(decks,cards,history,*sessions);
+    return true;
+}
+
+bool DatabaseWorker::refreshStudyGuidance()
+{
+    assertThread();
+    QStringList dirtyIds;
+    QSqlQuery dirty(m_db);
+    if (!dirty.exec("SELECT id FROM betterflash_study_dirty_variants ORDER BY id")) { m_sqlDetail=dirty.lastError().text(); return false; }
+    while (dirty.next()) dirtyIds.append(dirty.value(0).toString());
+    if (dirty.lastError().isValid()) { m_sqlDetail=dirty.lastError().text(); return false; }
+    if (dirtyIds.isEmpty()) return true;
+    QHash<QString, QString> keys;
+    QHash<QString, double> budgets;
+    QHash<QString, int> activeReviewCounts;
+    QSqlQuery variants(m_db);
+    if (!variants.exec("SELECT v.id,v.variant_key,v.review_count,n.id,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints FROM betterflash_study_dirty_variants d CROSS JOIN review_variants v ON v.id=d.id JOIN notes n ON n.id=v.card_id")) {
+        m_sqlDetail=variants.lastError().text();
+        return false;
+    }
+    while (variants.next()) {
+        const QString id=variants.value(0).toString();
+        const QString key=variants.value(1).toString();
+        if (id.isEmpty()||key.isEmpty()) { m_sqlDetail=QStringLiteral("Study guidance contains an invalid review variant."); return false; }
+        keys.insert(id,key);
+        const int scheduleReviewCount=variants.value(2).toInt();
+        if (scheduleReviewCount < 0) { m_sqlDetail=QStringLiteral("Study guidance contains an invalid review count."); return false; }
+        activeReviewCounts.insert(id,scheduleReviewCount);
+        const struct model::Card note{variants.value(3).toString(),variants.value(4).toString(),variants.value(5).toString(),
+                                      variants.value(6).toString(),variants.value(7).toString(),variants.value(8).toString(),
+                                      variants.value(9).toInt(),variants.value(10).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(variants.value(10).toString().toUtf8()).object().toVariantMap(),
+                                      variants.value(11).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(variants.value(11).toString().toUtf8()).object().toVariantMap()};
+        const auto supported = model::variantKeys(note);
+        if (!supported || !supported->contains(key)) {
+            m_sqlDetail=QStringLiteral("A saved card has an invalid review direction. Repair the card before refreshing study guidance.");
+            return false;
+        }
+        budgets.insert(id,model::readingBudget(model::question(note,key)));
+    }
+    if (variants.lastError().isValid()) {
+        m_sqlDetail=variants.lastError().text();
+        return false;
+    }
+    QHash<QString,QVector<betterflash::study::ReviewEvidence>> evidence;
+    QHash<QString,int> reviewCounts=activeReviewCounts;
+    QSqlQuery reviews(m_db);
+    if (!reviews.exec("SELECT r.variant_id,r.grade,r.recall_fraction,r.response_seconds "
+                     "FROM betterflash_study_dirty_variants d CROSS JOIN review_variants v ON v.id=d.id CROSS JOIN reviews r ON r.id IN ("
+                     "SELECT recent.id FROM reviews recent INDEXED BY reviews_variant_recent WHERE recent.variant_id=v.id AND recent.card_id=v.card_id "
+                     "ORDER BY recent.reviewed_at DESC,recent.id DESC LIMIT 12) "
+                     "WHERE v.review_count>0 ORDER BY v.id,r.reviewed_at DESC,r.id DESC")) {
+        m_sqlDetail=reviews.lastError().text();
+        return false;
+    }
+    while (reviews.next()) {
+        const QString variantId=reviews.value(0).toString();
+        const int grade=reviews.value(1).toInt();
+        const double recall=reviews.value(2).toDouble();
+        const double seconds=reviews.value(3).toDouble();
+        if (grade<0||grade>4||!std::isfinite(recall)||recall<0.0||recall>1.0||!std::isfinite(seconds)||seconds<0.0) {
+            m_sqlDetail=QStringLiteral("Study guidance contains an invalid saved review.");
+            return false;
+        }
+        const int activeCount=activeReviewCounts.value(variantId);
+        if (evidence.value(variantId).size() < std::min(activeCount,12)) {
+            evidence[variantId].append({grade,recall,seconds});
+        }
+    }
+    if (reviews.lastError().isValid()) {
+        m_sqlDetail=reviews.lastError().text();
+        return false;
+    }
+    QHash<QString,QVariantMap> next;
+    for (auto it=keys.cbegin();it!=keys.cend();++it)
+        next.insert(it.key(),betterflash::study::assess(it.key(),it.value(),budgets.value(it.key()),reviewCounts.value(it.key()),evidence.value(it.key())));
+    if (!execute("DELETE FROM betterflash_study_dirty_variants")) return false;
+    for (const QString &id : dirtyIds) m_weaknessByVariant.remove(id);
+    for (auto it=next.cbegin();it!=next.cend();++it) m_weaknessByVariant.insert(it.key(),it.value());
     return true;
 }
 std::expected<QVariantList, QString> DatabaseWorker::reviewSessions()
@@ -585,6 +719,8 @@ QVariantMap DatabaseWorker::reviewCard(const struct model::Card &note,const stru
     result.insert("stability",schedule.stability);result.insert("difficulty",schedule.difficulty);
     result.insert("question",model::question(note,schedule.key));result.insert("answer",model::answer(note,schedule.key));
     result.insert("readingBudgetSeconds",model::readingBudget(result.value("question").toString()));result.insert("deckName",deckName);
+    const QVariantMap weakness = m_weaknessByVariant.value(schedule.id);
+    if (!weakness.isEmpty()) result.insert("weakness", weakness);
     return result;
 }
 QVariantMap DatabaseWorker::sessionCard(const QString &variantId, const QVariantMap &card) const
@@ -1002,11 +1138,19 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
     if (publishSnapshot()) done(QStringLiteral("Reset %1 source card(s). All variants are new and due now.").arg(count));
 #endif
 }
-void DatabaseWorker::beginReview(const QString &deckId)
+void DatabaseWorker::beginReview(const QString &deckId, const QString &order)
 {
     const struct HistoryScope history(this, QStringLiteral("Start review"));
     if (!history) return;
     if (!ready()) return;
+    if (order != QStringLiteral("due") && order != QStringLiteral("weakest")) {
+        fail("REVIEW_ORDER_INVALID", "Choose a supported review order.");
+        return;
+    }
+    if (!refreshStudyGuidance()) {
+        fail("REVIEW_GUIDANCE", "Could not calculate study guidance. Refresh and try again.", m_sqlDetail);
+        return;
+    }
     if (!deckId.isEmpty() && (!model::validUuid(deckId)||!deck(deckId))) {fail("DECK_NOT_FOUND","Choose an existing deck to review.");return;}
     const QString sessionId=model::uuid();
     const QString sessionStartedAt=model::nowUtc();
@@ -1021,6 +1165,18 @@ void DatabaseWorker::beginReview(const QString &deckId)
     if (!q.exec()) {fail("REVIEW_START","Could not start review. Refresh and try again.",q.lastError().text());return;}
     m_sessionId=sessionId;m_sessionStartedAt=sessionStartedAt;m_sessionDeckName=sessionDeckName;
     m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();m_selectedVariant.clear();m_queueDirty=true;while (q.next()) { const QString id=q.value(0).toString(); m_queue.append(id); m_sessionOrder.append(id); }
+    if (order == QStringLiteral("weakest")) {
+        std::stable_sort(m_sessionOrder.begin(),m_sessionOrder.end(),[this](const QString &left,const QString &right) {
+            const QVariantMap a=m_weaknessByVariant.value(left), b=m_weaknessByVariant.value(right);
+            const bool assessedA=a.value("assessed").toBool(), assessedB=b.value("assessed").toBool();
+            const double scoreA=a.value("score").toDouble(), scoreB=b.value("score").toDouble();
+            const bool prioritizedA=assessedA&&scoreA>0.0, prioritizedB=assessedB&&scoreB>0.0;
+            if (prioritizedA != prioritizedB) return prioritizedA;
+            if (scoreA != scoreB) return scoreA > scoreB;
+            return false;
+        });
+        m_queue=m_sessionOrder;
+    }
     if (!m_queue.isEmpty()) m_selectedVariant=m_queue.first();
     m_sessionTotal=m_queue.size();m_sessionActive=!m_queue.isEmpty();
     m_historyRuntimeChanged=true;

@@ -1,8 +1,10 @@
 # Study support ideas
 
-Status: deferred feature exploration, recorded 2026-10-11. Current work remains
-focused on the Library and its presentation. These ideas are not implemented
-features or decisions about their interface.
+Status: original exploration recorded 2026-10-11. Deterministic card and direction
+ranking, weakness badges, due-card ordering and optional card-level model guidance
+are now implemented. See [study guidance](study-guidance.md) for the current
+formula, interface and verification limits. The notes below retain the broader
+ideas; completed-run ranking and deck-level topic grouping remain deferred.
 
 ## Identify weak areas deterministically
 
@@ -14,7 +16,8 @@ underlying understanding, rather than simply a need for more repetitions.
 Explore a deterministic, explainable ranking first. Candidate signals include
 misses, partial recall, repeated Hard ratings, response time in the context of
 prompt complexity, and whether performance is improving or deteriorating.
-Weights, time windows and minimum evidence requirements remain undecided.
+The first scoring formula is documented in the study-guidance guide and remains
+open to refinement during use.
 Account for separate reverse and cloze variants, pauses, reading time, corrections,
 and sparse history before interpreting slow answers as weakness.
 

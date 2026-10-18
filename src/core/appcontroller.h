@@ -40,6 +40,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QVariantList reviewCards READ reviewCards NOTIFY reviewStateChanged)
     Q_PROPERTY(QVariantMap pendingGradeCorrection READ pendingGradeCorrection NOTIFY pendingGradeCorrectionChanged)
     Q_PROPERTY(QVariantMap navigationContext READ navigationContext WRITE setNavigationContext)
+    Q_PROPERTY(QString reviewOrder READ reviewOrder WRITE setReviewOrder NOTIFY reviewOrderChanged)
 public:
     explicit AppController(const QString &storageDir, QObject *parent = nullptr);
     ~AppController() override;
@@ -71,6 +72,8 @@ public:
     QVariantMap pendingGradeCorrection() const { return m_pendingGradeCorrection; }
     QVariantMap navigationContext() const { return m_navigationContext; }
     void setNavigationContext(const QVariantMap &context) { m_navigationContext=context; }
+    QString reviewOrder() const { return m_reviewOrder; }
+    Q_INVOKABLE void setReviewOrder(const QString &order);
 
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
     Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
@@ -125,7 +128,7 @@ public:
     void reportHistoryError(const QString &code, const QString &message);
 
 signals:
-    void decksChanged(); void cardsChanged(); void historyChanged(); void reviewSessionsChanged();
+    void decksChanged(); void cardsChanged(); void historyChanged(); void reviewSessionsChanged(); void reviewOrderChanged();
     void selectedDeckIdChanged(); void statusMessageChanged(); void currentCardChanged();
     void lastErrorChanged(); void busyChanged(); void reviewingChanged();
     void answerRevealedChanged(); void pausedChanged(); void reviewStateChanged();
@@ -193,6 +196,7 @@ private:
     QList<QVariantMap> m_operationContexts{QVariantMap{}};
     QVariantMap m_completedOperationContext;
     QVariantMap m_navigationContext;
+    QString m_reviewOrder = QStringLiteral("weakest");
     double m_responseSeconds = 0.0;
     double m_accumulatedSeconds = 0.0;
     QElapsedTimer m_elapsed;

@@ -19,6 +19,8 @@ Item {
     }
     onQueueCollapsedChanged: preferences.reviewQueueCollapsed = queueCollapsed
     readonly property var reviewCards: app.reviewCards
+    readonly property var weakness: app.currentCard.weakness || ({})
+    readonly property bool weakCard: !!weakness.assessed && Number(weakness.score) >= 25
     function cardTags(card) {
         const raw = card && (card.tags || card.labels || []);
         if (Array.isArray(raw))
@@ -235,6 +237,11 @@ Item {
                         AppMenuItem { glyph: "edit"
                             text: "Edit current card"
                             onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id)
+                        }
+                        AppMenuItem { glyph: "book"
+                            text: "Study guidance"
+                            enabled: !app.busy && page.hasCard
+                            onTriggered: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
                         }
                         AppMenuItem { glyph: "review-ledger"
                             text: "Summarize remaining cards"
@@ -740,7 +747,7 @@ Item {
                 Layout.fillHeight: true
                 color: Theme.surface
                 radius: 16
-                border.color: Theme.rule
+                border.color: page.weakCard ? currentWeakness.tierColor : Theme.rule
                 border.width: 1
                 RowLayout {
                     anchors.fill: parent
@@ -791,12 +798,27 @@ Item {
                                         }
                                     }
                                 }
-                                Label {
-                                    textFormat: Text.PlainText
-                                    text: "Question"
-                                    color: Theme.inkMuted
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 15
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+                                    Label {
+                                        textFormat: Text.PlainText
+                                        text: "Question"
+                                        color: Theme.inkMuted
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 15
+                                    }
+                                    WeaknessBadge {
+                                        id: currentWeakness
+                                        assessment: page.weakness
+                                        visible: !!page.weakness.assessed
+                                    }
+                                    AppButton {
+                                        text: page.ui.width < 700 ? "Study" : "Study guidance"
+                                        hint: "Explain this direction's weakness signals and optionally ask the language model for help"
+                                        enabled: !app.busy && page.hasCard
+                                        onClicked: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
+                                    }
                                 }
                                 MarkdownPane {
                                     objectName: "reviewQuestion"

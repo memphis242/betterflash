@@ -89,7 +89,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     readonly property var selectedDeck: deckById(app.selectedDeckId)
@@ -2463,6 +2463,31 @@ ApplicationWindow {
         id: deckHeatmapDialog
         ui: window
     }
+    StudyGuidanceDialog {
+        id: studyGuidanceDialog
+        ui: window
+        property bool resumeOnClose: false
+        property bool resumePending: false
+        property string pausedVariantId: ""
+        function resumeIfReady() {
+            if (!resumePending || app.busy || visible)
+                return
+            resumePending = false
+            if (window.page === 0 && app.reviewing && app.paused
+                && app.currentCard.variantId === pausedVariantId)
+                app.resumeReview()
+        }
+        onClosed: {
+            studyAssistant.cancel()
+            resumePending = resumeOnClose
+            resumeOnClose = false
+            resumeIfReady()
+        }
+        Connections {
+            target: app
+            function onBusyChanged() { studyGuidanceDialog.resumeIfReady() }
+        }
+    }
     CardDetailDialog {
         id: detailDialog
         objectName: "cardDetailDialog"
@@ -2606,6 +2631,16 @@ ApplicationWindow {
     }
     function openPartial() {
         partialDialog.open()
+    }
+    function openStudyGuidance(cardId, variantId) {
+        if (app.busy || !cardId)
+            return
+        studyGuidanceDialog.resumePending = false
+        studyGuidanceDialog.resumeOnClose = page === 0 && app.reviewing && !app.paused
+        studyGuidanceDialog.pausedVariantId = app.currentCard.variantId || ""
+        if (studyGuidanceDialog.resumeOnClose)
+            app.pauseReview()
+        studyGuidanceDialog.showCard(cardId, variantId || "")
     }
     function openSummary() {
         aiDialog.open()

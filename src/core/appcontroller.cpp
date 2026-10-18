@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QSettings>
 #include <QThread>
 #include <algorithm>
 #include <cassert>
@@ -14,6 +15,9 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     : QObject(parent),m_worker(new DatabaseWorker(QDir(storageDir).filePath(QStringLiteral("betterflash.sqlite")))),
       m_thread(new QThread(this)),m_storagePath(QDir(storageDir).filePath(QStringLiteral("betterflash.sqlite")))
 {
+    QSettings settings;
+    const QString storedOrder=settings.value(QStringLiteral("review/order"),QStringLiteral("weakest")).toString();
+    m_reviewOrder=(storedOrder==QStringLiteral("due")||storedOrder==QStringLiteral("weakest"))?storedOrder:QStringLiteral("weakest");
     m_worker->moveToThread(m_thread);
     connect(m_thread,&QThread::started,m_worker,&DatabaseWorker::initialize);
     connect(m_worker,&DatabaseWorker::snapshotReady,this,&AppController::handleSnapshot);
@@ -80,6 +84,14 @@ void AppController::setBusy(bool value) { if (m_busy!=value) {m_busy=value;emit 
 void AppController::setError(const QVariantMap &error) {m_lastError=error;emit lastErrorChanged();}
 void AppController::setSelectedDeckId(const QString &id)
 { if (m_selectedDeckId!=id) {m_selectedDeckId=id;emit selectedDeckIdChanged();} }
+void AppController::setReviewOrder(const QString &order)
+{
+    const QString normalized=order==QStringLiteral("due")?QStringLiteral("due"):order==QStringLiteral("weakest")?QStringLiteral("weakest"):QString();
+    if (normalized.isEmpty()||normalized==m_reviewOrder) return;
+    m_reviewOrder=normalized;
+    QSettings().setValue(QStringLiteral("review/order"),m_reviewOrder);
+    emit reviewOrderChanged();
+}
 void AppController::createDeck(const QString &name,const QString &description,const QString &parentId)
 { invoke([=](DatabaseWorker *worker){worker->createDeck(name,description,parentId);}); }
 void AppController::updateDeck(const QString &id,const QString &name,const QString &description,const QString &parentId)
@@ -248,7 +260,8 @@ void AppController::startReview(const QString &deckId)
     const QVariantMap context=historyContext();
     m_reviewedCount=0;m_sessionTotal=0;m_spokenAnswer.clear();m_paused=false;m_leftReviewedVariants.clear();clearPendingGradeCorrection();
     emit spokenAnswerChanged();emit pausedChanged();emit reviewStateChanged();
-    invoke([=](DatabaseWorker *worker){worker->beginReview(deckId);},context);
+    const QString requestedOrder=m_reviewOrder;
+    invoke([deckId,requestedOrder](DatabaseWorker *worker){worker->beginReview(deckId,requestedOrder);},context);
 }
 void AppController::selectReviewCard(const QString &variantId)
 {

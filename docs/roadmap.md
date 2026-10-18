@@ -29,11 +29,11 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   application session; checkpoints provide persistent content recovery. See
   [undo and redo](undo.md). Continue refining selection, scroll, zoom, filters,
   and pane context across navigation.
-- **Weak-area study guidance:** define an explainable ranking using recall,
-  difficulty, timing, and trends, with appropriate treatment of sparse history
-  and independently scheduled variants. Optional language-model assistance can
-  help with explanations and independent study. See
-  [study support ideas](study-support-ideas.md).
+- **Weak-area study guidance:** initial deterministic direction/card ranking,
+  Library and Review tiers, weakest-first due reviews and explicit optional
+  model guidance are implemented. Refine weights and thresholds during use;
+  deck topic grouping and completed-run rankings remain follow-ups. See
+  [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
 - **Generate like this:** propose analogous problem cards, with a review and
   answer-verification workflow before saving. See the same study-support notes.
 - **Learning statistics:** refine the provisional library/deck learning score,
