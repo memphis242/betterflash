@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(BetterFlash VERSION 0.1.0 LANGUAGES C CXX)
+set(BETTERFLASH_VERSION "${PROJECT_VERSION}-beta")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -97,6 +98,7 @@ target_link_libraries(betterflash PRIVATE betterflash_core betterflash_voice bet
 set_target_properties(betterflash PROPERTIES
     BUILD_RPATH "${BETTERFLASH_ONNXRUNTIME_ROOT}/lib"
     INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+target_compile_definitions(betterflash PRIVATE BETTERFLASH_VERSION="${BETTERFLASH_VERSION}")
 target_compile_options(betterflash PRIVATE -Wall -Wextra -Wpedantic)
 foreach(target betterflash_core betterflash_voice betterflash_render betterflash_integrations betterflash_search)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
@@ -115,7 +117,7 @@ if(ANDROID)
         "${BETTERFLASH_ONNXRUNTIME_LIBRARY}")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_NAME "org.betterflash.app")
-    set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}")
+    set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_NAME "${BETTERFLASH_VERSION}")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_CODE 1)
     set_property(TARGET betterflash PROPERTY QT_ANDROID_MIN_SDK_VERSION 28)
     set_property(TARGET betterflash PROPERTY QT_ANDROID_TARGET_SDK_VERSION 36)

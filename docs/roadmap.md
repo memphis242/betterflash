@@ -52,6 +52,13 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Android completion
 
+As of 2026-10-19, the desktop baseline is **v0.1.0-beta**. The user accepted
+the initial study-guidance and Generate like this features and paused the
+desktop TODO sweep to plan Android. Android implementation is not yet
+authorized by that planning request. Start with the
+[Android handoff plan](android-plan.md), targeting a Samsung Galaxy S26 Ultra
+running One UI 9.0 / Android 17. Automated testing remains paused.
+
 - Build with a real Qt Android kit, SDK, NDK, JDK, and arm64 OpenSSL package.
 - Verify startup, layout, image import, microphone permission handling, speech
   lifecycle behavior, memory use, model cancellation, and synchronization on a

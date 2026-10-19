@@ -1,5 +1,10 @@
 # Android draft
 
+For the next-session handoff, target device, researched setup and phased work,
+start with [Android implementation plan](android-plan.md). This document describes
+the existing Qt 6.11/API 36 draft; the planned Qt 6.12/API 37 work has not been
+implemented or device-verified.
+
 The Android target shares the desktop C++ data, scheduling, Markdown, network, and voice modules with the QML interface. Its minimum Android version is API 28 and target version is API 36. The custom manifest retains the Qt Application, Activity, native library placeholders, configuration handling, and FileProvider needed for a Qt package. It declares network and microphone access, treats a microphone as optional, and includes the visibility query for system speech engines.
 
 Microphone permission is requested through `QCoreApplication::requestPermission(QMicrophonePermission{}, ...)` only when voice is enabled. Declaring the permission never starts recording. Voice is disabled when the Android application leaves the foreground. Foreground review is the initial scope; locked-screen or background review still needs a microphone foreground service, notification controls, audio focus handling, Bluetooth route testing, and lifecycle recovery. Key entry currently provides session storage on Android; encrypted persistence using Android Keystore remains a draft task.

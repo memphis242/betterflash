@@ -47,7 +47,7 @@
 int main(int argc, char **argv) {
     QCoreApplication::setOrganizationName(QStringLiteral("BetterFlash"));
     QCoreApplication::setApplicationName(QStringLiteral("BetterFlash"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(BETTERFLASH_VERSION));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.betterflash.BetterFlash"));
 #ifdef Q_OS_ANDROID
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
