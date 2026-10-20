@@ -153,6 +153,18 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             || payload.value("restoreDependency").metaType().id() != QMetaType::Bool)) {
         detail="A restore dependency must be a boolean on an explicit deck restore."; return false;
     }
+    if (payload.contains("resolvedEventId")
+        && (type != QStringLiteral("deck.upsert")
+            || payload.value("resolvedEventId").metaType().id() != QMetaType::QString
+            || !model::validUuid(payload.value("resolvedEventId").toString()))) {
+        detail="Hierarchy repairs must identify their source event."; return false;
+    }
+    if (payload.contains("restoreContainerOnly")
+        && (type != QStringLiteral("deck.upsert") || !payload.value("restore").toBool()
+            || payload.value("restoreContainerOnly").metaType().id() != QMetaType::Bool
+            || !payload.value("restoreContainerOnly").toBool() || !payload.contains("resolvedEventId"))) {
+        detail="A hierarchy repair can explicitly restore only its deck container."; return false;
+    }
     if (payload.contains("historyOnly")
         && ((type != QStringLiteral("review.add") && type != QStringLiteral("review.correct"))
             || payload.value("historyOnly").metaType().id() != QMetaType::Bool)) {

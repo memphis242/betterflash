@@ -16,11 +16,25 @@
 #include <QSet>
 #include <QtConcurrent>
 #include <cassert>
+#include <cmath>
+#include <optional>
 
 namespace {
 inline constexpr qsizetype maxSyncImages = 64;
 inline constexpr qint64 maxResponseBytes = 8 * 1024 * 1024;
 static_assert(betterflash::model::maxMediaBytes >= betterflash::model::maxImageBytes);
+
+std::optional<qint64> responseCount(const QVariant &value, const qint64 fallback = 0) {
+    if (!value.isValid()) return fallback;
+    switch (value.metaType().id()) {
+    case QMetaType::Int: case QMetaType::UInt: case QMetaType::LongLong:
+    case QMetaType::ULongLong: case QMetaType::Double: break;
+    default: return std::nullopt;
+    }
+    const double count = value.toDouble();
+    if (!std::isfinite(count) || count < 0 || count > 1000000000 || std::floor(count) != count) return std::nullopt;
+    return static_cast<qint64>(count);
+}
 
 std::expected<QStringList, QString> mediaReferences(const QVariantList &events, const bool wrapped) {
     QList<struct betterflash::model::Card> cards;
@@ -90,6 +104,8 @@ void SyncController::setEndpoint(const QString &endpoint) {
 QNetworkRequest SyncController::request(const QUrl &url) const {
     QNetworkRequest result(url);
     result.setRawHeader("Authorization", "Bearer " + m_credentials->key().toUtf8());
+    result.setRawHeader("X-BetterFlash-Protocol", "2");
+    if (!m_collectionId.isEmpty()) result.setRawHeader("X-BetterFlash-Collection", m_collectionId.toUtf8());
     result.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     result.setTransferTimeout(30000);
     return result;
@@ -116,6 +132,7 @@ void SyncController::resetPending() {
         reply->deleteLater();
     }
     m_batch.clear();
+    m_collectionId.clear();
     m_response.clear();
     m_uploads.clear();
     m_downloads.clear();
@@ -148,6 +165,9 @@ void SyncController::synchronize() {
     if (!hasToken()) { fail(QStringLiteral("SYNC_TOKEN"), QStringLiteral("Add your server's access token in Sync settings.")); return; }
     m_busy = true;
     m_rounds = 0;
+    m_contentConflicts = 0;
+    m_hierarchyResolutions = 0;
+    m_conflictedRecords.clear();
     beginBatch();
 }
 void SyncController::beginBatch() {
@@ -172,8 +192,57 @@ void SyncController::handleBatch(const QVariantMap &batch) {
     m_batch = batch;
     m_batchWasFull = batch.value(QStringLiteral("hasMoreLocal")).toBool();
     m_uploads = *names;
-    m_phase = Phase::Uploading;
-    uploadNext();
+    identifyCollection();
+}
+void SyncController::identifyCollection() {
+    assert(m_busy);
+    assert(!m_reply);
+    m_phase = Phase::Identifying;
+    const QString requestId = m_requestId;
+    QUrl url(m_endpoint);
+    QString path = url.path();
+    path.chop(4);
+    url.setPath(path + QStringLiteral("info"));
+    m_reply = m_network.get(request(url));
+    QNetworkReply *const reply = m_reply;
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
+        if (received > 16384 || total > 16384) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestId] {
+        if (!active(requestId, Phase::Identifying) || m_reply != reply) { reply->deleteLater(); return; }
+        m_reply = nullptr;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool success = reply->error() == QNetworkReply::NoError && status == 200;
+        const QByteArray body = reply->readAll();
+        reply->deleteLater();
+        if (!success) {
+            fail(QStringLiteral("SYNC_IDENTITY"), status == 401 || status == 403
+                ? QStringLiteral("Check your sync access token.")
+                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 2."));
+            return;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(body);
+        const QVariantMap info = document.object().toVariantMap();
+        const QString identity = info.value(QStringLiteral("collectionId")).toString();
+        if (body.size() > 16384 || !document.isObject() || !betterflash::model::validUuid(identity)
+            || info.value(QStringLiteral("protocolVersion")).toInt() != 2
+            || !info.value(QStringLiteral("capabilities")).toStringList().contains(QStringLiteral("independent-schedules"))
+            || !info.value(QStringLiteral("capabilities")).toStringList().contains(QStringLiteral("hierarchy-repair"))) {
+            fail(QStringLiteral("SYNC_PROTOCOL"), QStringLiteral("The server must support independent schedules and deck hierarchy repair. Upgrade the server and every synced client."));
+            return;
+        }
+        const QString bound = m_batch.value(QStringLiteral("collectionId")).toString();
+        if (!bound.isEmpty() && bound != identity) {
+            fail(QStringLiteral("SYNC_COLLECTION_MISMATCH"), QStringLiteral("This device is bound to a different sync collection. Restore the original endpoint and account token, or use a separate local collection."));
+            return;
+        }
+        m_collectionId = identity;
+        m_batch.insert(QStringLiteral("collectionId"), identity);
+        m_phase = Phase::Uploading;
+        uploadNext();
+    });
+    m_status = QStringLiteral("Checking the sync collection.");
+    emit changed();
 }
 void SyncController::uploadNext() {
     const QString requestId = m_requestId;
@@ -226,9 +295,13 @@ void SyncController::postBatch() {
         const bool success = reply->error() == QNetworkReply::NoError && httpStatus >= 200 && httpStatus < 300;
         reply->deleteLater();
         if (!success) {
+            const QVariantMap serverError = QJsonDocument::fromJson(body).object().value(QStringLiteral("error")).toObject().toVariantMap();
+            const QString code = serverError.value(QStringLiteral("code")).toString();
+            const QString detail = serverError.value(QStringLiteral("message")).toString();
             const QString message = httpStatus == 401 || httpStatus == 403 ? QStringLiteral("Check your sync access token.")
-                : QStringLiteral("Check the server URL and connection, then try again.");
-            fail(QStringLiteral("SYNC_HTTP_%1").arg(httpStatus), message); return;
+                : (!detail.isEmpty() && detail.size() <= 1024 ? detail
+                   : QStringLiteral("Check the server URL and connection, then try again."));
+            fail(code.isEmpty() || code.size() > 64 ? QStringLiteral("SYNC_HTTP_%1").arg(httpStatus) : code, message); return;
         }
         if (body.size() > maxResponseBytes) {
             fail(QStringLiteral("SYNC_RESPONSE_LIMIT"), QStringLiteral("The server returned an oversized sync page. Update the server or try again.")); return;
@@ -239,6 +312,9 @@ void SyncController::postBatch() {
             fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned an invalid sync response.")); return;
         }
         QVariantMap response = document.object().toVariantMap();
+        if (response.value(QStringLiteral("collectionId")).toString() != m_collectionId) {
+            fail(QStringLiteral("SYNC_COLLECTION_MISMATCH"), QStringLiteral("The server collection changed during sync. Restore the original server database and retry.")); return;
+        }
         QSet<QString> submitted;
         for (const QVariant &entry : m_batch.value(QStringLiteral("events")).toList())
             submitted.insert(entry.toMap().value(QStringLiteral("id")).toString());
@@ -246,6 +322,27 @@ void SyncController::postBatch() {
         if (!valid) { fail(QStringLiteral("SYNC_RESPONSE"), valid.error()); return; }
         if (response.value(QStringLiteral("acceptedIds")).toList().size() != submitted.size()) {
             fail(QStringLiteral("SYNC_ACKNOWLEDGEMENT"), QStringLiteral("The server did not acknowledge every submitted change. Your pending changes are retained. Update the server and sync again.")); return;
+        }
+        const QVariant conflicts = response.value(QStringLiteral("contentConflicts"));
+        if (conflicts.isValid() && (conflicts.metaType().id() != QMetaType::QVariantList || conflicts.toList().size() > 1000)) {
+            fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned invalid content conflict information.")); return;
+        }
+        const auto conflictCount = responseCount(response.value(QStringLiteral("contentConflictCount")), conflicts.toList().size());
+        const auto hierarchyCount = responseCount(response.value(QStringLiteral("hierarchyResolutionCount")));
+        if (!conflictCount || *conflictCount < conflicts.toList().size() || !hierarchyCount) {
+            fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned an invalid content conflict count.")); return;
+        }
+        m_contentConflicts += *conflictCount;
+        m_hierarchyResolutions += *hierarchyCount;
+        for (const QVariant &value : conflicts.toList()) {
+            const QVariantMap conflict = value.toMap();
+            const QString entity = conflict.value(QStringLiteral("entity")).toString();
+            const QString id = conflict.value(QStringLiteral("id")).toString();
+            if ((entity != QStringLiteral("card") && entity != QStringLiteral("deck")) || !betterflash::model::validUuid(id)) {
+                fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned an invalid conflicting record identifier.")); return;
+            }
+            const QString record = entity + QLatin1Char(' ') + id;
+            if (m_conflictedRecords.size() < 10 && !m_conflictedRecords.contains(record)) m_conflictedRecords.append(record);
         }
         const auto references = mediaReferences(response.value(QStringLiteral("events")).toList(), true);
         if (!references) { fail(QStringLiteral("SYNC_IMAGE_LIMIT"), references.error()); return; }
@@ -332,6 +429,17 @@ void SyncController::finishApply(const QString &requestId, const bool success, c
     m_error.clear();
     m_lastSync = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     m_settings.setValue(QStringLiteral("sync/lastSync"), m_lastSync);
-    m_status = QStringLiteral("Collection synced.");
+    if (m_contentConflicts > 0) {
+        m_status = QStringLiteral("Collection synced with content conflicts.");
+        m_error = QStringLiteral("SYNC_CONTENT_CONFLICT: %1 concurrent card or deck edit(s) used server arrival order. Both versions are retained in the server event log. Review the affected content and recover an earlier version from that log if needed.").arg(m_contentConflicts);
+        if (!m_conflictedRecords.isEmpty()) m_error += QStringLiteral(" Affected records (up to 10): ") + m_conflictedRecords.join(QStringLiteral(", "));
+    } else {
+        m_status = QStringLiteral("Collection synced.");
+    }
+    if (m_hierarchyResolutions > 0) {
+        m_status = QStringLiteral("Collection synced with repaired deck moves.");
+        const QString message = QStringLiteral("%1 deck move(s) would have created a cycle or targeted a deleted parent. The server retained a valid parent and preserved both events in its log.").arg(m_hierarchyResolutions);
+        m_error = m_error.isEmpty() ? QStringLiteral("SYNC_HIERARCHY_RESOLVED: ") + message : m_error + QLatin1Char(' ') + message;
+    }
     emit changed();
 }

@@ -36,7 +36,9 @@ class SyncTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def request(self, method, path, data=None, token=TOKEN, raw=False):
-        headers = {"Authorization": "Bearer " + token}
+        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "2"}
+        if method == "PUT":
+            headers["X-BetterFlash-Collection"] = self.store.collection_id
         body = data if raw else json.dumps(data).encode() if data is not None else None
         if not raw and data is not None:
             headers["Content-Type"] = "application/json"

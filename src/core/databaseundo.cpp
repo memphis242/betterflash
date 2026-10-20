@@ -279,6 +279,7 @@ QVariantMap DatabaseWorker::historyRow(const QString &entity, const QString &id)
 bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq)
 {
     m_historyValidationFailure=false;
+    m_historyHierarchyCycle=false;
     if (changes.isEmpty()) return true;
     QHash<QString, QVariantMap> desired;
     for (const QVariant &value : changes) {
@@ -319,7 +320,7 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
         while (!cursor.isEmpty()) {
             if (!parents.contains(cursor)) { m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("Undo would leave a deck without its parent. Its current content was preserved."); return false; }
             if (colors.value(cursor) == 2) break;
-            if (colors.value(cursor) == 1) { m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("Undo would create a deck hierarchy cycle. Its current content was preserved."); return false; }
+            if (colors.value(cursor) == 1) { m_historyValidationFailure=true; m_historyHierarchyCycle=true; m_sqlDetail = QStringLiteral("Undo would create a deck hierarchy cycle. Its current content was preserved."); return false; }
             colors.insert(cursor, 1);
             path.append(cursor);
             cursor = parents.value(cursor);
@@ -817,8 +818,13 @@ bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq
     if (!applyHistoryChanges(usable,true,seq)) {
         const QString detail=m_sqlDetail;
         const bool validationFailure=m_historyValidationFailure;
+        const bool hierarchyCycle=m_historyHierarchyCycle;
+        assert(!hierarchyCycle || validationFailure);
         if (!execute("ROLLBACK TO apply_history_event") || !execute("RELEASE apply_history_event")) return false;
         if (!validationFailure) {m_sqlDetail=detail;return false;}
+        if (m_allowHierarchyRepair && hierarchyCycle) {
+            applied=false; m_sqlDetail.clear(); return true;
+        }
         if (detail.contains(QStringLiteral("destination deck no longer exists"))
             || detail.contains(QStringLiteral("without its parent"))
             || detail.contains(QStringLiteral("unavailable review"))

@@ -133,8 +133,10 @@ void DatabaseWorker::initialize()
     while (query.next()) {
         if (query.value(0).toString() == QStringLiteral("device_id")) m_deviceId = query.value(1).toString();
         else if (query.value(0).toString() == QStringLiteral("sync_cursor")) m_cursor = query.value(1).toLongLong();
+        else if (query.value(0).toString() == QStringLiteral("sync_collection_id")) m_collectionId = query.value(1).toString();
     }
-    if (!model::validUuid(m_deviceId)||m_cursor<0||m_cursor>9007199254740991LL) {
+    if (!model::validUuid(m_deviceId)||(!m_collectionId.isEmpty()&&!model::validUuid(m_collectionId))
+        ||m_cursor<0||m_cursor>9007199254740991LL) {
         fail("STORAGE_METADATA","Device metadata is invalid. Preserve the database and inspect the details.");shutdown();return;
     }
     if (publishSnapshot()) done("Ready");
@@ -1127,7 +1129,8 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
                 // A reset detaches the schedule from any previous grade correction.
                 if (!execute("DELETE FROM metadata WHERE key=?",{QStringLiteral("review_owner:")+schedule.id})) return false;
             }
-            if (!enqueue("card.upsert",cardPayload(note))) return false;
+            for (const struct model::Variant &schedule : cardVariants(note.id))
+                if (!enqueue("variant.upsert",{{"variant",model::toMap(schedule)}})) return false;
         }
         count=cards.size();
         return m_sqlDetail.isEmpty();
@@ -1333,6 +1336,19 @@ bool DatabaseWorker::pendingRestore(const QString &type,const QString &id,bool a
 }
 bool DatabaseWorker::applyDeckDelete(const QString &id,qint64 seq,bool &applied)
 {
+    if (m_allowHierarchyRepair) {
+        if (m_hierarchyPageIncomplete) { applied=false;return true; }
+        QSqlQuery pending(m_db);
+        if (!pending.exec("SELECT EXISTS(SELECT 1 FROM local_events WHERE echoed=0 AND "
+                          "(target_type='deck' OR (json_extract(event,'$.type')='history.apply' AND EXISTS "
+                          "(SELECT 1 FROM json_each(local_events.event,'$.payload.changes') "
+                          "WHERE json_extract(value,'$.entity')='deck'))))") || !pending.next()) {
+            m_sqlDetail=pending.lastError().text();return false;
+        }
+        // Server-ordered hierarchy writes determine which local folders belong
+        // to the deleted subtree before its contents can be removed.
+        if (pending.value(0).toBool()) { applied=false;return true; }
+    }
     QSqlQuery hierarchy(m_db);
     hierarchy.prepare("WITH RECURSIVE subtree(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN subtree s ON d.parent_id=s.id) SELECT d.id,d.parent_id FROM decks d JOIN subtree s ON s.id=d.id");
     hierarchy.addBindValue(id);
@@ -1441,8 +1457,9 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         const struct model::Deck record=*model::deckFromMap(object(payload,"deck"));
         const bool restore = payload.value("restore").toBool();
         const bool dependency = payload.value("restoreDependency").toBool();
+        const bool containerOnly = dependency || payload.value("restoreContainerOnly").toBool();
         if (!executeEffects) {
-            if (restore && !recordSequence(dependency ? "restore-container" : "restore-deck",record.id,seq)) return false;
+            if (restore && !recordSequence(containerOnly ? "restore-container" : "restore-deck",record.id,seq)) return false;
             return dependency || recordSequence("deck",record.id,seq);
         }
         if (dependency) {
@@ -1456,16 +1473,18 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         if ((deletedAt >= 0 && !restore) || seq <= recordedAt || (restore && seq <= deletedAt)) return true;
         if (pendingEntity("deck",record.id)) {applied=false;return m_sqlDetail.isEmpty();}
         if (!record.parentId.isEmpty()&&isDeleted("deck",record.parentId)) {
-            if (restore) { applied=false; return m_sqlDetail.isEmpty(); }
+            if (restore || (m_allowHierarchyRepair && !m_finalizingHierarchyOrphans)) { applied=false; return m_sqlDetail.isEmpty(); }
+            if (m_allowHierarchyRepair)
+                return applyDeckDelete(record.id,seq,applied) && (!applied || recordSequence("deck",record.id,seq));
             return tombstone("deck",record.id,seq)&&recordSequence("deck",record.id,seq);
         }
         if (!validDeckParent(record.id,record.parentId)) {
-            if (!record.parentId.isEmpty()&&deck(record.parentId)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
+            if (!m_allowHierarchyRepair && !record.parentId.isEmpty()&&deck(record.parentId)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
             applied=false;return m_sqlDetail.isEmpty();
         }
         return upsertDeck(record)
             && (!restore || execute("DELETE FROM tombstones WHERE entity_type='deck' AND entity_id=?",{record.id}))
-            && (!restore || recordSequence(dependency ? "restore-container" : "restore-deck",record.id,seq))
+            && (!restore || recordSequence(containerOnly ? "restore-container" : "restore-deck",record.id,seq))
             && recordSequence("deck",record.id,seq);
     }
     if (type==QStringLiteral("card.upsert")) {
@@ -1504,7 +1523,14 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
                 for (const QVariant &id : payload.value("freshVariantIds").toList())
                     if (!recordSequence("variant",id.toString(),seq)) return false;
             } else {
-                for (const struct model::Variant &v : schedules) if (!recordSequence("variant",v.id,seq)) return false;
+                // Card events carry schedules as creation context. Existing schedules
+                // are owned by review events and standalone variant updates.
+                for (const struct model::Variant &v : schedules) {
+                    const auto existing=variant(v.id);
+                    if (!m_sqlDetail.isEmpty()) return false;
+                    if (existing) continue;
+                    if (!recordSequence("variant",v.id,seq)) return false;
+                }
             }
             return true;
         }
@@ -1515,7 +1541,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         if (pendingEntity("card",record.id)) {applied=false;return m_sqlDetail.isEmpty();}
         if (isDeleted("deck",record.deckId)) {
             if (restore) { applied=false; return m_sqlDetail.isEmpty(); }
-            return tombstone("card",record.id,seq);
+            return eraseCard(record.id,seq);
         }
         if (!deck(record.deckId)) {applied=false;return m_sqlDetail.isEmpty();}
         const bool newer=seq>entitySequence("card",record.id);
@@ -1546,7 +1572,9 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
                 if (!upsertVariant(v)||!recordSequence("variant",v.id,seq)) return false;
                 continue;
             }
-            if (seq<=entitySequence("variant",v.id)) continue;
+            const auto existing=variant(v.id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (existing) continue;
             if (pendingEntity("variant",v.id)) {applied=false;continue;}
             if (!upsertVariant(v)||!recordSequence("variant",v.id,seq)) return false;
         }
@@ -1641,36 +1669,62 @@ bool DatabaseWorker::applyRemoteEvent(const QVariantMap &event,qint64 seq,bool &
 }
 bool DatabaseWorker::retryRemoteEvents()
 {
+    assert(!m_finalizingHierarchyOrphans);
+    const auto resetOrphanPolicy=qScopeGuard([this] { m_finalizingHierarchyOrphans=false; });
     QSqlQuery q(m_db);
     if (!q.exec("SELECT seq,event FROM remote_pending ORDER BY seq")) {m_sqlDetail=q.lastError().text();return false;}
     QList<QPair<qint64,QVariantMap>> events;
     while (q.next()) events.append({q.value(0).toLongLong(),QJsonDocument::fromJson(q.value(1).toString().toUtf8()).object().toVariantMap()});
-    QHash<QString,QString> parents;QSqlQuery decks(m_db);
-    if (!decks.exec("SELECT id,parent_id FROM decks")) {m_sqlDetail=decks.lastError().text();return false;}
-    while (decks.next()) parents.insert(decks.value(0).toString(),decks.value(1).toString());
-    for (const auto &entry : events) if (entry.second.value("type")==QStringLiteral("deck.upsert")) {
-        const QVariantMap payload=object(entry.second,"payload");
-        const QVariantMap record=object(payload,"deck");
-        if (payload.value("restoreDependency").toBool() && parents.contains(record.value("id").toString())) continue;
-        parents.insert(record.value("id").toString(),record.value("parentId").toString());
+    if (!m_allowHierarchyRepair) {
+        QHash<QString,QString> parents;QSqlQuery decks(m_db);
+        if (!decks.exec("SELECT id,parent_id FROM decks")) {m_sqlDetail=decks.lastError().text();return false;}
+        while (decks.next()) parents.insert(decks.value(0).toString(),decks.value(1).toString());
+        for (const auto &entry : events) if (entry.second.value("type")==QStringLiteral("deck.upsert")) {
+            const QVariantMap payload=object(entry.second,"payload");
+            const QVariantMap record=object(payload,"deck");
+            if (payload.value("restoreDependency").toBool() && parents.contains(record.value("id").toString())) continue;
+            parents.insert(record.value("id").toString(),record.value("parentId").toString());
+        }
+        QHash<QString,int> colors;
+        std::function<bool(const QString &)> acyclic=[&](const QString &id) {
+            if (id.isEmpty()||!parents.contains(id)) return true;
+            if (colors.value(id)==1) return false;
+            if (colors.value(id)==2) return true;
+            colors[id]=1;
+            if (!acyclic(parents.value(id))) return false;
+            colors[id]=2;
+            return true;
+        };
+        for (const QString &id : parents.keys()) if (!acyclic(id)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
     }
-    QHash<QString,int> colors;
-    std::function<bool(const QString &)> acyclic=[&](const QString &id) {
-        if (id.isEmpty()||!parents.contains(id)) return true;
-        if (colors.value(id)==1) return false;if (colors.value(id)==2) return true;colors[id]=1;
-        if (!acyclic(parents.value(id))) return false;colors[id]=2;return true;
+    const auto hierarchyDeletion=[](const QVariantMap &event) {
+        if (event.value("type")==QStringLiteral("deck.delete")) return true;
+        if (event.value("type")!=QStringLiteral("history.apply")) return false;
+        for (const QVariant &value:object(event,"payload").value("changes").toList()) {
+            const QVariantMap change=value.toMap();
+            if (change.value("entity")==QStringLiteral("deck") && change.value("after").toMap().isEmpty()) return true;
+        }
+        return false;
     };
-    for (const QString &id : parents.keys()) if (!acyclic(id)) {m_sqlDetail="Deck hierarchy contains a cycle.";return false;}
+    bool deletionsPhase=!m_allowHierarchyRepair;
     bool progressed=false;
     do {
         progressed=false;
         for (auto it=events.begin();it!=events.end();) {
+            if (!deletionsPhase && hierarchyDeletion(it->second)) { ++it;continue; }
             bool applied=false;
             if (!applyRemoteEvent(it->second,it->first,applied)) return false;
             if (applied) {
                 if (!execute("DELETE FROM remote_pending WHERE seq=?",{it->first})) return false;
                 it=events.erase(it);progressed=true;
             } else ++it;
+        }
+        if (m_allowHierarchyRepair) {
+            if (progressed) { deletionsPhase=false; m_finalizingHierarchyOrphans=false; }
+            else if (!deletionsPhase) { deletionsPhase=true;progressed=true; }
+            else if (!m_hierarchyPageIncomplete && !m_finalizingHierarchyOrphans) {
+                m_finalizingHierarchyOrphans=true;progressed=true;
+            }
         }
     } while (progressed&&!events.isEmpty());
     return true;
@@ -1729,7 +1783,8 @@ void DatabaseWorker::requestSyncBatch(const QString &requestId)
     m_requests.insert(requestId,SyncRequest{submitted,m_cursor});
     m_requestOrder.removeAll(requestId);m_requestOrder.append(requestId);
     while (m_requestOrder.size()>64) m_requests.remove(m_requestOrder.takeFirst());
-    emit syncBatchReady({{"deviceId",m_deviceId},{"cursor",m_cursor},{"events",events},{"hasMoreLocal",hasMoreLocal},{"requestId",requestId}});
+    emit syncBatchReady({{"deviceId",m_deviceId},{"cursor",m_cursor},{"events",events},{"hasMoreLocal",hasMoreLocal},
+                         {"requestId",requestId},{"collectionId",m_collectionId}});
     done("Sync changes prepared");
 }
 
@@ -1743,10 +1798,23 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     if (request==m_requests.cend()||request->cursor!=m_cursor) {reject("Sync request is unknown or its download cursor is no longer current. Prepare a new batch and retry.");return;}
     const auto valid=betterflash::protocol::validateResponse(response,request->cursor,request->submittedIds);
     if (!valid) {reject(valid.error());return;}
+    const QString responseCollectionId=response.value(QStringLiteral("collectionId")).toString();
+    if (response.contains(QStringLiteral("collectionId"))
+        && (response.value(QStringLiteral("collectionId")).metaType().id() != QMetaType::QString
+            || !model::validUuid(responseCollectionId))) {
+        reject("The sync response contains an invalid collection identifier.");return;
+    }
+    if (!m_collectionId.isEmpty() && responseCollectionId != m_collectionId) {
+        reject("The sync response belongs to a different collection.");return;
+    }
     const QVariantList events=response.value("events").toList();
     const qint64 cursor=response.value("cursor").toLongLong();
     QSet<QString> acceptedIds;for (const QVariant &id:response.value("acceptedIds").toList()) acceptedIds.insert(id.toString());
     bool hasPendingOutbox=false;
+    assert(!m_allowHierarchyRepair);
+    m_allowHierarchyRepair = !responseCollectionId.isEmpty();
+    m_hierarchyPageIncomplete = response.value("hasMore").toBool();
+    const auto resetHierarchyPolicy = qScopeGuard([this] { m_allowHierarchyRepair = false; m_hierarchyPageIncomplete = false; });
     m_syncReviewConflicts.clear();
     m_syncHistoryConflicts.clear();
     const bool ok=mutate([&] {
@@ -1757,14 +1825,19 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
             if (!execute("INSERT INTO remote_pending(seq,event_id,event) VALUES(?,?,?) ON CONFLICT(seq) DO UPDATE SET event=CASE WHEN event_id=excluded.event_id THEN event ELSE NULL END",{wrapper.value("seq"),event.value("id"),json(event)})) return false;
         }
         for (const QString &id : acceptedIds) if (!execute("DELETE FROM sync_outbox WHERE id=?",{id})) return false;
-        if (!retryRemoteEvents()||!execute("UPDATE metadata SET value=? WHERE key='sync_cursor'",{QString::number(cursor)})) return false;
+        if (!retryRemoteEvents()
+            || (!responseCollectionId.isEmpty()
+                && !execute("INSERT INTO metadata(key,value) VALUES('sync_collection_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",{responseCollectionId}))
+            || !execute("UPDATE metadata SET value=? WHERE key='sync_cursor'",{QString::number(cursor)})) return false;
         QSqlQuery pending(m_db);
         if (!pending.exec("SELECT EXISTS(SELECT 1 FROM sync_outbox)" )||!pending.next()) {m_sqlDetail=pending.lastError().text();return false;}
         hasPendingOutbox=pending.value(0).toBool();
         return true;
     });
     if (!ok) {fail("SYNC_APPLY","Could not apply sync changes. Existing records and pending uploads were preserved.",m_sqlDetail);appliedSignal(false,false);return;}
-    m_cursor=cursor;m_queueDirty=true;
+    m_cursor=cursor;
+    if (!responseCollectionId.isEmpty()) m_collectionId=responseCollectionId;
+    m_queueDirty=true;
     const bool hasMore=response.value("hasMore").toBool()||hasPendingOutbox;
     if (publishSnapshot()&&publishQueue(false)) {
         if (!m_syncHistoryConflicts.isEmpty()) fail("SYNC_UNDO_CONFLICT","Sync finished with an undo or redo conflict. Changed records were preserved; review them before repeating the action.","Record identifiers: "+m_syncHistoryConflicts.join(", "));

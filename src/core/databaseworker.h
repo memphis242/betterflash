@@ -93,6 +93,10 @@ private:
     QString m_connectionName;
     QSqlDatabase m_db;
     QString m_deviceId;
+    QString m_collectionId;
+    bool m_allowHierarchyRepair = false;
+    bool m_hierarchyPageIncomplete = false;
+    bool m_finalizingHierarchyOrphans = false;
     qint64 m_cursor = 0;
     struct SyncRequest {
         QSet<QString> submittedIds;
@@ -158,6 +162,7 @@ private:
     bool m_historyRuntimeChanged = false;
     QStringList m_syncHistoryConflicts;
     bool m_historyValidationFailure = false;
+    bool m_historyHierarchyCycle = false;
 
     bool initializeHistory();
     struct HistoryScope historyScope(const QString &label);

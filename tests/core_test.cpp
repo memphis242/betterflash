@@ -139,6 +139,9 @@ private slots:
     void syncRoundTripIdempotenceAndDeletion();
     void syncProtectsPendingEditsAcrossDownloadPages();
     void syncMissingDependenciesAreDurable();
+    void syncHierarchyRepairRetainsOtherHistoryChanges();
+    void syncHierarchyPagesPreserveMovedSubtree();
+    void syncDeletedMissingParentDrainsOrphanEvents();
     void invalidSyncDoesNotAcknowledgeUploads();
     void syncByteCapsAndFailureSignals();
     void syncRequiresIssuedAcknowledgmentsAndContiguousCursor();
@@ -739,6 +742,114 @@ void CoreTest::syncMissingDependenciesAreDurable()
         const QVariantList deletes{QVariantMap{{"seq",4},{"event",syncEvent("deck.delete",{{"id",deck.id}})}},
             QVariantMap{{"seq",5},{"event",syncEvent("card.upsert",{{"card",model::toMap(note)},{"variants",QVariantList{model::toMap(initial)}}})}}};
         QVERIFY(apply(app,response(deletes,5)));QVERIFY(app.cards().isEmpty());QCOMPARE(app.history().size(),1);
+    }
+}
+void CoreTest::syncHierarchyRepairRetainsOtherHistoryChanges()
+{
+    QTemporaryDir directory;
+    const QString identity=model::uuid();
+    const struct model::Deck first{model::uuid(),"First",{},model::nowUtc()};
+    const struct model::Deck second{model::uuid(),"Second",{},model::nowUtc()};
+    const struct model::Card note{model::uuid(),first.id,"basic","Original","Answer",{},1};
+    const struct model::Variant schedule{model::variantId(note.id,"forward"),note.id,"forward",model::nowUtc()};
+    struct FakeServer server;
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(first)}}));
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(second)}}));
+    server.append(syncEvent("card.upsert",{{"card",model::toMap(note)},{"variants",QVariantList{model::toMap(schedule)}}}));
+    const auto exchange=[&](AppController &app) {
+        QVariantMap result=server.exchange(batch(app));
+        result.insert("collectionId",identity);
+        return apply(app,result);
+    };
+    AppController existing(directory.filePath("existing"));QVERIFY(idle(existing));
+    QVERIFY(exchange(existing));
+    struct model::Deck movedSecond=second;movedSecond.parentId=first.id;
+    struct model::Deck movedFirst=first;movedFirst.parentId=second.id;
+    struct model::Card edited=note;edited.front="Edited by history";
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(movedSecond)}}));
+    const QVariantList changes{
+        QVariantMap{{"entity","deck"},{"id",first.id},{"before",model::toMap(first)},{"after",model::toMap(movedFirst)}},
+        QVariantMap{{"entity","card"},{"id",note.id},{"before",model::toMap(note)},{"after",model::toMap(edited)}}};
+    server.append(syncEvent("history.apply",{{"changes",changes}}));
+    QVERIFY(exchange(existing));
+    QCOMPARE(card(existing,note.id).value("front").toString(),note.front);
+    {
+        struct DatabaseAccess database(existing.storagePath());
+        QCOMPARE(database.count("remote_pending"),1);
+    }
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(first)}}));
+    QVERIFY(exchange(existing));
+    QCOMPARE(card(existing,note.id).value("front").toString(),edited.front);
+    {
+        struct DatabaseAccess database(existing.storagePath());
+        QCOMPARE(database.count("remote_pending"),0);
+    }
+    AppController fresh(directory.filePath("fresh"));QVERIFY(idle(fresh));
+    QVERIFY(exchange(fresh));
+    QCOMPARE(card(fresh,note.id).value("front").toString(),edited.front);
+    struct DatabaseAccess database(fresh.storagePath());
+    QCOMPARE(database.count("remote_pending"),0);
+}
+void CoreTest::syncHierarchyPagesPreserveMovedSubtree()
+{
+    QTemporaryDir directory;
+    const QString identity=model::uuid();
+    const struct model::Deck parent{model::uuid(),"Destination",{},model::nowUtc()};
+    const struct model::Deck moved{model::uuid(),"Moved",{},model::nowUtc()};
+    const struct model::Card note{model::uuid(),moved.id,"basic","Retained","Answer",{},1};
+    const struct model::Variant schedule{model::variantId(note.id,"forward"),note.id,"forward",model::nowUtc()};
+    struct FakeServer server;
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(parent)}}));
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(moved)}}));
+    server.append(syncEvent("card.upsert",{{"card",model::toMap(note)},{"variants",QVariantList{model::toMap(schedule)}}}));
+    const auto exchange=[&](AppController &app,const int limit=100) {
+        QVariantMap result=server.exchange(batch(app),limit);result.insert("collectionId",identity);
+        return apply(app,result);
+    };
+    AppController app(directory.filePath("existing"));QVERIFY(idle(app));QVERIFY(exchange(app));
+    QVERIFY(app.moveDeck(moved.id,parent.id));QVERIFY(idle(app));
+    server.append(syncEvent("deck.delete",{{"id",parent.id}}));
+    const QVariantMap request=batch(app);
+    QVERIFY(!request.value("events").toList().isEmpty());
+    const QString sourceId=request.value("events").toList().last().toMap().value("id").toString();
+    QVariantMap page=server.exchange(request,1);page.insert("collectionId",identity);
+    QVERIFY(apply(app,page));QCOMPARE(app.cards().size(),1);
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(moved)},{"restore",true},
+        {"restoreContainerOnly",true},{"resolvedEventId",sourceId}}));
+    QVERIFY(exchange(app,1));QCOMPARE(app.cards().size(),1);
+    QVERIFY(exchange(app,1));QCOMPARE(app.cards().size(),1);
+    QCOMPARE(app.decks().size(),1);
+    QCOMPARE(app.decks().first().toMap().value("parentId").toString(),QString());
+    {
+        struct DatabaseAccess database(app.storagePath());QCOMPARE(database.count("remote_pending"),0);
+    }
+    AppController fresh(directory.filePath("fresh"));QVERIFY(idle(fresh));QVERIFY(exchange(fresh));
+    QCOMPARE(fresh.cards().size(),1);QCOMPARE(fresh.decks().size(),1);
+    QCOMPARE(card(fresh,note.id).value("front").toString(),note.front);
+    struct DatabaseAccess database(fresh.storagePath());QCOMPARE(database.count("remote_pending"),0);
+}
+void CoreTest::syncDeletedMissingParentDrainsOrphanEvents()
+{
+    QTemporaryDir directory;
+    const QString identity=model::uuid();
+    const struct model::Deck orphan{model::uuid(),"Orphan",{},model::nowUtc(),model::uuid()};
+    const struct model::Card note{model::uuid(),orphan.id,"basic","Question","Answer",{},1};
+    const struct model::Variant schedule{model::variantId(note.id,"forward"),note.id,"forward",model::nowUtc()};
+    struct FakeServer server;
+    server.append(syncEvent("deck.upsert",{{"deck",model::toMap(orphan)}}));
+    server.append(syncEvent("card.upsert",{{"card",model::toMap(note)},{"variants",QVariantList{model::toMap(schedule)}}}));
+    server.append(syncEvent("deck.delete",{{"id",orphan.parentId}}));
+    for (const int limit:{1,100}) {
+        AppController app(directory.filePath(QString::number(limit)));QVERIFY(idle(app));
+        bool more=false;
+        do {
+            QVariantMap page=server.exchange(batch(app),limit);
+            page.insert("collectionId",identity);more=page.value("hasMore").toBool();
+            QVERIFY(apply(app,page));
+        } while (more);
+        QVERIFY(app.decks().isEmpty());QVERIFY(app.cards().isEmpty());
+        struct DatabaseAccess database(app.storagePath());
+        QCOMPARE(database.count("remote_pending"),0);
     }
 }
 void CoreTest::invalidSyncDoesNotAcknowledgeUploads()

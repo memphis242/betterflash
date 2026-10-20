@@ -15,8 +15,10 @@ import re
 import sqlite3
 import stat
 import tempfile
+import threading
+from types import MappingProxyType
 from urllib.parse import urlsplit
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 TOKEN = os.environ.get("BETTERFLASH_SYNC_TOKEN", "")
 EVENT_LIMIT = 100
@@ -32,6 +34,7 @@ NARRATION_MAX_SECONDS = 5 * 60
 NARRATION_MAX_PCM_BYTES = NARRATION_SAMPLE_RATE * NARRATION_CHANNELS * NARRATION_BYTES_PER_SAMPLE * NARRATION_MAX_SECONDS
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
+MAX_WORKERS = 32
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
 EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert", "history.apply"))
 MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
@@ -46,6 +49,54 @@ class ProtocolError(Exception):
 class Conflict(ProtocolError):
     def __init__(self):
         super().__init__("EVENT_CONFLICT", "An event identifier already contains different data.", 409)
+
+
+class Accounts:
+    """Immutable account credentials and stores loaded before serving requests."""
+
+    def __init__(self, path, data_dir):
+        try:
+            with Path(path).open("rb") as source:
+                document = decode_json(source.read())
+        except (OSError, ValueError, UnicodeError, RecursionError) as failure:
+            raise SystemExit(f"SYNC_ACCOUNTS: Cannot read a valid accounts file: {failure}") from failure
+        if not isinstance(document, dict) or set(document) != {"accounts"} or not isinstance(document["accounts"], list):
+            raise SystemExit("SYNC_ACCOUNTS: The accounts file must contain only an accounts array.")
+        root = Path(data_dir).resolve()
+        stores, digests = {}, {}
+        for account in document["accounts"]:
+            if not isinstance(account, dict) or set(account) != {"id", "tokenSha256"}:
+                raise SystemExit("SYNC_ACCOUNTS: Each account must contain only id and tokenSha256.")
+            account_id = account["id"]
+            if not valid_uuid(account_id) or account_id in stores:
+                raise SystemExit("SYNC_ACCOUNTS: Account identifiers must be unique canonical UUIDs.")
+            account_digests = account["tokenSha256"]
+            if (not isinstance(account_digests, list) or not account_digests
+                    or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                           for digest in account_digests)
+                    or len(set(account_digests)) != len(account_digests)):
+                raise SystemExit("SYNC_ACCOUNTS: Each account needs unique lowercase SHA-256 token digests.")
+            if any(digest in digests for digest in account_digests):
+                raise SystemExit("SYNC_ACCOUNTS: Token digests must identify only one account.")
+            account_root = root / account_id
+            store = Store(account_root / "collection.sqlite3", account_root / "media")
+            stores[account_id] = store
+            for digest in account_digests:
+                digests[digest] = store
+        self.stores = MappingProxyType(stores)
+        self.digests = MappingProxyType(digests)
+
+    def authorize(self, authorization):
+        if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+            return None
+        token = authorization[7:]
+        if not token or "\n" in token or "\r" in token:
+            return None
+        supplied = hashlib.sha256(token.encode()).hexdigest()
+        for digest, store in self.digests.items():
+            if hmac.compare_digest(supplied, digest):
+                return store
+        return None
 
 
 def valid_uuid(value):
@@ -256,6 +307,11 @@ def validate_history(payload):
 
 
 def validate_payload(kind, payload):
+    if "resolvedEventId" in payload and (kind != "deck.upsert" or not valid_uuid(payload["resolvedEventId"])):
+        raise ProtocolError("INVALID_EVENT", "Hierarchy repairs must identify their source event.")
+    if "restoreContainerOnly" in payload and (kind != "deck.upsert" or payload.get("restore") is not True
+            or payload["restoreContainerOnly"] is not True or "resolvedEventId" not in payload):
+        raise ProtocolError("INVALID_EVENT", "A hierarchy repair can explicitly restore only its deck container.")
     if "restore" in payload and (kind not in ("deck.upsert", "card.upsert") or type(payload["restore"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "Restore intent must be a boolean on a deck or card upsert.")
     if "freshVariantIds" in payload and (kind != "card.upsert" or not payload.get("restore", False) or not isinstance(payload["freshVariantIds"], list)):
@@ -319,7 +375,8 @@ def validate_payload(kind, payload):
 def validate_event(event, device):
     if not isinstance(event, dict) or not valid_uuid(event.get("id")):
         raise ProtocolError("INVALID_EVENT", "Events must have a UUID identifier.")
-    if event.get("deviceId") != device or event.get("type") not in EVENT_TYPES:
+    if (event.get("deviceId") != device or not isinstance(event.get("type"), str)
+            or event["type"] not in EVENT_TYPES):
         raise ProtocolError("INVALID_EVENT", "The event's device or operation is invalid.")
     if not isinstance(event.get("payload"), dict):
         raise ProtocolError("INVALID_EVENT", "The event payload must be an object.")
@@ -389,7 +446,33 @@ class Store:
                              "seq INTEGER PRIMARY KEY AUTOINCREMENT,"
                              "event_id TEXT UNIQUE NOT NULL,device_id TEXT NOT NULL,"
                              "event_json TEXT NOT NULL,created_at TEXT NOT NULL)")
+            database.execute("CREATE TABLE IF NOT EXISTS content_heads("
+                             "entity TEXT NOT NULL,entity_id TEXT NOT NULL,seq INTEGER NOT NULL,"
+                             "event_id TEXT NOT NULL,device_id TEXT NOT NULL,content_json TEXT,"
+                             "PRIMARY KEY(entity,entity_id))")
+            database.execute("CREATE TABLE IF NOT EXISTS deck_parents("
+                             "deck_id TEXT PRIMARY KEY,parent_id TEXT NOT NULL,deleted INTEGER NOT NULL)")
+            database.execute("CREATE TABLE IF NOT EXISTS hierarchy_resolutions("
+                             "original_event_id TEXT NOT NULL,resolution_seq INTEGER UNIQUE NOT NULL)")
+            database.execute("CREATE TABLE IF NOT EXISTS content_conflicts("
+                             "seq INTEGER NOT NULL,entity TEXT NOT NULL,entity_id TEXT NOT NULL,"
+                             "previous_seq INTEGER NOT NULL,previous_event_id TEXT NOT NULL,event_id TEXT NOT NULL)")
+            database.execute("CREATE INDEX IF NOT EXISTS content_conflicts_seq ON content_conflicts(seq)")
+            database.execute("CREATE UNIQUE INDEX IF NOT EXISTS content_conflicts_entity_event "
+                             "ON content_conflicts(seq,entity,entity_id)")
             database.execute("BEGIN IMMEDIATE")
+            database.execute("CREATE TABLE IF NOT EXISTS server_metadata(collection_id TEXT NOT NULL)")
+            metadata_rows = database.execute("SELECT collection_id FROM server_metadata").fetchall()
+            if len(metadata_rows) > 1:
+                raise ProtocolError("STORAGE_ERROR", "The server collection metadata is not unique.", 500)
+            if not metadata_rows:
+                collection_id = str(uuid4())
+                database.execute("INSERT INTO server_metadata(collection_id) VALUES(?)", (collection_id,))
+            else:
+                collection_id = metadata_rows[0][0]
+                if not valid_uuid(collection_id):
+                    raise ProtocolError("STORAGE_ERROR", "The server collection identifier is invalid.", 500)
+            self.collection_id = collection_id
             try:
                 projected = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_sessions'").fetchone()
                 database.execute("CREATE TABLE IF NOT EXISTS review_sessions("
@@ -397,6 +480,32 @@ class Store:
                 if not projected:
                     for row in database.execute("SELECT event_json FROM events ORDER BY seq"):
                         self.record_review_session(database, json.loads(row["event_json"]))
+                if database.execute("SELECT 1 FROM content_heads LIMIT 1").fetchone() is None:
+                    for row in database.execute("SELECT seq,event_id,device_id,event_json FROM events ORDER BY seq"):
+                        for entity, entity_id, content in self.content_targets(json.loads(row["event_json"])):
+                            database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
+                                             (entity, entity_id, row["seq"], row["event_id"], row["device_id"], content))
+                if database.execute("SELECT 1 FROM deck_parents LIMIT 1").fetchone() is None:
+                    pending_repairs = {}
+                    with closing(database.execute("SELECT seq,event_id,event_json FROM events ORDER BY seq")) as legacy_rows:
+                        for row in legacy_rows:
+                            event = json.loads(row["event_json"])
+                            corrections = self.project_deck(database, event)
+                            affected = set()
+                            if event["type"] == "deck.upsert":
+                                affected.add(event["payload"]["deck"]["id"])
+                            elif event["type"] == "deck.delete":
+                                affected.add(event["payload"]["id"])
+                            elif event["type"] == "history.apply":
+                                affected.update(change["id"] for change in event["payload"]["changes"] if change["entity"] == "deck")
+                            for deck_id in affected:
+                                pending_repairs.pop(deck_id, None)
+                            for corrected, container_restore in corrections or ():
+                                pending_repairs[corrected["id"]] = (event, corrected, container_restore)
+                    for event, corrected, container_restore in pending_repairs.values():
+                        final = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (corrected["id"],)).fetchone()
+                        if final is not None and not final["deleted"]:
+                            self.append_repairs(database, event, [(corrected, container_restore)])
                 database.commit()
             except BaseException:
                 database.rollback()
@@ -407,6 +516,144 @@ class Store:
         database.row_factory = sqlite3.Row
         database.execute("PRAGMA synchronous=FULL")
         return database
+
+    @staticmethod
+    def deck_would_cycle(database, deck_id, parent_id):
+        seen = set()
+        current = parent_id
+        while current:
+            if current == deck_id:
+                return True
+            if current in seen:
+                return True
+            seen.add(current)
+            row = database.execute("SELECT parent_id,deleted FROM deck_parents WHERE deck_id=?", (current,)).fetchone()
+            if row is None or row["deleted"]:
+                return False
+            current = row["parent_id"]
+        return False
+
+    @staticmethod
+    def mark_deleted(database, deck_id):
+        pending = [deck_id]
+        while pending:
+            current = pending.pop()
+            children = database.execute("SELECT deck_id FROM deck_parents WHERE parent_id=? AND deleted=0", (current,)).fetchall()
+            database.execute("INSERT INTO deck_parents(deck_id,parent_id,deleted) VALUES(?,?,1) "
+                             "ON CONFLICT(deck_id) DO UPDATE SET parent_id='',deleted=1", (current, ""))
+            pending.extend(child[0] for child in children)
+
+    @staticmethod
+    def project_deck(database, event):
+        kind = event["type"]
+        if kind == "deck.delete":
+            Store.mark_deleted(database, event["payload"]["id"])
+            return []
+        if kind == "history.apply":
+            changes = {change["id"]: change for change in event["payload"]["changes"]
+                       if change["entity"] == "deck" and not change.get("contextOnly")}
+            previous = {deck_id: database.execute(
+                "SELECT parent_id,deleted FROM deck_parents WHERE deck_id=?", (deck_id,)).fetchone()
+                for deck_id in changes}
+            # One history event supplies an atomic final hierarchy.
+            for deck_id, change in changes.items():
+                after = change["after"]
+                if after is None:
+                    continue
+                parent = after.get("parentId", "")
+                database.execute("INSERT INTO deck_parents(deck_id,parent_id,deleted) VALUES(?,?,?) "
+                                 "ON CONFLICT(deck_id) DO UPDATE SET parent_id=excluded.parent_id,deleted=excluded.deleted",
+                                 (deck_id, parent, int(after is None)))
+            for deck_id, change in changes.items():
+                if change["after"] is None:
+                    Store.mark_deleted(database, deck_id)
+            corrections = []
+            for deck_id in sorted(changes, reverse=True):
+                after = changes[deck_id]["after"]
+                current = database.execute("SELECT parent_id,deleted FROM deck_parents WHERE deck_id=?", (deck_id,)).fetchone()
+                if (after is None or current["deleted"]
+                        or not Store.deck_would_cycle(database, deck_id, current["parent_id"])):
+                    continue
+                old = previous[deck_id]
+                parent = old["parent_id"] if old is not None and not old["deleted"] else ""
+                database.execute("UPDATE deck_parents SET parent_id='' WHERE deck_id=?", (deck_id,))
+                if Store.deck_would_cycle(database, deck_id, parent):
+                    parent = ""
+                database.execute("UPDATE deck_parents SET parent_id=? WHERE deck_id=?", (parent, deck_id))
+                corrected = dict(after)
+                corrected["parentId"] = parent
+                corrections.append((corrected, True))
+            return corrections
+        if kind != "deck.upsert":
+            return None
+        deck = event["payload"]["deck"]
+        existing = database.execute("SELECT parent_id,deleted FROM deck_parents WHERE deck_id=?", (deck["id"],)).fetchone()
+        proposed = deck.get("parentId", "")
+        if existing is not None and existing["deleted"] and not event["payload"].get("restore", False):
+            return []
+        if event["payload"].get("restoreDependency") and existing is not None and not existing["deleted"]:
+            proposed = existing["parent_id"]
+        parent = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (proposed,)).fetchone() if proposed else None
+        if parent is not None and parent["deleted"] and not event["payload"].get("restore", False):
+            corrected = dict(deck)
+            corrected["parentId"] = existing["parent_id"] if existing is not None else ""
+            return [(corrected, True)]
+        if not Store.deck_would_cycle(database, deck["id"], proposed):
+            database.execute("INSERT INTO deck_parents(deck_id,parent_id,deleted) VALUES(?,?,0) "
+                             "ON CONFLICT(deck_id) DO UPDATE SET parent_id=excluded.parent_id,deleted=0",
+                             (deck["id"], proposed))
+            return []
+        previous = existing["parent_id"] if existing is not None and not existing["deleted"] else ""
+        corrected = dict(deck)
+        corrected["parentId"] = previous
+        database.execute("INSERT INTO deck_parents(deck_id,parent_id,deleted) VALUES(?,?,0) "
+                         "ON CONFLICT(deck_id) DO UPDATE SET parent_id=excluded.parent_id,deleted=0",
+                         (deck["id"], previous))
+        return [(corrected, False)]
+
+    def append_repairs(self, database, source_event, corrections):
+        for corrected, container_restore in corrections:
+            generated = {"id": str(uuid4()), "deviceId": self.collection_id,
+                         "type": "deck.upsert", "createdAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                         "payload": {"deck": corrected, "resolvedEventId": source_event["id"]}}
+            if source_event.get("payload", {}).get("restore") is True:
+                generated["payload"]["restore"] = True
+            if container_restore or source_event["payload"].get("restoreContainerOnly") is True:
+                generated["payload"]["restore"] = True
+                generated["payload"]["restoreContainerOnly"] = True
+            generated_canonical = validate_event(generated, self.collection_id)
+            generated_result = database.execute(
+                "INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                (generated["id"], generated["deviceId"], generated_canonical, generated["createdAt"]))
+            generated_seq = generated_result.lastrowid
+            database.execute("INSERT INTO hierarchy_resolutions(original_event_id,resolution_seq) VALUES(?,?)",
+                             (source_event["id"], generated_seq))
+            database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
+                             ("deck", corrected["id"], generated_seq, generated["id"], generated["deviceId"],
+                              json.dumps(corrected, separators=(",", ":"), sort_keys=True, ensure_ascii=False)))
+            self.project_deck(database, generated)
+
+    @staticmethod
+    def content_targets(event):
+        kind, payload = event["type"], event["payload"]
+        if kind == "deck.upsert" and not payload.get("restoreDependency", False):
+            record = payload["deck"]
+            return [("deck", record["id"], json.dumps(record, separators=(",", ":"), sort_keys=True, ensure_ascii=False))]
+        if kind == "card.upsert":
+            record = payload["card"]
+            return [("card", record["id"], json.dumps(record, separators=(",", ":"), sort_keys=True, ensure_ascii=False))]
+        if kind in ("deck.delete", "card.delete"):
+            return [(kind.split(".")[0], payload["id"], None)]
+        if kind == "history.apply":
+            result = []
+            for change in payload["changes"]:
+                if change.get("contextOnly") or change["entity"] not in ("deck", "card"):
+                    continue
+                after = change["after"]
+                content = None if after is None else json.dumps(after, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+                result.append((change["entity"], change["id"], content))
+            return result
+        return []
 
     @staticmethod
     def record_review_session(database, event):
@@ -453,6 +700,11 @@ class Store:
         cursor, events = body.get("cursor"), body.get("events")
         if type(cursor) is not int or not isinstance(events, list):
             raise ProtocolError("INVALID_REQUEST", "The cursor must be an integer and events an array.")
+        collection_id = body.get("collectionId")
+        if collection_id is not None and not valid_uuid(collection_id):
+            raise ProtocolError("INVALID_REQUEST", "The collection identifier is invalid.")
+        if collection_id is not None and collection_id != self.collection_id:
+            raise ProtocolError("COLLECTION_MISMATCH", "This collection belongs to a different sync account.", 409)
         if len(events) > EVENT_LIMIT:
             raise ProtocolError("EVENT_LIMIT", "Send at most 100 events per batch.")
         canonical_events = [(event, validate_event(event, body["deviceId"])) for event in events]
@@ -463,6 +715,7 @@ class Store:
                 if cursor < 0 or cursor > latest:
                     raise ProtocolError("INVALID_CURSOR", "The cursor is outside this server's event log.")
                 accepted = []
+                batch_event_ids = {event[0]["id"] for event in canonical_events}
                 for event, canonical in canonical_events:
                     existing = database.execute("SELECT event_json FROM events WHERE event_id=?", (event["id"],)).fetchone()
                     if existing and existing[0] != canonical:
@@ -470,29 +723,58 @@ class Store:
                     if not existing:
                         self.media_sizes(event)
                         self.record_review_session(database, event)
-                        database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                        cursor_result = database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
                                          (event["id"], body["deviceId"], canonical, event["createdAt"]))
+                        event_seq = cursor_result.lastrowid
+                        for entity, entity_id, content in self.content_targets(event):
+                            head = database.execute("SELECT seq,event_id,device_id,content_json FROM content_heads WHERE entity=? AND entity_id=?",
+                                                    (entity, entity_id)).fetchone()
+                            if (head is not None and head["seq"] > cursor and head["event_id"] not in batch_event_ids
+                                    and head["content_json"] != content):
+                                database.execute("INSERT INTO content_conflicts(seq,entity,entity_id,previous_seq,previous_event_id,event_id) VALUES(?,?,?,?,?,?)",
+                                                 (event_seq, entity, entity_id, head["seq"], head["event_id"], event["id"]))
+                            database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
+                                             (entity, entity_id, event_seq, event["id"], body["deviceId"], content))
+                        corrections = self.project_deck(database, event)
+                        if corrections:
+                            self.append_repairs(database, event, corrections)
                     if event["id"] not in accepted:
                         accepted.append(event["id"])
-                rows = database.execute("SELECT seq,event_json FROM events WHERE seq>? ORDER BY seq LIMIT ?",
-                                        (cursor, RESPONSE_LIMIT)).fetchall()
                 outgoing, response_bytes, media_sizes = [], 0, {}
-                for row in rows:
-                    size = len(row["event_json"].encode()) + 64
-                    if outgoing and response_bytes + size > RESPONSE_BYTES:
-                        break
-                    event = json.loads(row["event_json"])
-                    assets = {**media_sizes, **self.media_sizes(event)}
-                    if outgoing and (len(assets) > PAGE_MEDIA_COUNT or sum(assets.values()) > PAGE_MEDIA_LIMIT):
-                        break
-                    media_sizes = assets
-                    outgoing.append({"seq": row["seq"], "event": event})
-                    response_bytes += size
+                with closing(database.execute("SELECT seq,event_json FROM events WHERE seq>? ORDER BY seq LIMIT ?",
+                                              (cursor, RESPONSE_LIMIT))) as rows:
+                    for row in rows:
+                        size = len(row["event_json"].encode()) + 64
+                        if outgoing and response_bytes + size > RESPONSE_BYTES:
+                            break
+                        event = json.loads(row["event_json"])
+                        assets = {**media_sizes, **self.media_sizes(event)}
+                        if outgoing and (len(assets) > PAGE_MEDIA_COUNT or sum(assets.values()) > PAGE_MEDIA_LIMIT):
+                            break
+                        media_sizes = assets
+                        outgoing.append({"seq": row["seq"], "event": event})
+                        response_bytes += size
                 next_cursor = outgoing[-1]["seq"] if outgoing else cursor
                 latest = database.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0]
+                conflicts = []
+                conflict_count = 0
+                hierarchy_count = 0
+                if outgoing:
+                    conflict_count = database.execute(
+                        "SELECT COUNT(*) FROM content_conflicts WHERE seq>? AND seq<=?",
+                        (cursor, next_cursor)).fetchone()[0]
+                    conflicts = [dict(row) for row in database.execute(
+                        "SELECT seq,event_id AS eventId,entity,entity_id AS id,previous_seq AS previousSeq,previous_event_id AS previousEventId "
+                        "FROM content_conflicts WHERE seq>? AND seq<=? ORDER BY seq LIMIT 1000",
+                        (cursor, next_cursor)).fetchall()]
+                    hierarchy_count = database.execute(
+                        "SELECT COUNT(*) FROM hierarchy_resolutions WHERE resolution_seq>? AND resolution_seq<=?",
+                        (cursor, next_cursor)).fetchone()[0]
                 response = {"acceptedIds": accepted, "events": outgoing, "cursor": next_cursor,
                             "hasMore": next_cursor < latest,
-                            "media": sorted(media_sizes)}
+                            "media": sorted(media_sizes), "collectionId": self.collection_id,
+                            "contentConflicts": conflicts, "contentConflictCount": conflict_count,
+                            "hierarchyResolutionCount": hierarchy_count}
                 database.commit()
                 return response
             except BaseException:
@@ -515,6 +797,7 @@ def decode_json(data):
 
 class Handler(BaseHTTPRequestHandler):
     store = None
+    accounts = None
 
     def setup(self):
         super().setup()
@@ -538,13 +821,26 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(failure.status, {"error": {"code": failure.code, "message": failure.message}}, body=body)
 
     def authorized(self, *, body=True):
-        if not TOKEN:
+        if self.accounts is not None:
+            store = self.accounts.authorize(self.headers.get("Authorization"))
+        elif TOKEN:
+            supplied = self.headers.get("Authorization", "").encode()
+            expected = ("Bearer " + TOKEN).encode()
+            store = self.store if hmac.compare_digest(supplied, expected) else None
+        else:
             self.send_error_value(ProtocolError("SERVER_NOT_CONFIGURED", "Configure a server access token.", 503), body=body)
-            return False
-        supplied = self.headers.get("Authorization", "").encode()
-        expected = ("Bearer " + TOKEN).encode()
-        if not hmac.compare_digest(supplied, expected):
+            return None
+        if store is None:
             self.send_error_value(ProtocolError("UNAUTHORIZED", "Use the server's configured access token.", 401), body=body)
+            return None
+        return store
+
+    def collection_matches(self, store, *, required, body=True):
+        supplied = self.headers.get("X-BetterFlash-Collection")
+        if supplied is None and not required:
+            return True
+        if supplied != store.collection_id:
+            self.send_error_value(ProtocolError("COLLECTION_MISMATCH", "This collection belongs to a different sync account.", 409), body=body)
             return False
         return True
 
@@ -572,14 +868,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self.send_json(200, {"ok": True}, body=body)
             return
+        if path == "/v1/info":
+            store = self.authorized(body=body)
+            if store is not None:
+                self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": 2,
+                                     "capabilities": ["independent-schedules", "hierarchy-repair"]}, body=body)
+            return
         match = MEDIA_RE.fullmatch(path)
         if not match:
             self.send_error_value(ProtocolError("NOT_FOUND", "The endpoint was not found.", 404), body=body)
             return
-        if not self.authorized(body=body):
+        store = self.authorized(body=body)
+        if store is None:
+            return
+        if not self.collection_matches(store, required=False, body=body):
             return
         filename = match.group(1)
-        file = self.store.media / filename
+        file = store.media / filename
         try:
             descriptor = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError:
@@ -610,7 +915,10 @@ class Handler(BaseHTTPRequestHandler):
         if not match:
             self.send_error_value(ProtocolError("NOT_FOUND", "The endpoint was not found.", 404))
             return
-        if not self.authorized():
+        store = self.authorized()
+        if store is None:
+            return
+        if not self.collection_matches(store, required=True):
             return
         temporary = None
         try:
@@ -618,17 +926,17 @@ class Handler(BaseHTTPRequestHandler):
             if (not data or hashlib.sha256(data).hexdigest() != match.group(1).split(".")[0]
                     or not valid_media_bytes(match.group(1), data)):
                 raise ProtocolError("MEDIA_INVALID", "The media bytes do not match the filename or supported format.", 422)
-            target = self.store.media / match.group(1)
+            target = store.media / match.group(1)
             if target.is_symlink():
                 raise ProtocolError("MEDIA_PATH", "The stored image path is invalid.", 409)
-            with tempfile.NamedTemporaryFile(dir=self.store.media, delete=False) as output:
+            with tempfile.NamedTemporaryFile(dir=store.media, delete=False) as output:
                 temporary = Path(output.name)
                 output.write(data)
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, target)
             temporary = None
-            directory = os.open(self.store.media, os.O_RDONLY | os.O_DIRECTORY)
+            directory = os.open(store.media, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory)
             finally:
@@ -646,16 +954,19 @@ class Handler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path != "/v1/sync":
             self.send_error_value(ProtocolError("NOT_FOUND", "The endpoint was not found.", 404))
             return
-        if not self.authorized():
+        store = self.authorized()
+        if store is None:
             return
         try:
             body = decode_json(self.read_body(BODY_LIMIT))
-            self.send_json(200, self.store.sync(body))
+            if self.headers.get("X-BetterFlash-Protocol") != "2":
+                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 2 before syncing this collection.", 426)
+            self.send_json(200, store.sync(body))
         except ProtocolError as failure:
             self.send_error_value(failure)
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, RecursionError):
             self.send_error_value(ProtocolError("INVALID_JSON", "Send a valid JSON sync request."))
-        except sqlite3.Error:
+        except (sqlite3.Error, OSError):
             self.send_error_value(ProtocolError("STORAGE_ERROR", "Cannot commit this batch. Check server storage.", 500))
 
     @staticmethod
@@ -664,17 +975,69 @@ class Handler(BaseHTTPRequestHandler):
                 ".webp": "image/webp", ".gif": "image/gif", ".wav": "audio/wav"}[Path(name).suffix]
 
 
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Limit request threads so large authenticated uploads cannot exhaust memory."""
+
+    daemon_threads = True
+
+    def __init__(self, *args, max_workers=MAX_WORKERS, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.worker_slots = threading.BoundedSemaphore(max_workers)
+
+    def process_request(self, request, client_address):
+        if not self.worker_slots.acquire(blocking=False):
+            try:
+                request.settimeout(1)
+                data = b'{"error":{"code":"SERVER_BUSY"}}'
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\n"
+                                b"Content-Type: application/json\r\n"
+                                b"Content-Length: " + str(len(data)).encode() + b"\r\n"
+                                b"Connection: close\r\n\r\n"
+                                + data)
+            except OSError:
+                pass
+            finally:
+                request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.worker_slots.release()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--database", default="betterflash-sync.sqlite3")
-    parser.add_argument("--media", default="betterflash-media")
+    parser.add_argument("--database")
+    parser.add_argument("--media")
+    parser.add_argument("--accounts-file")
+    parser.add_argument("--data-dir")
     arguments = parser.parse_args()
-    if len(TOKEN) < 24 or "\n" in TOKEN or "\r" in TOKEN:
-        raise SystemExit("SYNC_TOKEN: Set BETTERFLASH_SYNC_TOKEN to at least 24 characters.")
-    Handler.store = Store(arguments.database, arguments.media)
-    server = ThreadingHTTPServer((arguments.listen, arguments.port), Handler)
+    os.umask(0o077)
+    account_mode = arguments.accounts_file is not None or arguments.data_dir is not None
+    explicit_legacy_storage = arguments.database is not None or arguments.media is not None
+    if account_mode and (arguments.accounts_file is None or arguments.data_dir is None):
+        raise SystemExit("SYNC_ACCOUNTS: --accounts-file and --data-dir must be supplied together.")
+    if account_mode and (explicit_legacy_storage or TOKEN):
+        raise SystemExit("SYNC_ACCOUNTS: Account mode cannot be combined with legacy token or storage options.")
+    if not account_mode:
+        if len(TOKEN) < 24 or "\n" in TOKEN or "\r" in TOKEN:
+            raise SystemExit("SYNC_TOKEN: Set BETTERFLASH_SYNC_TOKEN to at least 24 characters.")
+        Handler.accounts = None
+        Handler.store = Store(arguments.database or "betterflash-sync.sqlite3",
+                              arguments.media or "betterflash-media")
+    else:
+        Handler.store = None
+        Handler.accounts = Accounts(arguments.accounts_file, arguments.data_dir)
+    server = BoundedHTTPServer((arguments.listen, arguments.port), Handler)
     print(f"BetterFlash sync listening on http://{arguments.listen}:{server.server_port}", flush=True)
     try:
         server.serve_forever()

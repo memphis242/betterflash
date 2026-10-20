@@ -39,11 +39,12 @@ signals:
     void keyChanged();
     void changed();
 private:
-    enum class Phase { Idle, Preparing, Uploading, Exchanging, Downloading, ValidatingImage, Applying };
+    enum class Phase { Idle, Preparing, Identifying, Uploading, Exchanging, Downloading, ValidatingImage, Applying };
     bool active(const QString &requestId, Phase phase) const;
     void beginBatch();
     void resetPending();
     void handleBatch(const QVariantMap &batch);
+    void identifyCollection();
     void uploadNext();
     void postBatch();
     void downloadNext();
@@ -63,6 +64,7 @@ private:
     QString m_error;
     QString m_lastSync;
     QString m_requestId;
+    QString m_collectionId;
     QVariantMap m_batch;
     QVariantMap m_response;
     QStringList m_uploads;
@@ -70,6 +72,9 @@ private:
     bool m_busy = false;
     bool m_batchWasFull = false;
     int m_rounds = 0;
+    qint64 m_contentConflicts = 0;
+    qint64 m_hierarchyResolutions = 0;
+    QStringList m_conflictedRecords;
     qint64 m_downloadedBytes = 0;
     Phase m_phase = Phase::Idle;
 };

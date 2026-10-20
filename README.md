@@ -33,7 +33,9 @@ Electron or a browser engine.
   optional language-model annotations.
 - Undo and redo the last five saved application actions with Ctrl+Z, Ctrl+Y, or
   Ctrl+Shift+Z. New changes discard the unused redo branch.
-- Sync collection mutations and managed media through the existing protocol.
+- Sync collection content, review schedules, history, and managed media across
+  devices through an account-isolated server. Model and appearance preferences
+  stay local. See [server setup and conflict policy](docs/sync.md).
 
 ## Install and run on Fedora
 

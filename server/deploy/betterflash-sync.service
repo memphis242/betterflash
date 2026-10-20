@@ -1,0 +1,28 @@
+[Unit]
+Description=BetterFlash account sync service
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=betterflash-sync
+StateDirectoryMode=0700
+UMask=0077
+LoadCredential=accounts.json:/etc/betterflash-sync/accounts.json
+ExecStart=/usr/bin/python3 /opt/betterflash/server/main.py --listen 127.0.0.1 --port 8765 --accounts-file %d/accounts.json --data-dir /var/lib/betterflash-sync
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
