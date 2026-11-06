@@ -83,20 +83,6 @@ QObject *visualObject(QQuickItem *item, const QString &name)
     return nullptr;
 }
 
-struct EnvironmentOverride final {
-    explicit EnvironmentOverride(QByteArray variable, const QByteArray &value)
-        : name(std::move(variable)), original(qgetenv(name.constData())), present(qEnvironmentVariableIsSet(name.constData()))
-    { qputenv(name.constData(),value); }
-    ~EnvironmentOverride()
-    {
-        if (present) qputenv(name.constData(),original);
-        else qunsetenv(name.constData());
-    }
-    const QByteArray name;
-    const QByteArray original;
-    const bool present;
-};
-
 class LoopbackProvider final {
 public:
     LoopbackProvider()
@@ -183,6 +169,7 @@ public:
         createCardThroughEditor(image);
         seedCards(image);
         check(m_app.cards().size() >= 22, "fixture_cards_created");
+        if (visible("cardDetailDialog")) close("cardDetailDialog");
         reviewIdleBrowser();
         const QColor firstColor = m_window->color();
         desktop("dark");
@@ -281,6 +268,8 @@ private:
         QQuickItem *const value = item(name);
         check(value->isVisible() && value->isEnabled(), "clickable_" + name);
         const QPoint position = rect(name).center().toPoint();
+        if (!check(QRect(QPoint(),m_window->size()).contains(position),"click_target_inside_window_"+name,
+                   QStringLiteral("point=%1,%2 window=%3x%4").arg(position.x()).arg(position.y()).arg(m_window->width()).arg(m_window->height()))) return;
         QTest::mouseClick(m_window, Qt::LeftButton, Qt::NoModifier, position);
         QTest::qWait(85);
     }
@@ -324,7 +313,7 @@ private:
               QStringLiteral("main=%1 window=%2 nav=%3").arg(main.width()).arg(m_window->width()).arg(nav.width()));
         check(main.top() >= header.bottom() - 1.1 && main.bottom() <= m_window->height() + 1.1,
               "pinned_bars_reserve_space_" + suffix);
-        const auto names = {QStringLiteral("reviewTopBar"),QStringLiteral("libraryTopBar"),QStringLiteral("settingsTopBar")};
+        const auto names = {QStringLiteral("reviewHeader"),QStringLiteral("libraryDeckPane"),QStringLiteral("libraryCardPane"),QStringLiteral("settingsTopBar")};
         for (const QString &name : names) {
             if (!item(name)->isVisible()) continue;
             const QRectF bounds = rect(name);
@@ -342,7 +331,12 @@ private:
         const qreal contentWidth = flick->property("contentWidth").toDouble();
         check(contentWidth <= width + 1.5, "no_horizontal_scroll_" + suffix + "_" + name,
               QStringLiteral("content=%1 viewport=%2").arg(contentWidth).arg(width));
-        const QPointF position = rect(name).center();
+        QQuickItem *const viewport=qobject_cast<QQuickItem *>(flick);
+        if (!viewport) throw std::runtime_error("A scroll viewport is not a visual item.");
+        const QRectF visibleViewport=viewport->mapRectToScene(QRectF(0,0,viewport->width(),viewport->height()))
+            .intersected(QRectF(QPointF(),m_window->size()));
+        if (!check(!visibleViewport.isEmpty(),"scroll_target_visible_"+suffix+"_"+name)) return;
+        const QPointF position=visibleViewport.center();
         QTest::mouseMove(m_window,position.toPoint());
         qreal last = flick->property("contentY").toDouble();
         const qreal start = last;
@@ -552,153 +546,80 @@ private:
     void reviewIdleBrowser()
     {
         m_app.stopReview();
-        for (int index = 0; index < 8; ++index)
-            m_app.createDeck(QStringLiteral("Browser fixture %1").arg(index), QStringLiteral("Horizontal browser fixture."));
-        if (!check(waitUntil([this] { return !m_app.busy() && m_app.decks().size() == 12; }), "review_browser_overflow_fixtures")) return;
+        check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing();}),"review_idle_ready");
+        call("runAction",{QStringLiteral("reviewPage")});
+        check(visible("reviewIdle")&&!visible("reviewWorkspace"),"idle_review_overview_visible");
+        const QVariantList cards=m_app.cards(),history=m_app.history();
+        call("setDeck",{m_deckChild,true});
+        check(m_app.selectedDeckId()==m_deckChild,"overview_selects_child_deck");
         call("setDeck",{m_deckA,true});
-        key(Qt::Key_1,Qt::AltModifier);
-        if (!check(waitUntil([this] { return !m_app.busy() && visible("reviewIdle"); }), "review_idle_visible")) return;
-        check(visible("reviewDeckBrowser") && visible("reviewDeckList"), "review_deck_browser_visible");
-        QObject *const deckList = require("reviewDeckList");
-        int topLevelCount = 0;
-        for (const QVariant &value : m_app.decks())
-            topLevelCount += value.toMap().value("parentId").toString().isEmpty() ? 1 : 0;
-        check(deckList->property("count").toInt() == topLevelCount, "review_root_lists_only_top_level_decks",
-              QStringLiteral("count=%1").arg(deckList->property("count").toInt()));
-        check(deckList->property("contentWidth").toDouble() > deckList->property("width").toDouble(),
-              "review_deck_browser_has_bounded_horizontal_overflow");
-        deckList->setProperty("contentX",0.0);
-        const QPointF deckPosition = rect("reviewDeckList").center();
-        qreal previousX = 0.0;
-        bool wheelMonotonic = true;
-        for (int iteration = 0; iteration < 8; ++iteration) {
-            QWheelEvent event(deckPosition,m_window->mapToGlobal(deckPosition.toPoint()),QPoint(),QPoint(0,-120),
-                              Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
-            QTest::lastMouseTimestamp += 35;
-            event.setTimestamp(static_cast<quint64>(QTest::lastMouseTimestamp));
-            QCoreApplication::sendEvent(m_window,&event);
-            QTest::qWait(30);
-            const qreal currentX = deckList->property("contentX").toDouble();
-            if (currentX + 0.5 < previousX) wheelMonotonic = false;
-            previousX = currentX;
-        }
-        check(wheelMonotonic && previousX > 0 && m_window->property("page").toInt() == 0,
-              "review_deck_browser_horizontal_wheel_is_bounded");
-        QObject *const stats = require("reviewStats");
-        check(stats->property("visible").toBool(), "review_queue_stats_visible");
-        QVariantMap selected;
-        for (const QVariant &value : m_app.decks())
-            if (value.toMap().value("id").toString() == m_deckA) selected = value.toMap();
-        const QStringList statKeys = {QStringLiteral("dueCount"),QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount"),QStringLiteral("laterCount")};
-        const QStringList objectKeys = {QStringLiteral("due"),QStringLiteral("new"),QStringLiteral("review"),QStringLiteral("later")};
-        for (int index = 0; index < statKeys.size(); ++index) {
-            QObject *const stat = require("queueStat" + objectKeys[index]);
-            const QVariant expected = m_app.decks().isEmpty() ? QVariant(0) : QVariant(selected.value(statKeys[index]).toInt());
-            check(stat->property("count").toInt() == expected.toInt(), "review_queue_stat_matches_model_" + objectKeys[index],
-                  QStringLiteral("actual=%1 expected=%2").arg(stat->property("count").toInt()).arg(expected.toInt()));
-        }
-        const QRectF idle = rect("reviewIdle");
-        const QRectF action = rect("reviewStartArea");
-        const QRectF primary = rect("reviewPrimary");
-        check(primary.width() >= 180 && primary.height() >= 48
-              && std::abs(primary.center().x() - action.center().x()) <= 2.0
-              && primary.center().y() >= idle.top() + idle.height() * 0.5,
-              "review_idle_primary_is_large_and_centered");
-        check(action.top() >= idle.top() && action.bottom() <= idle.bottom() + 1.1, "review_idle_action_zone_bounded");
-        call("setDeck",{m_deckA,true});
-        QObject *const subdecks = require("reviewBrowseSubdecks");
-        QStringList childNames;
-        for (const QVariant &value : m_app.decks()) {
-            const QVariantMap deck = value.toMap();
-            if (deck.value("parentId").toString() == m_deckA) childNames.append(deck.value("id").toString());
-        }
-        check(subdecks->property("enabled").toBool(), "review_subdeck_action_enabled",
-              QStringLiteral("appSelected=%1 windowSelected=%2 uiSelected=%3 parent=%4 children=%5")
-                  .arg(m_app.selectedDeckId()).arg(m_window->property("selectedDeckId").toString())
-                  .arg(require("reviewDeckBreadcrumb")->property("text").toString()).arg(m_deckA).arg(childNames.join(',')));
-        click("reviewBrowseSubdecks");
-        check(m_window->property("deckBrowserParentId").toString() == m_deckA, "review_browse_enters_selected_subdecks");
-        check(require("reviewDeckList")->property("count").toInt() == 1, "review_child_level_lists_children");
-        click("reviewDeckBrowserBack");
-        check(m_window->property("deckBrowserParentId").toString().isEmpty(), "review_browse_back_returns_to_root");
-        click("reviewDeckTreeToggle");
-        check(m_window->property("deckTreeExpanded").toBool() && visible("reviewDeckTree"), "review_tree_expands_from_root");
-        const QRectF tree = rect("reviewDeckTree");
-        check(tree.width() <= rect("reviewDeckBrowser").width() + 1.1 && tree.height() > 0, "review_tree_is_bounded");
-        QObject *const treeList = require("reviewDeckTree");
-        click("reviewDeckBranch0");
-        check(treeList->property("count").toInt() == 1 && visible("reviewDeckTree"), "review_tree_branch_collapses_to_root");
-        click("reviewDeckBranch0");
-        check(treeList->property("count").toInt() > 1, "review_tree_branch_reopens_children");
-        click("reviewDeckTreeSelect1");
-        check(m_app.selectedDeckId() == m_deckChild && m_window->property("page").toInt() == 0,
-              "review_tree_child_selection_preserves_review_context");
-        focus("reviewDeckList");
-        key(Qt::Key_Right);
-        key(Qt::Key_Return);
-        check(m_app.selectedDeckId() != m_deckA && !m_app.selectedDeckId().isEmpty(), "review_deck_tiles_keyboard_select");
-        call("setDeck",{m_deckA,true});
-        check(m_window->property("deckTreeExpanded").toBool(), "review_tree_state_persists_across_selection");
+        check(m_app.selectedDeckId()==m_deckA&&m_app.cards()==cards&&m_app.history()==history,
+              "overview_navigation_preserves_collection");
+        QObject *const ai=m_engine.rootContext()->contextProperty("ai").value<QObject *>();
+        check(ai&&!ai->property("busy").toBool(),"overview_selection_does_not_start_inference");
         key(Qt::Key_2,Qt::AltModifier);
+    }
+    QQuickItem *paneToggle(bool rightSide,bool collapsed) const
+    {
+        std::function<QQuickItem *(QQuickItem *)> find=[&](QQuickItem *parent)->QQuickItem * {
+            if (parent->isVisible()&&parent->property("rightSide").isValid()&&parent->property("collapsed").isValid()
+                &&parent->property("rightSide").toBool()==rightSide&&parent->property("collapsed").toBool()==collapsed) return parent;
+            for (QQuickItem *const child:parent->childItems()) if (QQuickItem *const found=find(child)) return found;
+            return nullptr;
+        };
+        QQuickItem *const result=find(item("libraryPage"));
+        if (!result) throw std::runtime_error("The library pane toggle is unavailable.");
+        return result;
+    }
+    void togglePane(bool rightSide,bool collapsed)
+    {
+        QQuickItem *const control=paneToggle(rightSide,collapsed);
+        const QPoint position=control->mapRectToScene(QRectF(0,0,control->width(),control->height())).center().toPoint();
+        QTest::mouseClick(m_window,Qt::LeftButton,Qt::NoModifier,position);
+        QTest::qWait(100);
     }
     void desktop(const QString &theme)
     {
         resize(1320,860);
         key(Qt::Key_2,Qt::AltModifier);
-        call("setDeck",{m_deckA});
-        check(m_window->property("page").toInt() == 1, "library_navigation_" + theme);
-        wheel("libraryScroll",theme + "_desktop");
-        call("pickCard",{m_longCard});
-        check(item("cardDetails")->isVisible(), "detail_opens_after_selection_" + theme);
-        const qreal detailWidth = item("cardDetails")->width();
-        const qreal listWidth = item("libraryList")->width();
-        check(detailWidth >= 260 && listWidth >= 300, "detail_has_sensible_bounds_" + theme,
-              QStringLiteral("detail=%1 list=%2").arg(detailWidth).arg(listWidth));
-        wheel("detailsScroll",theme + "_desktop");
-        click("detailsToggle");
-        check(!item("cardDetails")->isVisible() && item("libraryList")->width() >= listWidth + detailWidth - 2,
-              "detail_collapse_restores_full_list_" + theme);
-        click("detailsToggle");
-        check(std::abs(item("cardDetails")->width()-detailWidth) < 1.1, "detail_reopen_preserves_width_" + theme,
-              QStringLiteral("before=%1 after=%2").arg(detailWidth).arg(item("cardDetails")->width()));
-        focus("detailsHandle");
-        const int initial = call("detailWidth").toInt();
-        key(Qt::Key_Left);
-        const int resized = call("detailWidth").toInt();
-        check(resized == std::min(initial+24,650), "detail_keyboard_resize_" + theme);
-        const qreal scrollBeforeNavigation = require("libraryScroll")->property("contentY").toDouble();
-        key(Qt::Key_3,Qt::AltModifier);
-        key(Qt::Key_2,Qt::AltModifier);
-        check(call("detailWidth").toInt() == resized && m_window->property("selectedCardId").toString() == m_longCard,
-              "navigation_preserves_card_and_pane_width_" + theme);
-        check(std::abs(require("libraryScroll")->property("contentY").toDouble() - scrollBeforeNavigation) < 1.1,
-              "navigation_preserves_library_scroll_" + theme);
+        call("setDeck",{m_deckA}); call("pickCard",{m_longCard});
+        check(m_window->property("page").toInt()==1&&visible("libraryCardList"),"library_navigation_"+theme);
+        wheel("libraryCardList",theme+"_desktop");
+        const QVariantList cards=m_app.cards(),history=m_app.history();
+        const qreal scrollBefore=require("libraryCardList")->property("contentY").toDouble();
+        call("openSelectedDetail");
+        check(visible("cardDetailDialog")&&require("cardDetailDialog")->property("cardId").toString()==m_longCard,
+              "selected_card_opens_detail_"+theme);
+        wheel("cardDetailDialog",theme+"_detail");
+        close("cardDetailDialog");
+        check(m_window->property("selectedCardId").toString()==m_longCard&&m_app.cards()==cards&&m_app.history()==history,
+              "detail_close_preserves_selection_and_records_"+theme);
+        check(std::abs(require("libraryCardList")->property("contentY").toDouble()-scrollBefore)<1.1,
+              "detail_close_preserves_library_scroll_"+theme);
+        togglePane(true,false);
+        check(!visible("libraryCardPane"),"card_pane_collapses_"+theme);
+        togglePane(true,true);
+        check(visible("libraryCardPane")&&m_window->property("selectedCardId").toString()==m_longCard,
+              "card_pane_reopens_with_selection_"+theme);
+        togglePane(false,false);
+        check(!require("libraryPage")->property("effectiveLeftOpen").toBool()&&visible("libraryCardPane"),
+              "deck_pane_collapses_without_hiding_cards_"+theme);
+        togglePane(false,true);
+        key(Qt::Key_3,Qt::AltModifier); key(Qt::Key_2,Qt::AltModifier);
+        check(m_window->property("selectedCardId").toString()==m_longCard,"navigation_preserves_selected_card_"+theme);
         click("navToggle");
-        check(m_window->property("navCollapsed").toBool() && rect("sideNavigation").width() <= 60
-              && rect("mainContent").width() >= m_window->width() - 1.1,
-              "side_navigation_collapse_preserves_content_" + theme);
-        for (const QString &navName : {QStringLiteral("navReview"),QStringLiteral("navLibrary"),QStringLiteral("navHistory"),QStringLiteral("navSettings")})
-            check(visible(navName) && require(navName)->property("enabled").toBool(), "collapsed_navigation_control_" + navName + "_" + theme);
-        click("navReview");
-        click("navLibrary");
-        check(m_window->property("page").toInt() == 1 && m_window->property("selectedCardId").toString() == m_longCard,
-              "collapsed_navigation_preserves_library_context_" + theme);
-        layouts(theme + "_desktop_collapsed");
+        check(m_window->property("navCollapsed").toBool(),"navigation_collapses_"+theme);
+        click("navReview"); click("navLibrary");
+        check(m_window->property("page").toInt()==1&&m_window->property("selectedCardId").toString()==m_longCard,
+              "collapsed_navigation_preserves_context_"+theme);
         click("navToggle");
-        check(!m_window->property("navCollapsed").toBool() && rect("sideNavigation").width() > 60,
-              "side_navigation_reopens_" + theme);
-        layouts(theme + "_desktop_expanded");
-        screenshot(theme + "-desktop-library");
-        keyboardNavigation(theme);
-        review(theme);
+        check(!m_window->property("navCollapsed").toBool(),"navigation_reopens_"+theme);
+        layouts(theme+"_desktop"); screenshot(theme+"-desktop-library");
+        keyboardNavigation(theme); review(theme);
         key(Qt::Key_4,Qt::AltModifier);
-        call("setSettingsSection",{1});
-        require("settingsSection")->setProperty("currentIndex",1);
         require("settingsPage")->setProperty("section",1);
-        QTest::qWait(100);
-        wheel("settingsScroll",theme + "_desktop_keyboard");
-        screenshot(theme + "-desktop-keyboard");
-        rebind(theme);
+        QTest::qWait(100); wheel("settingsScroll",theme+"_desktop_keyboard");
+        screenshot(theme+"-desktop-keyboard"); rebind(theme);
     }
     void rebind(const QString &theme)
     {
@@ -735,13 +656,22 @@ private:
         check(waitUntil([this] { return m_app.selectedDeckId() == m_deckB && !visible("commandPalette"); }),
               "command_palette_switches_deck_" + theme);
         key(Qt::Key_L,Qt::ControlModifier);
-        check(visible("deckPicker"), "deck_search_keyboard_" + theme);
-        require("deckSearch")->setProperty("text",QStringLiteral("Native interaction"));
-        key(Qt::Key_Down);
-        key(Qt::Key_Up);
-        key(Qt::Key_Return);
-        check(waitUntil([this] { return m_app.selectedDeckId() == m_deckA && !visible("deckPicker"); }),
-              "deck_search_selects_deck_" + theme);
+        check(visible("deckSearchField")&&require("deckSearchField")->property("activeFocus").toBool(),
+              "deck_search_keyboard_focuses_field_"+theme);
+        QObject *const library=require("libraryPage");
+        library->setProperty("deckSearchText",QStringLiteral("Fixture A"));
+        QTest::qWait(80); key(Qt::Key_Return);
+        const QVariant raw=library->property("treeRows");
+        const QVariantList rows=raw.metaType()==QMetaType::fromType<QJSValue>()?raw.value<QJSValue>().toVariant().toList():raw.toList();
+        int target=-1;
+        for (qsizetype index=0;index<rows.size();++index)
+            if (rows[index].toMap().value("id").toString()==m_deckA) target=static_cast<int>(index);
+        check(target>=0,"deck_search_finds_matching_record_"+theme);
+        require("libraryDeckTree")->setProperty("currentIndex",target);
+        focus("libraryDeckTree"); key(Qt::Key_Return);
+        check(waitUntil([this] {return m_app.selectedDeckId()==m_deckA;}),"deck_search_selects_deck_"+theme);
+        library->setProperty("deckSearchText",QString());
+        call("pickCard",{m_longCard});
         key(Qt::Key_E,Qt::ControlModifier);
         check(visible("cardDialog") && m_window->property("editingCardId").toString() == m_longCard,
               "edit_selected_card_keyboard_" + theme);
@@ -762,513 +692,119 @@ private:
     }
     void checkReviewQueuePreview(const QString &suffix)
     {
-        QObject *const preview = require("reviewQueuePreview");
-        check(preview->property("timelineMode").toBool(), "review_preview_is_timeline_" + suffix);
-        check(preview->property("horizontalScrollable").toBool() && preview->property("interactive").toBool(),
-              "review_preview_is_horizontally_scrollable_" + suffix);
-        check(!preview->property("autoCentersCurrent").toBool(),
-              "review_preview_does_not_auto_recenter_" + suffix);
-        check(!preview->property("railVisible").toBool(), "review_preview_has_no_rail_" + suffix);
-        check(preview->property("count").toInt() >= 1, "review_timeline_has_current_card_" + suffix,
-              QStringLiteral("count=%1 pending=%2").arg(preview->property("count").toInt()).arg(m_app.pendingCards().size()));
-
-        const QRectF viewport = rect("reviewQueuePreview");
-        const QRectF surface = rect("reviewDialogSurface");
-        check(viewport.left() >= surface.left() - 1.1 && viewport.right() <= surface.right() + 1.1
-              && viewport.top() >= surface.top() - 1.1 && viewport.bottom() <= surface.bottom() + 1.1,
-              "review_timeline_inside_modal_" + suffix);
-        check(viewport.width() >= surface.width() - 48.0,
-              "review_timeline_spans_modal_section_" + suffix,
-              QStringLiteral("timeline=%1 modal=%2").arg(viewport.width()).arg(surface.width()));
-
-        const int currentIndex = preview->property("currentIndex").toInt();
-        check(preview->property("currentIndex").isValid() && currentIndex >= 0,
-              "review_timeline_current_card_is_addressable_" + suffix,
-              QStringLiteral("index=%1").arg(currentIndex));
-        check(require("reviewQueueCurrent")->property("timelineRole").toString() == QStringLiteral("current"),
-              "review_timeline_marks_current_role_" + suffix);
-        check(!require("reviewQueueCurrent")->property("currentLabelVisible").toBool(),
-              "review_timeline_expresses_current_without_label_" + suffix);
-
-        const int previousCount = preview->property("previousCount").toInt();
-        const int upcomingCount = preview->property("upcomingCount").toInt();
-        const int expectedUpcoming = std::max(0, static_cast<int>(m_app.pendingCards().size()) - 1);
-        check(previousCount >= 0 && previousCount == m_app.reviewedCount() && upcomingCount == expectedUpcoming
-              && preview->property("count").toInt() == upcomingCount + std::max(2, previousCount) + 1,
-              "review_timeline_role_counts_match_" + suffix,
-              QStringLiteral("previous=%1 upcoming=%2 expectedUpcoming=%3 count=%4").arg(previousCount).arg(upcomingCount)
-                  .arg(expectedUpcoming).arg(preview->property("count").toInt()));
-        check(preview->property("previousSpaceReserved").toBool(),
-              "review_timeline_reserves_leading_space_" + suffix);
-        if (previousCount > 0) {
-            QObject *const previous = require("reviewTimelineItem" + QString::number(std::max(2, previousCount) - 1));
-            check(previous->property("timelineRole").toString() == QStringLiteral("previous")
-                      && !previous->property("variantId").toString().isEmpty()
-                      && previous->property("reviewOutline").toBool()
-                      && previous->property("reviewedGrade").toInt() >= 0
-                      && previous->property("reviewedGrade").toInt() <= 4
-                      && previous->property("renderedOpacity").toDouble() < 1.0,
-                  "review_timeline_previous_card_carries_a_faded_grade_" + suffix);
-        }
-        check(preview->property("fadeEnds").toBool(), "review_timeline_has_faded_ends_" + suffix);
-        check(preview->property("previousCardsFaded").toBool() && preview->property("upcomingCardsHazy").toBool(),
-              "review_timeline_applies_directional_fade_" + suffix);
-        check(preview->property("previousOutlines").toBool(), "review_timeline_previous_cards_have_review_outlines_" + suffix);
-
-        const QString beforeVariant = currentVariant();
-        const qreal initial = preview->property("contentX").toDouble();
-        const qreal minimum = preview->property("minimumScroll").toDouble();
-        const qreal maximum = preview->property("maximumScroll").toDouble();
-        const QRectF activeBeforeScroll = rect("reviewQueueCurrent");
-        QObject *const scrollBar = require("reviewQueueScrollBar");
-        check(visible("reviewQueueScrollBar") && rect("reviewQueueScrollBar").top() >= viewport.bottom() - 1.1,
-              "review_timeline_scrollbar_is_always_visible_below_cards_" + suffix);
-        if (upcomingCount >= 3 && object("reviewQueueItem1") && object("reviewQueueItem2")) {
-            QObject *const second = require("reviewQueueItem1");
-            QObject *const third = require("reviewQueueItem2");
-            const qreal secondWidth = second->property("renderedWidth").toDouble();
-            const qreal thirdWidth = third->property("renderedWidth").toDouble();
-            const qreal gap = third->property("renderedLeft").toDouble()
-                - second->property("renderedLeft").toDouble() - secondWidth;
-            preview->setProperty("contentX", std::min(maximum, initial + preview->property("stride").toDouble() * 2.0));
-            QTest::qWait(80);
-            QObject *const movedSecond = require("reviewQueueItem1");
-            QObject *const movedThird = require("reviewQueueItem2");
-            const qreal movedGap = movedThird->property("renderedLeft").toDouble()
-                - movedSecond->property("renderedLeft").toDouble() - movedSecond->property("renderedWidth").toDouble();
-            check(secondWidth > 0 && thirdWidth > 0 && gap > 0
-                      && std::abs(movedGap - gap) < 0.1
-                      && std::abs(movedSecond->property("renderedWidth").toDouble() - secondWidth) < 0.1
-                      && std::abs(movedThird->property("renderedWidth").toDouble() - thirdWidth) < 0.1,
-                  "review_preview_card_widths_and_gaps_stay_constant_" + suffix);
-            preview->setProperty("contentX", initial);
-            QTest::qWait(60);
-        }
-        check(maximum >= minimum, "review_preview_has_valid_scroll_bounds_" + suffix);
-        if (preview->property("count").toInt() > 12)
-            check(preview->property("virtualized").toBool()
-                      && preview->property("renderedCount").toInt() < preview->property("count").toInt(),
-                  "review_preview_renders_only_viewport_cards_" + suffix);
-        QObject *const upcoming = upcomingCount > 0 ? object("reviewQueueItem" + QString::number(upcomingCount - 1)) : nullptr;
-        const qreal initialDisclosure = upcoming ? upcoming->property("revealAmount").toDouble() : 0.0;
-        preview->setProperty("contentX", maximum + 500.0);
-        QTest::qWait(100);
-        check(std::abs(preview->property("contentX").toDouble() - maximum) < 2.0
-                  && currentVariant() == beforeVariant,
-              "review_preview_stops_at_tail_without_switching_card_" + suffix);
-        check(std::abs(scrollBar->property("position").toDouble() + scrollBar->property("size").toDouble() - 1.0) < 0.01,
-              "review_timeline_scrollbar_maps_right_endpoint_" + suffix);
-        const bool activeOffscreen = !activeBeforeScroll.translated(initial - maximum, 0).intersects(viewport);
-        check(visible("reviewQueueReturn") == activeOffscreen,
-              "review_timeline_return_control_tracks_offscreen_active_card_" + suffix);
-        if (activeOffscreen) {
-            const QVariantList unchangedQueue = m_app.pendingCards();
-            click("reviewQueueReturn");
-            check(!visible("reviewQueueReturn") && currentVariant() == beforeVariant
-                      && m_app.pendingCards() == unchangedQueue
-                      && std::abs(rect("reviewQueueCurrent").center().x() - viewport.center().x()) < 2.0
-                      && rect("reviewQueuePreview") == viewport,
-                  "review_timeline_return_centers_active_without_layout_shift_" + suffix);
-            if (suffix.endsWith("_initial")) {
-                const bool revealed=m_app.answerRevealed();
-                const QVariantList history=m_app.history(),schedules=m_app.cards();
-                for (const Qt::Key activation:{Qt::Key_Space,Qt::Key_Return}) {
-                    preview->setProperty("contentX",maximum);QTest::qWait(60);
-                    focus("reviewQueueReturn");key(activation);
-                    const QString keyName=activation==Qt::Key_Space?QStringLiteral("space"):QStringLiteral("return");
-                    check(!visible("reviewQueueReturn")&&currentVariant()==beforeVariant
-                              &&m_app.pendingCards()==unchangedQueue&&m_app.history()==history&&m_app.cards()==schedules
-                              &&m_app.answerRevealed()==revealed
-                              &&std::abs(rect("reviewQueueCurrent").center().x()-viewport.center().x())<2.0
-                              &&rect("reviewQueuePreview")==viewport,
-                          "review_utility_return_"+keyName+"_centers_without_review_mutation_"+suffix);
-                }
-                focus("reviewQuestion");
-            }
-            preview->setProperty("contentX", maximum);
-            QTest::qWait(60);
-        }
-        if (upcomingCount > 0) {
-            const QRectF tail = rect("reviewQueueItem" + QString::number(upcomingCount - 1));
-            check(tail.left() >= viewport.left() - 1.1 && tail.right() <= viewport.right() + 1.1,
-                  "review_preview_tail_is_fully_visible_" + suffix);
-            if (maximum > initial + 5.0 && initialDisclosure < 0.99)
-                check(require("reviewQueueItem" + QString::number(upcomingCount - 1))->property("revealAmount").toDouble() > initialDisclosure,
-                      "review_preview_discloses_upcoming_card_as_it_enters_" + suffix);
-        }
-        preview->setProperty("contentX", minimum - 500.0);
-        QTest::qWait(100);
-        check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0,
-              "review_preview_stops_at_first_card_" + suffix);
-        check(std::abs(scrollBar->property("position").toDouble()) < 0.01,
-              "review_timeline_scrollbar_maps_left_endpoint_" + suffix);
-        focus("reviewQueueScrollBar");
-        key(Qt::Key_End);
-        check(std::abs(preview->property("contentX").toDouble() - maximum) < 2.0 && currentVariant() == beforeVariant,
-              "review_timeline_scrollbar_keyboard_reaches_right_endpoint_" + suffix);
+        QObject *const preview=require("reviewQueuePreview");
+        const QVariantList pending=m_app.pendingCards(),history=m_app.history(),cards=m_app.cards();
+        const QString selected=currentVariant();
+        check(preview->property("count").toInt()==m_app.reviewCards().size()
+              &&preview->property("activeVariantId").toString()==selected,"timeline_matches_review_session_"+suffix);
+        const qreal minimum=preview->property("minimumScroll").toDouble(),maximum=preview->property("maximumScroll").toDouble();
+        focus("reviewQueueScrollBar"); key(Qt::Key_End);
+        check(std::abs(preview->property("contentX").toDouble()-maximum)<2.0,"timeline_keyboard_reaches_end_"+suffix);
         key(Qt::Key_Home);
-        check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0 && currentVariant() == beforeVariant,
-              "review_timeline_scrollbar_keyboard_reaches_left_endpoint_" + suffix);
-        if (suffix.endsWith("_initial") && maximum > minimum + 100.0) {
-            QQuickItem *const thumb = qobject_cast<QQuickItem *>(scrollBar->property("contentItem").value<QObject *>());
-            if (!thumb) throw std::runtime_error("Timeline scrollbar has no thumb.");
-            const QPoint start = thumb->mapRectToScene(QRectF(0,0,thumb->width(),thumb->height())).center().toPoint();
-            const QPoint finish = start + QPoint(static_cast<int>(rect("reviewQueueScrollBar").width() * 0.25),0);
-            QTest::mousePress(m_window,Qt::LeftButton,Qt::NoModifier,start);
-            QTest::mouseMove(m_window,finish,50);
-            QTest::mouseRelease(m_window,Qt::LeftButton,Qt::NoModifier,finish);
-            QTest::qWait(80);
-            const qreal dragged = preview->property("contentX").toDouble();
-            check(dragged > minimum + 1.0 && dragged <= maximum + 1.1 && currentVariant() == beforeVariant,
-                  "review_timeline_scrollbar_drag_moves_only_viewport_" + suffix);
-            key(Qt::Key_Home);
-            check(std::abs(preview->property("contentX").toDouble() - minimum) < 2.0
-                      && std::abs(scrollBar->property("position").toDouble()) < 0.01,
-                  "review_timeline_scrollbar_tracks_return_after_drag_" + suffix);
-        }
-        const QString firstName = previousCount >= 2 ? QStringLiteral("reviewTimelineItem0")
-            : previousCount == 1 ? QStringLiteral("reviewTimelineItem1") : QStringLiteral("reviewQueueCurrent");
-        check(rect(firstName).center().x() <= viewport.center().x() + 2.0,
-              "review_preview_first_card_cannot_pass_center_" + suffix);
-        preview->setProperty("contentX", std::clamp(initial, minimum, maximum));
-        QTest::qWait(60);
+        check(std::abs(preview->property("contentX").toDouble()-minimum)<2.0,"timeline_keyboard_reaches_start_"+suffix);
+        check(currentVariant()==selected&&m_app.pendingCards()==pending&&m_app.history()==history&&m_app.cards()==cards,
+              "timeline_scroll_preserves_review_records_"+suffix);
+        click("reviewQueueCollapse");
+        check(!visible("reviewQueueBar")&&visible("reviewQueueReopen"),"timeline_collapses_"+suffix);
+        click("reviewQueueReopen");
+        check(visible("reviewQueueBar")&&currentVariant()==selected,"timeline_reopens_without_changing_card_"+suffix);
+        focus("reviewQuestion");
     }
     void reviewLifecycle()
     {
+        m_app.stopReview(); check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing();}),"short_review_setup");
+        call("runAction",{QStringLiteral("reviewPage")}); m_app.startReview(m_deckB);
+        if (!check(waitUntil([this] {return !m_app.busy()&&m_app.reviewing();}),"short_review_starts")) return;
+        const int count=m_app.history().size();
+        focus("reviewQuestion"); click("revealAnswer"); click("grade3");
+        check(waitUntil([this,count] {return !m_app.busy()&&m_app.queueCount()==0&&m_app.history().size()==count+1;}),
+              "short_review_commits_last_grade");
         m_app.stopReview();
-        QTest::qWait(60);
-        m_app.startReview(m_deckB);
-        if (!check(waitUntil([this] { return !m_app.busy() && m_app.reviewing() && !m_app.currentCard().isEmpty(); }),
-                   "short_review_starts")) return;
-        check(visible("reviewDialog"), "short_review_modal_visible");
-        QObject *const shortPreview = require("reviewQueuePreview");
-        check(shortPreview->property("count").toInt() >= 1 && shortPreview->property("currentIndex").toInt() >= 0,
-              "short_review_timeline_has_current_card");
-        m_app.revealAnswer();
-        m_app.grade(3);
-        check(waitUntil([this] { return !m_app.busy() && !m_app.reviewing(); })
-              && !visible("reviewDialog"), "short_review_exhaustion_closes_modal");
-        m_app.startReview(m_deckA);
-        if (!check(waitUntil([this] { return !m_app.busy() && m_app.reviewing() && visible("reviewDialog"); }),
-                   "review_lifecycle_restart")) return;
-        const int fullCount = m_app.queueCount();
-        const QString oldestVariant = currentVariant();
-        check(fullCount > 8, "long_review_fixture_has_more_than_five_future_cards");
-        for (int index = 0; index < 5 && m_app.queueCount() > 1; ++index) {
-            const int before = m_app.queueCount();
-            m_app.revealAnswer();
-            m_app.grade(3);
-            check(waitUntil([this,before] { return !m_app.busy() && m_app.queueCount() == before - 1; }),
-                  "long_review_records_grade_" + QString::number(index));
-        }
-        checkReviewQueuePreview("full_session_history");
-        QObject *const fullPreview = require("reviewQueuePreview");
-        check(fullPreview->property("previousCount").toInt() == 5
-                  && fullPreview->property("count").toInt() == fullCount,
-              "review_timeline_retains_every_completed_and_pending_card");
-        const QVariantList remaining = m_app.pendingCards();
-        const QVariantList historyBeforeSelection = m_app.history();
-        const QString tailVariant = remaining.last().toMap().value("variantId").toString();
-        fullPreview->setProperty("contentX", fullPreview->property("maximumScroll"));
-        QTest::qWait(100);
-        const QString tailHook = "reviewQueueItem" + QString::number(remaining.size() - 2);
-        check(require(tailHook)->property("variantId").toString() == tailVariant,
-              "review_timeline_reaches_actual_queue_end");
-        click(tailHook);
-        const QVariantList expectedRemaining = remaining;
-        check(waitUntil([this,tailVariant] { return !m_app.busy() && currentVariant() == tailVariant; })
-                  && m_app.pendingCards() == expectedRemaining && m_app.history() == historyBeforeSelection,
-              "review_timeline_selects_card_beyond_initial_preview");
-        QTest::qWait(80);
-        check(std::abs(fullPreview->property("contentX").toDouble() - fullPreview->property("maximumScroll").toDouble()) < 2.0,
-              "review_timeline_selected_tail_keeps_scroll_position");
-        fullPreview->setProperty("contentX", fullPreview->property("minimumScroll"));
-        QTest::qWait(100);
-        check(require("reviewTimelineItem0")->property("variantId").toString() == oldestVariant,
-              "review_timeline_reaches_first_completed_card");
-        click("reviewTimelineItem0");
-        check(waitUntil([this,oldestVariant] { return !m_app.busy() && currentVariant() == oldestVariant; })
-                  && m_app.reviewingCompletedCard() && m_app.pendingCards() == expectedRemaining
-                  && m_app.history() == historyBeforeSelection,
-              "review_timeline_inspects_oldest_completed_card_without_mutation");
-        m_app.stopReview();
-        check(waitUntil([this] { return !m_app.busy() && !m_app.reviewing() && !visible("reviewDialog"); }),
-              "review_stop_closes_modal");
+        check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing()&&visible("reviewIdle");}),"review_end_restores_overview");
     }
     void review(const QString &theme)
     {
-        m_app.stopReview();
-        QTest::qWait(60);
-        key(Qt::Key_1,Qt::AltModifier);
-        m_app.startReview(m_deckA);
-        if (!check(waitUntil([this] { return !m_app.busy() && m_app.reviewing() && !m_app.currentCard().isEmpty(); }), "review_started_" + theme))
+        m_app.stopReview(); check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing();}),"review_setup_"+theme);
+        key(Qt::Key_1,Qt::AltModifier); m_app.startReview(m_deckA);
+        if (!check(waitUntil([this] {return !m_app.busy()&&m_app.reviewing()&&!m_app.currentCard().isEmpty();}),"review_started_"+theme))
             throw std::runtime_error("Review did not start.");
-        check(visible("reviewIdle") && visible("reviewDialog") && visible("reviewModalHeader")
-              && visible("reviewPause") && visible("reviewPrimary"),
-              "active_review_uses_pinned_pause_control_" + theme);
-        const QRectF surface = rect("reviewDialogSurface");
-        check(surface.left() >= -1.1 && surface.top() >= -1.1 && surface.right() <= m_window->width() + 1.1
-              && surface.bottom() <= m_window->height() + 1.1
-              && require("reviewDialogSurface")->property("radius").toDouble() > 0,
-              "review_dialog_is_bounded_and_rounded_" + theme);
-        const QRectF modalHeader = rect("reviewModalHeader");
-        const QRectF deckTitle = rect("reviewDeckTitle");
-        const QRectF pause = rect("reviewPause");
-        const QRectF closeButton = rect("reviewClose");
-        check(pause.top() >= modalHeader.top() - 1.1 && pause.bottom() <= modalHeader.bottom() + 1.1
-              && pause.right() <= modalHeader.right() + 1.1 && pause.left() >= modalHeader.left() - 1.1,
-              "review_pause_sits_in_title_bar_" + theme);
-        check(pause.left() >= deckTitle.right() - 1.1 && pause.right() < closeButton.left() - 4.0,
-              "review_pause_is_after_title_and_before_close_" + theme,
-              QStringLiteral("titleRight=%1 pause=%2..%3 closeLeft=%4")
-                  .arg(deckTitle.right()).arg(pause.left()).arg(pause.right()).arg(closeButton.left()));
-        const QRectF timer = rect("reviewTimer");
-        check(require("reviewTimer")->property("running").toBool()
-                  && require("reviewTimer")->property("elapsedSeconds").toDouble() >= 0.0,
-              "review_timer_runs_during_active_card_" + theme);
-        check(std::abs(timer.center().x() - surface.center().x()) <= 3.0,
-              "review_timer_is_centered_" + theme,
-              QStringLiteral("timerCenter=%1 modalCenter=%2")
-                  .arg(timer.center().x()).arg(surface.center().x()));
-        checkReviewQueuePreview(theme + "_initial");
-        if (m_app.pendingCards().size() > 1) {
-            const QString originalVariant = currentVariant();
-            const QVariantList originalQueue = m_app.pendingCards();
-            const QVariantList originalHistory = m_app.history();
-            const QVariantList originalCards = m_app.cards();
-            const QString target = originalQueue.at(1).toMap().value("variantId").toString();
-            const qreal beforeSelectionScroll = require("reviewQueuePreview")->property("contentX").toDouble();
-            click("reviewQueueItem0");
-            check(waitUntil([this,target] { return !m_app.busy() && currentVariant() == target; })
-                      && m_app.pendingCards() == originalQueue
-                      && !m_app.answerRevealed() && m_app.history() == originalHistory
-                      && m_app.cards() == originalCards,
-                  "review_preview_click_selects_without_grading_" + theme);
-            check(std::abs(require("reviewQueuePreview")->property("contentX").toDouble() - beforeSelectionScroll) < 0.1,
-                  "review_preview_selection_keeps_scroll_position_" + theme);
-            m_app.selectReviewCard(originalVariant);
-            check(waitUntil([this,originalVariant] { return !m_app.busy() && currentVariant() == originalVariant; })
-                      && m_app.pendingCards() == originalQueue,
-                  "review_preview_selection_preserves_other_queue_order_" + theme);
-            require("reviewQueuePreview")->setProperty("currentIndex",2);
-            focus("reviewQueuePreview");
-            key(Qt::Key_Right);
-            key(Qt::Key_Return);
-            check(waitUntil([this,target] { return !m_app.busy() && currentVariant() == target; })
-                      && !m_app.answerRevealed() && m_app.history() == originalHistory,
-                  "review_preview_keyboard_selects_without_revealing_" + theme);
-            m_app.selectReviewCard(originalVariant);
-            check(waitUntil([this,originalVariant] { return !m_app.busy() && currentVariant() == originalVariant; }),
-                  "review_preview_keyboard_returns_to_original_" + theme);
-            require("reviewQueuePreview")->setProperty("currentIndex",2);
-            key(Qt::Key_Right);
-            key(Qt::Key_Space);
-            check(waitUntil([this,target] { return !m_app.busy() && currentVariant() == target; })
-                      && !m_app.answerRevealed() && m_app.history() == originalHistory,
-                  "review_preview_space_selects_without_reveal_shortcut_" + theme);
-            m_app.selectReviewCard(originalVariant);
-            check(waitUntil([this,originalVariant] { return !m_app.busy() && currentVariant() == originalVariant; }),
-                  "review_preview_space_returns_to_original_" + theme);
-            focus("reviewQuestion");
-        }
-        const QString modalVariant = currentVariant();
-        const int modalQueue = m_app.queueCount();
-        const bool modalAnswer = m_app.answerRevealed();
-        QTest::mouseClick(m_window,Qt::LeftButton,Qt::NoModifier,QPoint(5,5));
-        QTest::qWait(80);
-        check(m_app.reviewing() && !m_app.paused() && currentVariant() == modalVariant && m_app.queueCount() == modalQueue,
-              "review_modal_blocks_outside_click_" + theme);
-        click("reviewClose");
-        check(waitUntil([this] { return m_app.paused() && !visible("reviewDialog"); })
-              && currentVariant() == modalVariant && m_app.queueCount() == modalQueue && m_app.answerRevealed() == modalAnswer,
-              "review_close_pauses_and_preserves_session_" + theme);
-        const double pausedTime = m_app.responseSeconds();
-        QTest::qWait(100);
-        check(std::abs(m_app.responseSeconds() - pausedTime) < 0.03, "review_close_stops_response_timer_" + theme);
-        click("reviewPrimary");
-        check(waitUntil([this] { return m_app.reviewing() && !m_app.paused() && visible("reviewDialog"); }),
-              "review_resume_reopens_same_session_" + theme);
-        check(currentVariant() == modalVariant && m_app.queueCount() == modalQueue && m_app.answerRevealed() == modalAnswer,
-              "review_resume_preserves_session_state_" + theme);
-        key(Qt::Key_Escape);
-        check(waitUntil([this] { return m_app.paused() && !visible("reviewDialog"); })
-              && currentVariant() == modalVariant && m_app.queueCount() == modalQueue && m_app.answerRevealed() == modalAnswer,
-              "review_escape_pauses_and_preserves_session_" + theme);
-        click("reviewPrimary");
-        check(waitUntil([this] { return m_app.reviewing() && !m_app.paused() && visible("reviewDialog"); }),
-              "review_escape_resume_reopens_session_" + theme);
-        ensureLongCurrent();
-        check(item("reviewQuestion")->height() > 0 && require("reviewQuestion")->property("renderError").toString().isEmpty(),
-              "question_and_image_render_" + theme);
-        const QRectF question = rect("reviewQuestion");
-        const QRectF reveal = rect("revealAnswer");
-        QObject *const revealLabel = require("revealAnswer")->property("contentItem").value<QObject *>();
-        check(revealLabel && revealLabel->property("color") == require("reviewDeckTitle")->property("color"),
-              "review_reveal_uses_normal_text_color_" + theme);
-        check(!m_app.answerRevealed() && !visible("reviewAnswer"),
-              "review_answer_is_concealed_before_reveal_" + theme);
-        check(reveal.top() >= question.bottom() - 1.1
-                  && reveal.width() >= surface.width() * 0.70
-                  && reveal.height() >= 52.0
-                  && require("revealAnswer")->property("radius").toDouble() > 0,
-              "review_reveal_is_large_rounded_area_below_question_" + theme,
-              QStringLiteral("questionBottom=%1 reveal=%2..%3 size=%4x%5 radius=%6")
-                  .arg(question.bottom()).arg(reveal.top()).arg(reveal.bottom()).arg(reveal.width()).arg(reveal.height())
-                  .arg(require("revealAnswer")->property("radius").toDouble()));
-        wheel("reviewScroll",theme + "_desktop_question");
-        const QRectF toolbarBefore = rect("reviewToolbar");
-        wheel("reviewScroll",theme + "_desktop_question_again");
-        check(rect("reviewToolbar") == toolbarBefore, "review_controls_stay_pinned_" + theme);
-        check(rect("reviewModalHeader").top() <= rect("reviewQueuePreview").top()
-              && rect("reviewToolbar").bottom() <= rect("reviewDialogSurface").bottom() + 1.1,
-              "review_modal_header_and_grading_footer_stay_pinned_" + theme);
-        key(Qt::Key_P);
-        check(m_app.paused(), "review_pause_keyboard_" + theme);
-        const double elapsed = m_app.responseSeconds();
-        QTest::qWait(100);
-        check(std::abs(m_app.responseSeconds()-elapsed) < 0.03, "response_timer_paused_" + theme);
-        key(Qt::Key_P);
-        check(!m_app.paused(), "review_resume_keyboard_" + theme);
-        const QString current = currentVariant();
-        const int queue = m_app.queueCount();
-        key(Qt::Key_N,Qt::ControlModifier);
-        check(visible("cardDialog"), "editor_during_review_" + theme);
-        require("editorSource")->setProperty("text",QStringLiteral("Typing "));
-        require("editorSource")->setProperty("cursorPosition",7);
-        focus("editorSource");
-        for (const Qt::Key letter : {Qt::Key_D,Qt::Key_S,Qt::Key_P,Qt::Key_1,Qt::Key_Space}) key(letter);
-        check(m_app.queueCount() == queue && currentVariant() == current && !m_app.paused() && !m_app.answerRevealed(),
-              "review_shortcuts_do_not_intercept_editor_" + theme);
-        close("cardDialog");
+        check(visible("reviewWorkspace")&&visible("reviewPause")&&!visible("reviewIdle"),"active_review_workspace_visible_"+theme);
+        ensureLongCurrent(); checkReviewQueuePreview(theme+"_initial");
+        const QString selected=currentVariant(); const QVariantList pending=m_app.pendingCards();
+        click("reviewPause"); check(waitUntil([this] {return m_app.paused();}),"review_pause_control_"+theme);
+        const double elapsed=m_app.responseSeconds(); QTest::qWait(100);
+        check(std::abs(m_app.responseSeconds()-elapsed)<0.03&&currentVariant()==selected&&m_app.pendingCards()==pending,
+              "pause_preserves_timing_and_queue_"+theme);
+        click("reviewPause"); check(waitUntil([this] {return !m_app.paused();}),"review_resume_control_"+theme);
+        focus("reviewQuestion");
+        check(!m_app.answerRevealed(),"review_answer_starts_hidden_"+theme);
         key(Qt::Key_Space);
-        check(m_app.answerRevealed(), "reveal_keyboard_" + theme);
-        check(item("reviewAnswer")->height() > 0 && require("reviewAnswer")->property("renderError").toString().isEmpty(),
-              "answer_and_image_render_" + theme);
-        const QRectF firstGrade = rect("grade0");
-        const QRectF revealedTimer = rect("reviewTimer");
-        check(revealedTimer.bottom() <= firstGrade.top() + 1.1,
-              "review_timer_is_above_grade_controls_" + theme,
-              QStringLiteral("timerBottom=%1 gradeTop=%2").arg(revealedTimer.bottom()).arg(firstGrade.top()));
-        wheel("reviewScroll",theme + "_desktop_answer");
-        screenshot(theme + "-desktop-review");
-        const int historyCount = m_app.history().size();
-        key(Qt::Key_2);
-        check(visible("partialDialog"), "partial_grade_keyboard_" + theme);
+        check(m_app.answerRevealed()&&visible("reviewAnswer"),"review_keyboard_reveals_answer_"+theme);
+        wheel("reviewScroll",theme+"_desktop_review");
+        const int history=m_app.history().size(),queue=m_app.queueCount();
+        check(m_app.currentCard().value("pointCount").toInt()==3,"partial_grade_three_point_fixture_"+theme);
+        focus("reviewQuestion"); key(Qt::Key_2);
+        check(visible("partialDialog"),"partial_grade_keyboard_opens_dialog_"+theme);
         require("recalledPoints")->setProperty("value",1);
         click("gradePartialConfirm");
-        check(waitUntil([this,historyCount,queue] { return !m_app.busy() && m_app.history().size() == historyCount+1 && m_app.queueCount() == queue-1; }),
-              "partial_grade_records_and_advances_" + theme);
-        checkReviewQueuePreview(theme + "_after_grade");
-        {
-            const QString liveVariant = currentVariant();
-            const QVariantList liveQueue = m_app.pendingCards();
-            const QVariantList recordedHistory = m_app.history();
-            const QVariantList recordedCards = m_app.cards();
-            click("reviewTimelineItem1");
-            check(waitUntil([this,current] { return !m_app.busy() && currentVariant() == current; })
-                      && m_app.reviewingCompletedCard() && m_app.answerRevealed()
-                      && m_app.pendingCards() == liveQueue && m_app.history() == recordedHistory
-                      && m_app.cards() == recordedCards,
-                  "review_preview_completed_click_inspects_without_mutation_" + theme);
-            m_app.selectReviewCard(liveVariant);
-            check(waitUntil([this,liveVariant] { return !m_app.busy() && currentVariant() == liveVariant; })
-                      && !m_app.reviewingCompletedCard() && !m_app.answerRevealed()
-                      && m_app.pendingCards() == liveQueue,
-                  "review_preview_returns_to_live_queue_" + theme);
+        check(waitUntil([this,history,queue] {return !m_app.busy()&&m_app.history().size()==history+1&&m_app.queueCount()==queue-1&&!visible("partialDialog");}),
+              "partial_grade_commits_and_advances_"+theme);
+        bool partialRecorded=false;
+        for (const QVariant &value:m_app.history()) {
+            const QVariantMap review=value.toMap();
+            if (review.value("variantId").toString()==selected)
+                partialRecorded=review.value("grade").toInt()==1&&std::abs(review.value("recallFraction").toDouble()-1.0/3.0)<0.001;
         }
-        if (!m_app.history().isEmpty()) {
-            const QVariantMap grade = m_app.history().first().toMap();
-            check(grade.value("grade").toInt() == 1 && std::abs(grade.value("recallFraction").toDouble()-1.0/3.0) < 0.001,
-                  "partial_grade_uses_point_fraction_" + theme);
-        }
-        const QString deferred = currentVariant();
-        const int deferredCount = m_app.queueCount();
-        key(Qt::Key_D);
-        check(waitUntil([this,deferred] { return !m_app.busy() && currentVariant() != deferred; }), "defer_keyboard_advances_" + theme);
-        checkReviewQueuePreview(theme + "_after_defer");
-        const QVariantList pending = m_app.pendingCards();
-        const QString last = pending.isEmpty() ? QString() : pending.last().toMap().value("variantId",pending.last().toMap().value("id")).toString();
-        check(m_app.queueCount() == deferredCount && m_app.history().size() == historyCount+1 && last == deferred,
-              "defer_moves_to_end_without_grade_" + theme);
-        {
-            const QString selected=currentVariant();
-            const QVariantList before=m_app.pendingCards(),recordedHistory=m_app.history(),schedules=m_app.cards();
-            QVariantList expected=before;
-            QString successor;
-            for (qsizetype index=0;index<before.size();++index) {
-                if (before[index].toMap().value("variantId").toString()!=selected) continue;
-                successor=before[(index+1)%before.size()].toMap().value("variantId").toString();
-                expected.append(expected.takeAt(index));break;
-            }
-            const int completed=m_app.reviewedCount(),total=m_app.sessionTotal();
-            focus("deferCard");key(Qt::Key_Space);
-            check(waitUntil([this,&successor] {return !m_app.busy()&&currentVariant()==successor;})
-                      &&m_app.pendingCards()==expected&&!m_app.answerRevealed()
-                      &&m_app.history()==recordedHistory&&m_app.cards()==schedules
-                      &&m_app.reviewedCount()==completed&&m_app.sessionTotal()==total,
-                  "review_utility_defer_space_dispatches_once_without_grading_"+theme);
-            focus("reviewQuestion");
-        }
-        {
-            const QString selected=currentVariant();
-            const bool revealed=m_app.answerRevealed();
-            const QVariantList before=m_app.pendingCards(),recordedHistory=m_app.history(),schedules=m_app.cards();
-            focus("postponeCard");key(Qt::Key_Space);
-            check(visible("postponeDialog")&&currentVariant()==selected&&m_app.pendingCards()==before
-                      &&m_app.answerRevealed()==revealed&&m_app.history()==recordedHistory&&m_app.cards()==schedules,
-                  "review_utility_postpone_space_opens_without_review_mutation_"+theme);
-            key(Qt::Key_Escape);
-            check(!visible("postponeDialog")&&visible("reviewDialog")&&currentVariant()==selected
-                      &&m_app.pendingCards()==before&&m_app.answerRevealed()==revealed
-                      &&m_app.history()==recordedHistory&&m_app.cards()==schedules,
-                  "review_utility_postpone_cancel_preserves_review_"+theme);
-            focus("reviewQuestion");
-        }
-        const int postponedCount = m_app.queueCount();
-        key(Qt::Key_S);
-        check(visible("postponeDialog"), "postpone_keyboard_" + theme);
+        check(partialRecorded,"partial_grade_records_one_third_recall_"+theme);
+        const QString cursor=currentVariant();
+        const QVariantList pendingAfterGrade=m_app.pendingCards(),historyAfterGrade=m_app.history(),cardsAfterGrade=m_app.cards();
+        const auto selectTimeline=[this](const QString &variant) {
+            const QVariantList timeline=m_app.reviewCards();
+            int index=-1;
+            for (qsizetype position=0;position<timeline.size();++position)
+                if (timeline[position].toMap().value("variantId").toString()==variant) index=static_cast<int>(position);
+            if (index<0) return false;
+            require("reviewQueuePreview")->setProperty("currentIndex",index);
+            focus("reviewQueuePreview"); key(Qt::Key_Return);
+            return waitUntil([this,variant] {return !m_app.busy()&&currentVariant()==variant;});
+        };
+        check(selectTimeline(selected)&&m_app.reviewingCompletedCard()&&m_app.answerRevealed()
+              &&m_app.pendingCards()==pendingAfterGrade&&m_app.history()==historyAfterGrade&&m_app.cards()==cardsAfterGrade,
+              "timeline_inspects_completed_card_without_mutation_"+theme);
+        check(selectTimeline(cursor)&&!m_app.reviewingCompletedCard()&&!m_app.answerRevealed()
+              &&m_app.pendingCards()==pendingAfterGrade&&m_app.history()==historyAfterGrade&&m_app.cards()==cardsAfterGrade,
+              "timeline_returns_to_pending_card_without_mutation_"+theme);
+        const QString next=currentVariant(); const QVariantList recorded=m_app.history(),schedules=m_app.cards();
+        focus("deferCard"); key(Qt::Key_Space);
+        check(waitUntil([this,next] {return !m_app.busy()&&currentVariant()!=next;})
+              &&m_app.history()==recorded&&m_app.cards()==schedules,"defer_keyboard_does_not_grade_"+theme);
+        focus("postponeCard"); key(Qt::Key_Space);
+        check(visible("postponeDialog"),"postpone_keyboard_opens_dialog_"+theme);
+        const QString postponed=currentVariant(); const int postponedCount=m_app.queueCount();
         click("postponeConfirm");
-        check(waitUntil([this,postponedCount] { return !m_app.busy() && m_app.queueCount() == postponedCount-1; })
-              && m_app.history().size() == historyCount+1 && !visible("postponeDialog"),
-              "postpone_accepts_local_tomorrow_" + theme,
-              QStringLiteral("field=%1 dialogVisible=%2 queue=%3 expected=%4")
-                  .arg(require("postponeDate")->property("text").toString())
-                  .arg(visible("postponeDialog"))
-                  .arg(m_app.queueCount()).arg(postponedCount-1));
-        checkReviewQueuePreview(theme + "_after_postpone");
-        key(Qt::Key_K,Qt::ControlModifier);
-        require("commandSearch")->setProperty("text",QStringLiteral("summ"));
-        key(Qt::Key_Return);
-        check(waitUntil([this] { return visible("aiDialog"); }), "summary_action_opens_disclosure_" + theme);
-        QObject *const ai = m_engine.rootContext()->contextProperty("ai").value<QObject *>();
-        check(ai && !ai->property("busy").toBool() && ai->property("summary").toString().isEmpty(),
-              "summary_never_autosends_" + theme);
+        check(waitUntil([this,postponedCount] {return !m_app.busy()&&m_app.queueCount()==postponedCount-1&&!visible("postponeDialog");})
+              &&currentVariant()!=postponed&&m_app.history()==recorded,"postpone_commits_without_grade_"+theme);
+        click("reviewSummary");
+        QObject *const ai=m_engine.rootContext()->contextProperty("ai").value<QObject *>();
+        check(visible("aiDialog")&&ai&&!ai->property("busy").toBool(),"summary_requires_explicit_generation_"+theme);
         close("aiDialog");
-        const QString navigationVariant = currentVariant();
-        const int navigationQueue = m_app.queueCount();
+        const QString beforeNavigation=currentVariant(); const QVariantList navigationQueue=m_app.pendingCards();
         key(Qt::Key_2,Qt::AltModifier);
-        check(m_window->property("page").toInt() == 1 && m_app.paused() && !visible("reviewDialog")
-              && currentVariant() == navigationVariant && m_app.queueCount() == navigationQueue,
-              "review_navigation_pauses_and_preserves_session_" + theme);
-        key(Qt::Key_1,Qt::AltModifier);
-        check(visible("reviewPrimary"), "review_navigation_exposes_resume_action_" + theme);
-        click("reviewPrimary");
-        check(waitUntil([this] { return m_app.reviewing() && !m_app.paused() && visible("reviewDialog"); }),
-              "review_navigation_resume_reopens_session_" + theme);
-        layouts(theme + "_desktop_review");
+        check(waitUntil([this] {return m_app.paused();})&&currentVariant()==beforeNavigation&&m_app.pendingCards()==navigationQueue,
+              "review_navigation_pauses_and_retains_session_"+theme);
+        key(Qt::Key_1,Qt::AltModifier); click("reviewPause");
+        check(waitUntil([this] {return !m_app.paused()&&visible("reviewWorkspace");}),"review_navigation_resumes_workspace_"+theme);
+        layouts(theme+"_desktop_review");
     }
     void phone(const QString &theme)
     {
         resize(390,780);
         key(Qt::Key_2,Qt::AltModifier);
         call("setDeck",{m_deckA});
-        check(!item("cardDetails")->isVisible() && item("libraryList")->width() >= item("mainContent")->width() - rect("sideNavigation").width() - 32,
-              "phone_library_uses_full_width_" + theme);
-        layouts(theme + "_phone_library");
-        wheel("libraryScroll",theme + "_phone_library");
-        screenshot(theme + "-phone-library");
-        click("detailsToggle");
-        check(visible("cardDetailDialog"), "phone_card_detail_modal_" + theme);
+        call("pickCard",{m_longCard});
+        check(visible("libraryCardList"),"phone_library_cards_available_"+theme);
+        wheel("libraryCardList",theme+"_phone_library"); screenshot(theme+"-phone-library");
+        call("openSelectedDetail"); check(visible("cardDetailDialog"),"phone_card_detail_opens_"+theme);
         close("cardDetailDialog");
         key(Qt::Key_E,Qt::ControlModifier);
         check(visible("cardDialog"), "phone_editor_modal_" + theme);
@@ -1281,40 +817,12 @@ private:
         screenshot(theme + "-phone-editor");
         close("cardDialog");
         key(Qt::Key_1,Qt::AltModifier);
-        if (m_app.paused() && visible("reviewPrimary")) click("reviewPrimary");
-        check(waitUntil([this] { return m_app.reviewing() && !m_app.paused() && visible("reviewDialog"); }),
-              "phone_review_modal_reopened_after_navigation_" + theme);
-        ensureLongCurrent();
-        if (!m_app.answerRevealed()) key(Qt::Key_Space);
-        wheel("reviewScroll",theme + "_phone_review");
-        layouts(theme + "_phone_review");
-        const QRectF grades = rect("reviewToolbar");
-        const QRectF modalSurface = rect("reviewDialogSurface");
-        check(grades.left() >= modalSurface.left() - 1.1 && grades.right() <= modalSurface.right() + 1.1
-              && grades.top() >= modalSurface.top() - 1.1 && grades.bottom() <= modalSurface.bottom() + 1.1,
-              "phone_review_controls_do_not_overlap_nav_" + theme);
-        QObject *const queuePreview = require("reviewQueuePreview");
-        const QString previewVariant = currentVariant();
-        const int previewQueue = m_app.queueCount();
-        queuePreview->setProperty("currentIndex",0);
-        queuePreview->setProperty("contentX",0.0);
-        QTest::qWait(80);
-        const int previewStart = queuePreview->property("currentIndex").toInt();
-        focus("reviewQueuePreview");
-        key(Qt::Key_Right);
-        key(Qt::Key_Right);
-        key(Qt::Key_Right);
-        const int previewEnd = queuePreview->property("currentIndex").toInt();
-        check(previewEnd > previewStart && previewEnd < queuePreview->property("count").toInt()
-              && currentVariant() == previewVariant && m_app.queueCount() == previewQueue,
-              "phone_review_preview_keyboard_navigation_is_bounded_" + theme,
-              QStringLiteral("index=%1->%2 count=%3 focus=%4 sameVariant=%5 queue=%6->%7")
-                  .arg(previewStart).arg(previewEnd).arg(queuePreview->property("count").toInt())
-                  .arg(queuePreview->property("activeFocus").toBool()).arg(currentVariant() == previewVariant)
-                  .arg(previewQueue).arg(m_app.queueCount()));
-        screenshot(theme + "-phone-review");
-        check(!visible("navToggle") && rect("sideNavigation").width() <= 60,
-              "phone_navigation_uses_persistent_icon_rail_" + theme);
+        if (m_app.paused()) click("reviewPause");
+        check(waitUntil([this] {return m_app.reviewing()&&!m_app.paused()&&visible("reviewWorkspace");}),
+              "phone_review_resumes_after_navigation_"+theme);
+        ensureLongCurrent(); if (!m_app.answerRevealed()) {focus("reviewQuestion"); key(Qt::Key_Space);}
+        wheel("reviewScroll",theme+"_phone_review"); checkReviewQueuePreview(theme+"_phone");
+        layouts(theme+"_phone_review"); screenshot(theme+"-phone-review");
         key(Qt::Key_4,Qt::AltModifier);
         require("settingsPage")->setProperty("section",1);
         QTest::qWait(100);
@@ -1325,19 +833,13 @@ private:
     }
     void compactDesktop(const QString &theme)
     {
-        resize(860,600);
-        key(Qt::Key_2,Qt::AltModifier);
-        call("setDeck",{m_deckA});
-        call("pickCard",{m_longCard});
-        layouts(theme + "_compact_desktop");
-        const qreal pageWidth = item("mainContent")->width() - rect("sideNavigation").width();
-        check(item("libraryList")->width() >= 260 && item("cardDetails")->width() >= 240
-              && item("libraryList")->width() + item("cardDetails")->width() <= pageWidth + 2,
-              "compact_desktop_panes_clamp_width_" + theme);
-        click("detailsToggle");
-        check(item("libraryList")->width() >= pageWidth - 2 * m_window->property("gutter").toInt() - 2, "compact_desktop_collapsed_list_full_width_" + theme);
-        click("detailsToggle");
-        screenshot(theme + "-compact-desktop-library");
+        resize(860,600); key(Qt::Key_2,Qt::AltModifier); call("setDeck",{m_deckA}); call("pickCard",{m_longCard});
+        check(visible("libraryCardPane"),"compact_library_cards_available_"+theme);
+        togglePane(true,false); check(!visible("libraryCardPane"),"compact_card_pane_collapses_"+theme);
+        togglePane(true,true);
+        check(visible("libraryCardPane")&&m_window->property("selectedCardId").toString()==m_longCard,
+              "compact_card_pane_restores_selection_"+theme);
+        layouts(theme+"_compact_desktop"); screenshot(theme+"-compact-desktop-library");
     }
     void dialogsFit(const QString &theme)
     {
@@ -1358,12 +860,9 @@ private:
         require("credentialValue")->setProperty("text",QStringLiteral("isolated-fixture-secret"));
         checkDialog("credentialDialog");
         check(require("credentialValue")->property("text").toString().isEmpty(), "cancel_clears_credential_field_" + theme);
-        call("openVoiceConfig");
-        checkDialog("voiceConfigDialog");
-        call("openAiConfig");
-        checkDialog("aiConfigDialog");
-        call("openSyncConfig");
-        checkDialog("syncConfigDialog");
+        for (const QString &action:{QStringLiteral("openVoiceConfig"),QStringLiteral("openAiConfig"),QStringLiteral("openSyncConfig")}) {
+            call(action); check(m_window->property("page").toInt()==3&&visible("settingsPage"),"settings_action_opens_page_"+theme+"_"+action);
+        }
         call("openPartial");
         checkDialog("partialDialog");
         call("openPostpone");
@@ -1371,7 +870,7 @@ private:
         call("openSummary");
         checkDialog("aiDialog");
         call("openAllHistory");
-        checkDialog("allHistoryDialog");
+        check(m_window->property("page").toInt()==2,"history_action_opens_history_page_"+theme);
         call("confirmDelete",{QStringLiteral("card"),m_longCard,QStringLiteral("Fixture")});
         checkDialog("deleteDialog");
         call("showError",{QStringLiteral("GUI_FIXTURE"),QStringLiteral("A verification error."),QStringLiteral("Isolated fixture details.")});
@@ -1383,10 +882,15 @@ private:
         QObject *const atomic = m_engine.rootContext()->contextProperty("atomic").value<QObject *>();
         if (!ai || !atomic) throw std::runtime_error("Atomicize contexts were not found.");
         LoopbackProvider provider;
-        const struct EnvironmentOverride credential(QByteArrayLiteral("BETTERFLASH_LLM_API_KEY"),QByteArrayLiteral("gui-fixture-only"));
         const QString originalEndpoint = ai->property("endpoint").toString();
+        const QString originalProvider = ai->property("provider").toString();
+        ai->setProperty("provider",QStringLiteral("remote"));
         ai->setProperty("endpoint",provider.endpoint());
-        check(ai->property("hasApiKey").toBool(), "atomicize_uses_isolated_mock_credential");
+        QObject *const binding=ai->property("apiKey").value<QObject *>();
+        if (!binding||!waitUntil([binding] {return !binding->property("ownKeyId").toString().isEmpty();}))
+            throw std::runtime_error("The isolated provider credential binding is unavailable.");
+        check(QMetaObject::invokeMethod(ai,"setApiKey",Q_ARG(QString,QStringLiteral("gui-fixture-only")))
+              &&ai->property("hasApiKey").toBool(),"atomicize_uses_isolated_mock_credential");
         const int before = m_app.cards().size();
         m_app.saveCard({},m_deckA,"basic","Atomicize fixture source","Independent concept A.\n\nIndependent concept B.","verification",2);
         if (!check(waitUntil([this,before] { return !m_app.busy() && m_app.cards().size() == before+1; }), "atomicize_fixture_saved"))
@@ -1404,7 +908,7 @@ private:
         call("setDeck",{m_deckA});
         call("pickCard",{sourceId});
         provider.proposal(QJsonObject{{"decision","keep"},{"reason","The related steps need their shared context."},{"cards",QJsonArray{}}});
-        click("atomicizeSelectedCard");
+        call("openAtomicize",{sourceId});
         check(waitUntil([atomic] { return !atomic->property("busy").toBool() && atomic->property("decision").toString() == QStringLiteral("keep"); }),
               "atomicize_keep_proposal_received");
         check(visible("atomicDialog") && !item("atomicApply")->isVisible() && sourceExists(), "atomicize_keep_never_replaces_source");
@@ -1416,7 +920,7 @@ private:
             QJsonObject{{"front","What is concept B?"},{"back","Concept B."},{"pointCount",1}}
         };
         provider.proposal(QJsonObject{{"decision","split"},{"reason","Each concept has its own recall target."},{"cards",splitCards}});
-        click("atomicizeSelectedCard");
+        call("openAtomicize",{sourceId});
         check(waitUntil([this,atomic] { return !atomic->property("busy").toBool() && atomic->property("decision").toString() == QStringLiteral("split")
                      && require("atomicTabs")->property("count").toInt() == 3; }), "atomicize_split_proposal_received");
         const QString edited = QStringLiteral("An edited focused question?\n\n---\n\nAn edited focused answer.");
@@ -1435,7 +939,7 @@ private:
         close("atomicDialog");
         check(sourceExists() && m_app.cards().size() == before+1, "atomicize_cancel_discards_proposal_preserves_source");
         resize(1320,860);
-        click("atomicizeSelectedCard");
+        call("openAtomicize",{sourceId});
         check(waitUntil([atomic] { return !atomic->property("busy").toBool() && atomic->property("decision").toString() == QStringLiteral("split"); }),
               "atomicize_second_split_received");
         require("atomicDraftSource")->setProperty("text",QStringLiteral("\n\n---\n\nAn answer"));
@@ -1473,6 +977,7 @@ private:
         check(editedSaved, "atomicize_saves_edited_markdown_and_points");
         check(provider.requests == 3 && provider.onlyFixtureCredentials, "atomicize_only_loopback_mock_requests");
         ai->setProperty("endpoint",originalEndpoint);
+        ai->setProperty("provider",originalProvider);
     }
 
     QQmlApplicationEngine &m_engine;
