@@ -12,6 +12,7 @@ from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import main
+from media_fixture import png_bytes
 
 
 def digest(token):
@@ -78,7 +79,7 @@ class AccountTests(unittest.TestCase):
         status, page = self.sync([], token="beta-token")
         self.assertEqual(status, 200)
         self.assertEqual(page["events"], [])
-        data = b"account alpha media"
+        data = png_bytes()
         filename = hashlib.sha256(data).hexdigest() + ".png"
         self.assertEqual(self.request("PUT", "/v1/media/" + filename, data, raw=True)[0], 201)
         self.assertEqual(self.request("GET", "/v1/media/" + filename, token="beta-token")[0], 404)
@@ -163,7 +164,6 @@ class AccountTests(unittest.TestCase):
         cases = [
             {"accounts": [{"id": "not-a-uuid", "tokenSha256": [digest("x")]}]},
             {"accounts": [{"id": "11111111-1111-4111-8111-111111111111", "tokenSha256": ["A" * 64]}]},
-            {"accounts": [{"id": "11111111-1111-4111-8111-111111111111", "tokenSha256": []}]},
             {"accounts": [{"id": "11111111-1111-4111-8111-111111111111", "tokenSha256": [digest("x")]},
                            {"id": "11111111-1111-4111-8111-111111111111", "tokenSha256": [digest("y")]}]},
             {"accounts": [{"id": "11111111-1111-4111-8111-111111111111", "tokenSha256": [digest("x")]},

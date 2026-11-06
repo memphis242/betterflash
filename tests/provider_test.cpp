@@ -348,6 +348,50 @@ elif operation == 'clear':
         qputenv("PATH", m_originalPath);
         qunsetenv("BETTERFLASH_FAKE_SECRET_FILE");
     }
+    void environmentCredentialsAreExplicitlyReadOnly() {
+        const QByteArray variable("BETTERFLASH_TEST_READ_ONLY_KEY");
+        qputenv(variable.constData(), "environment-secret");
+        SecretStore store(QStringLiteral("test-environment"), QString::fromLatin1(variable));
+        QCOMPARE(store.storageState(), QStringLiteral("environment"));
+        store.setKey(QStringLiteral("replacement"));
+        QCOMPARE(store.key(), QStringLiteral("environment-secret"));
+        QCOMPARE(store.storageState(), QStringLiteral("environment"));
+        store.clear();
+        QCOMPARE(store.key(), QStringLiteral("environment-secret"));
+        QCOMPARE(store.storageState(), QStringLiteral("environment"));
+        qunsetenv(variable.constData());
+    }
+    void keyringDestructionDrainsPendingRemoval() {
+        const QString bin = m_temporary.filePath(QStringLiteral("shutdown-bin"));
+        QVERIFY(QDir().mkpath(bin));
+        const QString script = QDir(bin).filePath(QStringLiteral("secret-tool"));
+        QFile output(script); QVERIFY(output.open(QIODevice::WriteOnly));
+        const QByteArray program = R"(#!/usr/bin/python3
+import os, pathlib, sys, time
+target = pathlib.Path(os.environ['BETTERFLASH_FAKE_SECRET_FILE'])
+if sys.argv[1] == 'store':
+    time.sleep(0.1)
+    target.write_text(sys.stdin.read())
+elif sys.argv[1] == 'clear':
+    time.sleep(0.1)
+    target.unlink(missing_ok=True)
+)";
+        QCOMPARE(output.write(program), program.size()); output.close();
+        QVERIFY(QFile::setPermissions(script, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        const QString secretPath = m_temporary.filePath(QStringLiteral("shutdown-secret"));
+        qputenv("BETTERFLASH_FAKE_SECRET_FILE", secretPath.toUtf8());
+        qputenv("PATH", bin.toUtf8());
+        QFile initial(secretPath); QVERIFY(initial.open(QIODevice::WriteOnly));
+        QCOMPARE(initial.write("saved-secret"), qint64(12)); initial.close();
+        {
+            SecretStore store(QStringLiteral("test-shutdown"));
+            store.setKey(QStringLiteral("replacement-secret"));
+            store.clear();
+        }
+        QVERIFY(!QFile::exists(secretPath));
+        qputenv("PATH", m_originalPath);
+        qunsetenv("BETTERFLASH_FAKE_SECRET_FILE");
+    }
     void cleanupTestCase() {
         qputenv("PATH", m_originalPath);
         if (m_originalLlmKey.isNull()) qunsetenv("BETTERFLASH_LLM_API_KEY");

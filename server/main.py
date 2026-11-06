@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Local, single-account event and attachment transport for BetterFlash."""
+"""Private account event and attachment transport for BetterFlash."""
 
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
@@ -13,9 +14,18 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import socket
 import stat
 import tempfile
 import threading
+import warnings
+
+try:
+    from PIL import Image, UnidentifiedImageError, features
+except ImportError:
+    raise SystemExit("SYNC_IMAGE_DECODER: Install python3-pillow (Fedora) or python3-pil (Debian) before starting the server.") from None
+if not features.check("jpg") or not features.check("webp"):
+    raise SystemExit("SYNC_IMAGE_DECODER: Install Pillow with JPEG and WebP decoding support before starting the server.")
 from types import MappingProxyType
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4, uuid5
@@ -26,6 +36,8 @@ RESPONSE_LIMIT = 1000
 BODY_LIMIT = 4 * 1024 * 1024
 EVENT_BYTES = 3 * 1024 * 1024
 RESPONSE_BYTES = 6 * 1024 * 1024
+DELETION_SCOPE_BYTES = 24 * 1024 * 1024
+MAX_RESPONSE_BYTES = 31 * 1024 * 1024
 MEDIA_LIMIT = 20 * 1024 * 1024
 NARRATION_SAMPLE_RATE = 16000
 NARRATION_CHANNELS = 1
@@ -35,6 +47,11 @@ NARRATION_MAX_PCM_BYTES = NARRATION_SAMPLE_RATE * NARRATION_CHANNELS * NARRATION
 PAGE_MEDIA_LIMIT = 64 * 1024 * 1024
 PAGE_MEDIA_COUNT = 64
 MAX_WORKERS = 32
+ACCOUNT_WORKERS = 4
+REQUEST_SECONDS = 30
+IMAGE_PIXELS = 32000000
+Image.MAX_IMAGE_PIXELS = IMAGE_PIXELS
+warnings.filterwarnings("error", category=Image.DecompressionBombWarning)
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
 EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert", "history.apply"))
 MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
@@ -71,11 +88,11 @@ class Accounts:
             if not valid_uuid(account_id) or account_id in stores:
                 raise SystemExit("SYNC_ACCOUNTS: Account identifiers must be unique canonical UUIDs.")
             account_digests = account["tokenSha256"]
-            if (not isinstance(account_digests, list) or not account_digests
+            if (not isinstance(account_digests, list)
                     or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
                            for digest in account_digests)
                     or len(set(account_digests)) != len(account_digests)):
-                raise SystemExit("SYNC_ACCOUNTS: Each account needs unique lowercase SHA-256 token digests.")
+                raise SystemExit("SYNC_ACCOUNTS: Token digests must be unique lowercase SHA-256 values; an empty list disables access.")
             if any(digest in digests for digest in account_digests):
                 raise SystemExit("SYNC_ACCOUNTS: Token digests must identify only one account.")
             account_root = root / account_id
@@ -314,8 +331,8 @@ def validate_payload(kind, payload):
         raise ProtocolError("INVALID_EVENT", "A hierarchy repair can explicitly restore only its deck container.")
     if "restore" in payload and (kind not in ("deck.upsert", "card.upsert") or type(payload["restore"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "Restore intent must be a boolean on a deck or card upsert.")
-    if "freshVariantIds" in payload and (kind != "card.upsert" or not payload.get("restore", False) or not isinstance(payload["freshVariantIds"], list)):
-        raise ProtocolError("INVALID_EVENT", "Fresh variant identifiers belong only to an explicit card restore.")
+    if "freshVariantIds" in payload and (kind != "card.upsert" or not isinstance(payload["freshVariantIds"], list)):
+        raise ProtocolError("INVALID_EVENT", "Fresh variant identifiers belong only to a card upsert.")
     if "restoreDependency" in payload and (kind != "deck.upsert" or not payload.get("restore", False) or type(payload["restoreDependency"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "A restore dependency must be a boolean on an explicit deck restore.")
     if "historyOnly" in payload and (kind not in ("review.add", "review.correct") or type(payload["historyOnly"]) is not bool):
@@ -336,7 +353,7 @@ def validate_payload(kind, payload):
                 if variant["cardId"] != card["id"] or variant["key"] not in expected or variant["key"] in keys:
                     raise ProtocolError("INVALID_EVENT", "Card variant dependencies are invalid or duplicated.")
                 keys.add(variant["key"])
-            if payload.get("restore", False):
+            if payload.get("restore", False) or "freshVariantIds" in payload:
                 fresh = payload.get("freshVariantIds")
                 variant_ids = {variant["id"] for variant in variants}
                 if (not isinstance(fresh, list) or len(fresh) > len(variants)
@@ -380,6 +397,8 @@ def validate_event(event, device):
         raise ProtocolError("INVALID_EVENT", "The event's device or operation is invalid.")
     if not isinstance(event.get("payload"), dict):
         raise ProtocolError("INVALID_EVENT", "The event payload must be an object.")
+    if "deletionScopes" in event or "deletionScopes" in event["payload"]:
+        raise ProtocolError("INVALID_EVENT", "Deletion scopes are server response metadata and cannot be submitted by clients.")
     instant(event.get("createdAt"))
     validate_payload(event["type"], event["payload"])
     try:
@@ -431,12 +450,30 @@ def valid_media_bytes(name, data):
                 and u16(32) == NARRATION_CHANNELS * NARRATION_BYTES_PER_SAMPLE and u16(34) == NARRATION_BYTES_PER_SAMPLE * 8
                 and data[36:40] == b"data"
                 and u32(40) == len(data) - 44 and u32(40) > 0 and u32(40) % 2 == 0)
-    return True
+    try:
+        expected = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".gif": "GIF", ".webp": "WEBP"}.get(Path(name).suffix)
+        if expected is None or not 0 < len(data) <= MEDIA_LIMIT:
+            return False
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != expected or not 0 < image.width * image.height <= IMAGE_PIXELS:
+                return False
+            image.verify()
+        # Decode the first displayed frame, matching the client's QImageReader use.
+        # Never iterate an untrusted animation's remaining frames.
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+        return True
+    except (OSError, ValueError, SyntaxError, EOFError, OverflowError, UnidentifiedImageError,
+            Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return False
 
 
 class Store:
     def __init__(self, path, media):
         self.path = str(path)
+        self.request_slots = threading.BoundedSemaphore(ACCOUNT_WORKERS)
+        self._validated_media = {}
+        self._media_validation_lock = threading.Lock()
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.media = Path(media).resolve()
         self.media.mkdir(parents=True, exist_ok=True)
@@ -485,23 +522,25 @@ class Store:
                         for entity, entity_id, content in self.content_targets(json.loads(row["event_json"])):
                             database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
                                              (entity, entity_id, row["seq"], row["event_id"], row["device_id"], content))
-                if database.execute("SELECT 1 FROM deck_parents LIMIT 1").fetchone() is None:
+                database.execute("CREATE TABLE IF NOT EXISTS deletion_scopes(seq INTEGER PRIMARY KEY,scope_json TEXT NOT NULL)")
+                database.execute("CREATE TABLE IF NOT EXISTS card_locations(card_id TEXT PRIMARY KEY,deck_id TEXT NOT NULL,deleted INTEGER NOT NULL)")
+                database.execute("CREATE INDEX IF NOT EXISTS card_locations_deck ON card_locations(deck_id,deleted)")
+                database.execute("CREATE INDEX IF NOT EXISTS deck_parents_parent ON deck_parents(parent_id,deleted)")
+                database.execute("CREATE TABLE IF NOT EXISTS projection_versions(name TEXT PRIMARY KEY)")
+                if not database.execute("SELECT 1 FROM projection_versions WHERE name='authoritative-deletions-v1'").fetchone():
+                    database.execute("DELETE FROM deck_parents")
+                    database.execute("DELETE FROM card_locations")
+                    database.execute("DELETE FROM deletion_scopes")
                     pending_repairs = {}
-                    with closing(database.execute("SELECT seq,event_id,event_json FROM events ORDER BY seq")) as legacy_rows:
-                        for row in legacy_rows:
-                            event = json.loads(row["event_json"])
-                            corrections = self.project_deck(database, event)
-                            affected = set()
-                            if event["type"] == "deck.upsert":
-                                affected.add(event["payload"]["deck"]["id"])
-                            elif event["type"] == "deck.delete":
-                                affected.add(event["payload"]["id"])
-                            elif event["type"] == "history.apply":
-                                affected.update(change["id"] for change in event["payload"]["changes"] if change["entity"] == "deck")
-                            for deck_id in affected:
-                                pending_repairs.pop(deck_id, None)
-                            for corrected, container_restore in corrections or ():
-                                pending_repairs[corrected["id"]] = (event, corrected, container_restore)
+                    for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq").fetchall():
+                        event = json.loads(row["event_json"])
+                        corrections = self.project_event(database, event, row["seq"])
+                        for entity, entity_id, _ in self.content_targets(event):
+                            if entity == "deck":
+                                pending_repairs.pop(entity_id, None)
+                        for corrected, container_restore in corrections or ():
+                            pending_repairs[corrected["id"]] = (event, corrected, container_restore)
+                    database.execute("INSERT INTO projection_versions(name) VALUES('authoritative-deletions-v1')")
                     for event, corrected, container_restore in pending_repairs.values():
                         final = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (corrected["id"],)).fetchone()
                         if final is not None and not final["deleted"]:
@@ -534,20 +573,33 @@ class Store:
         return False
 
     @staticmethod
-    def mark_deleted(database, deck_id):
+    def mark_deleted(database, deck_id, scopes):
+        scope = {"decks": {}, "cards": {}}
+        scopes[deck_id] = scope
         pending = [deck_id]
         while pending:
             current = pending.pop()
-            children = database.execute("SELECT deck_id FROM deck_parents WHERE parent_id=? AND deleted=0", (current,)).fetchall()
+            if current in scope["decks"]:
+                continue
+            if len(scope["decks"]) >= 100000:
+                raise ProtocolError("DELETION_SCOPE_LIMIT", "This deletion exceeds 100000 decks. Delete smaller subtrees and sync each deletion before continuing.", 413)
+            row = database.execute("SELECT parent_id FROM deck_parents WHERE deck_id=?", (current,)).fetchone()
+            scope["decks"][current] = row[0] if row else ""
+            for card in database.execute("SELECT card_id FROM card_locations WHERE deck_id=? AND deleted=0 LIMIT 100001", (current,)):
+                if len(scope["cards"]) >= 100000:
+                    raise ProtocolError("DELETION_SCOPE_LIMIT", "This deletion exceeds 100000 cards. Delete smaller subtrees and sync each deletion before continuing.", 413)
+                scope["cards"][card[0]] = current
+            database.execute("UPDATE card_locations SET deleted=1 WHERE deck_id=?", (current,))
+            children = database.execute("SELECT deck_id FROM deck_parents WHERE parent_id=? AND deleted=0 LIMIT 100001", (current,)).fetchall()
             database.execute("INSERT INTO deck_parents(deck_id,parent_id,deleted) VALUES(?,?,1) "
                              "ON CONFLICT(deck_id) DO UPDATE SET parent_id='',deleted=1", (current, ""))
             pending.extend(child[0] for child in children)
 
     @staticmethod
-    def project_deck(database, event):
+    def project_deck(database, event, scopes):
         kind = event["type"]
         if kind == "deck.delete":
-            Store.mark_deleted(database, event["payload"]["id"])
+            Store.mark_deleted(database, event["payload"]["id"], scopes)
             return []
         if kind == "history.apply":
             changes = {change["id"]: change for change in event["payload"]["changes"]
@@ -566,18 +618,22 @@ class Store:
                                  (deck_id, parent, int(after is None)))
             for deck_id, change in changes.items():
                 if change["after"] is None:
-                    Store.mark_deleted(database, deck_id)
+                    Store.mark_deleted(database, deck_id, scopes)
             corrections = []
             for deck_id in sorted(changes, reverse=True):
                 after = changes[deck_id]["after"]
                 current = database.execute("SELECT parent_id,deleted FROM deck_parents WHERE deck_id=?", (deck_id,)).fetchone()
-                if (after is None or current["deleted"]
-                        or not Store.deck_would_cycle(database, deck_id, current["parent_id"])):
+                if after is None or current["deleted"]:
+                    continue
+                target = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (current["parent_id"],)).fetchone()
+                deleted_parent = target is not None and target["deleted"]
+                if not deleted_parent and not Store.deck_would_cycle(database, deck_id, current["parent_id"]):
                     continue
                 old = previous[deck_id]
                 parent = old["parent_id"] if old is not None and not old["deleted"] else ""
                 database.execute("UPDATE deck_parents SET parent_id='' WHERE deck_id=?", (deck_id,))
-                if Store.deck_would_cycle(database, deck_id, parent):
+                candidate = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (parent,)).fetchone()
+                if (candidate is not None and candidate["deleted"]) or Store.deck_would_cycle(database, deck_id, parent):
                     parent = ""
                 database.execute("UPDATE deck_parents SET parent_id=? WHERE deck_id=?", (parent, deck_id))
                 corrected = dict(after)
@@ -611,6 +667,38 @@ class Store:
                          (deck["id"], previous))
         return [(corrected, False)]
 
+    @staticmethod
+    def project_event(database, event, seq):
+        kind, payload = event["type"], event["payload"]
+        cards = []
+        if kind == "card.upsert":
+            cards = [(payload["card"]["id"], payload["card"], payload.get("restore", False))]
+        elif kind == "card.delete":
+            cards = [(payload["id"], None, False)]
+        elif kind == "history.apply":
+            cards = [(change["id"], change["after"], True) for change in payload["changes"]
+                     if change["entity"] == "card" and not change.get("contextOnly")]
+        for card_id, after, restore in cards:
+            existing = database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()
+            if after is None:
+                database.execute("INSERT INTO card_locations VALUES(?,'',1) ON CONFLICT(card_id) DO UPDATE SET deleted=1", (card_id,))
+            elif not existing or not existing[0] or restore:
+                parent = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (after["deckId"],)).fetchone()
+                deleted = parent is not None and parent[0] and not restore
+                database.execute("INSERT INTO card_locations VALUES(?,?,?) ON CONFLICT(card_id) DO UPDATE SET deck_id=excluded.deck_id,deleted=excluded.deleted",
+                                 (card_id, after["deckId"], int(deleted)))
+        scopes = {}
+        corrections = Store.project_deck(database, event, scopes)
+        if scopes:
+            encoded = json.dumps(scopes, separators=(",", ":"), sort_keys=True)
+            deck_count = sum(len(scope["decks"]) for scope in scopes.values())
+            card_count = sum(len(scope["cards"]) for scope in scopes.values())
+            if (len(encoded.encode()) > DELETION_SCOPE_BYTES or deck_count > 200000 or card_count > 100000
+                    or any(len(scope["decks"]) > 100000 for scope in scopes.values())):
+                raise ProtocolError("DELETION_SCOPE_LIMIT", "This deletion exceeds the supported collection scope. Delete smaller subtrees and sync each deletion before continuing.", 413)
+            database.execute("INSERT OR REPLACE INTO deletion_scopes VALUES(?,?)", (seq, encoded))
+        return corrections
+
     def append_repairs(self, database, source_event, corrections):
         for corrected, container_restore in corrections:
             generated = {"id": str(uuid4()), "deviceId": self.collection_id,
@@ -631,7 +719,7 @@ class Store:
             database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
                              ("deck", corrected["id"], generated_seq, generated["id"], generated["deviceId"],
                               json.dumps(corrected, separators=(",", ":"), sort_keys=True, ensure_ascii=False)))
-            self.project_deck(database, generated)
+            self.project_event(database, generated, generated_seq)
 
     @staticmethod
     def content_targets(event):
@@ -689,6 +777,25 @@ class Store:
                 raise ProtocolError("MEDIA_MISSING", "Upload the referenced image before sending its card.", 422) from None
             if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= MEDIA_LIMIT:
                 raise ProtocolError("MEDIA_STORAGE", "A referenced image is missing or invalid. Restore the server media file.", 422)
+            signature = (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+            with self._media_validation_lock:
+                validated = self._validated_media.get(name) == signature
+            if not validated:
+                try:
+                    descriptor = os.open(self.media / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(descriptor, "rb") as source:
+                        current = os.fstat(source.fileno())
+                        if not stat.S_ISREG(current.st_mode) or not 0 < current.st_size <= MEDIA_LIMIT:
+                            raise OSError("invalid media file")
+                        data = source.read(MEDIA_LIMIT + 1)
+                    if hashlib.sha256(data).hexdigest() != name.split(".")[0] or not valid_media_bytes(name, data):
+                        raise ProtocolError("MEDIA_INVALID", "A referenced attachment is invalid. Restore valid media or recover this collection from a trusted backup.", 422)
+                except OSError:
+                    raise ProtocolError("MEDIA_STORAGE", "Cannot validate a referenced attachment. Restore the server media file.", 422) from None
+                with self._media_validation_lock:
+                    if len(self._validated_media) >= 256:
+                        del self._validated_media[next(iter(self._validated_media))]
+                    self._validated_media[name] = signature
             result[name] = metadata.st_size
         if len(result) > PAGE_MEDIA_COUNT or sum(result.values()) > PAGE_MEDIA_LIMIT:
             raise ProtocolError("MEDIA_EVENT_LIMIT", "A card can reference at most 64 images and 64 MiB of attached data.", 413)
@@ -735,7 +842,7 @@ class Store:
                                                  (event_seq, entity, entity_id, head["seq"], head["event_id"], event["id"]))
                             database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
                                              (entity, entity_id, event_seq, event["id"], body["deviceId"], content))
-                        corrections = self.project_deck(database, event)
+                        corrections = self.project_event(database, event, event_seq)
                         if corrections:
                             self.append_repairs(database, event, corrections)
                     if event["id"] not in accepted:
@@ -751,8 +858,17 @@ class Store:
                         assets = {**media_sizes, **self.media_sizes(event)}
                         if outgoing and (len(assets) > PAGE_MEDIA_COUNT or sum(assets.values()) > PAGE_MEDIA_LIMIT):
                             break
+                        wrapper = {"seq": row["seq"], "event": event}
+                        scope = database.execute("SELECT scope_json FROM deletion_scopes WHERE seq=?", (row["seq"],)).fetchone()
+                        if scope:
+                            wrapper["deletionScopes"] = json.loads(scope[0])
+                        size += len(json.dumps(wrapper.get("deletionScopes", {}), separators=(",", ":")).encode())
+                        if size > MAX_RESPONSE_BYTES:
+                            raise ProtocolError("STORAGE_ERROR", "A stored deletion exceeds the supported download limit. Preserve the server database and contact its administrator.", 500)
+                        if outgoing and response_bytes + size > RESPONSE_BYTES:
+                            break
                         media_sizes = assets
-                        outgoing.append({"seq": row["seq"], "event": event})
+                        outgoing.append(wrapper)
                         response_bytes += size
                 next_cursor = outgoing[-1]["seq"] if outgoing else cursor
                 latest = database.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0]
@@ -802,6 +918,32 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(20)
+        self._request_store = None
+        self._deadline = threading.Timer(REQUEST_SECONDS, self.expire_request)
+        self._deadline.daemon = True
+        self._deadline.start()
+
+    def expire_request(self):
+        # Shutdown interrupts buffered header/body reads as well as blocked writes.
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # A peer may have closed the socket at the deadline.
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionError, TimeoutError):
+            pass  # Disconnects and absolute deadlines end only this request.
+
+    def finish(self):
+        self._deadline.cancel()
+        try:
+            super().finish()
+        finally:
+            if self._request_store is not None:
+                self._request_store.request_slots.release()
+                self._request_store = None
 
     def log_message(self, *_args):
         # HTTP headers and user content never enter the server log.
@@ -833,6 +975,11 @@ class Handler(BaseHTTPRequestHandler):
         if store is None:
             self.send_error_value(ProtocolError("UNAUTHORIZED", "Use the server's configured access token.", 401), body=body)
             return None
+        if self._request_store is None:
+            if not store.request_slots.acquire(blocking=False):
+                self.send_error_value(ProtocolError("ACCOUNT_BUSY", "This account has too many active requests. Retry shortly.", 429), body=body)
+                return None
+            self._request_store = store
         return store
 
     def collection_matches(self, store, *, required, body=True):
@@ -931,7 +1078,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ProtocolError("MEDIA_PATH", "The stored image path is invalid.", 409)
             with tempfile.NamedTemporaryFile(dir=store.media, delete=False) as output:
                 temporary = Path(output.name)
-                output.write(data)
+                if output.write(data) != len(data):
+                    raise OSError("Incomplete media write")
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, target)

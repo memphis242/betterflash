@@ -10,6 +10,8 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSettings>
@@ -62,6 +64,7 @@ public:
                     socket->disconnect(this);
                     connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
                     if (request.method == QByteArrayLiteral("GET") && request.path.endsWith("/v1/info")) {
+                        ++infoRequests;
                         const QByteArray body = QJsonDocument::fromVariant(QVariantMap{
                             {QStringLiteral("collectionId"), m_collectionId},
                             {QStringLiteral("protocolVersion"), 3},
@@ -97,12 +100,17 @@ public:
     bool listen() { return m_server.listen(QHostAddress::LocalHost, 0); }
     QString endpoint() const { return QStringLiteral("http://127.0.0.1:%1/v1/sync").arg(m_server.serverPort()); }
     QList<struct HttpRequest> requests;
+    int infoRequests = 0;
 private:
     QTcpServer m_server;
     const Handler m_handler;
     const QString m_collectionId;
     QHash<QTcpSocket *, QByteArray> m_buffers;
 };
+void configureSync(SyncController &sync, const QString &endpoint) {
+    sync.setEndpoint(endpoint);
+    if (!sync.hasToken()) sync.setToken(QStringLiteral("local-integration-test-token-0123456789"));
+}
 QByteArray json(const QVariantMap &value) { return QJsonDocument::fromVariant(value).toJson(QJsonDocument::Compact); }
 QVariantMap emptyResponse(const struct HttpRequest &request) {
     const QVariantMap batch = QJsonDocument::fromJson(request.body).toVariant().toMap();
@@ -256,6 +264,286 @@ private slots:
         const auto match = QRegularExpression(QStringLiteral("http://127\\.0\\.0\\.1:[0-9]+")).match(message);
         QVERIFY(match.hasMatch());
         m_endpoint = match.captured() + QStringLiteral("/v1/sync");
+        qputenv("BETTERFLASH_SYNC_ENDPOINT", m_endpoint.toUtf8());
+    }
+    void environmentTokenIsNeverSentToAnotherEndpoint() {
+        LocalHttpFixture other([](const struct HttpRequest &request) { return HttpResponse{json(emptyResponse(request))}; });
+        QVERIFY(other.listen());
+        AppController app(m_temporary.filePath(QStringLiteral("scoped-environment-token")));
+        QVERIFY(waitIdle(app));
+        SyncController sync(&app, app.mediaPath());
+        sync.setEndpoint(m_endpoint);
+        QVERIFY(sync.hasToken());
+        QCOMPARE(sync.keyStorageState(), QStringLiteral("environment"));
+        sync.setEndpoint(other.endpoint());
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 5000));
+        QCOMPARE(other.infoRequests, 0);
+        QCOMPARE(other.requests.size(), 0);
+        QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_TOKEN")));
+        QVERIFY(!sync.hasToken());
+    }
+    void durableNoticesSurviveCleanSyncAndConnectionFailure() {
+        const QString directory = m_temporary.filePath(QStringLiteral("durable-controller-notices"));
+        QVariantMap retained;
+        QString deckId;
+        {
+            AppController app(directory);
+            AppController peer(m_temporary.filePath(QStringLiteral("durable-controller-peer")));
+            QVERIFY(waitIdle(app)); QVERIFY(waitIdle(peer));
+            app.createDeck(QStringLiteral("Shared deck")); QVERIFY(waitIdle(app));
+            deckId = app.decks().first().toMap().value(QStringLiteral("id")).toString();
+            SyncController sync(&app, app.mediaPath()), peerSync(&peer, peer.mediaPath());
+            configureSync(sync, m_endpoint); configureSync(peerSync, m_endpoint);
+            QVERIFY2(synchronize(sync), qPrintable(sync.error()));
+            QVERIFY2(synchronize(peerSync), qPrintable(peerSync.error()));
+            app.updateDeck(deckId, QStringLiteral("Desktop edit"));
+            peer.updateDeck(deckId, QStringLiteral("Peer edit"));
+            QVERIFY(waitIdle(app)); QVERIFY(waitIdle(peer));
+            QVERIFY2(synchronize(peerSync), qPrintable(peerSync.error()));
+            sync.synchronize();
+            QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 10000));
+            QVERIFY2(sync.error().startsWith(QStringLiteral("SYNC_CONTENT_CONFLICT")), qPrintable(sync.error()));
+            retained = sync.syncNotices();
+            QVERIFY(retained.value(QStringLiteral("contentConflictCount")).toLongLong() > 0);
+            QVERIFY(betterflash::model::validUuid(retained.value(QStringLiteral("revision")).toString()));
+            QVERIFY(retained.value(QStringLiteral("records")).toStringList().contains(QStringLiteral("deck ") + deckId));
+            sync.synchronize();
+            QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 10000));
+            QCOMPARE(QJsonObject::fromVariantMap(sync.syncNotices()), QJsonObject::fromVariantMap(retained));
+            QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_CONTENT_CONFLICT")));
+        }
+        AppController restarted(directory); QVERIFY(waitIdle(restarted));
+        SyncController sync(&restarted, restarted.mediaPath());
+        configureSync(sync, m_endpoint);
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 10000));
+        QCOMPARE(QJsonObject::fromVariantMap(sync.syncNotices()), QJsonObject::fromVariantMap(retained));
+        QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_CONTENT_CONFLICT")));
+
+        QTcpServer unavailable;
+        QVERIFY(unavailable.listen(QHostAddress::LocalHost, 0));
+        const QString unreachableEndpoint = QStringLiteral("http://127.0.0.1:%1/v1/sync").arg(unavailable.serverPort());
+        unavailable.close();
+        configureSync(sync, unreachableEndpoint);
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 10000));
+        QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_IDENTITY")));
+        QVERIFY(sync.error().contains(QStringLiteral("SYNC_CONTENT_CONFLICT")));
+        QCOMPARE(QJsonObject::fromVariantMap(sync.syncNotices()), QJsonObject::fromVariantMap(retained));
+
+        configureSync(sync, m_endpoint);
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&sync] { return !sync.busy(); }, 10000));
+        QCOMPARE(QJsonObject::fromVariantMap(sync.syncNotices()), QJsonObject::fromVariantMap(retained));
+        const int pending = outboxCount(restarted.storagePath());
+        restarted.acknowledgeSyncNotices(retained.value(QStringLiteral("revision")).toString());
+        QVERIFY(waitIdle(restarted));
+        QCOMPARE(sync.syncNotices().value(QStringLiteral("contentConflictCount")).toLongLong(), qint64(0));
+        QVERIFY(sync.syncNotices().value(QStringLiteral("records")).toStringList().isEmpty());
+        QVERIFY(sync.syncNotices().value(QStringLiteral("revision")) != retained.value(QStringLiteral("revision")));
+        QVERIFY(sync.error().isEmpty());
+        QCOMPARE(outboxCount(restarted.storagePath()), pending);
+        QVERIFY2(synchronize(sync), qPrintable(sync.error()));
+    }
+    QVariantMap prepare(AppController &app) {
+        QSignalSpy ready(&app, &AppController::syncBatchReady);
+        app.requestSyncBatch();
+        if (ready.isEmpty() && !ready.wait(5000)) return {};
+        return ready.first().first().toMap();
+    }
+    QVariantMap upload(const QVariantMap &batch) {
+        QNetworkAccessManager network;
+        QNetworkRequest request{QUrl(m_endpoint)};
+        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        request.setRawHeader("Authorization", "Bearer local-integration-test-token-0123456789");
+        request.setRawHeader("X-BetterFlash-Protocol", "3");
+        QVariantMap outgoing = batch;
+        if (outgoing.value("collectionId").toString().isEmpty()) outgoing.remove("collectionId");
+        QNetworkReply *const reply = network.post(request, json(outgoing));
+        if (!QTest::qWaitFor([reply] { return reply->isFinished(); }, 10000)) return {};
+        QVariantMap result = QJsonDocument::fromJson(reply->readAll()).toVariant().toMap();
+        if (result.contains("error")) qWarning() << result;
+        result.insert("requestId", batch.value("requestId"));
+        return result;
+    }
+    bool receive(AppController &app, const QVariantMap &response) {
+        QSignalSpy applied(&app, &AppController::syncApplied);
+        app.applySyncResponse(response);
+        if (applied.isEmpty() && !applied.wait(5000)) return false;
+        return QTest::qWaitFor([&app] { return !app.busy(); }, 5000) && applied.first().first().toBool();
+    }
+    bool exchange(AppController &app) { return receive(app, upload(prepare(app))); }
+    QString create(AppController &app, const QString &name) {
+        QSet<QString> before;
+        for (const QVariant &deck : app.decks()) before.insert(deck.toMap().value("id").toString());
+        app.createDeck(name);
+        if (!waitIdle(app)) return {};
+        for (const QVariant &deck : app.decks())
+            if (!before.contains(deck.toMap().value("id").toString())) return deck.toMap().value("id").toString();
+        return {};
+    }
+    QVariantList schedules(const AppController &app) {
+        return app.cards().isEmpty() ? QVariantList{} : app.cards().first().toMap().value("variants").toList();
+    }
+    void authoritativeDeletionSurvivesMoveOutAndFreshReplay() {
+        AppController desktop(m_temporary.filePath("scope-desktop")), phone(m_temporary.filePath("scope-phone"));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString parent = create(desktop, "Parent"), child = create(desktop, "Child");
+        QVERIFY(desktop.saveCard({}, child, "basic", "Question", "Answer", {}, 1)); QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        desktop.deleteDeck(parent); QVERIFY(waitIdle(desktop));
+        QVERIFY(phone.moveDeck(child, parent)); QVERIFY(waitIdle(phone)); QVERIFY(exchange(phone));
+        QVERIFY(exchange(desktop));
+        QVERIFY(phone.moveDeck(child, {})); QVERIFY(waitIdle(phone)); QVERIFY(exchange(phone));
+        QVERIFY(exchange(desktop));
+        AppController fresh(m_temporary.filePath("scope-fresh")); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        QCOMPARE(deckParents(phone), deckParents(fresh));
+        QCOMPARE(deckParents(desktop), deckParents(fresh));
+        QCOMPARE(phone.cards().size(), fresh.cards().size());
+        QVERIFY(fresh.decks().isEmpty()); QVERIFY(fresh.cards().isEmpty());
+        AppController paged(m_temporary.filePath("scope-paged")); QVERIFY(waitIdle(paged));
+        bool more=true;
+        for (int page=0;more&&page<100;++page) {
+            QVariantMap result=upload(prepare(paged));
+            const QVariantList events=result.value("events").toList();
+            if (events.size()>1) {
+                const QVariantMap wrapper=events.first().toMap();
+                result.insert("events",QVariantList{wrapper}); result.insert("cursor",wrapper.value("seq")); result.insert("hasMore",true);
+                result.remove("contentConflicts"); result.remove("contentConflictCount"); result.remove("hierarchyResolutionCount");
+            }
+            more=result.value("hasMore").toBool(); QVERIFY(receive(paged,result));
+        }
+        QVERIFY(!more); QCOMPARE(deckParents(paged),deckParents(fresh)); QCOMPARE(paged.cards().size(),fresh.cards().size());
+    }
+    void historyMoveIntoDeletedParentGetsRepaired() {
+        AppController desktop(m_temporary.filePath("parent-desktop")), phone(m_temporary.filePath("parent-phone"));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString parent = create(desktop, "Parent"), child = create(desktop, "Child");
+        QVERIFY(desktop.moveDeck(child, parent)); QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        QSignalSpy actions(&desktop, &AppController::actionRecorded);
+        QVERIFY(desktop.moveDeck(child, {})); QVERIFY(waitIdle(desktop));
+        const QString action = actions.last().first().toString();
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        QVERIFY(desktop.applyHistory(action, false)); QVERIFY(waitIdle(desktop));
+        phone.deleteDeck(parent); QVERIFY(waitIdle(phone)); QVERIFY(exchange(phone));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone)); QVERIFY(exchange(desktop));
+        AppController fresh(m_temporary.filePath("parent-fresh")); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        QCOMPARE(deckParents(desktop), deckParents(fresh)); QCOMPARE(deckParents(phone), deckParents(fresh));
+        QVERIFY(deckParents(fresh).contains(child)); QCOMPARE(deckParents(fresh).value(child).toString(), QString());
+    }
+    void restoredScopedChildUsesItsCurrentParent() {
+        AppController desktop(m_temporary.filePath("restore-scope-desktop")), phone(m_temporary.filePath("restore-scope-phone"));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString parent=create(desktop,"Parent"),child=create(desktop,"Child");
+        QVERIFY(desktop.saveCard({},child,"basic","Question","Answer",{},1)); QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        desktop.deleteDeck(parent); QVERIFY(waitIdle(desktop));
+        QVERIFY(phone.moveDeck(child,parent)); QVERIFY(waitIdle(phone)); QVERIFY(exchange(phone));
+        QVERIFY(exchange(desktop));
+        QSignalSpy actions(&phone,&AppController::actionRecorded);
+        QVERIFY(phone.moveDeck(child,{})); QVERIFY(waitIdle(phone));
+        QVERIFY(phone.applyHistory(actions.last().first().toString(),false)); QVERIFY(waitIdle(phone));
+        QVERIFY(exchange(phone)); QVERIFY(exchange(desktop));
+        AppController fresh(m_temporary.filePath("restore-scope-fresh")); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        QCOMPARE(deckParents(phone),deckParents(fresh)); QCOMPARE(deckParents(desktop),deckParents(fresh));
+        QVERIFY(deckParents(fresh).contains(child)); QCOMPARE(deckParents(fresh).value(child).toString(),QString());
+        QVERIFY(phone.cards().isEmpty()); QVERIFY(fresh.cards().isEmpty());
+    }
+    void recreatedVariantRejectsReviewFromRemovedGeneration_data() {
+        QTest::addColumn<QString>("kind"); QTest::addColumn<QString>("reducedKind");
+        QTest::addColumn<QString>("front"); QTest::addColumn<QString>("reducedFront");
+        QTest::addColumn<QString>("back"); QTest::addColumn<QString>("removedKey");
+        QTest::newRow("reverse") << QString("reverse") << QString("basic") << QString("Question") << QString("Question") << QString("Answer") << QString("reverse");
+        QTest::newRow("numbered-cloze") << QString("cloze") << QString("cloze") << QString("{{c1::One}} {{c2::Two}}") << QString("{{c1::One}}") << QString() << QString("c2");
+    }
+    void recreatedVariantRejectsReviewFromRemovedGeneration() {
+        QFETCH(QString,kind); QFETCH(QString,reducedKind); QFETCH(QString,front);
+        QFETCH(QString,reducedFront); QFETCH(QString,back); QFETCH(QString,removedKey);
+        const QString suffix=QString::fromLatin1(QTest::currentDataTag());
+        AppController desktop(m_temporary.filePath("variant-desktop-"+suffix)), phone(m_temporary.filePath("variant-phone-"+suffix));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString deck = create(desktop, "Deck");
+        QVERIFY(desktop.saveCard({}, deck, kind, front, back, {}, 1)); QVERIFY(waitIdle(desktop));
+        const QString id = desktop.cards().first().toMap().value("id").toString();
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        phone.startReview(deck); QVERIFY(waitIdle(phone)); phone.selectReviewCard(betterflash::model::variantId(id, removedKey)); QVERIFY(waitIdle(phone)); phone.revealAnswer(); QVERIFY(waitIdle(phone)); phone.grade(3); QVERIFY(waitIdle(phone));
+        QVERIFY(desktop.saveCard(id, deck, reducedKind, reducedFront, back, {}, 1)); QVERIFY(waitIdle(desktop));
+        const QVariantMap held = upload(prepare(desktop));
+        QVERIFY(desktop.saveCard(id, deck, kind, front, back, {}, 1)); QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(phone));
+        QVERIFY(receive(desktop, held)); QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        AppController fresh(m_temporary.filePath("variant-fresh-"+suffix)); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        QCOMPARE(schedules(desktop), schedules(fresh)); QCOMPARE(schedules(phone), schedules(fresh));
+    }
+    void independentReviewCannotCrossLaterUndoBarrier() {
+        AppController desktop(m_temporary.filePath("undo-desktop")), phone(m_temporary.filePath("undo-phone"));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString deck = create(desktop, "Deck");
+        QVERIFY(desktop.saveCard({}, deck, "basic", "Question", "Answer", {}, 1)); QVERIFY(waitIdle(desktop));
+        desktop.startReview(deck); QVERIFY(waitIdle(desktop)); desktop.revealAnswer(); QVERIFY(waitIdle(desktop)); desktop.grade(0); QVERIFY(waitIdle(desktop));
+        desktop.stopReview(); QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        for (const QString &path : {desktop.storagePath(), phone.storagePath()}) {
+            const QString connection = betterflash::model::uuid();
+            {
+                QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE", connection);
+                database.setDatabaseName(path); QVERIFY(database.open());
+                QSqlQuery due(database);
+                QVERIFY(due.exec("UPDATE review_variants SET due='2020-01-01T00:00:00.000Z'"));
+                database.close();
+            }
+            QSqlDatabase::removeDatabase(connection);
+        }
+        QSignalSpy actions(&desktop, &AppController::actionRecorded);
+        desktop.startReview(deck); QVERIFY(waitIdle(desktop)); desktop.revealAnswer(); QVERIFY(waitIdle(desktop)); desktop.grade(3); QVERIFY(waitIdle(desktop));
+        const QString action = actions.last().first().toString();
+        QVERIFY(desktop.applyHistory(action, false)); QVERIFY(waitIdle(desktop));
+        phone.startReview(deck); QVERIFY(waitIdle(phone)); phone.revealAnswer(); QVERIFY(waitIdle(phone)); phone.grade(3); QVERIFY(waitIdle(phone));
+        QVERIFY(exchange(phone)); QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        AppController fresh(m_temporary.filePath("undo-fresh")); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        QCOMPARE(schedules(desktop), schedules(fresh)); QCOMPARE(schedules(phone), schedules(fresh));
+    }
+    void committedConflictNoticeSurvivesInterruptedDownloadAndRestart() {
+        const QString directory=m_temporary.filePath("notice-desktop");
+        QString deck;
+        {
+            AppController desktop(directory), phone(m_temporary.filePath("notice-phone"));
+            QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+            deck=create(desktop,"Shared deck"); QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+            phone.updateDeck(deck,"Phone edit"); QVERIFY(waitIdle(phone));
+            desktop.updateDeck(deck,"Desktop edit"); QVERIFY(waitIdle(desktop));
+            QVERIFY(exchange(phone));
+            QVariantMap first=upload(prepare(desktop));
+            QVERIFY(first.value("contentConflictCount").toLongLong()>0);
+            first.insert("hasMore",true);
+            QVERIFY(receive(desktop,first));
+            const QVariantMap notices=prepare(desktop).value("syncNotices").toMap();
+            QVERIFY(notices.value("contentConflictCount").toLongLong()>0);
+        }
+        AppController restarted(directory); QVERIFY(waitIdle(restarted));
+        QVariantMap batch=prepare(restarted);
+        const QVariantMap before=batch.value("syncNotices").toMap();
+        QVERIFY(before.value("contentConflictCount").toLongLong()>0);
+        QVERIFY(!before.value("records").toStringList().isEmpty());
+        QVERIFY(receive(restarted,upload(batch)));
+        QCOMPARE(prepare(restarted).value("syncNotices").toMap(),before);
+        AppController peer(m_temporary.filePath("notice-peer")); QVERIFY(waitIdle(peer)); QVERIFY(exchange(peer));
+        restarted.updateDeck(deck,"Another desktop edit"); QVERIFY(waitIdle(restarted));
+        peer.updateDeck(deck,"Another phone edit"); QVERIFY(waitIdle(peer));
+        QVERIFY(exchange(peer)); QVERIFY(exchange(restarted));
+        const QVariantMap latest=prepare(restarted).value("syncNotices").toMap();
+        QVERIFY(latest.value("revision")!=before.value("revision"));
+        const int pending=outboxCount(restarted.storagePath());
+        restarted.acknowledgeSyncNotices(before.value("revision").toString());
+        QVERIFY(QTest::qWaitFor([&restarted] {return !restarted.busy();},5000));
+        QCOMPARE(restarted.lastError().value("code").toString(),QString("SYNC_NOTICE_CHANGED"));
+        QCOMPARE(prepare(restarted).value("syncNotices").toMap(),latest);
+        restarted.acknowledgeSyncNotices(latest.value("revision").toString()); QVERIFY(waitIdle(restarted));
+        const QVariantMap cleared=prepare(restarted).value("syncNotices").toMap();
+        QCOMPARE(cleared.value("contentConflictCount").toLongLong(),qint64(0)); QVERIFY(cleared.value("records").toStringList().isEmpty());
+        QCOMPARE(outboxCount(restarted.storagePath()),pending);
     }
     void offlineContentAndReviewConvergeInEitherUploadOrder_data() {
         QTest::addColumn<bool>("contentFirst");
@@ -276,7 +564,7 @@ private slots:
             QVERIFY(waitIdle(source));
             const QString cardId = source.cards().first().toMap().value(QStringLiteral("id")).toString();
             SyncController sourceSync(&source, source.mediaPath());
-            sourceSync.setEndpoint(m_endpoint);
+            configureSync(sourceSync, m_endpoint);
             QVERIFY2(synchronize(sourceSync), qPrintable(sourceSync.error()));
 
             AppController desktop(m_temporary.filePath(label + QStringLiteral("-desktop")));
@@ -285,8 +573,8 @@ private slots:
             QVERIFY(waitIdle(phone));
             SyncController desktopSync(&desktop, desktop.mediaPath());
             SyncController phoneSync(&phone, phone.mediaPath());
-            desktopSync.setEndpoint(m_endpoint);
-            phoneSync.setEndpoint(m_endpoint);
+            configureSync(desktopSync, m_endpoint);
+            configureSync(phoneSync, m_endpoint);
             QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
             QVERIFY2(synchronize(phoneSync), qPrintable(phoneSync.error()));
             QCOMPARE(desktop.cards().size(), 1);
@@ -316,7 +604,7 @@ private slots:
             AppController fresh(m_temporary.filePath(label + QStringLiteral("-fresh")));
             QVERIFY(waitIdle(fresh));
             SyncController freshSync(&fresh, fresh.mediaPath());
-            freshSync.setEndpoint(m_endpoint);
+            configureSync(freshSync, m_endpoint);
             QVERIFY2(synchronize(freshSync), qPrintable(freshSync.error()));
             QCOMPARE(fresh.cards().size(), 1);
             QCOMPARE(fresh.cards().first().toMap().value(QStringLiteral("front")).toString(), QStringLiteral("Edited offline question"));
@@ -360,7 +648,7 @@ private slots:
         QVERIFY(waitIdle(source));
         const QString cardId = source.cards().first().toMap().value(QStringLiteral("id")).toString();
         SyncController sourceSync(&source, source.mediaPath());
-        sourceSync.setEndpoint(m_endpoint);
+        configureSync(sourceSync, m_endpoint);
         QVERIFY2(synchronize(sourceSync), qPrintable(sourceSync.error()));
         AppController desktop(m_temporary.filePath(QStringLiteral("concurrent-review-desktop")));
         AppController phone(m_temporary.filePath(QStringLiteral("concurrent-review-phone")));
@@ -368,8 +656,8 @@ private slots:
         QVERIFY(waitIdle(phone));
         SyncController desktopSync(&desktop, desktop.mediaPath());
         SyncController phoneSync(&phone, phone.mediaPath());
-        desktopSync.setEndpoint(m_endpoint);
-        phoneSync.setEndpoint(m_endpoint);
+        configureSync(desktopSync, m_endpoint);
+        configureSync(phoneSync, m_endpoint);
         QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
         QVERIFY2(synchronize(phoneSync), qPrintable(phoneSync.error()));
         QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
@@ -395,7 +683,7 @@ private slots:
         AppController fresh(m_temporary.filePath(QStringLiteral("concurrent-review-fresh")));
         QVERIFY(waitIdle(fresh));
         SyncController freshSync(&fresh, fresh.mediaPath());
-        freshSync.setEndpoint(m_endpoint);
+        configureSync(freshSync, m_endpoint);
         QVERIFY2(synchronize(freshSync), qPrintable(freshSync.error()));
         const struct DatabaseSnapshot state = readSnapshot(fresh.storagePath(), cardId);
         QVERIFY(state.valid);
@@ -425,9 +713,9 @@ private slots:
         app.createDeck(QStringLiteral("Pending upload"));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(first.endpoint());
+        configureSync(sync, first.endpoint());
         QVERIFY2(synchronize(sync), qPrintable(sync.error()));
-        sync.setEndpoint(second.endpoint());
+        configureSync(sync, second.endpoint());
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy() && !app.busy(); }, 10000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_COLLECTION_MISMATCH")));
@@ -444,7 +732,7 @@ private slots:
         const QString cardId = desktop.cards().first().toMap().value(QStringLiteral("id")).toString();
         SyncController desktopSync(&desktop, desktop.mediaPath());
         SyncController phoneSync(&phone, phone.mediaPath());
-        desktopSync.setEndpoint(m_endpoint); phoneSync.setEndpoint(m_endpoint);
+        configureSync(desktopSync, m_endpoint); configureSync(phoneSync, m_endpoint);
         QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
         QVERIFY2(synchronize(phoneSync), qPrintable(phoneSync.error()));
         QVERIFY(desktop.saveCard(cardId, deckId, QStringLiteral("basic"), QStringLiteral("PC offline edit"), QStringLiteral("Answer"), {}, 1));
@@ -460,7 +748,7 @@ private slots:
         AppController fresh(m_temporary.filePath(QStringLiteral("content-conflict-fresh")));
         QVERIFY(waitIdle(fresh));
         SyncController freshSync(&fresh, fresh.mediaPath());
-        freshSync.setEndpoint(m_endpoint); freshSync.synchronize();
+        configureSync(freshSync, m_endpoint); freshSync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !freshSync.busy(); }, 30000));
         QVERIFY(freshSync.error().startsWith(QStringLiteral("SYNC_CONTENT_CONFLICT")));
         const struct DatabaseSnapshot state = readSnapshot(fresh.storagePath(), cardId);
@@ -486,13 +774,13 @@ private slots:
         const QString deckA = source.decks().at(0).toMap().value(QStringLiteral("id")).toString();
         const QString deckB = source.decks().at(1).toMap().value(QStringLiteral("id")).toString();
         QVERIFY(!deckA.isEmpty()); QVERIFY(!deckB.isEmpty());
-        SyncController sourceSync(&source, source.mediaPath()); sourceSync.setEndpoint(m_endpoint);
+        SyncController sourceSync(&source, source.mediaPath()); configureSync(sourceSync, m_endpoint);
         QVERIFY2(synchronize(sourceSync), qPrintable(sourceSync.error()));
         AppController desktop(m_temporary.filePath(label + QStringLiteral("-move-desktop")));
         AppController phone(m_temporary.filePath(label + QStringLiteral("-move-phone")));
         QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
-        SyncController desktopSync(&desktop, desktop.mediaPath()); desktopSync.setEndpoint(m_endpoint);
-        SyncController phoneSync(&phone, phone.mediaPath()); phoneSync.setEndpoint(m_endpoint);
+        SyncController desktopSync(&desktop, desktop.mediaPath()); configureSync(desktopSync, m_endpoint);
+        SyncController phoneSync(&phone, phone.mediaPath()); configureSync(phoneSync, m_endpoint);
         QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
         QVERIFY2(synchronize(phoneSync), qPrintable(phoneSync.error()));
         QVERIFY(desktop.moveDeck(deckA, deckB)); QVERIFY(waitIdle(desktop));
@@ -508,7 +796,7 @@ private slots:
         QVERIFY2(synchronizeAllowHierarchyResolution(phoneSync), qPrintable(phoneSync.error()));
         AppController fresh(m_temporary.filePath(label + QStringLiteral("-move-fresh")));
         QVERIFY(waitIdle(fresh));
-        SyncController freshSync(&fresh, fresh.mediaPath()); freshSync.setEndpoint(m_endpoint);
+        SyncController freshSync(&fresh, fresh.mediaPath()); configureSync(freshSync, m_endpoint);
         QVERIFY2(synchronizeAllowHierarchyResolution(freshSync), qPrintable(freshSync.error()));
         const QVariantMap expected = desktopFirst
             ? QVariantMap{{deckA, deckB}, {deckB, QString()}}
@@ -537,7 +825,7 @@ private slots:
         QVERIFY(waitIdle(desktop));
         const QString cardId = desktop.cards().first().toMap().value(QStringLiteral("id")).toString();
         SyncController desktopSync(&desktop, desktop.mediaPath()), phoneSync(&phone, phone.mediaPath());
-        desktopSync.setEndpoint(m_endpoint); phoneSync.setEndpoint(m_endpoint);
+        configureSync(desktopSync, m_endpoint); configureSync(phoneSync, m_endpoint);
         QVERIFY2(synchronize(desktopSync), qPrintable(desktopSync.error()));
         QVERIFY2(synchronize(phoneSync), qPrintable(phoneSync.error()));
         desktop.deleteDeck(parent); QVERIFY(waitIdle(desktop));
@@ -546,7 +834,7 @@ private slots:
         QVERIFY2(synchronizeAllowHierarchyResolution(phoneSync), qPrintable(phoneSync.error()));
         QVERIFY2(synchronizeAllowHierarchyResolution(desktopSync), qPrintable(desktopSync.error()));
         AppController fresh(m_temporary.filePath(QStringLiteral("stale-parent-fresh"))); QVERIFY(waitIdle(fresh));
-        SyncController freshSync(&fresh, fresh.mediaPath()); freshSync.setEndpoint(m_endpoint);
+        SyncController freshSync(&fresh, fresh.mediaPath()); configureSync(freshSync, m_endpoint);
         QVERIFY2(synchronizeAllowHierarchyResolution(freshSync), qPrintable(freshSync.error()));
         const QVariantMap expected{{moved, QString()}};
         for (const AppController *const app : {&desktop, &phone, &fresh}) {
@@ -577,7 +865,7 @@ private slots:
         QVERIFY(waitIdle(first));
         SyncController firstSync(&first, firstMedia.rootPath());
         SyncController secondSync(&second, second.mediaPath());
-        firstSync.setEndpoint(m_endpoint); secondSync.setEndpoint(m_endpoint);
+        configureSync(firstSync, m_endpoint); configureSync(secondSync, m_endpoint);
         QVERIFY2(synchronize(firstSync), qPrintable(firstSync.error()));
         QVERIFY2(synchronize(secondSync), qPrintable(secondSync.error()));
         QCOMPARE(second.cards().size(), 1);
@@ -620,7 +908,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("cancel-before-batch")));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         QSignalSpy batches(&app, &AppController::syncBatchReady);
         int completions = 0;
         connect(&sync, &SyncController::changed, this, [&] {
@@ -649,7 +937,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("cancel-after-apply")));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         QSignalSpy applied(&app, &AppController::syncResponseApplied);
         bool canceled = false;
         int completions = 0;
@@ -696,7 +984,7 @@ private slots:
         });
         QVERIFY(server.listen());
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         QVERIFY2(synchronize(sync), qPrintable(sync.error()));
         QCOMPARE(server.requests.size(), 2);
         const QVariantMap secondBatch = QJsonDocument::fromJson(server.requests.at(1).body).toVariant().toMap();
@@ -727,7 +1015,7 @@ private slots:
         app.createDeck(QStringLiteral("A pending local change"));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy(); }, 10000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_ACKNOWLEDGEMENT")));
@@ -776,7 +1064,7 @@ private slots:
         AppController app(directory);
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy(); }, 10000));
         QVERIFY(!sync.error().isEmpty());
@@ -800,7 +1088,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("metadata-media")));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         QVERIFY2(synchronize(sync), qPrintable(sync.error()));
         QCOMPARE(server.requests.size(), 1);
         QVERIFY(QDir(app.mediaPath()).entryList(QDir::Files).isEmpty());
@@ -828,7 +1116,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("invalid-download-") + QString::fromLatin1(QTest::currentDataTag())));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy(); }, 10000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_IMAGE_")));
@@ -857,7 +1145,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("aggregate-download-limit")));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
-        sync.setEndpoint(server.endpoint());
+        configureSync(sync, server.endpoint());
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy(); }, 20000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_IMAGE_")));

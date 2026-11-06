@@ -7,7 +7,7 @@ Item {
     id: settingsPage
     required property var ui
     readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen || aiModelPicker.dialogOpen
-        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen
+        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen || syncNoticeDialog.visible
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
@@ -36,6 +36,7 @@ Item {
     property int voiceTabIndex: voicePreferences.selectedTab
     onVoiceTabIndexChanged: voicePreferences.selectedTab = Math.max(0, Math.min(1, voiceTabIndex))
     property string syncTokenDraft: ""
+    property string syncNoticeRevision: ""
     property string exportDestinationDraft: ""
     onVisibleChanged: if (!visible) {
         voiceKeyDraft = ""
@@ -624,6 +625,16 @@ Item {
                             message: sync.error
                             Layout.fillWidth: true
                         }
+                        SettingsButton {
+                            text: "Mark sync notices read"
+                            visible: Number(sync.syncNotices.contentConflictCount || 0) > 0
+                                || Number(sync.syncNotices.hierarchyResolutionCount || 0) > 0
+                            enabled: !sync.busy && !app.busy
+                            onClicked: {
+                                settingsPage.syncNoticeRevision = String(sync.syncNotices.revision || "")
+                                syncNoticeDialog.open()
+                            }
+                        }
                     }
                     ColumnLayout {
                         visible: settingsPage.section === 5
@@ -680,6 +691,40 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                     }
+                }
+            }
+        }
+    }
+    Dialog {
+        id: syncNoticeDialog
+        parent: Overlay.overlay
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(460, settingsPage.width - 32)
+        title: "Mark sync notices read"
+        standardButtons: Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle {
+            color: Theme.surface
+            radius: 12
+            border.color: Theme.rule
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label {
+                text: "Clear these notices on this device after reviewing them. This does not resolve content conflicts. Earlier versions remain in the server log."
+                color: Theme.ink
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            SettingsButton {
+                text: "Mark read"
+                primary: true
+                Layout.alignment: Qt.AlignRight
+                enabled: !sync.busy && !app.busy
+                onClicked: {
+                    app.acknowledgeSyncNotices(settingsPage.syncNoticeRevision)
+                    syncNoticeDialog.close()
                 }
             }
         }

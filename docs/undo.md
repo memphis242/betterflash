@@ -32,7 +32,11 @@ timeline. If an undo removes the displayed card, its detail dialog closes.
 Redo restores the saved result rather than repeating a model request or creating
 new identities. A restored grade keeps its original review timestamp, response
 duration, and due time. Undo restores its prior independent schedule and review
-ownership. Review actions also restore the queue and active card, answer state,
+ownership. Synchronized undo and redo establish explicit schedule sequence
+barriers, so an earlier independent review cannot overwrite the restored
+schedule when its deferred event is retried. Moving a deck by undo into a
+concurrently deleted parent receives the same server hierarchy repair as an
+ordinary move. Review actions also restore the queue and active card, answer state,
 pause state, and elapsed response time. Returning to a card resumes its timer
 from that point rather than counting time spent elsewhere.
 

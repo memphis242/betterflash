@@ -119,6 +119,7 @@ public:
     Q_INVOKABLE void loadExampleDeck();
     Q_INVOKABLE void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
     Q_INVOKABLE void loadStudyAnalytics(const QStringList &deckIds = {}, const QString &requestId = {});
+    Q_INVOKABLE void acknowledgeSyncNotices(const QString &revision);
     Q_INVOKABLE void requestSyncBatch(const QString &requestId = {});
     Q_INVOKABLE void applySyncResponse(const QVariantMap &response);
     bool applyHistory(const QString &id, bool redo);
@@ -135,6 +136,7 @@ signals:
     void responseSecondsChanged(); void spokenAnswerChanged();
     void pendingGradeCorrectionChanged();
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
+    void syncNoticesChanged(const QVariantMap &notices);
     void syncBatchReady(const QVariantMap &batch);
     void syncBatchFailed(const QString &code, const QString &message);
     void syncBatchFailedForRequest(const QString &requestId,const QString &code,const QString &message);

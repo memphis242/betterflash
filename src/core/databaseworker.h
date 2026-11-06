@@ -55,6 +55,7 @@ public:
     void forgetHistory(const QStringList &ids);
     void loadCardTimeline(const QString &cardId, int offset = 0, const QString &requestId = {});
     void loadStudyAnalytics(const QStringList &deckIds = {}, const QString &requestId = {});
+    void acknowledgeSyncNotices(const QString &revision);
     void requestSyncBatch(const QString &requestId);
     void applySyncResponse(const QVariantMap &response);
 
@@ -80,6 +81,7 @@ signals:
                           bool inspecting, const QString &cursorVariantId);
     void gradeCommitted(bool correction);
     void atomicSplitApplied(const QString &sourceId,bool success,const QStringList &newIds);
+    void syncNoticesChanged(const QVariantMap &notices);
     void syncBatchReady(const QVariantMap &batch);
     void syncBatchFailed(const QString &code, const QString &message);
     void syncBatchFailedForRequest(const QString &requestId,const QString &code,const QString &message);
@@ -162,7 +164,8 @@ private:
     bool m_historyRuntimeChanged = false;
     QStringList m_syncHistoryConflicts;
     bool m_historyValidationFailure = false;
-    bool m_historyHierarchyCycle = false;
+    enum class HistoryFailure { Conflict, MissingParent, MissingDeck, MissingReview, PendingRestore, Cycle };
+    HistoryFailure m_historyFailure = HistoryFailure::Conflict;
 
     bool initializeHistory();
     struct HistoryScope historyScope(const QString &label);
@@ -219,9 +222,10 @@ private:
     bool migrate();
     bool applyRemoteEvent(const QVariantMap &event, qint64 seq, bool &applied);
     bool retryRemoteEvents();
+    QVariantMap syncNotices();
     bool pendingEntity(const QString &type, const QString &id);
     bool pendingRestore(const QString &type, const QString &id, bool authoritativeOnly = false);
-    bool applyDeckDelete(const QString &id, qint64 seq, bool &applied);
+    bool applyDeckDelete(const QString &id, qint64 seq, bool &applied, bool applyUnscoped = true);
     qint64 entitySequence(const QString &type, const QString &id);
     bool recordSequence(const QString &type, const QString &id, qint64 seq);
     bool eventEffects(const QVariantMap &event, qint64 seq, bool executeEffects, bool &applied);

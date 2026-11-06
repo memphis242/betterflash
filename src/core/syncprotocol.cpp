@@ -138,15 +138,18 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
         ||json(event).toUtf8().size()>model::maxSyncEventBytes) {detail="Sync event envelope is invalid or exceeds its size limit.";return false;}
     const QString type=event.value("type").toString();
     const QVariantMap payload=object(event,"payload");
+    if (event.contains("deletionScopes")||payload.contains("deletionScopes")) {
+        detail="Deletion scopes belong only to server response wrappers."; return false;
+    }
     if (payload.contains("restore")
         && ((type != QStringLiteral("deck.upsert") && type != QStringLiteral("card.upsert"))
             || payload.value("restore").metaType().id() != QMetaType::Bool)) {
         detail="Restore intent must be a boolean on a deck or card upsert."; return false;
     }
     if (payload.contains("freshVariantIds")
-        && (type != QStringLiteral("card.upsert") || !payload.value("restore").toBool()
+        && (type != QStringLiteral("card.upsert")
             || payload.value("freshVariantIds").metaType().id() != QMetaType::QVariantList)) {
-        detail="Fresh variant identifiers belong only to an explicit card restore."; return false;
+        detail="Fresh variant identifiers belong only to a card upsert."; return false;
     }
     if (payload.contains("restoreDependency")
         && (type != QStringLiteral("deck.upsert") || !payload.value("restore").toBool()
@@ -192,7 +195,7 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             if (schedule->cardId!=record->id||!expected.contains(schedule->key)||keys.contains(schedule->key)||ids.contains(schedule->id)) {detail="Variant source or key is duplicated or invalid.";return false;}
             keys.insert(schedule->key);ids.insert(schedule->id);
         }
-        if (payload.value("restore").toBool()) {
+        if (payload.value("restore").toBool() || payload.contains("freshVariantIds")) {
             if (payload.value("freshVariantIds").metaType().id()!=QMetaType::QVariantList) {
                 detail="A card restore must identify its newly created review variants."; return false;
             }
@@ -258,8 +261,8 @@ std::expected<void,QString> validateResponse(const QVariantMap &response,qint64 
         ||!integer(response.value("cursor"),oldCursor,9007199254740991LL)
         ||response.value("hasMore").metaType().id()!=QMetaType::Bool)
         return std::unexpected(QStringLiteral("Response fields are missing or have invalid types."));
-    if (json(response).toUtf8().size()>8*1024*1024)
-        return std::unexpected(QStringLiteral("Response exceeds the 8 MiB transport limit."));
+    if (json(response).toUtf8().size()>32*1024*1024)
+        return std::unexpected(QStringLiteral("Response exceeds the 32 MiB transport limit."));
     const QVariantList accepted=response.value("acceptedIds").toList();
     const QVariantList events=response.value("events").toList();
     const qint64 cursor=response.value("cursor").toLongLong();
@@ -272,6 +275,21 @@ std::expected<void,QString> validateResponse(const QVariantMap &response,qint64 
             ||acceptedIds.contains(id.toString())||!submittedIds.contains(id.toString()))
             return std::unexpected(QStringLiteral("Accepted event identifiers must be unique UUIDs from the issued upload batch."));
         acceptedIds.insert(id.toString());
+    }
+    const QVariant conflicts=response.value("contentConflicts");
+    if (conflicts.isValid() && (conflicts.metaType().id()!=QMetaType::QVariantList || conflicts.toList().size()>1000))
+        return std::unexpected(QStringLiteral("Content conflicts must be a bounded array."));
+    for (const QString &key:{QStringLiteral("contentConflictCount"),QStringLiteral("hierarchyResolutionCount")}) {
+        if (response.contains(key)&&!integer(response.value(key),0,9007199254740991LL))
+            return std::unexpected(QStringLiteral("Sync notice counts must be nonnegative safe integers."));
+    }
+    if (response.contains("contentConflictCount")&&response.value("contentConflictCount").toLongLong()<conflicts.toList().size())
+        return std::unexpected(QStringLiteral("The content conflict count cannot omit listed conflicts."));
+    for (const QVariant &value:conflicts.toList()) {
+        const QVariantMap conflict=value.toMap();
+        const QString entity=conflict.value("entity").toString();
+        if (value.metaType().id()!=QMetaType::QVariantMap || (entity!=QStringLiteral("card")&&entity!=QStringLiteral("deck")) || !model::validUuid(conflict.value("id").toString()))
+            return std::unexpected(QStringLiteral("A conflicting record identifier is invalid."));
     }
     qint64 previous=oldCursor;
     for (const QVariant &value:events) {
@@ -286,6 +304,36 @@ std::expected<void,QString> validateResponse(const QVariantMap &response,qint64 
             return std::unexpected(QStringLiteral("Remote events must have unique identifiers and cover every sequence after the current cursor without gaps."));
         const auto valid=validateEvent(event);
         if (!valid) return std::unexpected(valid.error());
+        if (wrapper.contains("deletionScopes")) {
+            if (wrapper.value("deletionScopes").metaType().id()!=QMetaType::QVariantMap)
+                return std::unexpected(QStringLiteral("Authoritative deletion scopes must be an object."));
+            QSet<QString> roots;
+            const QVariantMap payload=object(event,"payload");
+            if (event.value("type")==QStringLiteral("deck.delete")) roots.insert(payload.value("id").toString());
+            if (event.value("type")==QStringLiteral("history.apply"))
+                for (const QVariant &value:payload.value("changes").toList()) {
+                    const QVariantMap change=value.toMap();
+                    if (change.value("entity")==QStringLiteral("deck")&&historyNull(change.value("after"))&&!change.value("contextOnly").toBool()) roots.insert(change.value("id").toString());
+                }
+            const QVariantMap scopes=wrapper.value("deletionScopes").toMap();
+            if (scopes.size()!=roots.size()) return std::unexpected(QStringLiteral("Deletion scopes must match their source event's deleted decks."));
+            for (auto it=scopes.cbegin();it!=scopes.cend();++it) {
+                if (!roots.contains(it.key())||it.value().metaType().id()!=QMetaType::QVariantMap)
+                    return std::unexpected(QStringLiteral("A deletion scope has an invalid source deck."));
+                const QVariantMap scope=it.value().toMap();
+                if (scope.value("decks").metaType().id()!=QMetaType::QVariantMap||scope.value("cards").metaType().id()!=QMetaType::QVariantMap)
+                    return std::unexpected(QStringLiteral("Deletion scopes must identify decks and cards."));
+                const QVariantMap decks=scope.value("decks").toMap(),cards=scope.value("cards").toMap();
+                if (!decks.contains(it.key())||decks.size()>model::maxCollectionRecords||cards.size()>model::maxCollectionRecords)
+                    return std::unexpected(QStringLiteral("A deletion scope is incomplete or exceeds its collection limits."));
+                for (auto deck=decks.cbegin();deck!=decks.cend();++deck)
+                    if (!model::validUuid(deck.key())||deck.value().metaType().id()!=QMetaType::QString||(!deck.value().toString().isEmpty()&&!model::validUuid(deck.value().toString())))
+                        return std::unexpected(QStringLiteral("A deletion scope has an invalid deck identifier."));
+                for (auto card=cards.cbegin();card!=cards.cend();++card)
+                    if (!model::validUuid(card.key())||card.value().metaType().id()!=QMetaType::QString||!decks.contains(card.value().toString()))
+                        return std::unexpected(QStringLiteral("A deletion scope has an invalid card container."));
+            }
+        }
         previous=seq;eventIds.insert(event.value("id").toString());
     }
     if (previous!=cursor)

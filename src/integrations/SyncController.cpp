@@ -21,8 +21,23 @@
 
 namespace {
 inline constexpr qsizetype maxSyncImages = 64;
-inline constexpr qint64 maxResponseBytes = 8 * 1024 * 1024;
+inline constexpr qint64 maxResponseBytes = 32 * 1024 * 1024;
 static_assert(betterflash::model::maxMediaBytes >= betterflash::model::maxImageBytes);
+
+QString normalizedEndpoint(const QString &endpoint) {
+    const QString value = endpoint.trimmed();
+    if (value.isEmpty()) return {};
+    QUrl url(value);
+    if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()
+        || url.hasQuery() || url.hasFragment()) return {};
+    const bool local = url.host() == QStringLiteral("127.0.0.1") || url.host() == QStringLiteral("localhost");
+    if (url.scheme() != QStringLiteral("https") && !(local && url.scheme() == QStringLiteral("http"))) return {};
+    QString path = url.path();
+    while (path.endsWith(QLatin1Char('/'))) path.chop(1);
+    if (!path.endsWith(QStringLiteral("/v1/sync"))) path += QStringLiteral("/v1/sync");
+    url.setPath(path);
+    return url.toString();
+}
 
 std::optional<qint64> responseCount(const QVariant &value, const qint64 fallback = 0) {
     if (!value.isValid()) return fallback;
@@ -73,6 +88,7 @@ SyncController::SyncController(AppController *app, const QString &mediaDirectory
     configureCredentials();
     connect(m_app, &AppController::syncBatchReady, this, &SyncController::handleBatch);
     connect(m_app, &AppController::syncResponseApplied, this, &SyncController::finishApply);
+    connect(m_app, &AppController::syncNoticesChanged, this, &SyncController::setSyncNotices);
     connect(m_app, &AppController::syncBatchFailedForRequest, this, [this](const QString &requestId, const QString &code, const QString &message) {
         if (active(requestId, Phase::Preparing)) fail(code, message);
     });
@@ -80,7 +96,10 @@ SyncController::SyncController(AppController *app, const QString &mediaDirectory
 void SyncController::configureCredentials() {
     if (m_credentials) m_credentials->deleteLater();
     const QString scope = QString::fromLatin1(QCryptographicHash::hash(m_endpoint.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-    m_credentials = new SecretStore(QStringLiteral("sync-") + scope, QStringLiteral("BETTERFLASH_SYNC_TOKEN"), this);
+    const QString environmentEndpoint = normalizedEndpoint(qEnvironmentVariable("BETTERFLASH_SYNC_ENDPOINT"));
+    const bool boundEnvironment = !environmentEndpoint.isEmpty() && environmentEndpoint == normalizedEndpoint(m_endpoint);
+    m_credentials = new SecretStore(QStringLiteral("sync-") + scope,
+        boundEnvironment ? QStringLiteral("BETTERFLASH_SYNC_TOKEN") : QString(), this);
     connect(m_credentials, &SecretStore::changed, this, &SyncController::keyChanged);
     emit keyChanged();
 }
@@ -95,6 +114,11 @@ void SyncController::setEndpoint(const QString &endpoint) {
         value = url.toString();
     }
     if (m_endpoint == value) return;
+    if (!m_credentials->finishPending()) {
+        m_error = QStringLiteral("KEYRING_PENDING: Finish the pending credential change before switching endpoints.");
+        emit changed();
+        return;
+    }
     cancel();
     m_endpoint = value;
     m_settings.setValue(QStringLiteral("sync/endpoint"), value);
@@ -165,9 +189,6 @@ void SyncController::synchronize() {
     if (!hasToken()) { fail(QStringLiteral("SYNC_TOKEN"), QStringLiteral("Add your server's access token in Sync settings.")); return; }
     m_busy = true;
     m_rounds = 0;
-    m_contentConflicts = 0;
-    m_hierarchyResolutions = 0;
-    m_conflictedRecords.clear();
     beginBatch();
 }
 void SyncController::beginBatch() {
@@ -187,6 +208,7 @@ void SyncController::beginBatch() {
 void SyncController::handleBatch(const QVariantMap &batch) {
     const QString requestId = batch.value(QStringLiteral("requestId")).toString();
     if (!active(requestId, Phase::Preparing)) return;
+    if (batch.contains(QStringLiteral("syncNotices"))) setSyncNotices(batch.value(QStringLiteral("syncNotices")).toMap());
     const auto names = mediaReferences(batch.value(QStringLiteral("events")).toList(), false);
     if (!names) { fail(QStringLiteral("SYNC_IMAGE_LIMIT"), names.error()); return; }
     m_batch = batch;
@@ -282,6 +304,7 @@ void SyncController::postBatch() {
     QVariantMap outgoing = m_batch;
     outgoing.remove(QStringLiteral("requestId"));
     outgoing.remove(QStringLiteral("hasMoreLocal"));
+    outgoing.remove(QStringLiteral("syncNotices"));
     m_reply = m_network.post(networkRequest, QJsonDocument::fromVariant(outgoing).toJson(QJsonDocument::Compact));
     QNetworkReply *const reply = m_reply;
     connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64 total) {
@@ -332,8 +355,6 @@ void SyncController::postBatch() {
         if (!conflictCount || *conflictCount < conflicts.toList().size() || !hierarchyCount) {
             fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned an invalid content conflict count.")); return;
         }
-        m_contentConflicts += *conflictCount;
-        m_hierarchyResolutions += *hierarchyCount;
         for (const QVariant &value : conflicts.toList()) {
             const QVariantMap conflict = value.toMap();
             const QString entity = conflict.value(QStringLiteral("entity")).toString();
@@ -341,8 +362,6 @@ void SyncController::postBatch() {
             if ((entity != QStringLiteral("card") && entity != QStringLiteral("deck")) || !betterflash::model::validUuid(id)) {
                 fail(QStringLiteral("SYNC_RESPONSE"), QStringLiteral("The server returned an invalid conflicting record identifier.")); return;
             }
-            const QString record = entity + QLatin1Char(' ') + id;
-            if (m_conflictedRecords.size() < 10 && !m_conflictedRecords.contains(record)) m_conflictedRecords.append(record);
         }
         const auto references = mediaReferences(response.value(QStringLiteral("events")).toList(), true);
         if (!references) { fail(QStringLiteral("SYNC_IMAGE_LIMIT"), references.error()); return; }
@@ -429,17 +448,27 @@ void SyncController::finishApply(const QString &requestId, const bool success, c
     m_error.clear();
     m_lastSync = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     m_settings.setValue(QStringLiteral("sync/lastSync"), m_lastSync);
+    if (m_contentConflicts > 0) m_status = QStringLiteral("Collection synced with content conflicts.");
+    else if (m_hierarchyResolutions > 0) m_status = QStringLiteral("Collection synced with repaired deck moves.");
+    else { m_status = QStringLiteral("Collection synced."); }
+    emit changed();
+}
+void SyncController::setSyncNotices(const QVariantMap &notices) {
+    m_syncNotices = notices;
+    m_contentConflicts = notices.value(QStringLiteral("contentConflictCount")).toLongLong();
+    m_hierarchyResolutions = notices.value(QStringLiteral("hierarchyResolutionCount")).toLongLong();
+    m_conflictedRecords = notices.value(QStringLiteral("records")).toStringList();
+    Q_ASSERT(m_contentConflicts >= 0);
+    Q_ASSERT(m_hierarchyResolutions >= 0);
+    Q_ASSERT(m_conflictedRecords.size() <= 10);
+    m_notice.clear();
     if (m_contentConflicts > 0) {
-        m_status = QStringLiteral("Collection synced with content conflicts.");
-        m_error = QStringLiteral("SYNC_CONTENT_CONFLICT: %1 concurrent card or deck edit(s) used server arrival order. Both versions are retained in the server event log. Review the affected content and recover an earlier version from that log if needed.").arg(m_contentConflicts);
-        if (!m_conflictedRecords.isEmpty()) m_error += QStringLiteral(" Affected records (up to 10): ") + m_conflictedRecords.join(QStringLiteral(", "));
-    } else {
-        m_status = QStringLiteral("Collection synced.");
+        m_notice = QStringLiteral("SYNC_CONTENT_CONFLICT: %1 concurrent card or deck edit(s) used server arrival order. Both versions are retained in the server event log. Review the affected content and recover an earlier version from that log if needed.").arg(m_contentConflicts);
+        if (!m_conflictedRecords.isEmpty()) m_notice += QStringLiteral(" Affected records (up to 10): ") + m_conflictedRecords.join(QStringLiteral(", "));
     }
     if (m_hierarchyResolutions > 0) {
-        m_status = QStringLiteral("Collection synced with repaired deck moves.");
-        const QString message = QStringLiteral("%1 deck move(s) would have created a cycle or targeted a deleted parent. The server retained a valid parent and preserved both events in its log.").arg(m_hierarchyResolutions);
-        m_error = m_error.isEmpty() ? QStringLiteral("SYNC_HIERARCHY_RESOLVED: ") + message : m_error + QLatin1Char(' ') + message;
+        const QString message = QStringLiteral("SYNC_HIERARCHY_RESOLVED: %1 deck move(s) would have created a cycle or targeted a deleted parent. The server retained a valid parent and preserved both events in its log.").arg(m_hierarchyResolutions);
+        m_notice = m_notice.isEmpty() ? message : m_notice + QLatin1Char(' ') + message;
     }
     emit changed();
 }

@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: >-
-          dnf install -y git cmake ninja-build gcc-c++ python3
+          dnf install -y git cmake ninja-build gcc-c++ python3 python3-pillow
           qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel
           qt6-qtmultimedia-devel qt6-qtspeech-devel
           dejavu-sans-fonts dejavu-serif-fonts dejavu-sans-mono-fonts

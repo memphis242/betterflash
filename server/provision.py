@@ -7,35 +7,79 @@ import json
 import os
 from pathlib import Path
 import secrets
+import tempfile
 from uuid import uuid4
 
 
-def write_private(path, data):
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
-    directory = os.open(Path(path).parent, os.O_RDONLY | os.O_DIRECTORY)
+def stage_private(path, data):
+    """Create and sync a complete private file on the destination filesystem."""
+    descriptor, temporary = tempfile.mkstemp(prefix=".betterflash-provision-", dir=path.parent)
     try:
-        os.fsync(directory)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            if output.write(data) != len(data):
+                raise OSError("The staged credential file could not be written completely")
+            output.flush()
+            os.fsync(output.fileno())
+        return Path(temporary)
+    except BaseException:
+        Path(temporary).unlink()
+        raise
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
     finally:
-        os.close(directory)
+        os.close(descriptor)
 
 
 def provision(accounts_file, token_file):
-    """Create one account without overwriting existing registries or secrets."""
-    accounts_path, token_path = Path(accounts_file), Path(token_file)
-    if accounts_path.absolute() == token_path.absolute():
+    """Publish complete files exclusively and roll back this invocation on failure."""
+    accounts_path, token_path = Path(accounts_file).absolute(), Path(token_file).absolute()
+    if accounts_path.resolve() == token_path.resolve():
         raise ValueError("Choose different paths for the account registry and token.")
-    if accounts_path.exists() or accounts_path.is_symlink():
-        raise FileExistsError("The account registry already exists. Edit its token digests to add or rotate credentials.")
+    for path in (accounts_path, token_path):
+        if path.exists() or path.is_symlink():
+            raise FileExistsError("An output already exists. Existing registries and tokens are never overwritten.")
     account_id = str(uuid4())
     token = secrets.token_urlsafe(32)
     registry = {"accounts": [{"id": account_id, "tokenSha256": [hashlib.sha256(token.encode()).hexdigest()]}]}
-    write_private(token_path, token + "\n")
-    write_private(accounts_path, json.dumps(registry, indent=2) + "\n")
-    return account_id
+    staged, published = [], []
+    directories = tuple(dict.fromkeys((token_path.parent, accounts_path.parent)))
+    try:
+        for path, data in ((token_path, token + "\n"), (accounts_path, json.dumps(registry, indent=2) + "\n")):
+            staged.append((path, stage_private(path, data)))
+        for path, temporary in staged:
+            # Hard links publish only complete files and cannot replace a competitor.
+            metadata = temporary.stat()
+            os.link(temporary, path)
+            published.append((path, metadata.st_dev, metadata.st_ino))
+        for _, temporary in staged:
+            temporary.unlink()
+        for directory in directories:
+            sync_directory(directory)
+        return account_id
+    except BaseException as failure:
+        for path, device, inode in reversed(published):
+            try:
+                metadata = path.lstat()
+                if (metadata.st_dev, metadata.st_ino) == (device, inode):
+                    path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_failure:
+                failure.add_note(f"Cannot roll back {path}: {cleanup_failure}. Check outputs before retrying.")
+        for directory in directories:
+            if directory.is_dir():
+                try:
+                    sync_directory(directory)
+                except OSError as cleanup_failure:
+                    failure.add_note(f"Cannot sync rollback directory {directory}: {cleanup_failure}.")
+        raise
+    finally:
+        for _, temporary in staged:
+            temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -46,7 +90,8 @@ def main():
     try:
         account_id = provision(arguments.accounts_file, arguments.token_file)
     except (OSError, ValueError) as failure:
-        raise SystemExit(f"SYNC_PROVISION: {failure}. Existing files are preserved; check both output paths before retrying.") from None
+        details = " ".join(getattr(failure, "__notes__", ()))
+        raise SystemExit(f"SYNC_PROVISION: {failure}. {details} Existing files are preserved; check both output paths before retrying.") from None
     print(f"Account created: {account_id}")
     print("Enter the token from the private token file in each device's Sync settings.")
 

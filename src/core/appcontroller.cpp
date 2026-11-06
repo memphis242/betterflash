@@ -42,6 +42,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::actionRecorded,this,[this](const QString &id,const QString &label) {
         emit actionRecorded(id,label,m_completedOperationContext,historyContext());
     });
+    connect(m_worker,&DatabaseWorker::syncNoticesChanged,this,&AppController::syncNoticesChanged);
     connect(m_worker,&DatabaseWorker::historyApplied,this,&AppController::historyApplied);
     connect(m_worker,&DatabaseWorker::historyError,this,[this](const QString &code,const QString &message,const QString &detail) {
         emit historyInvalidated();
@@ -265,7 +266,7 @@ void AppController::startReview(const QString &deckId)
 }
 void AppController::selectReviewCard(const QString &variantId)
 {
-    if (m_busy||m_paused) return;
+    if (m_busy) return;
     if (!m_reviewing) {
         setError({{"code","REVIEW_INACTIVE"},{"message","Start a review before choosing a card."},{"detail",QString()}});return;
     }
@@ -298,7 +299,7 @@ void AppController::resetElapsed()
 {
     m_elapsed.invalidate();m_accumulatedSeconds=0;m_responseSeconds=0;
     if (m_reviewing&&!m_paused&&!m_reviewingCompletedCard&&m_currentCard.value("sessionGrade",-1).toInt()<0) {m_elapsed.start();m_elapsedTick.start();}
-    else m_elapsedTick.stop();
+    else { m_elapsedTick.stop(); }
     emit responseSecondsChanged();
 }
 bool AppController::reviewActionReady(bool needsAnswer, bool allowPaused)
@@ -357,10 +358,18 @@ void AppController::clearPendingGradeCorrection()
 }
 void AppController::deferCard()
 {
+    if (m_reviewingCompletedCard) {
+        setError({{"code","REVIEW_INSPECTION"},{"message","Choose an unreviewed queue card before deferring."},{"detail",QString()}});
+        return;
+    }
     if (reviewActionReady(false, true)) {clearPendingGradeCorrection();invoke([](DatabaseWorker *worker){worker->defer();});}
 }
 void AppController::postponeCard(const QString &date)
 {
+    if (m_reviewingCompletedCard) {
+        setError({{"code","REVIEW_INSPECTION"},{"message","Choose an unreviewed queue card before postponing."},{"detail",QString()}});
+        return;
+    }
     if (reviewActionReady(false, true)) {clearPendingGradeCorrection();invoke([=](DatabaseWorker *worker){worker->postpone(date);});}
 }
 void AppController::postponeDays(int days)
@@ -392,6 +401,7 @@ void AppController::stopReview()
 void AppController::setSpokenAnswer(const QString &answer)
 {m_spokenAnswer=answer.left(1024*1024);emit spokenAnswerChanged();}
 void AppController::refresh() {invoke([](DatabaseWorker *worker){worker->snapshot();});}
+void AppController::acknowledgeSyncNotices(const QString &revision) {invoke([revision](DatabaseWorker *worker){worker->acknowledgeSyncNotices(revision);});}
 void AppController::requestSyncBatch(const QString &requestId) {invoke([=](DatabaseWorker *worker){worker->requestSyncBatch(requestId);});}
 void AppController::applySyncResponse(const QVariantMap &response)
 {invoke([=](DatabaseWorker *worker){worker->applySyncResponse(response);});}
@@ -509,8 +519,15 @@ void AppController::handleQueue(const QVariantList &cards,int total,bool resetCu
     m_reviewCards=cards;m_pendingCards.clear();
     for (const QVariant &value : cards) if (value.toMap().value("sessionGrade",-1).toInt()<0) m_pendingCards.append(value);
     m_queueCount=m_pendingCards.size();m_sessionTotal=total;m_currentCard=selectedCard;
-    if (!cards.isEmpty()||total==0) m_reviewedCount=cards.size()-m_pendingCards.size();
-    m_reviewingCompletedCard=inspecting;m_reviewCursorVariantId=cursorVariantId;
+    int removedReviewed=0;
+    if (!cards.isEmpty()||total==0) {
+        QSet<QString> activeVariants;
+        for (const QVariant &value:cards) activeVariants.insert(value.toMap().value("variantId").toString());
+        for (const QString &variantId:m_leftReviewedVariants) if (!activeVariants.contains(variantId)) ++removedReviewed;
+        m_reviewedCount=cards.size()-m_pendingCards.size()+removedReviewed;
+    }
+    m_reviewingCompletedCard=inspecting;if (!inspecting) m_reviewCursorVariantId=cursorVariantId;
+    m_sessionTotal=total+removedReviewed;
     const bool reviewing=!cards.isEmpty();
     if (reviewing!=m_reviewing) {m_reviewing=reviewing;emit reviewingChanged();}
     if (changed) {

@@ -279,7 +279,7 @@ QVariantMap DatabaseWorker::historyRow(const QString &entity, const QString &id)
 bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq)
 {
     m_historyValidationFailure=false;
-    m_historyHierarchyCycle=false;
+    m_historyFailure=HistoryFailure::Conflict;
     if (changes.isEmpty()) return true;
     QHash<QString, QVariantMap> desired;
     for (const QVariant &value : changes) {
@@ -318,9 +318,9 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
         QString cursor = it.key();
         QStringList path;
         while (!cursor.isEmpty()) {
-            if (!parents.contains(cursor)) { m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("Undo would leave a deck without its parent. Its current content was preserved."); return false; }
+            if (!parents.contains(cursor)) { m_historyValidationFailure=true; m_historyFailure=HistoryFailure::MissingParent; m_sqlDetail = QStringLiteral("Undo would leave a deck without its parent. Its current content was preserved."); return false; }
             if (colors.value(cursor) == 2) break;
-            if (colors.value(cursor) == 1) { m_historyValidationFailure=true; m_historyHierarchyCycle=true; m_sqlDetail = QStringLiteral("Undo would create a deck hierarchy cycle. Its current content was preserved."); return false; }
+            if (colors.value(cursor) == 1) { m_historyValidationFailure=true; m_historyFailure=HistoryFailure::Cycle; m_sqlDetail = QStringLiteral("Undo would create a deck hierarchy cycle. Its current content was preserved."); return false; }
             colors.insert(cursor, 1);
             path.append(cursor);
             cursor = parents.value(cursor);
@@ -358,7 +358,7 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
         if (entity == QStringLiteral("card")) {
             const auto record = model::cardFromMap(after);
             if (!record) { m_sqlDetail = record.error(); return false; }
-            if (!parents.contains(record->deckId)) { m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("The destination deck no longer exists. Restore or move the deck first."); return false; }
+            if (!parents.contains(record->deckId)) { m_historyValidationFailure=true; m_historyFailure=HistoryFailure::MissingDeck; m_sqlDetail = QStringLiteral("The destination deck no longer exists. Restore or move the deck first."); return false; }
             if (!validateMedia(*record)) return false;
             const auto keys = model::variantKeys(*record);
             assert(keys);
@@ -386,7 +386,7 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
             const QVariantMap record = resulting(QStringLiteral("review"), after.value("reviewId").toString());
             if (schedule.isEmpty() || record.isEmpty() || record.value("variantId") != id
                 || record.value("cardId") != schedule.value("cardId")) {
-                m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("Undo would attach a schedule to an unavailable review."); return false;
+                m_historyValidationFailure=true; m_historyFailure=HistoryFailure::MissingReview; m_sqlDetail = QStringLiteral("Undo would attach a schedule to an unavailable review."); return false;
             }
         }
     }
@@ -474,7 +474,7 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
                 if (remote) {
                     bool applied=true;
                     if (!applyDeckDelete(id,seq,applied)) return false;
-                    if (!applied) { m_historyValidationFailure=true; m_sqlDetail=QStringLiteral("The deck deletion is waiting for a pending local restore."); return false; }
+                    if (!applied) { m_historyValidationFailure=true; m_historyFailure=HistoryFailure::PendingRestore; m_sqlDetail=QStringLiteral("The deck deletion is waiting for a pending local restore."); return false; }
                 } else if (!tombstone(entity, id, seq) || !execute("DELETE FROM decks WHERE id=?", {id})) return false;
             } else if (entity == QStringLiteral("review")) {
                 if (!execute("DELETE FROM reviews WHERE id=?", {id})) return false;
@@ -726,9 +726,15 @@ bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq
         for (const QVariant &value:changes) {
             const QVariantMap change=value.toMap();
             if (change.value("contextOnly").toBool()) continue;
+            if (change.value("entity")==QStringLiteral("deck")&&!present(change.value("after"))) {
+                bool deleted=true;
+                if (!applyDeckDelete(change.value("id").toString(),seq,deleted,false)) return false;
+                if (!deleted) applied=false;
+            }
             const QString entity=change.value("entity").toString();
             const QString id=change.value("id").toString();
             if (!recordSequence(entity==QStringLiteral("owner")?QStringLiteral("variant"):entity,id,seq)) return false;
+            if ((entity==QStringLiteral("variant")||entity==QStringLiteral("owner"))&&!recordSequence("variant-barrier",id,seq)) return false;
             if (present(change.value("after")) && entity==QStringLiteral("card") && !recordSequence("restore-card",id,seq)) return false;
             if (present(change.value("after")) && entity==QStringLiteral("deck") && !recordSequence("restore-container",id,seq)) return false;
         }
@@ -818,18 +824,23 @@ bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq
     if (!applyHistoryChanges(usable,true,seq)) {
         const QString detail=m_sqlDetail;
         const bool validationFailure=m_historyValidationFailure;
-        const bool hierarchyCycle=m_historyHierarchyCycle;
+        const HistoryFailure failure=m_historyFailure;
+        const bool hierarchyCycle=failure==HistoryFailure::Cycle;
         assert(!hierarchyCycle || validationFailure);
         if (!execute("ROLLBACK TO apply_history_event") || !execute("RELEASE apply_history_event")) return false;
         if (!validationFailure) {m_sqlDetail=detail;return false;}
         if (m_allowHierarchyRepair && hierarchyCycle) {
             applied=false; m_sqlDetail.clear(); return true;
         }
-        if (detail.contains(QStringLiteral("destination deck no longer exists"))
-            || detail.contains(QStringLiteral("without its parent"))
-            || detail.contains(QStringLiteral("unavailable review"))
-            || detail.contains(QStringLiteral("waiting for a pending local restore"))) {
+        switch (failure) {
+        case HistoryFailure::MissingParent:
+        case HistoryFailure::MissingDeck:
+        case HistoryFailure::MissingReview:
+        case HistoryFailure::PendingRestore:
             applied=false; m_sqlDetail.clear(); return true;
+        case HistoryFailure::Conflict:
+        case HistoryFailure::Cycle:
+            break;
         }
         m_syncHistoryConflicts.append(changes.first().toMap().value("id").toString());
         m_sqlDetail.clear(); return true;
@@ -840,6 +851,7 @@ bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq
         const QString entity=change.value("entity").toString();
         const QString id=change.value("id").toString();
         if (!recordSequence(entity==QStringLiteral("owner")?QStringLiteral("variant"):entity,id,seq)) return false;
+        if ((entity==QStringLiteral("variant")||entity==QStringLiteral("owner"))&&!change.value("contextOnly").toBool()&&!recordSequence("variant-barrier",id,seq)) return false;
         if (present(change.value("after")) && entity==QStringLiteral("card") && !recordSequence("restore-card",id,seq)) return false;
         if (present(change.value("after")) && entity==QStringLiteral("deck") && !recordSequence("restore-container",id,seq)) return false;
     }

@@ -11,6 +11,7 @@ from uuid import UUID, uuid4, uuid5
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import main
+from media_fixture import png_bytes
 from http.server import ThreadingHTTPServer
 
 TOKEN = "local-test-token-" + "x" * 32
@@ -137,7 +138,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(len(self.sync([])[1]["events"]), 1)
 
     def test_media_round_trip_and_hash_integrity(self):
-        data = b"an opaque test image payload"
+        data = png_bytes()
         filename = hashlib.sha256(data).hexdigest() + ".png"
         self.assertEqual(self.request("PUT", "/v1/media/" + filename, b"wrong", raw=True)[0], 422)
         self.assertEqual(self.request("PUT", "/v1/media/" + filename, data, raw=True)[0], 201)
@@ -149,7 +150,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/v1/media/" + filename, token="wrong")[0], 401)
 
     def test_media_symlinks_are_not_read_or_written(self):
-        data = b"private content"
+        data = png_bytes(1)
         filename = hashlib.sha256(data).hexdigest() + ".png"
         private = Path(self.temporary.name) / "private"
         private.write_bytes(data)
@@ -192,7 +193,7 @@ class SyncTests(unittest.TestCase):
     def test_media_reference_budget_paginate_and_rejects_oversized_cards(self):
         names = []
         for index in range(80):
-            data = f"bounded attachment fixture {index}".encode()
+            data = png_bytes(index)
             name = hashlib.sha256(data).hexdigest() + ".png"
             (self.store.media / name).write_bytes(data)
             names.append(name)

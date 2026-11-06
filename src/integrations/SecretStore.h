@@ -17,6 +17,7 @@ public:
     QString storageState() const { return m_storageState; }
     void setKey(const QString &key);
     void clear();
+    bool finishPending(int timeoutMs = 10000);
 signals:
     void changed();
 private:
@@ -36,4 +37,5 @@ private:
     QString m_storageState = QStringLiteral("loading");
     quint64 m_revision = 0;
     bool m_running = false;
+    bool m_environment = false;
 };

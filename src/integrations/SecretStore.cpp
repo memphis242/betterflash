@@ -1,5 +1,7 @@
 #include "SecretStore.h"
 
+#include <QElapsedTimer>
+#include <QDebug>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
@@ -12,7 +14,8 @@ SecretStore::SecretStore(QString service, QString environmentVariable, QObject *
         m_key = qEnvironmentVariable(environmentVariable.toLocal8Bit().constData()).trimmed();
         if (m_key.size() > 4096 || m_key.contains(QLatin1Char('\n')) || m_key.contains(QLatin1Char('\r'))) m_key.clear();
         if (!m_key.isEmpty()) {
-            m_status = QStringLiteral("Using a key from the environment.");
+            m_environment = true;
+            m_status = QStringLiteral("Using a read-only key from the environment. Change or unset its environment variable and restart to replace or remove it.");
             m_storageState = QStringLiteral("environment");
             return;
         }
@@ -20,11 +23,43 @@ SecretStore::SecretStore(QString service, QString environmentVariable, QObject *
     QTimer::singleShot(0, this, &SecretStore::load);
 }
 SecretStore::~SecretStore() {
+    if (!finishPending()) qWarning("KEYRING_PENDING: Credential changes did not finish. Check the desktop keyring before restarting.");
     const auto processes = findChildren<QProcess *>();
     for (auto *const process : processes) {
         process->disconnect(this);
-        if (process->state() != QProcess::NotRunning) { process->kill(); process->waitForFinished(100); }
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+            (void)process->waitForFinished(100); // The bounded drain already reports unfinished mutations.
+        }
     }
+}
+bool SecretStore::finishPending(const int timeoutMs) {
+    Q_ASSERT(timeoutMs >= 0);
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (m_running || !m_operations.isEmpty()) {
+        if (!m_running) runNext();
+        if (!m_running) continue;
+        const auto processes = findChildren<QProcess *>();
+        QProcess *active = nullptr;
+        for (auto *const process : processes) {
+            if (!process->property("completed").toBool()) { active = process; break; }
+        }
+        Q_ASSERT(active);
+        if (!active) {
+            m_status = QStringLiteral("KEYRING_STATE: Cannot locate the pending credential helper. Verify the desktop keyring before restarting.");
+            m_storageState = QStringLiteral("pending-failed");
+            emit changed();
+            return false;
+        }
+        const qint64 remaining = timeoutMs - elapsed.elapsed();
+        if (remaining <= 0 || !active->waitForFinished(static_cast<int>(remaining))) {
+            m_status = QStringLiteral("KEYRING_PENDING: Credential changes are still pending. Keep the app open and unlock the desktop keyring before retrying.");
+            emit changed();
+            return false;
+        }
+    }
+    return true;
 }
 void SecretStore::run(const QStringList &arguments, const QByteArray &input,
                      const std::function<void(int, const QByteArray &)> &callback) {
@@ -48,7 +83,10 @@ void SecretStore::runNext() {
     timeout->setSingleShot(true);
     connect(timeout, &QTimer::timeout, process, &QProcess::kill);
     connect(process, &QProcess::started, this, [process, input = operation.input, timeout] {
-        if (!input.isEmpty()) process->write(input);
+        if (!input.isEmpty() && process->write(input) != input.size()) {
+            process->kill();
+            return;
+        }
         process->closeWriteChannel();
         timeout->start(10000);
     });
@@ -88,6 +126,11 @@ void SecretStore::load() {
     });
 }
 void SecretStore::setKey(const QString &key) {
+    if (m_environment) {
+        m_status = QStringLiteral("The environment key is read-only. Change or unset its environment variable and restart to replace it.");
+        emit changed();
+        return;
+    }
     const QString cleaned = key.trimmed();
     if (cleaned.isEmpty()) { clear(); return; }
     if (cleaned.size() > 4096 || cleaned.contains(QLatin1Char('\n')) || cleaned.contains(QLatin1Char('\r'))) {
@@ -116,6 +159,11 @@ void SecretStore::setKey(const QString &key) {
     });
 }
 void SecretStore::clear() {
+    if (m_environment) {
+        m_status = QStringLiteral("The environment key is read-only. Unset its environment variable and restart to remove it.");
+        emit changed();
+        return;
+    }
     m_key.clear();
     const quint64 revision = ++m_revision;
     m_status = QStringLiteral("Removing the stored key.");

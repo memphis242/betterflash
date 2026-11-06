@@ -30,8 +30,23 @@ python3 server/main.py --port 8765 \
 ```
 
 Configure `http://127.0.0.1:8765` in desktop Sync settings and enter the same token.
-An app launched from the same shell can read `BETTERFLASH_SYNC_TOKEN` directly.
-The service uses only Python's standard library and does not need pip packages.
+For an environment token, also export `BETTERFLASH_SYNC_ENDPOINT` as the exact
+server endpoint (the origin or full `/v1/sync` URL). The app only uses
+`BETTERFLASH_SYNC_TOKEN` for that normalized endpoint, including its path and
+port. It never supplies that environment token when another endpoint is selected.
+Environment credentials are explicitly read-only: token editing and removal
+report that the variable must be changed or unset followed by an app restart.
+To use editable keyring credentials, unset the environment token before starting
+the app. Pending keyring writes/removals are drained for up to ten seconds at
+endpoint replacement and shutdown; a stalled operation blocks endpoint changes
+and reports `KEYRING_PENDING`. An operation still blocked at shutdown is reported
+to the application log. Unlock the keyring and verify the credential before
+restarting if that happens.
+
+The server and provisioning tool require Python 3.11 or newer; the server also requires Pillow with PNG, JPEG, GIF, and WebP support.
+Install the distribution's `python3-pillow` (Fedora) or `python3-pil` (Debian).
+No graphical display is needed. Keep the decoder package updated with the host's
+security updates. A missing Pillow installation fails startup before listening.
 
 For multiple user accounts, omit `BETTERFLASH_SYNC_TOKEN` and start with an
 immutable credential registry and data root:
@@ -49,8 +64,14 @@ python3 server/provision.py --accounts-file /private/path/accounts.json \
   --token-file /private/path/device-token
 ```
 
-The parent directories must exist. Both files are created with mode `0600`;
-existing paths are never overwritten. The command prints no credentials. Copy
+The parent directories must exist. Both files are staged and synced with mode
+`0600` before exclusive publication; existing paths are never overwritten.
+Caught write, publication, and fsync failures roll back only files published by
+that invocation, so a clean retry is possible. Concurrent invocations can publish
+only one registry/token pair. The two destinations are not a single filesystem
+transaction: after power loss or forcible termination during publication,
+check both outputs and remove an incomplete new pair before retrying. Never run
+provisioning against a registry used by a running service. The command prints no credentials. Copy
 the registry to the server and enter the token from the private file in each
 device's existing Sync settings. Generate high-entropy tokens; hashes cannot
 make a human-chosen password safe. Distinct random tokens for individual devices
@@ -65,8 +86,14 @@ UUID, and token rotation is supported by listing multiple digests:
   "tokenSha256":["0000000000000000000000000000000000000000000000000000000000000000"]}]}
 ```
 
-The registry is loaded at startup; restart the service after changing it. An
-authenticated `GET /v1/info` returns the account's stable `collectionId`,
+The registry is loaded at startup; restart the service after changing it. To
+revoke the last device, retain the account ID and set `"tokenSha256": []`.
+This disables that account's authentication without deleting its collection or
+preventing other accounts from starting. Restore a valid digest and restart to
+reenable access. Revocation is effective after restart, including in-flight
+requests that were accepted by the old process.
+
+An authenticated `GET /v1/info` returns the account's stable `collectionId`,
 protocol version, and capabilities. Protocol 3 clients check this identity
 before uploading attachments or events and bind it locally in the transaction
 that applies the first successful response. Subsequent sync attempts to a
@@ -106,7 +133,28 @@ device tokens out of collection backups. Restore the complete database,
 including `server_metadata`, to keep existing devices bound. Event logs and
 attachment history are retained without automatic pruning so an offline device
 can catch up. Monitor disk usage; no log compaction or aggregate media quota is
-implemented.
+implemented. For this private VPN/personal deployment, accounts are trusted
+and there is no signup or public registration surface. Put the state directory
+on a dedicated filesystem or filesystem quota with capacity reserved for the
+host, and alert on free bytes and inodes. The application does not provide
+per-account storage-capacity guarantees: a compromised device can exhaust that state
+budget, including through unreferenced attachments. Before admitting mutually
+untrusted accounts, use separate service instances/filesystem budgets or add
+transactional account quotas for log bytes, media bytes, and attachment counts.
+Do not delete historical attachments merely because current cards no longer
+reference them; an offline device may still need them during replay.
+
+The backend bounds a connection's network lifetime to 30 seconds, including
+headers, body reads, and response writes, with a separate 20-second socket
+inactivity timeout. Socket shutdown does not cancel decoding or an already
+running database transaction; accepted work may finish after the peer disconnects,
+and idempotent retries reconcile a commit whose response was lost. A slow trickle cannot extend that deadline. There are at
+most 32 worker threads and four authenticated requests per account (including
+all its device tokens). Excess account requests receive `429 ACCOUNT_BUSY`;
+excess global requests receive `503 SERVER_BUSY`. Retry after existing requests
+finish. Unauthenticated partial headers still consume global slots until their
+deadline. Keep the backend loopback-only and protect the VPN/proxy boundary;
+these bounds are not a substitute for public-edge connection/rate controls.
 
 ## Protocol and compatibility
 
@@ -143,7 +191,7 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 | --- | --- |
 | `deck.upsert` | `deck` with name, description, identifier, creation time, and optional `parentId` (empty or absent means a top-level deck) |
 | `deck.delete` | `id` |
-| `card.upsert` | source `card` and exactly its `variants`, used only to initialize missing schedules except for explicit fresh restore variants |
+| `card.upsert` | source `card` and exactly its `variants`, used to initialize missing schedules; `freshVariantIds` explicitly identifies newly created or recreated schedules |
 | `card.delete` | source `id` |
 | `review.add` | initial `review` and its updated `variant` |
 | `review.correct` | corrected `review` and recalculated `variant`, with `previousReview` and `previousVariant` snapshots; review identity, timestamp, response duration, and review count are preserved |
@@ -191,7 +239,12 @@ session metadata, leaving their copies as estimated groups after an upgrade.
 Protocol 3 requires session metadata support on every device. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
-Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Narration WAV files must contain nonempty, canonical 16 kHz mono signed 16-bit PCM audio of at most 5 minutes.
+Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Images must fully
+decode as their PNG, JPEG, WebP, or GIF filename extension and contain at most
+32 million pixels, matching the native client's supported formats and pixel
+limit. Only the first displayed animation frame is decoded; arbitrary animation
+length cannot multiply validation work. Referenced files are also validated
+before event admission and replay, with a bounded 256-entry metadata cache. Narration WAV files must contain nonempty, canonical 16 kHz mono signed 16-bit PCM audio of at most 5 minutes.
 Upgrade all clients and the server to the five-minute narration build before
 syncing recordings longer than 60 seconds; older builds reject those attachments.
 Upload referenced assets before sending a card event. A card and a received page
@@ -199,6 +252,18 @@ can reference at most 64 unique media assets and 64 MiB of attached data. The se
 splits event pages at those bounds, and the client validates a page before fetching
 its assets. Damaged local copies are preserved under a `.damaged-UUID` suffix
 when sync downloads a verified replacement.
+
+If an older server already accepted invalid image bytes, appending a correction
+cannot remove that earlier poisoned event. Stop syncing all devices and preserve
+the complete server state. On a device with the complete collection, export a
+portable backup and repair/remove invalid attachments until that backup imports
+successfully into a separate local collection. Provision a new account and sync
+that separate collection to its fresh server history. Import/join from separate
+collections on the other devices only after validating the recovered data. Keep
+the old account disabled and archived until every device is recovered. Do not
+edit event hashes, delete individual log rows, or rewind existing client cursors.
+A readable trusted backup plus a fresh collection/account is the administrative
+recovery route; the server does not silently discard poisoned history.
 
 Cards can contain a `narrations` object mapping a review variant and side, such
 as `forward/front`, `reverse/back`, or `c1/front`, to a SHA-256 WAV filename.
@@ -229,8 +294,9 @@ back a deleted deck or card. Ordinary upserts retain deletion protection. All
 clients should be upgraded before syncing checkpoint restores; older clients
 ignore the flag and keep deleted records deleted. Checkpoint restoration does
 not rewind review history or retained variant schedules. Newly created variant
-identifiers are explicit in `freshVariantIds`; ordinary upserts cannot set this
-field. Restore dependency events recreate missing ancestor folders without
+identifiers are explicit in `freshVariantIds` on both ordinary edits and
+restores. A recreated direction or cloze key starts a new schedule generation;
+its server sequence blocks older deferred reviews while retaining their history. Restore dependency events recreate missing ancestor folders without
 overwriting live ancestor metadata. See [deck checkpoints](checkpoints.md).
 
 ## Conflict behavior and scope
@@ -256,7 +322,13 @@ detected stale-cursor content conflicts, and returns conflict metadata with the
 affected sync page. The client reports a completed sync with content conflicts
 and up to ten affected record IDs so the user can inspect the result. The total
 count covers all conflicts even when the metadata list is truncated to 1,000
-records per page. Detection is conservative for long backlogs: a device's own
+records per page. Notice counts and up to ten record IDs are committed with the
+download cursor and retained in local collection metadata across canceled or
+failed later pages, app restarts, and clean subsequent syncs. Notices remain
+visible until marked read. Acknowledgment compares the displayed notice revision
+inside the database transaction, so a new notice cannot be erased by an older
+acknowledgment. Marking notices read changes only local metadata and emits no
+sync event. Detection is conservative for long backlogs: a device's own
 earlier upload can also be reported if its event has not yet reached that
 device's download cursor. Copied device IDs do not suppress conflict notices.
 Content edits and reviews of the same card
@@ -272,11 +344,19 @@ The server projects deck parent relationships in arrival order. If two offline
 moves would create a cycle, it retains the earlier accepted relationship and
 appends a corrective `deck.upsert` that restores the losing deck's previous
 parent while preserving its other metadata. The original event remains intact.
-An ordinary move into an already deleted parent is repaired to the previous
-valid location. A repair can carry `restore: true` and
+An ordinary move or history compensation into an already deleted parent is
+repaired to the previous valid location, or the root if that location is unavailable. A repair can carry `restore: true` and
 `restoreContainerOnly: true` to restore the affected folder without restoring a
-whole subtree. Outstanding pages and pending local hierarchy writes settle before remote
-subtree deletions are applied, so a canceled move cannot erase unrelated cards.
+whole subtree. Each deletion response wrapper carries authoritative
+`deletionScopes`, keyed by deleted root ID, with `decks` mapping deck IDs to
+parents and `cards` mapping card IDs to their decks. The server captures this
+scope at the deletion's sequence and persists it in the event transaction;
+client submissions cannot supply it. Clients store scopes with pending events
+and apply them to local echoes as well as remote replay. Moving a deleted
+member out afterward cannot evade its tombstone, and downloading the same log
+in one page or many pages produces the same membership. Canonical event bytes
+and identifiers remain immutable. Projection migration rebuilds scope records
+from the ordered log without rewriting events.
 Clients apply this correction even on the device that authored the losing move
 and report `SYNC_HIERARCHY_RESOLVED`. The repair and its source event are committed
 in the same server transaction; retries cannot duplicate repairs. A cyclic move
@@ -292,6 +372,22 @@ subtree disappearing across multiple pages until all events are applied.
 Deletion tombstones prevent stale clients from resurrecting removed notes.
 Unsynced local mutations stay protected until their echoes establish server
 order. Dependency events that arrive before their notes are retained and retried.
+A terminal page with unresolved dependencies reports `SYNC_DEPENDENCY` instead
+of reporting a completed sync. The cursor and pending events remain durable;
+update every client and the server, then retry. Preserve the database for
+inspection if the dependency remains unavailable.
+
+Deletion scope metadata participates in server page byte budgets. Normal pages
+remain approximately 6 MiB; one large deletion may occupy its own larger page.
+Clients accept at most 32 MiB per response. Scope metadata is limited to 24 MiB,
+100,000 decks per scope, 200,000 total deck memberships, and 100,000 total card
+memberships. Oversized scopes fail before the server commits the mutation with
+`DELETION_SCOPE_LIMIT`; delete smaller subtrees and sync each before continuing.
+
+Explicit undo/redo schedule changes, resets, postponements, and direction
+creation establish schedule sequence barriers. A review ordered before such a
+barrier can enter history but cannot replace that schedule. Content-only edits
+retain existing schedules, including independent offline reviews.
 
 Log compaction and replaying concurrent reviews into a combined schedule remain
 future work. HTTPS terminates at the deployment proxy. The desktop stores its token
