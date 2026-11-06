@@ -370,6 +370,14 @@ deck removes descendant cards, retains their review history, and emits explicit
 delete events for every descendant card and deck. Remote clients may observe the
 subtree disappearing across multiple pages until all events are applied.
 Deletion tombstones prevent stale clients from resurrecting removed notes.
+An ordinary card write that first places a live or new card into a deleted
+deck is normalized into an immediate server-authored `card.delete` in the
+same transaction. The original write is
+preserved and the deletion precedes subsequent client events, so its tombstone
+is identical for author echoes and any download page size. Retrying the source
+write cannot duplicate this deletion. Projection migration adds missing
+barriers only for rejected cards that remain deleted after the complete legacy
+log; a later explicit restore is preserved.
 Unsynced local mutations stay protected until their echoes establish server
 order. Dependency events that arrive before their notes are retained and retried.
 A terminal page with unresolved dependencies reports `SYNC_DEPENDENCY` instead

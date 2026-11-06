@@ -416,6 +416,53 @@ private slots:
         }
         QVERIFY(!more); QCOMPARE(deckParents(paged),deckParents(fresh)); QCOMPARE(paged.cards().size(),fresh.cards().size());
     }
+    void movingCardThroughDeletedDeckConvergesAcrossPages_data() {
+        QTest::addColumn<bool>("moveOut");
+        QTest::newRow("moves-back-to-live-deck") << true;
+        QTest::newRow("ends-in-deleted-deck") << false;
+    }
+    void movingCardThroughDeletedDeckConvergesAcrossPages() {
+        QFETCH(bool,moveOut);
+        const QString suffix=QString::fromLatin1(QTest::currentDataTag());
+        AppController author(m_temporary.filePath("transit-author-"+suffix)), deleting(m_temporary.filePath("transit-deleting-"+suffix));
+        QVERIFY(waitIdle(author)); QVERIFY(waitIdle(deleting));
+        const QString parent=create(author,"Deleted parent"),other=create(author,"Other deck");
+        QVERIFY(author.saveCard({},other,"basic","Question","Answer",{},1)); QVERIFY(waitIdle(author));
+        const QString id=author.cards().first().toMap().value("id").toString();
+        QVERIFY(exchange(author)); QVERIFY(exchange(deleting));
+        deleting.deleteDeck(parent); QVERIFY(waitIdle(deleting)); QVERIFY(exchange(deleting));
+        QVERIFY(author.moveCards(QVariantList{id},parent)); QVERIFY(waitIdle(author));
+        if (moveOut) {QVERIFY(author.moveCards(QVariantList{id},other)); QVERIFY(waitIdle(author));}
+        QVERIFY(exchange(author));
+        AppController together(m_temporary.filePath("transit-together-"+suffix)),paged(m_temporary.filePath("transit-paged-"+suffix));
+        QVERIFY(waitIdle(together)); QVERIFY(waitIdle(paged)); QVERIFY(exchange(together));
+        bool more=true;
+        for (int page=0;more&&page<100;++page) {
+            QVariantMap result=upload(prepare(paged));
+            const QVariantList events=result.value("events").toList();
+            if (events.size()>1) {
+                const QVariantMap wrapper=events.first().toMap();
+                result.insert("events",QVariantList{wrapper}); result.insert("cursor",wrapper.value("seq")); result.insert("hasMore",true);
+                result.remove("contentConflicts"); result.remove("contentConflictCount"); result.remove("hierarchyResolutionCount");
+            }
+            more=result.value("hasMore").toBool(); QVERIFY(receive(paged,result));
+        }
+        QVERIFY(!more); QVERIFY(exchange(deleting));
+        QCOMPARE(together.cards().size(),paged.cards().size());
+        QCOMPARE(author.cards().size(),paged.cards().size());
+        QCOMPARE(deleting.cards().size(),paged.cards().size());
+        QVERIFY(paged.cards().isEmpty());
+        for (const QString &path:{author.storagePath(),deleting.storagePath(),together.storagePath(),paged.storagePath()}) {
+            const QString connection=betterflash::model::uuid();
+            {
+                QSqlDatabase database=QSqlDatabase::addDatabase("QSQLITE",connection);
+                database.setDatabaseName(path); database.setConnectOptions("QSQLITE_OPEN_READONLY"); QVERIFY(database.open());
+                QSqlQuery tombstone(database); tombstone.prepare("SELECT 1 FROM tombstones WHERE entity_type='card' AND entity_id=?"); tombstone.addBindValue(id);
+                QVERIFY(tombstone.exec()); QVERIFY(tombstone.next()); database.close();
+            }
+            QSqlDatabase::removeDatabase(connection);
+        }
+    }
     void historyMoveIntoDeletedParentGetsRepaired() {
         AppController desktop(m_temporary.filePath("parent-desktop")), phone(m_temporary.filePath("parent-phone"));
         QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));

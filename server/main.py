@@ -527,24 +527,35 @@ class Store:
                 database.execute("CREATE INDEX IF NOT EXISTS card_locations_deck ON card_locations(deck_id,deleted)")
                 database.execute("CREATE INDEX IF NOT EXISTS deck_parents_parent ON deck_parents(parent_id,deleted)")
                 database.execute("CREATE TABLE IF NOT EXISTS projection_versions(name TEXT PRIMARY KEY)")
-                if not database.execute("SELECT 1 FROM projection_versions WHERE name='authoritative-deletions-v1'").fetchone():
+                database.execute("CREATE TABLE IF NOT EXISTS card_resolutions(original_event_id TEXT PRIMARY KEY,resolution_seq INTEGER UNIQUE NOT NULL)")
+                if (not database.execute("SELECT 1 FROM projection_versions WHERE name='authoritative-deletions-v1'").fetchone()
+                        or not database.execute("SELECT 1 FROM projection_versions WHERE name='deleted-parent-cards-v1'").fetchone()):
                     database.execute("DELETE FROM deck_parents")
                     database.execute("DELETE FROM card_locations")
                     database.execute("DELETE FROM deletion_scopes")
                     pending_repairs = {}
+                    pending_card_deletions = {}
                     for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq").fetchall():
                         event = json.loads(row["event_json"])
-                        corrections = self.project_event(database, event, row["seq"])
+                        rejected_cards = []
+                        corrections = self.project_event(database, event, row["seq"], rejected_cards)
+                        for card_id in rejected_cards:
+                            pending_card_deletions[card_id] = event
                         for entity, entity_id, _ in self.content_targets(event):
                             if entity == "deck":
                                 pending_repairs.pop(entity_id, None)
                         for corrected, container_restore in corrections or ():
                             pending_repairs[corrected["id"]] = (event, corrected, container_restore)
-                    database.execute("INSERT INTO projection_versions(name) VALUES('authoritative-deletions-v1')")
+                    database.execute("INSERT OR IGNORE INTO projection_versions(name) VALUES('authoritative-deletions-v1')")
+                    database.execute("INSERT OR IGNORE INTO projection_versions(name) VALUES('deleted-parent-cards-v1')")
                     for event, corrected, container_restore in pending_repairs.values():
                         final = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (corrected["id"],)).fetchone()
                         if final is not None and not final["deleted"]:
                             self.append_repairs(database, event, [(corrected, container_restore)])
+                    for card_id, event in pending_card_deletions.items():
+                        final = database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()
+                        if final is not None and final["deleted"]:
+                            self.append_card_deletion(database, event, card_id)
                 database.commit()
             except BaseException:
                 database.rollback()
@@ -668,7 +679,7 @@ class Store:
         return [(corrected, False)]
 
     @staticmethod
-    def project_event(database, event, seq):
+    def project_event(database, event, seq, rejected_cards=None):
         kind, payload = event["type"], event["payload"]
         cards = []
         if kind == "card.upsert":
@@ -685,6 +696,8 @@ class Store:
             elif not existing or not existing[0] or restore:
                 parent = database.execute("SELECT deleted FROM deck_parents WHERE deck_id=?", (after["deckId"],)).fetchone()
                 deleted = parent is not None and parent[0] and not restore
+                if deleted and kind == "card.upsert" and rejected_cards is not None:
+                    rejected_cards.append(card_id)
                 database.execute("INSERT INTO card_locations VALUES(?,?,?) ON CONFLICT(card_id) DO UPDATE SET deck_id=excluded.deck_id,deleted=excluded.deleted",
                                  (card_id, after["deckId"], int(deleted)))
         scopes = {}
@@ -698,6 +711,24 @@ class Store:
                 raise ProtocolError("DELETION_SCOPE_LIMIT", "This deletion exceeds the supported collection scope. Delete smaller subtrees and sync each deletion before continuing.", 413)
             database.execute("INSERT OR REPLACE INTO deletion_scopes VALUES(?,?)", (seq, encoded))
         return corrections
+
+    def append_card_deletion(self, database, source_event, card_id):
+        generated = {"id": str(uuid5(UUID(source_event["id"]), "deleted-parent-card")),
+                     "deviceId": self.collection_id, "type": "card.delete",
+                     "createdAt": source_event["createdAt"], "payload": {"id": card_id}}
+        canonical = validate_event(generated, self.collection_id)
+        existing = database.execute("SELECT seq,event_json FROM events WHERE event_id=?", (generated["id"],)).fetchone()
+        if existing is not None:
+            if existing["event_json"] != canonical:
+                raise ProtocolError("STORAGE_ERROR", "A generated card deletion conflicts with its source. Preserve the server database for inspection.", 500)
+            return
+        result = database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                                  (generated["id"], generated["deviceId"], canonical, generated["createdAt"]))
+        seq = result.lastrowid
+        database.execute("INSERT INTO card_resolutions(original_event_id,resolution_seq) VALUES(?,?)", (source_event["id"], seq))
+        database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES('card',?,?,?,?,NULL)",
+                         (card_id, seq, generated["id"], generated["deviceId"]))
+        self.project_event(database, generated, seq)
 
     def append_repairs(self, database, source_event, corrections):
         for corrected, container_restore in corrections:
@@ -842,9 +873,12 @@ class Store:
                                                  (event_seq, entity, entity_id, head["seq"], head["event_id"], event["id"]))
                             database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES(?,?,?,?,?,?)",
                                              (entity, entity_id, event_seq, event["id"], body["deviceId"], content))
-                        corrections = self.project_event(database, event, event_seq)
+                        rejected_cards = []
+                        corrections = self.project_event(database, event, event_seq, rejected_cards)
                         if corrections:
                             self.append_repairs(database, event, corrections)
+                        for card_id in rejected_cards:
+                            self.append_card_deletion(database, event, card_id)
                     if event["id"] not in accepted:
                         accepted.append(event["id"])
                 outgoing, response_bytes, media_sizes = [], 0, {}

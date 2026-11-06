@@ -98,6 +98,95 @@ class ConvergenceTests(unittest.TestCase):
         self.assertTrue(response["hasMore"])
         self.assertEqual(self.sync(cursor=response["cursor"])["events"][0]["event"], following)
 
+    def card_event(self, deck_id, card_id=None):
+        from uuid import UUID, uuid5
+        card = {"id": card_id or str(uuid4()), "deckId": deck_id, "kind": "basic", "front": "Question",
+                "back": "Answer", "tags": "", "pointCount": 1}
+        variant = {"id": str(uuid5(UUID(card["id"]), "forward")), "cardId": card["id"], "key": "forward",
+                   "due": "2026-10-20T00:00:00Z", "reviewCount": 0, "stability": 1, "difficulty": 0.5}
+        return self.event("card.upsert", {"card": card, "variants": [variant]})
+
+    def test_rejected_moves_and_new_cards_get_idempotent_ordered_deletions(self):
+        parent, other = self.deck(), self.deck()
+        initial_card = self.card_event(other["id"])
+        card_id = initial_card["payload"]["card"]["id"]
+        initial = self.sync([self.event("deck.upsert", {"deck": parent}), self.event("deck.upsert", {"deck": other}), initial_card])
+        self.sync([self.event("deck.delete", {"id": parent["id"]})], initial["cursor"])
+        move = self.card_event(parent["id"], card_id)
+        for event in [move, self.card_event(parent["id"])]:
+            before = self.sync(cursor=0)["cursor"]
+            page = self.sync([event], before)
+            self.assertEqual([row["event"]["type"] for row in page["events"]], ["card.upsert", "card.delete"])
+            generated = page["events"][1]["event"]
+            self.assertEqual(generated["deviceId"], self.store.collection_id)
+            self.assertEqual(generated["payload"]["id"], event["payload"]["card"]["id"])
+            self.assertEqual(self.sync([event], before)["events"], page["events"])
+            with closing(self.store.connect()) as database:
+                head = database.execute("SELECT event_id,content_json FROM content_heads WHERE entity='card' AND entity_id=?", (generated["payload"]["id"],)).fetchone()
+                self.assertEqual(tuple(head), (generated["id"], None))
+        move_out = self.card_event(other["id"], card_id)
+        self.sync([move_out])
+        with closing(self.store.connect()) as database:
+            self.assertEqual(database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()[0], 1)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM card_resolutions").fetchone()[0], 2)
+        restore = self.card_event(other["id"], card_id)
+        restore["payload"].update({"restore": True, "freshVariantIds": []})
+        self.sync([restore])
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM card_resolutions").fetchone()[0], 2)
+            self.assertEqual(database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()[0], 0)
+
+    def test_rejected_card_deletion_rolls_back_with_its_source_batch(self):
+        import copy
+        parent, other = self.deck(), self.deck()
+        card = self.card_event(other["id"])
+        initial = self.sync([self.event("deck.upsert", {"deck": parent}), self.event("deck.upsert", {"deck": other}), card,
+                             self.event("deck.delete", {"id": parent["id"]})])
+        card_id = card["payload"]["card"]["id"]
+        move = self.card_event(parent["id"], card_id)
+        conflict = copy.deepcopy(card)
+        conflict["payload"]["card"]["front"] = "Different immutable content"
+        with self.assertRaises(main.Conflict):
+            self.sync([move, conflict], initial["cursor"])
+        with closing(self.store.connect()) as database:
+            self.assertEqual(database.execute("SELECT MAX(seq) FROM events").fetchone()[0], initial["cursor"])
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM card_resolutions").fetchone()[0], 0)
+            self.assertEqual(database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()[0], 0)
+            self.assertEqual(database.execute("SELECT event_id FROM content_heads WHERE entity='card' AND entity_id=?", (card_id,)).fetchone()[0], card["id"])
+        self.assertEqual(len(self.sync([move], initial["cursor"])["events"]), 2)
+
+    def test_legacy_rejection_backfill_preserves_later_restores_and_canonical_events(self):
+        for restored in (False, True):
+            with self.subTest(restored=restored):
+                root = Path(self.temporary.name) / str(restored)
+                store = main.Store(root / "collection.sqlite", root / "media")
+                parent, other = self.deck(), self.deck()
+                card = self.card_event(other["id"])
+                card_id = card["payload"]["card"]["id"]
+                events = [self.event("deck.upsert", {"deck": parent}), self.event("deck.upsert", {"deck": other}), card,
+                          self.event("deck.delete", {"id": parent["id"]}), self.card_event(parent["id"], card_id)]
+                if restored:
+                    restore = self.card_event(other["id"], card_id)
+                    restore["payload"].update({"restore": True, "freshVariantIds": []})
+                    events.append(restore)
+                with closing(store.connect()) as database:
+                    for event in events:
+                        canonical = main.validate_event(event, self.device)
+                        database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                                         (event["id"], self.device, canonical, event["createdAt"]))
+                    database.execute("DELETE FROM projection_versions WHERE name='deleted-parent-cards-v1'")
+                    before = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+                store = main.Store(store.path, store.media)
+                with closing(store.connect()) as database:
+                    after = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+                    self.assertEqual(after[:len(before)], before)
+                    self.assertEqual(len(after), len(before) + (0 if restored else 1))
+                    self.assertEqual(database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()[0], int(not restored))
+                again = main.Store(store.path, store.media)
+                with closing(again.connect()) as database:
+                    self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], after)
+
     def test_client_cannot_supply_authoritative_scope(self):
         parent = self.deck()
         self.sync([self.event("deck.upsert", {"deck": parent})])
