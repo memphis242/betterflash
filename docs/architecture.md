@@ -41,7 +41,8 @@ The desktop application uses native ONNX Runtime for local semantic retrieval.
 The selected embedding model downloads on first semantic search; text matching
 continues while it downloads or if semantic search is disabled. No browser
 engine, Electron or Python runtime is required. The independent sync server
-uses Python's standard library.
+uses Python 3.11 or newer and Pillow for attachment validation. See
+[sync deployment](sync.md) for its dependencies and protocol requirements.
 
 Language-model inference uses native llama.cpp with bounded contexts, response
 limits, cancellation, and hardware-aware profile selection. Automatic desktop
