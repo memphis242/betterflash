@@ -871,7 +871,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/info":
             store = self.authorized(body=body)
             if store is not None:
-                self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": 2,
+                self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": 3,
                                      "capabilities": ["independent-schedules", "hierarchy-repair"]}, body=body)
             return
         match = MEDIA_RE.fullmatch(path)
@@ -959,8 +959,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             body = decode_json(self.read_body(BODY_LIMIT))
-            if self.headers.get("X-BetterFlash-Protocol") != "2":
-                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 2 before syncing this collection.", 426)
+            if self.headers.get("X-BetterFlash-Protocol") != "3":
+                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 3 before syncing this collection.", 426)
             self.send_json(200, store.sync(body))
         except ProtocolError as failure:
             self.send_error_value(failure)

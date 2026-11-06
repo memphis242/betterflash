@@ -64,7 +64,7 @@ public:
                     if (request.method == QByteArrayLiteral("GET") && request.path.endsWith("/v1/info")) {
                         const QByteArray body = QJsonDocument::fromVariant(QVariantMap{
                             {QStringLiteral("collectionId"), m_collectionId},
-                            {QStringLiteral("protocolVersion"), 2},
+                            {QStringLiteral("protocolVersion"), 3},
                             {QStringLiteral("capabilities"), QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair")}}}).toJson(QJsonDocument::Compact);
                         socket->write("HTTP/1.1 200 Fixture\r\nContent-Length: " + QByteArray::number(body.size())
                                       + "\r\nConnection: close\r\n\r\n" + body);

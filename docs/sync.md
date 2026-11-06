@@ -67,7 +67,7 @@ UUID, and token rotation is supported by listing multiple digests:
 
 The registry is loaded at startup; restart the service after changing it. An
 authenticated `GET /v1/info` returns the account's stable `collectionId`,
-protocol version, and capabilities. Protocol 2 clients check this identity
+protocol version, and capabilities. Protocol 3 clients check this identity
 before uploading attachments or events and bind it locally in the transaction
 that applies the first successful response. Subsequent sync attempts to a
 different account or replacement server database fail before uploading. Keep
@@ -110,8 +110,8 @@ implemented.
 
 ## Protocol and compatibility
 
-Upgrade the server and every synced device together to protocol 2. Clients send
-`X-BetterFlash-Protocol: 2`; the server rejects older clients with HTTP 426.
+Upgrade the server and every synced device together to protocol 3. Clients send
+`X-BetterFlash-Protocol: 3`; the server rejects older clients with HTTP 426.
 New clients require `/v1/info` to advertise `independent-schedules` and
 `hierarchy-repair`. Mixing old
 clients could overwrite review schedules with stale card snapshots.
@@ -159,7 +159,7 @@ Only target card states contribute media references. Large operations split at
 dependency-complete card boundaries, with parent decks before child content and
 deck deletions after it. Checkpoints themselves remain local. All clients and
 the server must support this event before using synchronized undo. It is part
-of the protocol 2 contract. See [undo and redo](undo.md) for the full policy.
+of the protocol 3 contract. See [undo and redo](undo.md) for the full policy.
 
 Imported historical reviews can use `historyOnly: true` without changing a
 schedule. Variant identifiers are UUID version 5 values derived from the source
@@ -188,7 +188,7 @@ the import or sync transaction. Reviews without session metadata remain valid.
 Upgrade every synced client to the session-history build (local schema 4) before
 using tracked review sessions. Older clients accept review events but discard
 session metadata, leaving their copies as estimated groups after an upgrade.
-Protocol 2 requires session metadata support on every device. Upgrade the server
+Protocol 3 requires session metadata support on every device. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Narration WAV files must contain nonempty, canonical 16 kHz mono signed 16-bit PCM audio of at most 5 minutes.

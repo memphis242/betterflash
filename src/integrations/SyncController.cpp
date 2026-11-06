@@ -104,7 +104,7 @@ void SyncController::setEndpoint(const QString &endpoint) {
 QNetworkRequest SyncController::request(const QUrl &url) const {
     QNetworkRequest result(url);
     result.setRawHeader("Authorization", "Bearer " + m_credentials->key().toUtf8());
-    result.setRawHeader("X-BetterFlash-Protocol", "2");
+    result.setRawHeader("X-BetterFlash-Protocol", "3");
     if (!m_collectionId.isEmpty()) result.setRawHeader("X-BetterFlash-Collection", m_collectionId.toUtf8());
     result.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     result.setTransferTimeout(30000);
@@ -218,14 +218,14 @@ void SyncController::identifyCollection() {
         if (!success) {
             fail(QStringLiteral("SYNC_IDENTITY"), status == 401 || status == 403
                 ? QStringLiteral("Check your sync access token.")
-                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 2."));
+                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 3."));
             return;
         }
         const QJsonDocument document = QJsonDocument::fromJson(body);
         const QVariantMap info = document.object().toVariantMap();
         const QString identity = info.value(QStringLiteral("collectionId")).toString();
         if (body.size() > 16384 || !document.isObject() || !betterflash::model::validUuid(identity)
-            || info.value(QStringLiteral("protocolVersion")).toInt() != 2
+            || responseCount(info.value(QStringLiteral("protocolVersion"))).value_or(0) != 3
             || !info.value(QStringLiteral("capabilities")).toStringList().contains(QStringLiteral("independent-schedules"))
             || !info.value(QStringLiteral("capabilities")).toStringList().contains(QStringLiteral("hierarchy-repair"))) {
             fail(QStringLiteral("SYNC_PROTOCOL"), QStringLiteral("The server must support independent schedules and deck hierarchy repair. Upgrade the server and every synced client."));
