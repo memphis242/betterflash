@@ -294,8 +294,6 @@ void Summarizer::setModel(const QString &model) {
 }
 std::expected<QNetworkRequest, struct ProviderError> Summarizer::configuredRequest() const {
     if (m_provider != QStringLiteral("remote")) return std::unexpected(ProviderError{QStringLiteral("LLM_PROVIDER"), QStringLiteral("Select a remote provider before configuring a network request.")});
-    if (!hasApiKey()) return std::unexpected(ProviderError{QStringLiteral("LLM_KEY_MISSING"),
-        QStringLiteral("Add a provider key in Language model settings.")});
     const QUrl endpoint(m_endpoint);
     const bool local = endpoint.host() == QStringLiteral("localhost") || endpoint.host() == QStringLiteral("127.0.0.1") || endpoint.host() == QStringLiteral("::1");
     if (!endpoint.isValid() || endpoint.host().isEmpty() || !endpoint.userInfo().isEmpty()
@@ -303,6 +301,8 @@ std::expected<QNetworkRequest, struct ProviderError> Summarizer::configuredReque
         || !(endpoint.scheme() == QStringLiteral("https") || (local && endpoint.scheme() == QStringLiteral("http"))))
         return std::unexpected(ProviderError{QStringLiteral("LLM_ENDPOINT"),
             QStringLiteral("Use an HTTPS chat-completions endpoint, or HTTP on localhost.")});
+    if (!hasApiKey()) return std::unexpected(ProviderError{QStringLiteral("LLM_KEY_MISSING"),
+        QStringLiteral("Add a provider key in Language model settings.")});
     if (m_model.isEmpty()) return std::unexpected(ProviderError{QStringLiteral("LLM_MODEL"),
         QStringLiteral("Enter a model identifier in Language model settings.")});
     QNetworkRequest request(endpoint);

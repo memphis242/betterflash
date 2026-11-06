@@ -71,6 +71,15 @@ private:
     bool settle(AppController &app) {
         return QTest::qWaitFor([&app] { return !app.busy(); }, 10000) && app.lastError().isEmpty();
     }
+    bool configureRemote(Summarizer &summary, const QString &endpoint) {
+        summary.setProvider(QStringLiteral("remote"));
+        summary.setEndpoint(endpoint);
+        summary.setModel(QStringLiteral("mock-model"));
+        QObject *const keyBinding = summary.apiKey();
+        if (!QTest::qWaitFor([keyBinding] { return !keyBinding->property("ownKeyId").toString().isEmpty(); }, 5000)) return false;
+        summary.setApiKey(QStringLiteral("mock-provider-key"));
+        return summary.hasApiKey();
+    }
     bool seed(AppController &app, int count = 2) {
         if (!settle(app)) return false;
         app.createDeck(QStringLiteral("Provider fixture"));
@@ -102,21 +111,29 @@ private:
 private slots:
     void initTestCase() {
         QVERIFY(m_temporary.isValid());
+        const QString providerBin = m_temporary.filePath(QStringLiteral("provider-bin"));
+        QVERIFY(QDir().mkpath(providerBin));
+        const QString secretTool = QDir(providerBin).filePath(QStringLiteral("secret-tool"));
+        QFile secretToolFile(secretTool); QVERIFY(secretToolFile.open(QIODevice::WriteOnly));
+        const QByteArray secretToolStub = "#!/bin/sh\nexit 1\n";
+        QCOMPARE(secretToolFile.write(secretToolStub), secretToolStub.size()); secretToolFile.close();
+        QVERIFY(QFile::setPermissions(secretTool, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        m_originalPath = qgetenv("PATH");
+        qputenv("PATH", providerBin.toUtf8() + ':' + m_originalPath);
         QCoreApplication::setOrganizationName(QStringLiteral("BetterFlashTest"));
         QCoreApplication::setApplicationName(QStringLiteral("Provider"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_temporary.filePath(QStringLiteral("settings")));
-        m_originalPath = qgetenv("PATH");
         m_originalLlmKey = qgetenv("BETTERFLASH_LLM_API_KEY");
         qputenv("BETTERFLASH_LLM_API_KEY", "mock-provider-key");
     }
     void summaryIncludesOnlyTheRemainingQuestions() {
         AppController app(m_temporary.filePath(QStringLiteral("summary")));
         QVERIFY(seed(app, 3));
-        app.revealAnswer(); app.grade(3); QVERIFY(settle(app));
+        app.revealAnswer(); QVERIFY(settle(app)); app.grade(3); QVERIFY(settle(app));
         QCOMPARE(app.pendingCards().size(), 2);
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
-        Summarizer summary(&app); summary.setEndpoint(provider.endpoint()); summary.setModel(QStringLiteral("mock-model"));
+        Summarizer summary(&app); QVERIFY(configureRemote(summary, provider.endpoint()));
         summary.summarizeRemaining();
         QVERIFY(QTest::qWaitFor([&summary] { return !summary.busy(); }, 5000));
         QVERIFY2(summary.error().isEmpty(), qPrintable(summary.error()));
@@ -149,7 +166,7 @@ private slots:
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.status = status; provider.body = body;
         provider.extraHeaders = "Location: " + redirectTarget.endpoint().toUtf8() + "\r\n";
-        Summarizer summary(&app); summary.setEndpoint(provider.endpoint()); summary.setModel(QStringLiteral("mock-model"));
+        Summarizer summary(&app); QVERIFY(configureRemote(summary, provider.endpoint()));
         summary.summarizeRemaining();
         QVERIFY(QTest::qWaitFor([&summary] { return !summary.busy(); }, 5000));
         QVERIFY2(summary.error().startsWith(code), qPrintable(summary.error()));
@@ -161,7 +178,7 @@ private slots:
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.delayMs = 300;
         provider.body = R"({"choices":[{"message":{"content":"obsolete"}}]})";
-        Summarizer summary(&app); summary.setEndpoint(provider.endpoint()); summary.setModel(QStringLiteral("mock-model"));
+        Summarizer summary(&app); QVERIFY(configureRemote(summary, provider.endpoint()));
         summary.summarizeRemaining();
         QVERIFY(QTest::qWaitFor([&provider] { return provider.requestCount == 1; }, 5000));
         summary.cancel(); QVERIFY(!summary.busy());
@@ -175,10 +192,10 @@ private slots:
     }
     void unsafeEndpointsDoNotSendCredentials() {
         AppController app(m_temporary.filePath(QStringLiteral("endpoint"))); QVERIFY(seed(app));
-        Summarizer summary(&app);
+        Summarizer summary(&app); summary.setProvider(QStringLiteral("remote"));
         summary.setEndpoint(QStringLiteral("http://example.invalid/chat/completions"));
         summary.summarizeRemaining();
-        QVERIFY(!summary.busy());
+        QVERIFY(QTest::qWaitFor([&summary] { return !summary.busy(); }, 5000));
         QVERIFY(summary.error().startsWith(QStringLiteral("LLM_ENDPOINT")));
     }
     void synchronousNotificationCancellationStopsTheRequest() {
@@ -186,7 +203,7 @@ private slots:
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.delayMs = 300;
         provider.body = atomicResponse(QStringLiteral("split"), atomicCards());
-        Summarizer summary(&app); summary.setEndpoint(provider.endpoint()); summary.setModel(QStringLiteral("mock-model"));
+        Summarizer summary(&app); QVERIFY(configureRemote(summary, provider.endpoint()));
         connect(&summary, &Summarizer::changed, &summary, [&summary] { if (summary.busy()) summary.cancel(); });
         summary.summarizeRemaining();
         QVERIFY(!summary.busy());
@@ -208,7 +225,7 @@ private slots:
         const QString id = app.cards().first().toMap().value(QStringLiteral("id")).toString();
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.body = atomicResponse(QStringLiteral("keep"));
-        Summarizer configuration(&app); configuration.setEndpoint(provider.endpoint()); configuration.setModel(QStringLiteral("mock-model"));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         Atomicizer atomic(&app, &configuration); atomic.propose(id);
         QVERIFY(QTest::qWaitFor([&atomic] { return !atomic.busy(); }, 5000));
         QVERIFY2(atomic.error().isEmpty(), qPrintable(atomic.error()));
@@ -226,7 +243,7 @@ private slots:
         const QString id = source.value(QStringLiteral("id")).toString();
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.body = atomicResponse(QStringLiteral("split"), atomicCards());
-        Summarizer configuration(&app); configuration.setEndpoint(provider.endpoint()); configuration.setModel(QStringLiteral("mock-model"));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         Atomicizer atomic(&app, &configuration); QSignalSpy applied(&atomic, &Atomicizer::applied);
         atomic.propose(id);
         QVERIFY(QTest::qWaitFor([&atomic] { return !atomic.busy(); }, 5000));
@@ -266,7 +283,7 @@ private slots:
         QTemporaryDir directory; QVERIFY(directory.isValid());
         AppController app(directory.path()); QVERIFY(seed(app));
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0)); provider.body = atomicResponse(decision, cards);
-        Summarizer configuration(&app); configuration.setEndpoint(provider.endpoint()); configuration.setModel(QStringLiteral("mock-model"));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         Atomicizer atomic(&app, &configuration); atomic.propose(app.cards().first().toMap().value(QStringLiteral("id")).toString());
         QVERIFY(QTest::qWaitFor([&atomic] { return !atomic.busy(); }, 5000));
         QVERIFY(atomic.error().startsWith(QStringLiteral("ATOMICIZE_")));
@@ -277,7 +294,7 @@ private slots:
         const QVariantMap source = app.cards().first().toMap();
         const QString id = source.value(QStringLiteral("id")).toString();
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0)); provider.body = atomicResponse(QStringLiteral("split"), atomicCards());
-        Summarizer configuration(&app); configuration.setEndpoint(provider.endpoint()); configuration.setModel(QStringLiteral("mock-model"));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         Atomicizer atomic(&app, &configuration); atomic.propose(id);
         QVERIFY(QTest::qWaitFor([&atomic] { return !atomic.busy(); }, 5000));
         QVERIFY(atomic.hasProposal());
@@ -300,7 +317,7 @@ private slots:
         AppController app(m_temporary.filePath(QStringLiteral("atomic-cancel"))); QVERIFY(seed(app));
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
         provider.body = atomicResponse(QStringLiteral("split"), atomicCards()); provider.delayMs = 300;
-        Summarizer configuration(&app); configuration.setEndpoint(provider.endpoint()); configuration.setModel(QStringLiteral("mock-model"));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         Atomicizer atomic(&app, &configuration); atomic.propose(app.cards().first().toMap().value(QStringLiteral("id")).toString());
         QVERIFY(QTest::qWaitFor([&provider] { return provider.requestCount == 1; }, 5000));
         atomic.clear(); QTest::qWait(400);
