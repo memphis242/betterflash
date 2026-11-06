@@ -556,6 +556,9 @@ class Store:
                         final = database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()
                         if final is not None and final["deleted"]:
                             self.append_card_deletion(database, event, card_id)
+                if not database.execute("SELECT 1 FROM projection_versions WHERE name='deleted-parent-card-notices-v1'").fetchone():
+                    self.record_card_deletion_notices(database)
+                    database.execute("INSERT INTO projection_versions(name) VALUES('deleted-parent-card-notices-v1')")
                 database.commit()
             except BaseException:
                 database.rollback()
@@ -712,6 +715,18 @@ class Store:
             database.execute("INSERT OR REPLACE INTO deletion_scopes VALUES(?,?)", (seq, encoded))
         return corrections
 
+    @staticmethod
+    def record_card_deletion_notices(database, source_id=None):
+        statement = ("INSERT INTO content_conflicts(seq,entity,entity_id,previous_seq,previous_event_id,event_id) "
+                     "SELECT resolution.seq,'card',json_extract(resolution.event_json,'$.payload.id'),"
+                     "source.seq,source.event_id,resolution.event_id FROM card_resolutions AS binding "
+                     "JOIN events AS source ON source.event_id=binding.original_event_id "
+                     "JOIN events AS resolution ON resolution.seq=binding.resolution_seq")
+        assert source_id is None or valid_uuid(source_id)
+        predicate = " WHERE 1" if source_id is None else " WHERE binding.original_event_id=?"
+        parameters = () if source_id is None else (source_id,)
+        database.execute(statement + predicate + " ON CONFLICT(seq,entity,entity_id) DO NOTHING", parameters)
+
     def append_card_deletion(self, database, source_event, card_id):
         generated = {"id": str(uuid5(UUID(source_event["id"]), "deleted-parent-card")),
                      "deviceId": self.collection_id, "type": "card.delete",
@@ -721,11 +736,13 @@ class Store:
         if existing is not None:
             if existing["event_json"] != canonical:
                 raise ProtocolError("STORAGE_ERROR", "A generated card deletion conflicts with its source. Preserve the server database for inspection.", 500)
+            self.record_card_deletion_notices(database, source_event["id"])
             return
         result = database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
                                   (generated["id"], generated["deviceId"], canonical, generated["createdAt"]))
         seq = result.lastrowid
         database.execute("INSERT INTO card_resolutions(original_event_id,resolution_seq) VALUES(?,?)", (source_event["id"], seq))
+        self.record_card_deletion_notices(database, source_event["id"])
         database.execute("INSERT OR REPLACE INTO content_heads(entity,entity_id,seq,event_id,device_id,content_json) VALUES('card',?,?,?,?,NULL)",
                          (card_id, seq, generated["id"], generated["deviceId"]))
         self.project_event(database, generated, seq)

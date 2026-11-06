@@ -378,6 +378,15 @@ is identical for author echoes and any download page size. Retrying the source
 write cannot duplicate this deletion. Projection migration adds missing
 barriers only for rejected cards that remain deleted after the complete legacy
 log; a later explicit restore is preserved.
+Each generated deletion also records a content conflict with the affected card
+ID at the deletion's sequence. It appears in that download page's conflict
+notice, including on the authoring device, and remains in the client's retained
+notices until acknowledged. The submitted card content and deletion remain in
+the server log for recovery. Startup backfills missing conflict records for
+existing generated deletions without rewriting events or duplicating notices
+on replay or retries. A client whose cursor already passed such a deletion
+does not receive a retroactive notice; inspect the retained server log when
+recovering a collection synced with an earlier server build.
 Unsynced local mutations stay protected until their echoes establish server
 order. Dependency events that arrive before their notes are retained and retried.
 A terminal page with unresolved dependencies reports `SYNC_DEPENDENCY` instead

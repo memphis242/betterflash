@@ -152,9 +152,60 @@ class ConvergenceTests(unittest.TestCase):
         with closing(self.store.connect()) as database:
             self.assertEqual(database.execute("SELECT MAX(seq) FROM events").fetchone()[0], initial["cursor"])
             self.assertEqual(database.execute("SELECT COUNT(*) FROM card_resolutions").fetchone()[0], 0)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM content_conflicts").fetchone()[0], 0)
             self.assertEqual(database.execute("SELECT deleted FROM card_locations WHERE card_id=?", (card_id,)).fetchone()[0], 0)
             self.assertEqual(database.execute("SELECT event_id FROM content_heads WHERE entity='card' AND entity_id=?", (card_id,)).fetchone()[0], card["id"])
         self.assertEqual(len(self.sync([move], initial["cursor"])["events"]), 2)
+
+    def test_rejected_card_notice_belongs_to_deletion_page_and_survives_restart(self):
+        parent, other = self.deck(), self.deck()
+        card = self.card_event(other["id"])
+        card_id = card["payload"]["card"]["id"]
+        initial = self.sync([self.event("deck.upsert", {"deck": parent}), self.event("deck.upsert", {"deck": other}), card])
+        self.sync([self.event("deck.delete", {"id": parent["id"]})], initial["cursor"])
+        move = self.card_event(parent["id"], card_id)
+        with patch.object(main, "RESPONSE_LIMIT", 1):
+            page = self.sync([move], initial["cursor"])
+            self.assertEqual(page["contentConflictCount"], 0)
+            page = self.sync(cursor=page["cursor"])
+            self.assertEqual(page["events"][0]["event"], move)
+            self.assertEqual(page["contentConflictCount"], 0)
+            before_deletion = page["cursor"]
+            deletion = self.sync(cursor=before_deletion)
+        self.assertEqual(deletion["events"][0]["event"]["type"], "card.delete")
+        self.assertEqual(deletion["contentConflictCount"], 1)
+        conflict = deletion["contentConflicts"][0]
+        self.assertEqual((conflict["entity"], conflict["id"]), ("card", card_id))
+        self.assertEqual(conflict["seq"], deletion["cursor"])
+        self.assertEqual(conflict["previousSeq"], before_deletion)
+        self.assertEqual(conflict["previousEventId"], move["id"])
+        self.assertEqual(conflict["eventId"], deletion["events"][0]["event"]["id"])
+        self.assertEqual(self.sync([move], before_deletion)["contentConflicts"], [conflict])
+        self.store = main.Store(self.store.path, self.store.media)
+        self.assertEqual(self.sync(cursor=before_deletion)["contentConflicts"], [conflict])
+        after = self.sync(cursor=deletion["cursor"])
+        self.assertEqual(after["contentConflictCount"], 0)
+        self.assertEqual(after["contentConflicts"], [])
+
+    def test_existing_generated_deletion_notices_backfill_without_rewriting_events(self):
+        parent = self.deck()
+        initial = self.sync([self.event("deck.upsert", {"deck": parent}),
+                             self.event("deck.delete", {"id": parent["id"]})])
+        event = self.card_event(parent["id"])
+        page = self.sync([event], initial["cursor"])
+        with closing(self.store.connect()) as database:
+            canonical = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+            database.execute("DELETE FROM content_conflicts")
+            database.execute("DELETE FROM projection_versions WHERE name='deleted-parent-card-notices-v1'")
+        for _ in range(2):
+            self.store = main.Store(self.store.path, self.store.media)
+            replay = self.sync(cursor=initial["cursor"])
+            self.assertEqual(replay["contentConflictCount"], 1)
+            self.assertEqual(replay["contentConflicts"][0]["id"], event["payload"]["card"]["id"])
+            self.assertEqual(replay["contentConflicts"][0]["seq"], page["cursor"])
+            with closing(self.store.connect()) as database:
+                self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], canonical)
+                database.execute("DELETE FROM projection_versions WHERE name='deleted-parent-cards-v1'")
 
     def test_legacy_rejection_backfill_preserves_later_restores_and_canonical_events(self):
         for restored in (False, True):
