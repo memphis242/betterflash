@@ -355,6 +355,7 @@ Dialog {
             }
             TabBar {
                 id: detailsTabs
+                implicitWidth: bodyScroll.availableWidth
                 visible: !!dialog.preview.token
                 Layout.fillWidth: true
                 AppTabButton {

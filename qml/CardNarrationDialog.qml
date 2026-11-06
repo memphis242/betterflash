@@ -300,11 +300,14 @@ Dialog {
         parent: Overlay.overlay
         anchors.centerIn: parent
         width: Math.min(480, dialog.ui.width - 2 * dialog.ui.gutter)
+        implicitHeight: 240
+        height: Math.min(implicitHeight, dialog.ui.height - 2 * dialog.ui.gutter)
         padding: 20
         modal: true
         title: "Discard narration?"
         background: Rectangle { radius: 16; color: Theme.surface; border.color: Theme.ledgerRule }
         contentItem: Label {
+            id: discardMessage
             padding: 20
             text: "The current recording has not been saved. Discard it and close the editor?"
             color: Theme.ink

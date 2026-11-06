@@ -356,10 +356,17 @@ Item {
         return pages
     }
     function cardsOnPage() {
+        const cards = visibleCards || []
+        const page = currentPage
+        if (!page) return []
+        const start = Math.max(0, Math.min(page.start, cards.length))
+        const end = Math.max(start, Math.min(page.end, cards.length))
         const result = []
-        for (let index = currentPage.start; index < currentPage.end; ++index)
-            result.push(Object.assign({}, visibleCards[index], { libraryIndex: index,
-                groupStart: !!visibleCards[index].searchGroup && (index === currentPage.start || visibleCards[index].groupStart) }))
+        for (let index = start; index < end; ++index) {
+            const card = cards[index]
+            result.push(Object.assign({}, card, { libraryIndex: index,
+                groupStart: !!card.searchGroup && (index === start || card.groupStart) }))
+        }
         return result
     }
     function pageForCard(id) {
