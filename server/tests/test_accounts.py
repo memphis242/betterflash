@@ -47,7 +47,7 @@ class AccountTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def request(self, method, path, data=None, token="alpha-token", raw=False):
-        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "3"}
+        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "4"}
         if method == "PUT":
             account_id = "22222222-2222-4222-8222-222222222222" if token.startswith("beta") else "11111111-1111-4111-8111-111111111111"
             headers["X-BetterFlash-Collection"] = self.stores[account_id].collection_id
@@ -89,7 +89,7 @@ class AccountTests(unittest.TestCase):
     def test_media_upload_requires_matching_collection(self):
         data = b"bound media"
         filename = hashlib.sha256(data).hexdigest() + ".png"
-        headers = {"Authorization": "Bearer alpha-token", "X-BetterFlash-Protocol": "3",
+        headers = {"Authorization": "Bearer alpha-token", "X-BetterFlash-Protocol": "4",
                    "X-BetterFlash-Collection": self.stores["22222222-2222-4222-8222-222222222222"].collection_id}
         request = urllib.request.Request(self.base + "/v1/media/" + filename, data, headers, method="PUT")
         with self.assertRaises(urllib.error.HTTPError) as raised:
@@ -101,7 +101,8 @@ class AccountTests(unittest.TestCase):
     def test_info_identity_is_stable_and_collection_mismatch_is_atomic(self):
         status, info = self.request("GET", "/v1/info")
         self.assertEqual(status, 200)
-        self.assertEqual(info["protocolVersion"], 3)
+        self.assertEqual(info["protocolVersion"], 4)
+        self.assertIn("short-interval-schedules", info["capabilities"])
         collection_id = info["collectionId"]
         self.assertEqual(collection_id, self.stores["11111111-1111-4111-8111-111111111111"].collection_id)
         event = self.event()
@@ -121,7 +122,7 @@ class AccountTests(unittest.TestCase):
         event = self.event()
         body = json.dumps({"deviceId": event["deviceId"], "cursor": 0, "events": [event]}).encode()
         request = urllib.request.Request(self.base + "/v1/sync", body,
-                                         {"Authorization": "Bearer alpha-token", "X-BetterFlash-Protocol": "2"},
+                                         {"Authorization": "Bearer alpha-token", "X-BetterFlash-Protocol": "3"},
                                          method="POST")
         with self.assertRaises(urllib.error.HTTPError) as raised:
             urllib.request.urlopen(request, timeout=5)

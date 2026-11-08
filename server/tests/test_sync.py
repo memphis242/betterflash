@@ -37,7 +37,7 @@ class SyncTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def request(self, method, path, data=None, token=TOKEN, raw=False):
-        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "3"}
+        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "4"}
         if method == "PUT":
             headers["X-BetterFlash-Collection"] = self.store.collection_id
         body = data if raw else json.dumps(data).encode() if data is not None else None
@@ -136,6 +136,47 @@ class SyncTests(unittest.TestCase):
         invalid["payload"]["card"]["front"] = "{{c1::answer::}}"
         self.assertEqual(self.sync([invalid])[0], 400)
         self.assertEqual(len(self.sync([])[1]["events"]), 1)
+
+    def test_subday_variant_schedules_round_trip_and_reject_out_of_bounds(self):
+        card_id = str(uuid4())
+        variant_id = str(uuid5(UUID(card_id), "forward"))
+        intervals = (10 / 1440, 1 / 24, 1 / 3, 1.0)
+        events = []
+        for stability in intervals:
+            events.append({"id": str(uuid4()), "deviceId": self.device,
+                           "type": "variant.upsert", "createdAt": "2026-11-08T00:00:00Z",
+                           "payload": {"variant": {"id": variant_id, "cardId": card_id, "key": "forward",
+                                                       "due": "2026-11-08T00:10:00Z", "reviewCount": 1,
+                                                       "stability": stability, "difficulty": 0.5,
+                                                       "graduated": stability >= 1.0}}})
+        status, response = self.sync(events)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(response["acceptedIds"]), len(intervals))
+        self.assertEqual([page["event"]["payload"]["variant"]["graduated"]
+                          for page in response["events"]], [False, False, False, True])
+
+        legacy_event = {"id": str(uuid4()), "deviceId": self.device,
+                        "type": "variant.upsert", "createdAt": "2026-11-08T00:00:00Z",
+                        "payload": {"variant": {"id": variant_id, "cardId": card_id, "key": "forward",
+                                                    "due": "2026-11-08T00:10:00Z", "reviewCount": 1,
+                                                    "stability": 0.25, "difficulty": 0.5}}}
+        status, legacy_response = self.sync([legacy_event])
+        self.assertEqual(status, 200)
+        self.assertNotIn("graduated", legacy_response["events"][-1]["event"]["payload"]["variant"])
+
+        for invalid_stability in (9 / 1440, 3650.001):
+            event = {"id": str(uuid4()), "deviceId": self.device,
+                     "type": "variant.upsert", "createdAt": "2026-11-08T00:00:00Z",
+                     "payload": {"variant": {"id": variant_id, "cardId": card_id, "key": "forward",
+                                                 "due": "2026-11-08T00:10:00Z", "reviewCount": 1,
+                                                 "stability": invalid_stability, "difficulty": 0.5}}}
+            self.assertEqual(self.sync([event])[0], 400)
+
+        for invalid_graduated in (1, "false", None):
+            event = json.loads(json.dumps(legacy_event))
+            event["id"] = str(uuid4())
+            event["payload"]["variant"]["graduated"] = invalid_graduated
+            self.assertEqual(self.sync([event])[0], 400)
 
     def test_media_round_trip_and_hash_integrity(self):
         data = png_bytes()

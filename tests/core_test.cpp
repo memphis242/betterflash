@@ -1,12 +1,15 @@
 #include "core/appcontroller.h"
+#include "core/actionhistory.h"
 #include "core/cardmodel.h"
 #include "core/scheduler.h"
+#include "core/schedulelimits.h"
 #include "core/mediabackup.h"
 #include "core/syncprotocol.h"
 
 #include <QDate>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
@@ -17,6 +20,9 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimeZone>
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -112,9 +118,14 @@ class CoreTest final : public QObject {
     Q_OBJECT
 private slots:
     void schedulerGradesFractionsLatencyAndBounds();
+    void schedulerShortIntervalsAndMatureMisses();
+    void learningCanGraduateDespiteLargeReviewCount();
+    void graduatedScheduleSurvivesRestartCorrectionAndUndo();
+    void firstReviewSchedulesAtTenMinutes();
     void reverseVariantsAreIndependent();
     void deckHierarchyValidationAndSubtreeReview();
     void deckHierarchyMigratesFromV2();
+    void schemaSevenMigrationPreservesShortScheduleAndHistory();
     void deckHierarchyBackupDeletionAndInvalidParents();
     void remoteDeckDependenciesAndCyclesAreAtomic();
     void subtreeDeleteConvergesAcrossConcurrentChildMove();
@@ -156,29 +167,163 @@ void CoreTest::schedulerGradesFractionsLatencyAndBounds()
 {
     double previous=0;
     for (int grade=0;grade<=4;++grade) {
-        const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(10,.5,grade,1,2,4);
+        const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(10,.5,grade,1,2,4,betterflash::scheduler::Phase::Daily);
         QVERIFY(result.stability>previous);previous=result.stability;
     }
-    const struct betterflash::scheduler::ReviewResult partialLow=betterflash::scheduler::schedule(10,.5,1,.2,2,4);
-    const struct betterflash::scheduler::ReviewResult partialHigh=betterflash::scheduler::schedule(10,.5,1,.8,2,4);
+    const struct betterflash::scheduler::ReviewResult partialLow=betterflash::scheduler::schedule(10,.5,1,.2,2,4,betterflash::scheduler::Phase::Daily);
+    const struct betterflash::scheduler::ReviewResult partialHigh=betterflash::scheduler::schedule(10,.5,1,.8,2,4,betterflash::scheduler::Phase::Daily);
     QVERIFY(partialHigh.stability>partialLow.stability);
     QVERIFY(partialHigh.difficulty<partialLow.difficulty);
-    const struct betterflash::scheduler::ReviewResult easier=betterflash::scheduler::schedule(10,.1,3,1,2,4);
-    const struct betterflash::scheduler::ReviewResult harder=betterflash::scheduler::schedule(10,.9,3,1,2,4);
+    const struct betterflash::scheduler::ReviewResult easier=betterflash::scheduler::schedule(10,.1,3,1,2,4,betterflash::scheduler::Phase::Daily);
+    const struct betterflash::scheduler::ReviewResult harder=betterflash::scheduler::schedule(10,.9,3,1,2,4,betterflash::scheduler::Phase::Daily);
     QVERIFY(easier.stability>harder.stability);
-    QVERIFY(easier.intervalDays>harder.intervalDays);
-    const struct betterflash::scheduler::ReviewResult fast=betterflash::scheduler::schedule(10,.5,3,1,2,4);
-    const struct betterflash::scheduler::ReviewResult slow=betterflash::scheduler::schedule(10,.5,3,1,90,4);
+    QVERIFY(easier.interval>harder.interval);
+    const struct betterflash::scheduler::ReviewResult fast=betterflash::scheduler::schedule(10,.5,3,1,2,4,betterflash::scheduler::Phase::Daily);
+    const struct betterflash::scheduler::ReviewResult slow=betterflash::scheduler::schedule(10,.5,3,1,90,4,betterflash::scheduler::Phase::Daily);
     QVERIFY(fast.stability>slow.stability);
-    const struct betterflash::scheduler::ReviewResult reading=betterflash::scheduler::schedule(10,.5,3,1,90,4,120);
+    const struct betterflash::scheduler::ReviewResult reading=betterflash::scheduler::schedule(10,.5,3,1,90,4,betterflash::scheduler::Phase::Daily,120);
     QCOMPARE(reading.stability,fast.stability);
-    for (const double stability:{.25,3650.0}) for (const double difficulty:{0.0,1.0})
+    for (const double stability:{betterflash::scheduler::minimumStabilityDays,3650.0}) for (const double difficulty:{0.0,1.0})
         for (int grade=0;grade<=4;++grade) for (const double recall:{0.0,.5,1.0})
             for (const double seconds:{0.0,3600.0}) {
-                const struct betterflash::scheduler::ReviewResult r=betterflash::scheduler::schedule(stability,difficulty,grade,recall,seconds,0);
-                QVERIFY(std::isfinite(r.stability));QVERIFY(r.stability>=.25&&r.stability<=3650);
-                QVERIFY(r.difficulty>=0&&r.difficulty<=1);QVERIFY(r.intervalDays>=1&&r.intervalDays<=3650);
+                const struct betterflash::scheduler::ReviewResult r=betterflash::scheduler::schedule(stability,difficulty,grade,recall,seconds,0,betterflash::scheduler::Phase::Learning);
+                QVERIFY(std::isfinite(r.stability));
+                QVERIFY(r.stability>=betterflash::scheduler::minimumStabilityDays&&r.stability<=3650);
+                QVERIFY(r.difficulty>=0&&r.difficulty<=1);
+                QVERIFY(r.interval>=betterflash::scheduler::minimumInterval&&r.interval<=std::chrono::days{3650});
             }
+}
+void CoreTest::schedulerShortIntervalsAndMatureMisses()
+{
+    using namespace std::chrono;
+    const std::array<seconds,4> steps{minutes{10},hours{1},hours{8},days{1}};
+    for (int grade=0;grade<=4;++grade) {
+        const struct betterflash::scheduler::ReviewResult initial=betterflash::scheduler::schedule(
+            10,.5,grade,1,2,0,betterflash::scheduler::Phase::Learning);
+        QCOMPARE(initial.interval,steps.front());
+        QCOMPARE(initial.stability,betterflash::scheduler::minimumStabilityDays);
+    }
+    for (std::size_t index=0;index+1<steps.size();++index) {
+        const double stability=static_cast<double>(steps[index].count())/seconds{days{1}}.count();
+        for (const int grade:{1,2}) {
+            const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(
+                stability,.5,grade,1,2,1,betterflash::scheduler::Phase::Learning);
+            QCOMPARE(result.interval,steps[index]);
+        }
+        for (const int grade:{3,4}) {
+            const std::size_t next=std::min(index+1,steps.size()-1);
+            const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(
+                stability,.5,grade,1,2,1,betterflash::scheduler::Phase::Learning);
+            QCOMPARE(result.interval,steps[next]);
+        }
+    }
+    const struct betterflash::scheduler::ReviewResult youngMiss=betterflash::scheduler::schedule(
+        1.0/3.0,.5,0,0,2,87,betterflash::scheduler::Phase::Learning);
+    QCOMPARE(youngMiss.interval,minutes{10});
+    QCOMPARE(youngMiss.stability,betterflash::scheduler::minimumStabilityDays);
+
+    for (const double stabilityDays:{1.0,8.0,30.0}) {
+        const struct betterflash::scheduler::ReviewResult miss=betterflash::scheduler::schedule(
+            stabilityDays,.5,0,0,2,7,betterflash::scheduler::Phase::Daily);
+        const double expectedStability=std::max(1.0,stabilityDays*.25);
+        QCOMPARE(miss.stability,expectedStability);
+        QCOMPARE(miss.interval,days{static_cast<days::rep>(std::floor(expectedStability))});
+        QVERIFY(miss.interval>=days{1});
+    }
+    const struct betterflash::scheduler::ReviewResult graduated=betterflash::scheduler::schedule(
+        1.0/3.0,.5,3,1,2,8,betterflash::scheduler::Phase::Learning);
+    QCOMPARE(graduated.interval,days{1});
+    QVERIFY(graduated.graduated);
+    const struct betterflash::scheduler::ReviewResult repeatedDailyMiss=betterflash::scheduler::schedule(
+        graduated.stability,graduated.difficulty,0,0,2,9,betterflash::scheduler::Phase::Daily);
+    QVERIFY(repeatedDailyMiss.interval>=days{1});
+    QVERIFY(repeatedDailyMiss.graduated);
+}
+void CoreTest::learningCanGraduateDespiteLargeReviewCount()
+{
+    const struct betterflash::scheduler::ReviewResult miss=betterflash::scheduler::schedule(
+        1.0/3.0,.5,0,0,2,100,betterflash::scheduler::Phase::Learning);
+    QCOMPARE(miss.interval,std::chrono::minutes{10});
+    QVERIFY(!miss.graduated);
+}
+void CoreTest::graduatedScheduleSurvivesRestartCorrectionAndUndo()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    QString deckId,cardId,variantId;
+    {
+        AppController app(directory.path());QVERIFY(idle(app));
+        deckId=addDeck(app);cardId=addCard(app,deckId,"basic","Question","Answer");
+        QVERIFY(!cardId.isEmpty());
+        QVERIFY(!addCard(app,deckId,"basic","Filler question","Filler answer").isEmpty());
+        variantId=variant(card(app,cardId),"forward").value("id").toString();
+    }
+    {
+        struct DatabaseAccess db(QDir(directory.path()).filePath("betterflash.sqlite"));
+        QVERIFY(db.run("UPDATE review_variants SET due='2000-01-01T00:00:00.000Z',review_count=8,stability=8.0/24.0,difficulty=0.5,graduated=0 WHERE id='"+variantId+"'"));
+    }
+    QVariantMap graduatedSchedule;
+    {
+        AppController app(directory.path());QVERIFY(idle(app));
+        QCOMPARE(variant(card(app,cardId),"forward").value("graduated").toBool(),false);
+        app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.queueCount(),2);
+        app.selectReviewCard(variantId);QVERIFY(idle(app));
+        app.revealAnswer();QVERIFY(idle(app));app.grade(3);QVERIFY(idle(app));
+        graduatedSchedule=variant(card(app,cardId),"forward");
+        QVERIFY(graduatedSchedule.value("graduated").toBool());
+        const QDateTime reviewedAt=QDateTime::fromString(app.history().first().toMap().value("reviewedAt").toString(),Qt::ISODateWithMs);
+        const QDateTime due=QDateTime::fromString(graduatedSchedule.value("due").toString(),Qt::ISODateWithMs);
+        QVERIFY(reviewedAt.isValid());QVERIFY(due.isValid());
+        QCOMPARE(reviewedAt.secsTo(due),qint64(86400));
+    }
+    {
+        struct DatabaseAccess db(QDir(directory.path()).filePath("betterflash.sqlite"));
+        QVERIFY(db.run("UPDATE review_variants SET due='2000-01-01T00:00:00.000Z' WHERE id='"+variantId+"'"));
+    }
+    {
+        AppController app(directory.path());QVERIFY(idle(app));
+        QVERIFY(variant(card(app,cardId),"forward").value("graduated").toBool());
+        ActionHistory actionHistory(&app);
+        QSignalSpy applied(&app,&AppController::historyApplied);
+        app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.queueCount(),2);
+        app.selectReviewCard(variantId);QVERIFY(idle(app));
+        app.revealAnswer();QVERIFY(idle(app));app.grade(0);QVERIFY(idle(app));
+        QVariantMap afterMiss=variant(card(app,cardId),"forward");
+        QVERIFY(afterMiss.value("graduated").toBool());
+        const QDateTime reviewedAt=QDateTime::fromString(app.history().first().toMap().value("reviewedAt").toString(),Qt::ISODateWithMs);
+        QDateTime due=QDateTime::fromString(afterMiss.value("due").toString(),Qt::ISODateWithMs);
+        QVERIFY(reviewedAt.isValid());QVERIFY(due.isValid());QCOMPARE(reviewedAt.secsTo(due),qint64(86400));
+        app.selectReviewCard(variantId);QVERIFY(idle(app));app.grade(3);QVERIFY(!app.pendingGradeCorrection().isEmpty());
+        app.confirmGradeCorrection();QVERIFY(idle(app));
+        const QVariantMap corrected=variant(card(app,cardId),"forward");
+        QVERIFY(corrected.value("graduated").toBool());
+        QVERIFY(corrected.value("reviewCount").toInt()>=1);
+        QVERIFY(actionHistory.canUndo());
+        const QString correctionAction=actionHistory.undoLabel();QVERIFY(!correctionAction.isEmpty());
+        actionHistory.undo();
+        QVERIFY(applied.isEmpty()&&applied.wait(5000));QVERIFY(idle(app));
+        QVERIFY(actionHistory.canRedo());
+        QCOMPARE(variant(card(app,cardId),"forward"),afterMiss);
+        actionHistory.redo();
+        QVERIFY(applied.wait(5000));QVERIFY(idle(app));
+        QCOMPARE(variant(card(app,cardId),"forward"),corrected);
+    }
+}
+void CoreTest::firstReviewSchedulesAtTenMinutes()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    AppController app(directory.path());QVERIFY(idle(app));
+    const QString deckId=addDeck(app);QVERIFY(!deckId.isEmpty());
+    const QString cardId=addCard(app,deckId,"basic","Question","Answer");QVERIFY(!cardId.isEmpty());
+    app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.queueCount(),1);
+    const QString variantId=app.currentCard().value("variantId").toString();
+    app.revealAnswer();QVERIFY(idle(app));app.grade(3);QVERIFY(idle(app));
+    const QVariantMap saved=variant(card(app,cardId),"forward");
+    QVERIFY(!saved.isEmpty());QCOMPARE(saved.value("id").toString(),variantId);
+    QVERIFY(!app.history().isEmpty());
+    const QDateTime reviewedAt=QDateTime::fromString(app.history().first().toMap().value("reviewedAt").toString(),Qt::ISODateWithMs);
+    const QDateTime due=QDateTime::fromString(saved.value("due").toString(),Qt::ISODateWithMs);
+    QVERIFY(reviewedAt.isValid());QVERIFY(due.isValid());
+    QCOMPARE(reviewedAt.msecsTo(due),qint64(10*60*1000));
 }
 void CoreTest::reverseVariantsAreIndependent()
 {
@@ -234,7 +379,52 @@ void CoreTest::deckHierarchyMigratesFromV2()
         QVERIFY(!app.cards().isEmpty());QVERIFY(app.cards().first().toMap().value("id").toString()==cardId);
         QVariantMap found;for (const QVariant &value:app.decks()) if (value.toMap().value("id")==deckId) found=value.toMap();
         QCOMPARE(found.value("parentId").toString(),QString());QVERIFY(variant(found.isEmpty()?QVariantMap{}:card(app,cardId),QStringLiteral("forward")).value("id")==variantId);
-        struct DatabaseAccess db(app.storagePath());QSqlQuery query(db.db);QVERIFY(query.exec("PRAGMA user_version"));QVERIFY(query.next());QCOMPARE(query.value(0).toInt(),7);QVERIFY(db.run("SELECT parent_id FROM decks WHERE id='"+deckId+"'"));
+        struct DatabaseAccess db(app.storagePath());QSqlQuery query(db.db);QVERIFY(query.exec("PRAGMA user_version"));QVERIFY(query.next());QCOMPARE(query.value(0).toInt(),8);QVERIFY(db.run("SELECT parent_id FROM decks WHERE id='"+deckId+"'"));
+    }
+}
+void CoreTest::schemaSevenMigrationPreservesShortScheduleAndHistory()
+{
+    QTemporaryDir directory;QVERIFY(directory.isValid());
+    QString deckId,cardId,variantId,due;
+    QVariantList history;
+    int outboxCount=0;
+    {
+        AppController app(directory.path());QVERIFY(idle(app));
+        deckId=addDeck(app);cardId=addCard(app,deckId,"basic","Question","Answer");
+        QVERIFY(!cardId.isEmpty());
+        app.startReview(deckId);QVERIFY(idle(app));app.revealAnswer();QVERIFY(idle(app));app.grade(3);QVERIFY(idle(app));
+        variantId=variant(card(app,cardId),"forward").value("id").toString();
+        due=QStringLiteral("2000-01-01T00:00:00.000Z");
+        history=app.history();
+        QVERIFY(!variantId.isEmpty());QVERIFY(!due.isEmpty());QCOMPARE(history.size(),1);
+        outboxCount=batch(app).value("events").toList().size();QVERIFY(outboxCount>0);
+    }
+    {
+        struct DatabaseAccess db(QDir(directory.path()).filePath("betterflash.sqlite"));
+        QVERIFY(db.run("UPDATE review_variants SET due='"+due+"',review_count=5,stability=0.25,difficulty=0.5 WHERE id='"+variantId+"'"));
+        QVERIFY(db.run("PRAGMA user_version=7"));
+        QCOMPARE(db.count("reviews"),1);
+        QCOMPARE(db.count("sync_outbox"),outboxCount);
+    }
+    {
+        AppController app(directory.path());QVERIFY(idle(app));QVERIFY(app.lastError().isEmpty());
+        const QVariantMap migrated=variant(card(app,cardId),"forward");
+        QCOMPARE(migrated.value("id").toString(),variantId);
+        QCOMPARE(migrated.value("due").toString(),due);
+        QVERIFY(migrated.value("graduated").toBool());
+        QCOMPARE(migrated.value("stability").toDouble(),0.25);
+        QCOMPARE(app.history(),history);
+        struct DatabaseAccess db(app.storagePath());
+        QSqlQuery query(db.db);QVERIFY(query.exec("PRAGMA user_version"));QVERIFY(query.next());QCOMPARE(query.value(0).toInt(),8);
+        QCOMPARE(db.count("reviews"),1);QCOMPARE(db.count("sync_outbox"),outboxCount);
+        QCOMPARE(db.count("review_variants"),1);
+        app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.queueCount(),1);
+        app.revealAnswer();QVERIFY(idle(app));app.grade(0);QVERIFY(idle(app));
+        const QDateTime reviewedAt=QDateTime::fromString(app.history().first().toMap().value("reviewedAt").toString(),Qt::ISODateWithMs);
+        const QDateTime nextDue=QDateTime::fromString(variant(card(app,cardId),"forward").value("due").toString(),Qt::ISODateWithMs);
+        QVERIFY(reviewedAt.isValid());QVERIFY(nextDue.isValid());
+        QCOMPARE(reviewedAt.secsTo(nextDue),qint64(86400));
+        QVERIFY(variant(card(app,cardId),"forward").value("graduated").toBool());
     }
 }
 void CoreTest::deckHierarchyBackupDeletionAndInvalidParents()
@@ -528,7 +718,7 @@ void CoreTest::exportImportAndValidation()
     QVERIFY(!addCard(source,deckId,"cloze","{{c1::One}} and {{c2::Two}}",{},2).isEmpty());
     source.startReview(deckId);QVERIFY(idle(source));source.revealAnswer();QVERIFY(idle(source));source.grade(1,.5);QVERIFY(idle(source));
     const QString exportPath=sourceDirectory.filePath("collection.json");source.exportCollection(exportPath);QVERIFY(idle(source));QVERIFY(source.lastError().isEmpty());
-    const QJsonObject valid=readJson(exportPath);QCOMPARE(valid.value("version").toInt(),5);QCOMPARE(valid.value("variants").toArray().size(),4);
+    const QJsonObject valid=readJson(exportPath);QCOMPARE(valid.value("version").toInt(),6);QCOMPARE(valid.value("variants").toArray().size(),4);
     destination.importCollection(exportPath);QVERIFY(idle(destination));QVERIFY2(destination.lastError().isEmpty(),qPrintable(destination.lastError().value("detail").toString()));
     QCOMPARE(destination.cards(),source.cards());QCOMPARE(destination.history(),source.history());QCOMPARE(destination.decks(),source.decks());
     const QVariantList originalEvents=batch(destination).value("events").toList();

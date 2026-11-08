@@ -16,6 +16,31 @@ Adaptive v1 is a small, inspectable heuristic. It has not been fitted to a
 retention dataset. Its persisted review history allows a future calibrated
 scheduler to replay the same grades and timing information.
 
+## Short learning steps
+
+New directions are due immediately. Their first graded review schedules another
+review in 10 minutes, regardless of grade. Subsequent short learning steps are
+10 minutes, 1 hour, 8 hours, and 1 day:
+
+- Good and Easy advance one step.
+- Partial and Hard repeat the current step.
+- Missed returns a direction still in these sub-day steps to 10 minutes.
+
+The interval is measured from the saved review timestamp, not the start of a
+calendar day. Difficulty still responds to grades during learning; response
+time and recalled fraction do not change these fixed learning intervals.
+Reaching 1 day graduates the direction to adaptive daily scheduling. Graduation
+is stored explicitly with the schedule and travels through sync and backups.
+
+Daily schedules retain at least one day of stability. A miss on an established
+direction retains 25% of its stability, with a one-day floor: 30 days becomes
+7.5 days of stability and a 7-day interval, 8 days becomes 2 days, and 1 day
+remains 1 day. It does not restart the short learning sequence.
+
+Review sessions use a fixed queue. Finish the session and start another review
+to pick up directions that have become due again; they do not automatically
+reappear within an active session.
+
 ## Recall and timing
 
 The five grades are Missed, Partial, Hard, Good, and Easy. Partial recall records
@@ -40,21 +65,21 @@ An answer given within its reading allowance has no timing penalty. A slower
 answer reduces interval growth by at most 30 percent. Answer speed never earns
 an extra bonus. Long prompts, code, and math receive more reading time.
 
-## Stability update
+## Daily stability update
 
 Let `s` be old stability, `d` old difficulty, and `r` recall fraction:
 
 | Grade | New stability | New difficulty |
 | --- | --- | --- |
-| Missed | `0.25` | `d + 0.16` |
+| Missed | `max(1, 0.25*s)` | `d + 0.16` |
 | Partial | `s * (0.65 + 0.45*r) * timing * difficulty_factor` | `d + 0.07 - 0.06*r` |
 | Hard | `s * (1.05 + 0.30*r) * timing * difficulty_factor` | `d + 0.03 - 0.04*r` |
 | Good | `s * (1.35 + 0.55*r) * timing * difficulty_factor` | `d - 0.035 - 0.035*r` |
 | Easy | `s * (1.70 + 0.80*r) * timing * difficulty_factor` | `d - 0.07 - 0.05*r` |
 
-Difficulty is clamped to `[0, 1]`; stability to `[0.25, 3650]` days. The next
-interval is at least one day and otherwise the floor of stability. The first
-successful review is capped at two days. A missed answer returns the next day.
+Difficulty is clamped to `[0, 1]`. Daily stability is clamped to `[1, 3650]`
+days; its interval is the floor of that value in days. Short learning intervals
+have exact fractional-day stability, with a minimum of `1/144` day (10 minutes).
 Reviews are saved atomically with the changed schedule. Selecting a grade advances
 to the next pending card after the commit. Previous/next navigation also remains
 available independently of grading.
@@ -70,6 +95,23 @@ schedule before that review, using the corrected grade. The due date is anchored
 to the original review timestamp. The review count is not incremented again.
 Corrections are available during the active session, including after every item
 has been graded; Finish review ends that session.
+The original pre-review phase also determines whether a correction uses a
+learning step or a proportional daily adjustment. A corrected short interval
+may already be due if enough time has passed since the original review.
+
+## Storage and compatibility
+
+Schema 8 accepts stability down to 10 minutes and preserves existing schedules,
+history, and pending sync operations during migration. Migration does not
+change existing due dates or stability. Previously reviewed directions are
+marked graduated because their scheduler used daily intervals, including those
+with fractional-day stored stability. Legacy backups and sync events without a
+graduation field use the same rule. Their next grade uses daily scheduling;
+they cannot be mistaken for directions still learning. Unreviewed directions
+enter the 10-minute step after their first grade. A learning schedule between
+short steps is treated as the next allowed step before applying a grade.
+Portable backup version 6 and sync protocol 4 support short intervals. Upgrade
+the server and every device together; older clients cannot read these schedules.
 
 ## Deferral and postponement
 

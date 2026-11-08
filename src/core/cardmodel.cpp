@@ -194,7 +194,7 @@ QVariantMap toMap(const struct Deck &r)
 QVariantMap toMap(const struct Card &r)
 { return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations},{"narrationFingerprints",r.narrationFingerprints}}; }
 QVariantMap toMap(const struct Variant &r)
-{ return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty}}; }
+{ return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty},{"graduated",r.graduated}}; }
 QVariantMap toMap(const struct Review &r)
 { QVariantMap result{{"id",r.id},{"cardId",r.cardId},{"variantId",r.variantId},{"deckName",r.deckName},{"grade",r.grade},{"recallFraction",r.recallFraction},{"responseSeconds",r.responseSeconds},{"reviewedAt",r.reviewedAt},{"due",r.due}}; if (!r.sessionId.isEmpty()) { result.insert("sessionId",r.sessionId);result.insert("sessionDeckName",r.sessionDeckName);result.insert("sessionStartedAt",r.sessionStartedAt); } return result; }
 
@@ -289,7 +289,8 @@ std::expected<struct Variant, QString> variantFromMap(const QVariantMap &m)
 {
     if (!validUuid(m.value("id").toString()) || !validUuid(m.value("cardId").toString()) || !text(m,"key",16,true)
         || !text(m,"due",40,true) || !number(m,"reviewCount",0,1000000000,true)
-        || !number(m,"stability",0.25,3650) || !number(m,"difficulty",0,1))
+        || !number(m,"stability",scheduler::minimumStabilityDays,scheduler::maximumStabilityDays) || !number(m,"difficulty",0,1)
+        || (m.contains("graduated") && m.value("graduated").metaType().id() != QMetaType::Bool))
         return std::unexpected(QStringLiteral("Variant fields are invalid or exceed their limits."));
     const QString key = m.value("key").toString();
     if (key != QStringLiteral("forward") && key != QStringLiteral("reverse")
@@ -299,7 +300,13 @@ std::expected<struct Variant, QString> variantFromMap(const QVariantMap &m)
     if (!due) return std::unexpected(due.error());
     if (m.value("id").toString() != variantId(m.value("cardId").toString(),key))
         return std::unexpected(QStringLiteral("Variant identifier does not match its source note and key."));
-    return Variant{m.value("id").toString(),m.value("cardId").toString(),key,*due,m.value("reviewCount").toInt(),m.value("stability").toDouble(),m.value("difficulty").toDouble()};
+    const int reviewCount = m.value("reviewCount").toInt();
+    const bool graduated = m.contains("graduated") ? m.value("graduated").toBool() : reviewCount > 0;
+    const double stability = m.value("stability").toDouble();
+    if ((graduated && reviewCount == 0) || (!graduated && reviewCount > 0 && stability >= 1.0))
+        return std::unexpected(QStringLiteral("Variant %1 has inconsistent graduation: graduated=%2, reviewCount=%3, stability=%4 days. A graduated direction needs a saved review; a reviewed learning direction must have stability below one day.")
+            .arg(m.value("id").toString(), graduated ? QStringLiteral("true") : QStringLiteral("false")).arg(reviewCount).arg(stability, 0, 'g', 17));
+    return Variant{m.value("id").toString(),m.value("cardId").toString(),key,*due,reviewCount,stability,m.value("difficulty").toDouble(),graduated};
 }
 std::expected<struct Review, QString> reviewFromMap(const QVariantMap &m)
 {
@@ -356,11 +363,11 @@ std::expected<QVariantMap, QString> checkpointFromMap(const QVariantMap &value)
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {
     const int version = object.value("version").toInt();
-    if (version < 2 || version > 5 || !object.value("decks").isArray()
+    if (version < 2 || version > 6 || !object.value("decks").isArray()
         || !object.value("cards").isArray() || !object.value("variants").isArray() || !object.value("history").isArray())
-        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, 4, or 5 collection with decks, cards, variants, and history arrays."));
-    if (object.contains("checkpoints") && (version != 5 || !object.value("checkpoints").isArray()))
-        return std::unexpected(QStringLiteral("Checkpoint entries require a version 5 collection and an array."));
+        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, 4, 5, or 6 collection with decks, cards, variants, and history arrays."));
+    if (object.contains("checkpoints") && (version < 5 || !object.value("checkpoints").isArray()))
+        return std::unexpected(QStringLiteral("Checkpoint entries require a version 5 or 6 collection and an array."));
     int count = 0;
     for (const QString &key : {QStringLiteral("decks"),QStringLiteral("cards"),QStringLiteral("variants"),QStringLiteral("history")}) {
         count += object.value(key).toArray().size();

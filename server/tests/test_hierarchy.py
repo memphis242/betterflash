@@ -34,7 +34,7 @@ class HierarchyTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def request(self, body):
-        headers = {"Authorization": "Bearer " + main.TOKEN, "X-BetterFlash-Protocol": "3"}
+        headers = {"Authorization": "Bearer " + main.TOKEN, "X-BetterFlash-Protocol": "4"}
         request = urllib.request.Request(self.base + "/v1/sync", json.dumps(body).encode(), headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=5) as response:

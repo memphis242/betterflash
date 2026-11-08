@@ -31,6 +31,9 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4, uuid5
 
 TOKEN = os.environ.get("BETTERFLASH_SYNC_TOKEN", "")
+PROTOCOL_VERSION = 4
+MIN_STABILITY_DAYS = 1.0 / 144.0
+MAX_STABILITY_DAYS = 3650.0
 EVENT_LIMIT = 100
 RESPONSE_LIMIT = 1000
 BODY_LIMIT = 4 * 1024 * 1024
@@ -232,8 +235,14 @@ def validate_variant(record):
         raise ProtocolError("INVALID_EVENT", "A review variant identifier does not match its card and key.")
     instant(text(record, "due", 40, True))
     number(record, "reviewCount", 0, 1000000000, True)
-    number(record, "stability", 0.25, 3650)
+    number(record, "stability", MIN_STABILITY_DAYS, MAX_STABILITY_DAYS)
     number(record, "difficulty", 0, 1)
+    if "graduated" in record and type(record["graduated"]) is not bool:
+        raise ProtocolError("INVALID_EVENT", "A review variant graduated flag must be a boolean.")
+    graduated = record.get("graduated", record["reviewCount"] > 0)
+    if ((graduated and record["reviewCount"] == 0)
+            or (not graduated and record["reviewCount"] > 0 and record["stability"] >= 1.0)):
+        raise ProtocolError("INVALID_EVENT", f"Variant {record['id']} has inconsistent graduation: graduated={graduated}, reviewCount={record['reviewCount']}, stability={record['stability']} days. A graduated direction needs a saved review; a reviewed learning direction must have stability below one day.")
 
 
 def review_session(record):
@@ -1069,8 +1078,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/info":
             store = self.authorized(body=body)
             if store is not None:
-                self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": 3,
-                                     "capabilities": ["independent-schedules", "hierarchy-repair"]}, body=body)
+                self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": PROTOCOL_VERSION,
+                                     "capabilities": ["independent-schedules", "hierarchy-repair", "short-interval-schedules"]}, body=body)
             return
         match = MEDIA_RE.fullmatch(path)
         if not match:
@@ -1158,8 +1167,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             body = decode_json(self.read_body(BODY_LIMIT))
-            if self.headers.get("X-BetterFlash-Protocol") != "3":
-                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 3 before syncing this collection.", 426)
+            if self.headers.get("X-BetterFlash-Protocol") != str(PROTOCOL_VERSION):
+                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 4 with short-interval schedule support before syncing this collection.", 426)
             self.send_json(200, store.sync(body))
         except ProtocolError as failure:
             self.send_error_value(failure)

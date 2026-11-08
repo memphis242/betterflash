@@ -1,11 +1,13 @@
 #include "core/appcontroller.h"
 #include "core/cardmodel.h"
 #include "core/mediabackup.h"
+#include "core/schedulelimits.h"
 #include "integrations/MediaStore.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/SyncController.h"
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QImage>
 #include <QJsonDocument>
@@ -40,8 +42,9 @@ class LocalHttpFixture final : public QObject {
 public:
     using Handler = std::function<struct HttpResponse(const struct HttpRequest &)>;
     explicit LocalHttpFixture(Handler handler,
-                              QString collectionId = QStringLiteral("11111111-1111-4111-8111-111111111111"))
-        : m_handler(std::move(handler)), m_collectionId(std::move(collectionId)) {
+                              QString collectionId = QStringLiteral("11111111-1111-4111-8111-111111111111"),
+                              const int protocolVersion = 4)
+        : m_handler(std::move(handler)), m_collectionId(std::move(collectionId)), m_protocolVersion(protocolVersion) {
         connect(&m_server, &QTcpServer::newConnection, this, [this] {
             while (m_server.hasPendingConnections()) {
                 QTcpSocket *const socket = m_server.nextPendingConnection();
@@ -67,8 +70,10 @@ public:
                         ++infoRequests;
                         const QByteArray body = QJsonDocument::fromVariant(QVariantMap{
                             {QStringLiteral("collectionId"), m_collectionId},
-                            {QStringLiteral("protocolVersion"), 3},
-                            {QStringLiteral("capabilities"), QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair")}}}).toJson(QJsonDocument::Compact);
+                            {QStringLiteral("protocolVersion"), m_protocolVersion},
+                            {QStringLiteral("capabilities"), m_protocolVersion >= 4
+                                 ? QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair"), QStringLiteral("short-interval-schedules")}
+                                 : QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair")}}}).toJson(QJsonDocument::Compact);
                         socket->write("HTTP/1.1 200 Fixture\r\nContent-Length: " + QByteArray::number(body.size())
                                       + "\r\nConnection: close\r\n\r\n" + body);
                         socket->disconnectFromHost();
@@ -105,6 +110,7 @@ private:
     QTcpServer m_server;
     const Handler m_handler;
     const QString m_collectionId;
+    const int m_protocolVersion;
     QHash<QTcpSocket *, QByteArray> m_buffers;
 };
 void configureSync(SyncController &sync, const QString &endpoint) {
@@ -149,6 +155,7 @@ QByteArray smallImage() {
 struct DatabaseSnapshot {
     bool valid = false;
     QString front;
+    QString reviewedAt;
     QVariantMap forward;
     QVariantMap reverse;
     int historyCount = 0;
@@ -169,12 +176,13 @@ struct DatabaseSnapshot readSnapshot(const QString &path, const QString &cardId)
             if (!card.exec() || !card.next()) return result;
             result.front = card.value(0).toString();
             QSqlQuery variants(database);
-            variants.prepare(QStringLiteral("SELECT variant_key,due,review_count,stability,difficulty FROM review_variants WHERE card_id=? ORDER BY variant_key"));
+            variants.prepare(QStringLiteral("SELECT variant_key,due,review_count,stability,difficulty,graduated FROM review_variants WHERE card_id=? ORDER BY variant_key"));
             variants.addBindValue(cardId);
             if (!variants.exec()) return result;
             while (variants.next()) {
                 const QVariantMap value{{QStringLiteral("due"), variants.value(1)}, {QStringLiteral("reviewCount"), variants.value(2)},
-                    {QStringLiteral("stability"), variants.value(3)}, {QStringLiteral("difficulty"), variants.value(4)}};
+                    {QStringLiteral("stability"), variants.value(3)}, {QStringLiteral("difficulty"), variants.value(4)},
+                    {QStringLiteral("graduated"), variants.value(5)}};
                 if (variants.value(0).toString() == QStringLiteral("forward")) result.forward = value;
                 else if (variants.value(0).toString() == QStringLiteral("reverse")) result.reverse = value;
             }
@@ -183,6 +191,11 @@ struct DatabaseSnapshot readSnapshot(const QString &path, const QString &cardId)
             history.addBindValue(cardId);
             if (!history.exec() || !history.next()) return result;
             result.historyCount = history.value(0).toInt();
+            QSqlQuery latestReview(database);
+            latestReview.prepare(QStringLiteral("SELECT reviewed_at FROM reviews WHERE card_id=? ORDER BY reviewed_at DESC,id DESC LIMIT 1"));
+            latestReview.addBindValue(cardId);
+            if (!latestReview.exec()) return result;
+            if (latestReview.next()) result.reviewedAt = latestReview.value(0).toString();
             result.valid = true;
             return result;
         };
@@ -357,7 +370,7 @@ private slots:
         QNetworkRequest request{QUrl(m_endpoint)};
         request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
         request.setRawHeader("Authorization", "Bearer local-integration-test-token-0123456789");
-        request.setRawHeader("X-BetterFlash-Protocol", "3");
+        request.setRawHeader("X-BetterFlash-Protocol", "4");
         QVariantMap outgoing = batch;
         if (outgoing.value("collectionId").toString().isEmpty()) outgoing.remove("collectionId");
         QNetworkReply *const reply = network.post(request, json(outgoing));
@@ -385,6 +398,64 @@ private slots:
     }
     QVariantList schedules(const AppController &app) {
         return app.cards().isEmpty() ? QVariantList{} : app.cards().first().toMap().value("variants").toList();
+    }
+    void variantBoundsAcceptShortIntervalsAndRejectInvalidValues() {
+        const QString cardId = QStringLiteral("11111111-1111-4111-8111-111111111111");
+        QVariantMap variant{{QStringLiteral("id"), betterflash::model::variantId(cardId, QStringLiteral("forward"))},
+                            {QStringLiteral("cardId"), cardId}, {QStringLiteral("key"), QStringLiteral("forward")},
+                            {QStringLiteral("due"), QStringLiteral("2026-11-08T00:10:00Z")},
+                            {QStringLiteral("reviewCount"), 0}, {QStringLiteral("difficulty"), 0.5}};
+        for (const double stability : {10.0 / 1440.0, 1.0 / 24.0, 1.0 / 3.0, 1.0}) {
+            variant.insert(QStringLiteral("stability"), stability);
+            QVERIFY(betterflash::model::variantFromMap(variant).has_value());
+        }
+        variant.insert(QStringLiteral("stability"), betterflash::scheduler::minimumStabilityDays / 2.0);
+        QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+        variant.insert(QStringLiteral("stability"), betterflash::scheduler::maximumStabilityDays + 0.001);
+        QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+        variant.insert(QStringLiteral("reviewCount"), 3);
+        variant.insert(QStringLiteral("stability"), 0.25);
+        variant.remove(QStringLiteral("graduated"));
+        const auto legacy = betterflash::model::variantFromMap(variant);
+        QVERIFY(legacy.has_value());
+        QVERIFY(legacy->graduated);
+        QCOMPARE(legacy->stability, 0.25);
+        QCOMPARE(legacy->due, QStringLiteral("2026-11-08T00:10:00.000Z"));
+        QVERIFY(betterflash::model::toMap(*legacy).value(QStringLiteral("graduated")).toBool());
+        variant.insert(QStringLiteral("graduated"), false);
+        const auto explicitlyYoung = betterflash::model::variantFromMap(variant);
+        QVERIFY(explicitlyYoung.has_value());
+        QVERIFY(!explicitlyYoung->graduated);
+        variant.insert(QStringLiteral("graduated"), QStringLiteral("true"));
+        QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+    }
+    void backupVersionsRetainCheckpointsAndShortIntervals() {
+        const QString deckId = QStringLiteral("11111111-1111-4111-8111-111111111111");
+        const QString cardId = QStringLiteral("22222222-2222-4222-8222-222222222222");
+        const struct betterflash::model::Deck deck{deckId, QStringLiteral("Deck"), {}, QStringLiteral("2026-11-08T00:00:00Z"), {}};
+        const struct betterflash::model::Card card{cardId, deckId, QStringLiteral("basic"),
+            QStringLiteral("Question"), QStringLiteral("Answer"), {}, 1, {}, {}};
+        const auto collection = [&](const int version, const double stability, const bool checkpoints) {
+            const struct betterflash::model::Variant variant{betterflash::model::variantId(cardId, QStringLiteral("forward")),
+                cardId, QStringLiteral("forward"), QStringLiteral("2026-11-08T00:10:00Z"), version == 5 ? 3 : 1, stability, 0.5};
+            QVariantMap variantMap = betterflash::model::toMap(variant);
+            if (version < 6) variantMap.remove(QStringLiteral("graduated"));
+            QJsonObject value{{QStringLiteral("version"), version},
+                {QStringLiteral("decks"), QJsonArray::fromVariantList({betterflash::model::toMap(deck)})},
+                {QStringLiteral("cards"), QJsonArray::fromVariantList({betterflash::model::toMap(card)})},
+                {QStringLiteral("variants"), QJsonArray::fromVariantList({variantMap})},
+                {QStringLiteral("history"), QJsonArray{}}};
+            if (checkpoints) value.insert(QStringLiteral("checkpoints"), QJsonArray{});
+            return betterflash::model::collectionFromJson(value);
+        };
+        const auto oldBackup = collection(5, 0.25, true);
+        QVERIFY(oldBackup.has_value());
+        QVERIFY(oldBackup->variants.first().graduated);
+        QCOMPARE(oldBackup->variants.first().stability, 0.25);
+        QCOMPARE(oldBackup->variants.first().due, QStringLiteral("2026-11-08T00:10:00.000Z"));
+        const auto currentBackup = collection(6, betterflash::scheduler::minimumStabilityDays, false);
+        QVERIFY(currentBackup.has_value());
+        QVERIFY(!currentBackup->variants.first().graduated);
     }
     void authoritativeDeletionSurvivesMoveOutAndFreshReplay() {
         AppController desktop(m_temporary.filePath("scope-desktop")), phone(m_temporary.filePath("scope-phone"));
@@ -740,6 +811,92 @@ private slots:
         QVERIFY(untouched.value(QStringLiteral("reviewCount")).toInt() == 0);
         QCOMPARE(state.historyCount, 2);
     }
+    void subdayScheduleRoundTripsAcrossDevices() {
+        AppController desktop(m_temporary.filePath(QStringLiteral("subday-sync-desktop")));
+        AppController phone(m_temporary.filePath(QStringLiteral("subday-sync-phone")));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone));
+        const QString deck = create(desktop, QStringLiteral("Short interval sync"));
+        QVERIFY(!deck.isEmpty());
+        QVERIFY(desktop.saveCard({}, deck, QStringLiteral("basic"), QStringLiteral("Question"), QStringLiteral("Answer"), {}, 1));
+        QVERIFY(waitIdle(desktop));
+        QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+
+        phone.startReview(deck); QVERIFY(waitIdle(phone));
+        phone.revealAnswer(); QVERIFY(waitIdle(phone));
+        phone.grade(0); QVERIFY(waitIdle(phone));
+        const QVariantMap reviewed = phone.cards().first().toMap();
+        const QVariantMap schedule = reviewed.value(QStringLiteral("variants")).toList().first().toMap();
+        QCOMPARE(schedule.value(QStringLiteral("stability")).toDouble(), betterflash::scheduler::minimumStabilityDays);
+        QVERIFY(!schedule.value(QStringLiteral("graduated")).toBool());
+        QVERIFY(exchange(phone)); QVERIFY(exchange(desktop));
+        const QVariantMap desktopSchedule = desktop.cards().first().toMap().value(QStringLiteral("variants")).toList().first().toMap();
+        QCOMPARE(desktopSchedule.value(QStringLiteral("stability")).toDouble(), betterflash::scheduler::minimumStabilityDays);
+        QVERIFY(!desktopSchedule.value(QStringLiteral("graduated")).toBool());
+        QCOMPARE(desktopSchedule.value(QStringLiteral("due")).toString(), schedule.value(QStringLiteral("due")).toString());
+        const QString cardId = phone.cards().first().toMap().value(QStringLiteral("id")).toString();
+        const struct DatabaseSnapshot state = readSnapshot(phone.storagePath(), cardId);
+        QVERIFY(state.valid);
+        QVERIFY(!state.reviewedAt.isEmpty());
+        const QDateTime reviewedAt = QDateTime::fromString(state.reviewedAt, Qt::ISODateWithMs);
+        const QDateTime due = QDateTime::fromString(schedule.value(QStringLiteral("due")).toString(), Qt::ISODateWithMs);
+        QCOMPARE(reviewedAt.msecsTo(due), qint64(600000));
+    }
+    void graduatedScheduleRoundTripsThroughSync() {
+        bool injectRemoteSchedule = false;
+        bool serializedInitialPhase = false;
+        qint64 serverSequence = 0;
+        QString cardId;
+        const auto serverEvent = [&](const struct HttpRequest &request) {
+            QVariantMap response = emptyResponse(request);
+            const QVariantMap batch = QJsonDocument::fromJson(request.body).toVariant().toMap();
+            QVariantList accepted;
+            QVariantList outgoing;
+            for (const QVariant &eventValue : batch.value(QStringLiteral("events")).toList()) {
+                const QVariantMap event = eventValue.toMap();
+                accepted.append(event.value(QStringLiteral("id")));
+                outgoing.append(QVariantMap{{QStringLiteral("seq"), ++serverSequence}, {QStringLiteral("event"), event}});
+                if (event.value(QStringLiteral("type")) == QStringLiteral("card.upsert")) {
+                    const QVariantList variants = event.value(QStringLiteral("payload")).toMap().value(QStringLiteral("variants")).toList();
+                    serializedInitialPhase = !variants.isEmpty()
+                        && variants.first().toMap().value(QStringLiteral("graduated")).metaType().id() == QMetaType::Bool
+                        && !variants.first().toMap().value(QStringLiteral("graduated")).toBool();
+                }
+            }
+            response.insert(QStringLiteral("acceptedIds"), accepted);
+            if (injectRemoteSchedule) {
+                const struct betterflash::model::Variant schedule{betterflash::model::variantId(cardId, QStringLiteral("forward")),
+                    cardId, QStringLiteral("forward"), QStringLiteral("2026-11-08T01:00:00.000Z"), 4, 1.0, 0.5, true};
+                const QVariantMap event{{QStringLiteral("id"), betterflash::model::uuid()},
+                    {QStringLiteral("deviceId"), betterflash::model::uuid()},
+                    {QStringLiteral("type"), QStringLiteral("variant.upsert")},
+                    {QStringLiteral("createdAt"), QStringLiteral("2026-11-08T00:00:00.000Z")},
+                    {QStringLiteral("payload"), QVariantMap{{QStringLiteral("variant"), betterflash::model::toMap(schedule)}}}};
+                outgoing.append(QVariantMap{{QStringLiteral("seq"), ++serverSequence}, {QStringLiteral("event"), event}});
+            }
+            response.insert(QStringLiteral("events"), outgoing);
+            response.insert(QStringLiteral("cursor"), serverSequence);
+            return HttpResponse{json(response)};
+        };
+        LocalHttpFixture server(serverEvent);
+        QVERIFY(server.listen());
+        AppController app(m_temporary.filePath(QStringLiteral("graduated-sync")));
+        QVERIFY(waitIdle(app));
+        const QString deckId = create(app, QStringLiteral("Graduation sync"));
+        QVERIFY(!deckId.isEmpty());
+        QVERIFY(app.saveCard({}, deckId, QStringLiteral("basic"), QStringLiteral("Question"), QStringLiteral("Answer"), {}, 1));
+        QVERIFY(waitIdle(app));
+        cardId = app.cards().first().toMap().value(QStringLiteral("id")).toString();
+        SyncController sync(&app, app.mediaPath());
+        configureSync(sync, server.endpoint());
+        QVERIFY2(synchronize(sync), qPrintable(sync.error()));
+        QVERIFY(serializedInitialPhase);
+        injectRemoteSchedule = true;
+        QVERIFY2(synchronize(sync), qPrintable(sync.error() + QStringLiteral(" ") + app.lastError().value(QStringLiteral("detail")).toString()));
+        const QVariantMap schedule = app.cards().first().toMap().value(QStringLiteral("variants")).toList().first().toMap();
+        QVERIFY(schedule.value(QStringLiteral("graduated")).toBool());
+        QCOMPARE(schedule.value(QStringLiteral("stability")).toDouble(), 1.0);
+        QCOMPARE(schedule.value(QStringLiteral("reviewCount")).toInt(), 4);
+    }
     void changedInfoIdentityPreventsUploads() {
         const auto acknowledge = [](const struct HttpRequest &request) {
             QVariantMap response = emptyResponse(request);
@@ -766,7 +923,29 @@ private slots:
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy() && !app.busy(); }, 10000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_COLLECTION_MISMATCH")));
+        QCOMPARE(second.infoRequests, 1);
         QCOMPARE(second.requests.size(), 0);
+    }
+    void oldServerProtocolPreventsUploads() {
+        const auto acknowledge = [](const struct HttpRequest &request) {
+            return HttpResponse{json(emptyResponse(request))};
+        };
+        LocalHttpFixture server(acknowledge,
+            QStringLiteral("11111111-1111-4111-8111-111111111111"), 3);
+        QVERIFY(server.listen());
+        AppController app(m_temporary.filePath(QStringLiteral("old-server-protocol")));
+        QVERIFY(waitIdle(app));
+        app.createDeck(QStringLiteral("Pending upload"));
+        QVERIFY(waitIdle(app));
+        SyncController sync(&app, app.mediaPath());
+        configureSync(sync, server.endpoint());
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&] { return !sync.busy() && !app.busy(); }, 10000));
+        QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_PROTOCOL")));
+        QVERIFY(sync.error().contains(QStringLiteral("GET /v1/info reports protocol 3")));
+        QVERIFY(sync.error().contains(QStringLiteral("short-interval-schedules")));
+        QCOMPARE(server.infoRequests, 1);
+        QCOMPARE(server.requests.size(), 0);
     }
     void concurrentCardContentUsesServerOrderAndReportsConflict() {
         AppController desktop(m_temporary.filePath(QStringLiteral("content-conflict-desktop")));

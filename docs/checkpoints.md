@@ -63,14 +63,15 @@ may remain as unused files.
 ## Storage, backups, and sync
 
 Schema 7 adds local `deck_checkpoints` and content-addressed `checkpoint_media`
-tables. Checkpoints are immutable, survive restarts, and are retained if a deck
+tables. Schema 8 also supports short learning intervals without changing existing
+schedules. Checkpoints are immutable, survive restarts, and are retained if a deck
 is deleted. This first UI accesses them through a live deck; a browser for
 checkpoints of entirely deleted root decks is not provided yet.
 
-Portable version 5 backups include checkpoint history and historical media,
+Portable version 6 backups include checkpoint history and historical media,
 including assets no longer referenced by live cards. Imports remain additive
 and reject differing records with the same immutable checkpoint identifier.
-Versions 2, 3, and 4 remain readable. Checkpoint order is preserved on import.
+Versions 2, 3, 4, and 5 remain readable. Checkpoint order is preserved on import.
 
 Checkpoint history does not sync between devices in this version. Restored
 content does sync, including explicit resurrection of deleted cards/decks.

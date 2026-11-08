@@ -62,7 +62,7 @@ class SecurityTests(unittest.TestCase):
     def request(self, path, data=None, token="alpha", method="GET"):
         request = urllib.request.Request(self.base + path, data, {
             "Authorization": "Bearer " + token,
-            "X-BetterFlash-Protocol": "3",
+            "X-BetterFlash-Protocol": "4",
             "X-BetterFlash-Collection": self.store.collection_id,
         }, method=method)
         try:

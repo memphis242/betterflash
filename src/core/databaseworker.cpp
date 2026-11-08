@@ -16,6 +16,7 @@
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QThread>
 #include <QTimeZone>
 #include <algorithm>
@@ -32,7 +33,11 @@ struct model::Deck readDeck(const QSqlQuery &q)
 struct model::Card readCard(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),q.value(7).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(7).toString().toUtf8()).object().toVariantMap(),q.value(8).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(8).toString().toUtf8()).object().toVariantMap()}; }
 struct model::Variant readVariant(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble()}; }
+{
+    const int phaseColumn = q.record().indexOf(QStringLiteral("graduated"));
+    assert(phaseColumn >= 0);
+    return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(phaseColumn).toBool()};
+}
 struct model::Review readReview(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString()}; }
 QVariantList variantMaps(const QList<struct model::Variant> &variants)
@@ -146,12 +151,22 @@ bool DatabaseWorker::migrate()
     QSqlQuery versionQuery(m_db);
     if (!versionQuery.exec("PRAGMA user_version") || !versionQuery.next()) { m_sqlDetail = versionQuery.lastError().text();return false; }
     const int version = versionQuery.value(0).toInt();
-    if (version > 7) { m_sqlDetail = QStringLiteral("Database version is newer than this application.");return false; }
+    versionQuery.finish();
+    assert(!versionQuery.isActive());
+    if (version > 8) {
+        m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 8. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
+        return false;
+    }
     return mutate([&] {
+        const auto variantsSchema = [](const QString &name, const bool ifNotExists) {
+            assert(name == QStringLiteral("review_variants") || name == QStringLiteral("review_variants_v8"));
+            return QStringLiteral("CREATE TABLE%1 %2(id TEXT PRIMARY KEY,card_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,variant_key TEXT NOT NULL,due TEXT NOT NULL,review_count INTEGER NOT NULL CHECK(review_count>=0),stability REAL NOT NULL CHECK(stability BETWEEN (1.0/144.0) AND 3650),difficulty REAL NOT NULL CHECK(difficulty BETWEEN 0 AND 1),graduated INTEGER NOT NULL DEFAULT 0 CHECK(graduated IN (0,1)),CHECK(graduated=0 OR review_count>0),CHECK(graduated=1 OR review_count=0 OR stability<1),UNIQUE(card_id,variant_key))")
+                .arg(ifNotExists ? QStringLiteral(" IF NOT EXISTS") : QString(), name);
+        };
         const QStringList schema{
             "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '')",
             "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,kind TEXT NOT NULL,front TEXT NOT NULL,back TEXT NOT NULL,tags TEXT NOT NULL,point_count INTEGER NOT NULL CHECK(point_count BETWEEN 1 AND 1000),narrations TEXT NOT NULL DEFAULT '{}',narration_fingerprints TEXT NOT NULL DEFAULT '{}')",
-            "CREATE TABLE IF NOT EXISTS review_variants(id TEXT PRIMARY KEY,card_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,variant_key TEXT NOT NULL,due TEXT NOT NULL,review_count INTEGER NOT NULL CHECK(review_count>=0),stability REAL NOT NULL CHECK(stability BETWEEN .25 AND 3650),difficulty REAL NOT NULL CHECK(difficulty BETWEEN 0 AND 1),UNIQUE(card_id,variant_key))",
+            variantsSchema(QStringLiteral("review_variants"), true),
             "CREATE INDEX IF NOT EXISTS variants_due ON review_variants(due)",
             "CREATE TABLE IF NOT EXISTS reviews(id TEXT PRIMARY KEY,card_id TEXT NOT NULL,variant_id TEXT NOT NULL,deck_name TEXT NOT NULL,grade INTEGER NOT NULL CHECK(grade BETWEEN 0 AND 4),recall_fraction REAL NOT NULL CHECK(recall_fraction BETWEEN 0 AND 1),response_seconds REAL NOT NULL CHECK(response_seconds BETWEEN 0 AND 86400),reviewed_at TEXT NOT NULL,due TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '',session_deck_name TEXT NOT NULL DEFAULT '',session_started_at TEXT NOT NULL DEFAULT '')",
             "CREATE INDEX IF NOT EXISTS reviews_time ON reviews(reviewed_at)",
@@ -171,6 +186,17 @@ bool DatabaseWorker::migrate()
             "CREATE TABLE IF NOT EXISTS checkpoint_media(name TEXT PRIMARY KEY,bytes BLOB NOT NULL)"
         };
         for (const QString &statement : schema) if (!execute(statement)) return false;
+        if (version < 8) {
+            const QString nextVariants = variantsSchema(QStringLiteral("review_variants_v8"), false);
+            if (!execute(nextVariants)
+                || !execute("INSERT INTO review_variants_v8 SELECT id,card_id,variant_key,due,review_count,stability,difficulty,CASE WHEN review_count>0 THEN 1 ELSE 0 END FROM review_variants")
+                || !execute("DROP TABLE review_variants")
+                || !execute("ALTER TABLE review_variants_v8 RENAME TO review_variants")
+                || !execute("CREATE INDEX variants_due ON review_variants(due)")) {
+                m_sqlDetail = QStringLiteral("Could not migrate review schedules in %1 to schema 8: %2. The migration will be rolled back; preserve this database before retrying.").arg(m_path, m_sqlDetail);
+                return false;
+            }
+        }
         if (version < 3) {
             QSqlQuery columns(m_db);
             if (!columns.exec("PRAGMA table_info(decks)")) {m_sqlDetail=columns.lastError().text();return false;}
@@ -216,7 +242,7 @@ bool DatabaseWorker::migrate()
                 const QDate oldDue = QDate::fromString(old.value(7).toString(),Qt::ISODate);
                 const QString due = oldDue.isValid() ? oldDue.startOfDay(QTimeZone::systemTimeZone()).toUTC().toString(Qt::ISODateWithMs) : model::nowUtc();
                 for (const QString &key : *model::variantKeys(note)) {
-                    const struct model::Variant schedule{model::variantId(note.id,key),note.id,key,due,old.value(8).toInt(),std::clamp(old.value(9).toDouble(),.25,3650.0),std::clamp(old.value(10).toDouble(),0.0,1.0)};
+                    const struct model::Variant schedule{model::variantId(note.id,key),note.id,key,due,old.value(8).toInt(),std::clamp(old.value(9).toDouble(),betterflash::scheduler::minimumStabilityDays,betterflash::scheduler::maximumStabilityDays),std::clamp(old.value(10).toDouble(),0.0,1.0),old.value(8).toInt()>0};
                     if (!upsertVariant(schedule)) return false;
                 }
                 migrated.append(note);
@@ -247,7 +273,7 @@ bool DatabaseWorker::migrate()
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
-        return execute("PRAGMA user_version=7");
+        return execute("PRAGMA user_version=8");
     });
 }
 std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
@@ -264,14 +290,14 @@ std::optional<struct model::Card> DatabaseWorker::card(const QString &id)
 }
 std::optional<struct model::Variant> DatabaseWorker::variant(const QString &id)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants WHERE id=?");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
     return q.next() ? std::optional<struct model::Variant>(readVariant(q)) : std::nullopt;
 }
 QList<struct model::Variant> DatabaseWorker::cardVariants(const QString &id)
 {
     QList<struct model::Variant> result;
-    QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants WHERE card_id=? ORDER BY variant_key");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants WHERE card_id=? ORDER BY variant_key");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return result;}
     while (q.next()) result.append(readVariant(q));
     return result;
@@ -285,7 +311,7 @@ bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString 
     const auto previous=variant(r.id);
     if (!m_sqlDetail.isEmpty()) return false;
     const bool unchanged=previous&&model::toMap(*previous)==model::toMap(r);
-    if (!execute("INSERT INTO review_variants(id,card_id,variant_key,due,review_count,stability,difficulty) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due,review_count=excluded.review_count,stability=excluded.stability,difficulty=excluded.difficulty",{r.id,r.cardId,r.key,r.due,r.reviewCount,r.stability,r.difficulty})
+    if (!execute("INSERT INTO review_variants(id,card_id,variant_key,due,review_count,stability,difficulty,graduated) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due,review_count=excluded.review_count,stability=excluded.stability,difficulty=excluded.difficulty,graduated=excluded.graduated",{r.id,r.cardId,r.key,r.due,r.reviewCount,r.stability,r.difficulty,r.graduated})
         ||!execute("DELETE FROM tombstones WHERE entity_type='variant' AND entity_id=?",{r.id})) return false;
     if (reviewId.isEmpty()&&unchanged) return true;
     const QString key=QStringLiteral("review_owner:")+r.id;
@@ -532,7 +558,7 @@ bool DatabaseWorker::publishSnapshot()
     }
     if (processed!=deckIndexes.size()) {fail("STORAGE_HIERARCHY","The deck hierarchy contains a cycle. Repair the database and refresh.");return false;}
     QHash<QString,QList<struct model::Variant>> variants;
-    if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants ORDER BY variant_key")) {fail("STORAGE_READ","Could not load review variants. Try refreshing.",q.lastError().text());return false;}
+    if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants ORDER BY variant_key")) {fail("STORAGE_READ","Could not load review variants. Try refreshing.",q.lastError().text());return false;}
     while (q.next()) {const struct model::Variant schedule=readVariant(q);variants[schedule.cardId].append(schedule);}
     if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("STORAGE_READ","Could not load cards. Try refreshing.",q.lastError().text());return false;}
     while (q.next()) {
@@ -734,6 +760,7 @@ QVariantMap DatabaseWorker::reviewCard(const struct model::Card &note,const stru
     result.insert("variantId",schedule.id);result.insert("variantKey",schedule.key);
     result.insert("due",schedule.due);result.insert("reviewCount",schedule.reviewCount);
     result.insert("stability",schedule.stability);result.insert("difficulty",schedule.difficulty);
+    result.insert("graduated",schedule.graduated);
     result.insert("question",model::question(note,schedule.key));result.insert("answer",model::answer(note,schedule.key));
     result.insert("readingBudgetSeconds",model::readingBudget(result.value("question").toString()));result.insert("deckName",deckName);
     const QVariantMap weakness = m_weaknessByVariant.value(schedule.id);
@@ -769,7 +796,7 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         const QString now=model::nowUtc();
         QHash<QString,QVariantMap> cache;
         QSqlQuery q(m_db);
-        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
+        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name,v.graduated AS graduated FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
         if (!q.exec()) {fail("REVIEW_LOAD","Could not load the review queue. Refresh and try again.",q.lastError().text());return false;}
         while (q.next()) {
             const struct model::Variant schedule=readVariant(q);
@@ -1290,9 +1317,9 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     const struct model::Variant baseline=previous.baseline;
     const QString reviewedAt=correction?previous.savedReview.reviewedAt:model::nowUtc();
     const double effectiveSeconds=correction?previous.savedReview.responseSeconds:seconds;
-    const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(baseline.stability,baseline.difficulty,grade,recall,effectiveSeconds,baseline.reviewCount,previous.readingBudget);
-    const QString due=QDateTime::fromString(reviewedAt,Qt::ISODateWithMs).addDays(result.intervalDays).toString(Qt::ISODateWithMs);
-    const struct model::Variant schedule{old->id,old->cardId,old->key,due,baseline.reviewCount+1,result.stability,result.difficulty};
+    const struct betterflash::scheduler::ReviewResult result=betterflash::scheduler::schedule(baseline.stability,baseline.difficulty,grade,recall,effectiveSeconds,baseline.reviewCount,baseline.graduated?betterflash::scheduler::Phase::Daily:betterflash::scheduler::Phase::Learning,previous.readingBudget);
+    const QString due=QDateTime::fromString(reviewedAt,Qt::ISODateWithMs).addSecs(result.interval.count()).toString(Qt::ISODateWithMs);
+    const struct model::Variant schedule{old->id,old->cardId,old->key,due,baseline.reviewCount+1,result.stability,result.difficulty,result.graduated};
     const struct model::Review record{correction?previous.savedReview.id:model::uuid(),old->cardId,old->id,correction?previous.savedReview.deckName:sourceDeck->name,grade,recall,effectiveSeconds,reviewedAt,due,correction?previous.savedReview.sessionId:m_sessionId,correction?previous.savedReview.sessionDeckName:m_sessionDeckName,correction?previous.savedReview.sessionStartedAt:m_sessionStartedAt};
     QVariantMap payload{{"review",model::toMap(record)},{"variant",model::toMap(schedule)}};
     if (correction) {payload.insert("previousReview",model::toMap(previous.savedReview));payload.insert("previousVariant",model::toMap(previous.savedSchedule));}
@@ -1968,7 +1995,7 @@ void DatabaseWorker::exportCollection(const QString &path)
     while (q.next()) decks.append(model::toMap(readDeck(q)));
     if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
     while (q.next()) {const struct model::Card note=readCard(q);notes.append(note);cards.append(model::toMap(note));}
-    if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty FROM review_variants ORDER BY id")) {fail("EXPORT_READ","Could not read variants for export.",q.lastError().text());return;}
+    if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants ORDER BY id")) {fail("EXPORT_READ","Could not read variants for export.",q.lastError().text());return;}
     while (q.next()) variants.append(model::toMap(readVariant(q)));
     if (!q.exec("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due,session_id,session_deck_name,session_started_at FROM reviews ORDER BY reviewed_at,id")) {fail("EXPORT_READ","Could not read history for export.",q.lastError().text());return;}
     while (q.next()) history.append(model::toMap(readReview(q)));
@@ -2013,7 +2040,7 @@ void DatabaseWorker::exportCollection(const QString &path)
         mediaBytes += media.last().bytes.size();
         if (mediaBytes > model::maxMediaBytes) {fail("EXPORT_LIMIT","The collection and its checkpoints exceed the 64 MiB portable media limit.");return;}
     }
-    const QJsonObject root{{"version",5},{"media",model::mediaToJson(media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
+    const QJsonObject root{{"version",6},{"media",model::mediaToJson(media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
         {"variants",QJsonArray::fromVariantList(variants)},{"history",QJsonArray::fromVariantList(history)},
         {"deleted",QJsonArray::fromVariantList(deleted)},{"checkpoints",QJsonArray::fromVariantList(checkpoints)}};
     const auto validated = model::collectionFromJson(root);

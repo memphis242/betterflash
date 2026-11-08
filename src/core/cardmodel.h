@@ -1,5 +1,7 @@
 #pragma once
 
+#include "schedulelimits.h"
+
 #include <QDateTime>
 #include <QByteArray>
 #include <QJsonObject>
@@ -50,8 +52,9 @@ struct Variant {
     QString key;
     QString due;
     int reviewCount = 0;
-    double stability = 1.0;
+    double stability = scheduler::minimumStabilityDays;
     double difficulty = 0.5;
+    bool graduated = false;
 };
 struct Review {
     QString id;

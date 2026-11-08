@@ -94,7 +94,7 @@ reenable access. Revocation is effective after restart, including in-flight
 requests that were accepted by the old process.
 
 An authenticated `GET /v1/info` returns the account's stable `collectionId`,
-protocol version, and capabilities. Protocol 3 clients check this identity
+protocol version, and capabilities. Protocol 4 clients check this identity
 before uploading attachments or events and bind it locally in the transaction
 that applies the first successful response. Subsequent sync attempts to a
 different account or replacement server database fail before uploading. Keep
@@ -158,10 +158,10 @@ these bounds are not a substitute for public-edge connection/rate controls.
 
 ## Protocol and compatibility
 
-Upgrade the server and every synced device together to protocol 3. Clients send
-`X-BetterFlash-Protocol: 3`; the server rejects older clients with HTTP 426.
-New clients require `/v1/info` to advertise `independent-schedules` and
-`hierarchy-repair`. Mixing old
+Upgrade the server and every synced device together to protocol 4. Clients send
+`X-BetterFlash-Protocol: 4`; the server rejects older clients with HTTP 426.
+New clients require `/v1/info` to advertise `independent-schedules`,
+`hierarchy-repair`, and `short-interval-schedules`. Mixing old
 clients could overwrite review schedules with stale card snapshots.
 Media uploads require `X-BetterFlash-Collection` to match the identity obtained
 from `/v1/info`; the server checks it before accepting attachment bytes. Clients
@@ -207,7 +207,7 @@ Only target card states contribute media references. Large operations split at
 dependency-complete card boundaries, with parent decks before child content and
 deck deletions after it. Checkpoints themselves remain local. All clients and
 the server must support this event before using synchronized undo. It is part
-of the protocol 3 contract. See [undo and redo](undo.md) for the full policy.
+of the protocol 4 contract. See [undo and redo](undo.md) for the full policy.
 
 Imported historical reviews can use `historyOnly: true` without changing a
 schedule. Variant identifiers are UUID version 5 values derived from the source
@@ -236,7 +236,7 @@ the import or sync transaction. Reviews without session metadata remain valid.
 Upgrade every synced client to the session-history build (local schema 4) before
 using tracked review sessions. Older clients accept review events but discard
 session metadata, leaving their copies as estimated groups after an upgrade.
-Protocol 3 requires session metadata support on every device. Upgrade the server
+Protocol 4 requires session metadata support on every device. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Images must fully
@@ -281,9 +281,10 @@ without this field preserves a stored baseline only for the same attached
 audio asset; it never marks changed text as confirmed. An explicit empty
 object clears the baselines, leaving attached recordings unverified.
 
-New collection backups use version 5 for deck checkpoints, including historical
-image and narration assets. Narration text baselines remain included. The
-application still imports version 2, 3, and 4 backups. Provider credentials
+New collection backups use version 6 for short-interval schedules and deck
+checkpoints, including historical image and narration assets. Narration text
+baselines remain included. The application still imports version 2, 3, 4, and 5
+backups. Provider credentials
 remain excluded from every backup version.
 
 Checkpoint history is local to a collection and travels in portable backups;
