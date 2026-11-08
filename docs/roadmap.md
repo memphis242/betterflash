@@ -37,7 +37,8 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   deck topic grouping and completed-run rankings remain follow-ups. See
   [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
 - **Generate like this:** one-card model drafts are available in Review and
-  Library, with Markdown preview and editing before saving. Independent answer
+  Library, with Markdown preview. Present generated drafts in a modal consistent
+  with the new-card editor, with fully editable content before saving. Independent answer
   verification and optional difficulty controls remain follow-ups. TODO: support
   "Generate like this" for cloze card types, including valid cloze syntax and
   numbered cloze groups in generated drafts. Investigate the reported bug where
