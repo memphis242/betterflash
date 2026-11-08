@@ -15,6 +15,8 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Deferred desktop work
 
+- **Library scope:** support viewing every card in a selected deck and its
+  subdecks, as well as all cards across the entire collection.
 - **Checkpoint follow-ups:** checkpoint creation and content restoration are
   implemented, including child decks, deterministic changes, optional model
   annotations, recovery checkpoints, and portable backups. Checkpoint history
@@ -38,8 +40,15 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   Library, with Markdown preview and editing before saving. Independent answer
   verification and optional difficulty controls remain follow-ups. TODO: support
   "Generate like this" for cloze card types, including valid cloze syntax and
-  numbered cloze groups in generated drafts. See the same
+  numbered cloze groups in generated drafts. Investigate the reported bug where
+  saving a generated card from card detail leaves the card nowhere to be found;
+  verify persistence, destination deck, filtering, and navigation to the saved
+  card. Allow optional additional prompt instructions so the user can influence
+  generation. See the same
   study-support notes.
+- **Logo:** replace the current walnut mark with a deliberately drawn design.
+  The user may draw it digitally or commission an artist; the current mark
+  looks too AI-generated.
 - **Learning statistics:** refine the provisional library/deck learning score,
   coverage, and consistency measures; account for unreviewed material rather
   than scoring only the cards already reviewed. See
