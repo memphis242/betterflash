@@ -30,6 +30,11 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4, uuid5
 
+if __package__:
+    from .graduation import GraduationProjection
+else:
+    from graduation import GraduationProjection
+
 TOKEN = os.environ.get("BETTERFLASH_SYNC_TOKEN", "")
 PROTOCOL_VERSION = 4
 MIN_STABILITY_DAYS = 1.0 / 144.0
@@ -346,6 +351,8 @@ def validate_payload(kind, payload):
         raise ProtocolError("INVALID_EVENT", "A restore dependency must be a boolean on an explicit deck restore.")
     if "historyOnly" in payload and (kind not in ("review.add", "review.correct") or type(payload["historyOnly"]) is not bool):
         raise ProtocolError("INVALID_EVENT", "historyOnly must be a boolean on a review event.")
+    if "reset" in payload and (kind != "variant.upsert" or type(payload["reset"]) is not bool):
+        raise ProtocolError("INVALID_EVENT", "Reset intent must be a boolean on a variant upsert.")
     match kind:
         case "deck.upsert":
             validate_deck(payload.get("deck"))
@@ -394,6 +401,9 @@ def validate_payload(kind, payload):
                         raise ProtocolError("INVALID_EVENT", "A correction must preserve the review identity, time, response duration, and review count.")
         case "variant.upsert":
             validate_variant(payload.get("variant"))
+            variant = payload["variant"]
+            if payload.get("reset", False) and (variant["reviewCount"] != 0 or variant.get("graduated", False)):
+                raise ProtocolError("INVALID_EVENT", f"Reset intent for variant {variant['id']} requires reviewCount=0 and graduated=false; received reviewCount={variant['reviewCount']} and graduated={variant.get('graduated', False)}.")
         case "history.apply":
             validate_history(payload)
 
@@ -568,6 +578,24 @@ class Store:
                 if not database.execute("SELECT 1 FROM projection_versions WHERE name='deleted-parent-card-notices-v1'").fetchone():
                     self.record_card_deletion_notices(database)
                     database.execute("INSERT INTO projection_versions(name) VALUES('deleted-parent-card-notices-v1')")
+                phase = GraduationProjection(database, self.collection_id, validate_event, instant, ProtocolError, replay=True)
+                phase.initialize()
+                if not database.execute("SELECT 1 FROM projection_versions WHERE name='graduation-v2-reset-intent'").fetchone():
+                    database.execute("DELETE FROM graduation_heads")
+                    pending = {}
+                    for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq"):
+                        event = json.loads(row["event_json"])
+                        repair, barriers = phase.consume(event, row["seq"])
+                        for identifier in barriers:
+                            pending.pop(identifier, None)
+                        if repair:
+                            pending[repair["variant"]["id"]] = (event, repair)
+                    for identifier, (source_event, repair) in pending.items():
+                        head = phase.head(identifier)
+                        if head is not None and phase.is_graduated(head["variant"]):
+                            repair["variant"] = head["variant"]
+                            phase.append_repair(source_event, repair)
+                    database.execute("INSERT INTO projection_versions(name) VALUES('graduation-v2-reset-intent')")
                 database.commit()
             except BaseException:
                 database.rollback()
@@ -875,6 +903,7 @@ class Store:
         with closing(self.connect()) as database:
             database.execute("BEGIN IMMEDIATE")
             try:
+                phase = GraduationProjection(database, self.collection_id, validate_event, instant, ProtocolError)
                 latest = database.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0]
                 if cursor < 0 or cursor > latest:
                     raise ProtocolError("INVALID_CURSOR", "The cursor is outside this server's event log.")
@@ -905,6 +934,9 @@ class Store:
                             self.append_repairs(database, event, corrections)
                         for card_id in rejected_cards:
                             self.append_card_deletion(database, event, card_id)
+                        graduation_repair, _ = phase.consume(event, event_seq)
+                        if graduation_repair:
+                            phase.append_repair(event, graduation_repair)
                     if event["id"] not in accepted:
                         accepted.append(event["id"])
                 outgoing, response_bytes, media_sizes = [], 0, {}

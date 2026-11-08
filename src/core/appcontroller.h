@@ -2,6 +2,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <QDateTime>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
@@ -14,8 +15,8 @@ class DatabaseWorker;
 
 class AppController final : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QVariantList decks READ decks NOTIFY decksChanged)
-    Q_PROPERTY(QVariantList cards READ cards NOTIFY cardsChanged)
+    Q_PROPERTY(QVariantList decks READ decks NOTIFY decksSnapshotChanged)
+    Q_PROPERTY(QVariantList cards READ cards NOTIFY cardsSnapshotChanged)
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QVariantList reviewSessions READ reviewSessions NOTIFY reviewSessionsChanged)
     Q_PROPERTY(QString selectedDeckId READ selectedDeckId WRITE setSelectedDeckId NOTIFY selectedDeckIdChanged)
@@ -129,7 +130,8 @@ public:
     void reportHistoryError(const QString &code, const QString &message);
 
 signals:
-    void decksChanged(); void cardsChanged(); void historyChanged(); void reviewSessionsChanged(); void reviewOrderChanged();
+    void decksChanged(); void cardsChanged(); void decksSnapshotChanged(); void cardsSnapshotChanged();
+    void dueCountsChanged(); void historyChanged(); void reviewSessionsChanged(); void reviewOrderChanged();
     void selectedDeckIdChanged(); void statusMessageChanged(); void currentCardChanged();
     void lastErrorChanged(); void busyChanged(); void reviewingChanged();
     void answerRevealedChanged(); void pausedChanged(); void reviewStateChanged();
@@ -162,10 +164,16 @@ signals:
     void historyNavigationRequested(const QVariantMap &context);
     void historyInvalidated();
 
+private slots:
+    void checkDueRefresh();
+
 private:
     bool invoke(const std::function<void(DatabaseWorker *)> &call, const QVariantMap &context = {});
     void handleSnapshot(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void handleOperation(bool ok, const QString &message, const QVariantMap &error);
+    void scheduleDueRefresh(bool retry = false);
+    void refreshDueCounts();
+    bool dueCountsMismatch(const QDateTime &now, QDateTime *earliestFutureDue) const;
     void handleQueue(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
                      bool inspecting, const QString &cursorVariantId);
     void setBusy(bool value);
@@ -203,5 +211,7 @@ private:
     double m_accumulatedSeconds = 0.0;
     QElapsedTimer m_elapsed;
     QTimer m_elapsedTick;
+    QTimer m_dueRefreshTimer;
+    bool m_automaticDueRefreshPending = false;
     void clearPendingGradeCorrection();
 };

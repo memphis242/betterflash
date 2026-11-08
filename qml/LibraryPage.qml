@@ -12,6 +12,7 @@ Item {
     property string deckSearchText: librarySettings.deckQuery
     property string deckContentSearchText: librarySettings.deckContentQuery
     property bool searchReady: false
+    property string cardSearchScopeId: ""
     property var searchCollapsedDecks: ({})
     readonly property bool searchingDeckContent: deckContentSearchText.trim().length > 0
     readonly property bool searchingDecks: DeckSearch.normalize(deckSearchText).length > 0 || searchingDeckContent
@@ -526,12 +527,13 @@ Item {
         searchEngine.setDeckSearchActive(ui.page === 1)
         searchEngine.setDeckSearch(deckContentSearchText)
     }
-    function updateCardSearch() {
+    function updateCardSearch(dueOnly) {
         if (!searchReady) return
         searchEngine.setActive(ui.page === 1)
         const ids = activeFilterCount > 0 ? app.cards.filter(card => matchesCardFilter(card)).map(card => card.id) : []
-        searchEngine.setCardFilter(ids, activeFilterCount > 0)
-        searchEngine.setSearch(ui.selectedDeck.id || "", ui.cardSearchText)
+        searchEngine.setCardFilter(ids, activeFilterCount > 0, dueOnly === true)
+        cardSearchScopeId = app.selectedDeckId || ""
+        searchEngine.setSearch(cardSearchScopeId, ui.cardSearchText)
     }
 
     function selectCardAfterSearch() {
@@ -685,6 +687,10 @@ Item {
     }
     Connections {
         target: app
+        function onDueCountsChanged() {
+            if (library.filterState === "due" || library.filterState === "later")
+                library.updateCardSearch(true)
+        }
         function onDecksChanged() {
             library.initializeExpansion()
             if (ui.selectedDeck.id)
@@ -728,7 +734,10 @@ Item {
     }
     Connections {
         target: ui
-        function onSelectedDeckChanged() { library.updateCardSearch() }
+        function onSelectedDeckChanged() {
+            if (library.cardSearchScopeId !== (app.selectedDeckId || ""))
+                library.updateCardSearch()
+        }
         function onPageChanged() { library.updateCardSearch(); library.updateDeckSearch() }
         function onCardSearchTextChanged() { library.resetSearchPage = true; library.searchPageAnchorId = ""; library.resetPage(); library.updateCardSearch() }
     }

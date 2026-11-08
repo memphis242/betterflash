@@ -1,5 +1,6 @@
 #include "GuiSweep.h"
 #include "core/appcontroller.h"
+#include "core/cardmodel.h"
 #include "integrations/Atomicizer.h"
 #include "voice/VoiceController.h"
 
@@ -21,6 +22,9 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QStyleHints>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -145,6 +149,9 @@ public:
 
     bool run()
     {
+        const QString selectedCase=qEnvironmentVariable("BETTERFLASH_GUI_CASE");
+        if (!check(selectedCase.isEmpty()||selectedCase==QStringLiteral("due-search"),"gui_case_supported",
+                   QStringLiteral("BETTERFLASH_GUI_CASE=%1; use an empty value for the complete sweep or due-search for the focused case.").arg(selectedCase))) return finish();
         if (!check(m_window != nullptr, "window_created")) return finish();
         assert(m_window);
         if (!check(waitUntil([this] { return !m_app.busy(); }), "collection_ready")) return finish();
@@ -171,6 +178,8 @@ public:
         check(m_app.cards().size() >= 22, "fixture_cards_created");
         if (visible("cardDetailDialog")) close("cardDetailDialog");
         reviewIdleBrowser();
+        dueSearchPreservesContext();
+        if (selectedCase==QStringLiteral("due-search")) return finish();
         const QColor firstColor = m_window->color();
         desktop("dark");
         compactDesktop("dark");
@@ -542,6 +551,111 @@ private:
             if (card.value("deckId").toString() == m_deckA && card.value("kind").toString() == "basic") { m_longCard = card.value("id").toString();break; }
         }
         assert(!m_longCard.isEmpty());
+    }
+    void dueSearchPreservesContext()
+    {
+        resize(860,600);
+        key(Qt::Key_2,Qt::AltModifier);
+        call("setDeck",{m_deckA,true});
+        QObject *const library=require("libraryPage");
+        QObject *const search=m_engine.rootContext()->contextProperty("librarySearch").value<QObject *>();
+        if (!search) throw std::runtime_error("The library search context is unavailable.");
+        const auto list=[](QObject *object,const char *name) {
+            const QVariant raw=object->property(name);
+            return raw.metaType()==QMetaType::fromType<QJSValue>() ? raw.value<QJSValue>().toVariant().toList() : raw.toList();
+        };
+        QString target,originalDue;
+        for (const QVariant &value:m_app.cards()) {
+            const QVariantMap card=value.toMap();
+            if (card.value("deckId").toString()!=m_deckA||card.value("id").toString()==m_longCard
+                ||!card.value("front").toString().startsWith(QStringLiteral("Fixture "))) continue;
+            target=card.value("id").toString();
+            originalDue=card.value("variants").toList().first().toMap().value("due").toString();
+            break;
+        }
+        if (!check(!target.isEmpty(),"due_search_fixture_available")) return;
+        const bool semantic=search->property("semanticEnabled").toBool();
+        const QString originalFilter=library->property("filterState").toString();
+        const QString originalQuery=m_window->property("cardSearchText").toString();
+        search->setProperty("semanticEnabled",false);
+        library->setProperty("filterState",QStringLiteral("due"));
+        m_window->setProperty("cardSearchText",QStringLiteral("Fixture"));
+        check(waitUntil([search] {return !search->property("busy").toBool();}),"due_search_initial_query_settled");
+
+        const QString connection=QStringLiteral("gui-due-search-")+betterflash::model::uuid();
+        {
+            QSqlDatabase database=QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),connection);
+            database.setDatabaseName(m_app.storagePath());
+            if (!database.open()) throw std::runtime_error(("Cannot open due-search fixture database: "+database.lastError().text()).toStdString());
+            const auto setDue=[&](const QString &due) {
+                QSqlQuery query(database);
+                if (!query.prepare(QStringLiteral("UPDATE review_variants SET due=? WHERE card_id=?"))) return false;
+                query.addBindValue(due);query.addBindValue(target);
+                return query.exec()&&query.numRowsAffected()>0;
+            };
+            const QString future=QDateTime::currentDateTimeUtc().addSecs(8).toString(Qt::ISODateWithMs);
+            if (!check(setDue(future),"due_search_future_fixture_saved",m_app.storagePath())) return;
+            m_app.refresh();
+            check(waitUntil([this,search] {return !m_app.busy()&&!search->property("busy").toBool();}),"due_search_filtered_query_settled");
+            const auto containsTarget=[&] {
+                for (const QVariant &value:list(library,"visibleCards"))
+                    if (value.toMap().value("id").toString()==target) return true;
+                return false;
+            };
+            check(!containsTarget(),"due_search_excludes_future_card");
+            const QVariantList visible=list(library,"visibleCards");
+            const int lastPage=list(library,"cardPages").size()-1;
+            check(lastPage>0&&!visible.isEmpty(),"due_search_has_navigation_context");
+            if (!visible.isEmpty()) library->setProperty("searchPageAnchorId",visible.first().toMap().value("id"));
+            check(QMetaObject::invokeMethod(library,"changePage",Q_ARG(QVariant,QVariant(lastPage))),"due_search_navigates_result_page");
+            QTest::qWait(80);
+            const int page=library->property("pageIndex").toInt();
+            const QString anchor=library->property("pageAnchorId").toString();
+            const QString selected=m_window->property("selectedCardId").toString();
+            QSignalSpy resets(search,SIGNAL(resultsAboutToChange()));
+            check(resets.isValid(),"due_search_context_signal_available");
+            check(waitUntil([&] {return !search->property("busy").toBool()&&containsTarget();},12000),"due_search_discovers_newly_due_card");
+            bool anchorStillVisible=false;
+            for (const QVariant &entry:list(library,"pageCards"))
+                if (entry.toMap().value("id").toString()==anchor) anchorStillVisible=true;
+            check(resets.isEmpty()&&library->property("pageIndex").toInt()==page
+                  &&anchorStillVisible
+                  &&m_window->property("selectedCardId").toString()==selected,"due_search_retains_result_context",
+                  QStringLiteral("searchResetSignals=%1 page=%2->%3 anchor=%4->%5 selected=%6->%7")
+                      .arg(resets.size()).arg(page).arg(library->property("pageIndex").toInt())
+                      .arg(anchor,library->property("pageAnchorId").toString(),selected,m_window->property("selectedCardId").toString()));
+            library->setProperty("filterState",QString());
+            check(setDue(QDateTime::currentDateTimeUtc().addSecs(5).toString(Qt::ISODateWithMs)),"due_search_metadata_fixture_saved");
+            m_app.refresh();
+            check(waitUntil([this,search] {return !m_app.busy()&&!search->property("busy").toBool();}),"due_search_unfiltered_query_settled");
+            const QVariantList allVisible=list(library,"visibleCards");
+            if (!allVisible.isEmpty()) library->setProperty("searchPageAnchorId",allVisible.first().toMap().value("id"));
+            check(QMetaObject::invokeMethod(library,"changePage",Q_ARG(QVariant,QVariant(list(library,"cardPages").size()-1))),"due_search_navigates_metadata_page");
+            QTest::qWait(80);
+            const int metadataPage=library->property("pageIndex").toInt();
+            const QString metadataAnchor=library->property("pageAnchorId").toString();
+            QSignalSpy metadataResets(search,SIGNAL(resultsAboutToChange()));
+            check(waitUntil([&] {
+                for (const QVariant &entry:search->property("results").toList()) {
+                    const QVariantMap result=entry.toMap();
+                    if (result.value("id").toString()==target) return result.value("dueCount").toInt()>0;
+                }
+                return false;
+            },10000),"due_search_updates_cached_result_metadata");
+            QTest::qWait(80);
+            check(metadataResets.isEmpty()&&library->property("pageIndex").toInt()==metadataPage
+                  &&library->property("pageAnchorId").toString()==metadataAnchor,"due_search_metadata_preserves_navigation",
+                  QStringLiteral("searchResetSignals=%1 page=%2->%3 anchor=%4->%5").arg(metadataResets.size())
+                      .arg(metadataPage).arg(library->property("pageIndex").toInt()).arg(metadataAnchor,library->property("pageAnchorId").toString()));
+            check(setDue(originalDue),"due_search_fixture_restored",m_app.storagePath());
+            database.close();
+        }
+        QSqlDatabase::removeDatabase(connection);
+        m_window->setProperty("cardSearchText",originalQuery);
+        library->setProperty("filterState",originalFilter);
+        search->setProperty("semanticEnabled",semantic);
+        m_app.refresh();
+        check(waitUntil([this] {return !m_app.busy();}),"due_search_cleanup_finished");
     }
     void reviewIdleBrowser()
     {

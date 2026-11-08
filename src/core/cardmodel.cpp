@@ -424,6 +424,8 @@ std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &
         if (!value.isObject()) return std::unexpected(QStringLiteral("Variant record must be an object."));
         const auto record = variantFromMap(value.toObject().toVariantMap());
         if (!record) return std::unexpected(record.error());
+        if (version == 6 && !value.toObject().contains(QStringLiteral("graduated")))
+            return std::unexpected(QStringLiteral("Version 6 backup variant %1 is missing its graduated field. Re-export from the source collection or restore a complete backup; its learning phase cannot be inferred safely.").arg(record->id));
         if (deletedVariants.contains(record->id)||variantIds.contains(record->id) || !cardIds.contains(record->cardId)
             || !variantKeys(cards.value(record->cardId))->contains(record->key))
             return std::unexpected(QStringLiteral("Duplicate variant identifier or invalid source note dependency."));

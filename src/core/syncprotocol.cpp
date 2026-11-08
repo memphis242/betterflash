@@ -173,6 +173,10 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
             || payload.value("historyOnly").metaType().id() != QMetaType::Bool)) {
         detail="historyOnly must be a boolean on a review event."; return false;
     }
+    if (payload.contains("reset")
+        && (type != QStringLiteral("variant.upsert") || payload.value("reset").metaType().id() != QMetaType::Bool)) {
+        detail="Reset intent must be a boolean on a variant upsert."; return false;
+    }
     if (type == QStringLiteral("history.apply")) return historyChanges(payload, detail);
     if (type==QStringLiteral("deck.upsert")) {
         const auto record=model::deckFromMap(object(payload,"deck"));
@@ -215,6 +219,11 @@ bool validateEventImpl(const QVariantMap &event, QString &detail)
     if (type==QStringLiteral("variant.upsert")) {
         const auto schedule=model::variantFromMap(object(payload,"variant"));
         if (!schedule) {detail=schedule.error();return false;}
+        if (payload.value("reset").toBool() && (schedule->reviewCount != 0 || schedule->graduated)) {
+            detail=QStringLiteral("Reset intent for variant %1 requires reviewCount=0 and graduated=false; received reviewCount=%2 and graduated=%3.")
+                .arg(schedule->id).arg(schedule->reviewCount).arg(schedule->graduated ? QStringLiteral("true") : QStringLiteral("false"));
+            return false;
+        }
         return true;
     }
     if (type==QStringLiteral("review.add")||type==QStringLiteral("review.correct")) {

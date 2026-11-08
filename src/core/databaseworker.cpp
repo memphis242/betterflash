@@ -1170,7 +1170,7 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
                 if (!execute("DELETE FROM metadata WHERE key=?",{QStringLiteral("review_owner:")+schedule.id})) return false;
             }
             for (const struct model::Variant &schedule : cardVariants(note.id))
-                if (!enqueue("variant.upsert",{{"variant",model::toMap(schedule)}})) return false;
+                if (!enqueue("variant.upsert",{{"variant",model::toMap(schedule)},{"reset",true}})) return false;
         }
         count=cards.size();
         return m_sqlDetail.isEmpty();
@@ -1290,7 +1290,7 @@ void DatabaseWorker::postpone(const QString &date)
     const QDateTime localStart=day.startOfDay(QTimeZone::systemTimeZone());
     if (!localStart.isValid()) {fail("INVALID_POSTPONE_DATE","The selected date has no local start of day. Choose another date.");return;}
     struct model::Variant schedule=*existing;schedule.due=localStart.toUTC().toString(Qt::ISODateWithMs);
-    if (!mutate([&]{return upsertVariant(schedule)&&enqueue("variant.upsert",{{"variant",model::toMap(schedule)}});})) {fail("REVIEW_POSTPONE","Could not postpone this card. Check storage and try again.",m_sqlDetail);return;}
+    if (!mutate([&]{return upsertVariant(schedule)&&enqueue("variant.upsert",{{"variant",model::toMap(schedule)},{"reset",false}});})) {fail("REVIEW_POSTPONE","Could not postpone this card. Check storage and try again.",m_sqlDetail);return;}
     m_queue.removeAt(position);m_sessionOrder.removeAll(m_selectedVariant);advanceAfterRemoval(position);
     if (publishSnapshot()&&publishQueue(true)) done("Review postponed to "+date);
 }

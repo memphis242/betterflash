@@ -92,6 +92,7 @@ SearchController::SearchController(AppController *app, Summarizer *ai, const QSt
     }
     connect(m_app, &AppController::cardsChanged, this, [this] { restartAll(true); });
     connect(m_app, &AppController::decksChanged, this, [this] { restartAll(true); });
+    connect(m_app, &AppController::dueCountsChanged, this, &SearchController::refreshDueCountMetadata);
     m_initialized = true;
 }
 SearchController::~SearchController() {
@@ -353,7 +354,7 @@ void SearchController::setSearch(const QString &deckId, const QString &query) {
     if (search.deck == deckId && search.query == query) return;
     search.deck = deckId; search.query = query; restart(0, true);
 }
-void SearchController::setCardFilter(const QVariantList &cardIds, bool enabled) {
+void SearchController::setCardFilter(const QVariantList &cardIds, bool enabled, bool preserveContext) {
     QSet<QString> ids;
     if (enabled) {
         for (const QVariant &entry : cardIds) {
@@ -362,7 +363,7 @@ void SearchController::setCardFilter(const QVariantList &cardIds, bool enabled) 
         }
     }
     if (m_cardFilterEnabled == enabled && m_cardFilter == ids) return;
-    m_cardFilterEnabled = enabled; m_cardFilter = ids; restart(0, true);
+    m_cardFilterEnabled = enabled; m_cardFilter = ids; restart(0, !preserveContext, preserveContext);
 }
 void SearchController::setDeckSearchActive(bool active) {
     struct QueryState &search = state(1);
@@ -380,17 +381,47 @@ void SearchController::retryDeckSearch() {
 void SearchController::restartAll(bool clearResults) {
     for (int channel = 0; channel < int(m_channels.size()); ++channel) restart(channel, clearResults);
 }
-void SearchController::restart(int channel, bool clearResults) {
+void SearchController::refreshDueCountMetadata() {
+    QHash<QString, int> dueCountByCard;
+    for (const QVariant &entry : m_app->cards()) {
+        const QVariantMap card = entry.toMap();
+        const QString id = card.value(QStringLiteral("id")).toString();
+        if (!id.isEmpty()) dueCountByCard.insert(id, card.value(QStringLiteral("dueCount")).toInt());
+    }
+    for (int channel = 0; channel < int(m_channels.size()); ++channel) {
+        struct QueryState &search = state(channel);
+        for (auto it = search.cards.begin(); it != search.cards.end(); ++it) {
+            const auto latest = dueCountByCard.constFind(it.key());
+            if (latest == dueCountByCard.cend() || it.value().value(QStringLiteral("dueCount")).toInt() == *latest) continue;
+            it.value().insert(QStringLiteral("dueCount"), *latest);
+        }
+        bool resultsUpdated = false;
+        for (qsizetype index = 0; index < search.results.size(); ++index) {
+            QVariantMap result = search.results.at(index).toMap();
+            const auto latest = dueCountByCard.constFind(result.value(QStringLiteral("id")).toString());
+            if (latest == dueCountByCard.cend() || result.value(QStringLiteral("dueCount")).toInt() == *latest) continue;
+            result.insert(QStringLiteral("dueCount"), *latest);
+            search.results[index] = result;
+            resultsUpdated = true;
+        }
+        if (!resultsUpdated) continue;
+        if (channel == 0) emit resultsSnapshotChanged();
+        else emit deckResultsSnapshotChanged();
+    }
+}
+void SearchController::restart(int channel, bool clearResults, bool preserveContext) {
+    Q_ASSERT(!preserveContext || !clearResults);
     struct QueryState &search = state(channel);
+    search.preserveContext = preserveContext;
     ++*search.epoch; search.debounce.stop(); search.semanticDelay.stop(); abortRemote(channel);
     search.busy = false; search.lexicalComplete = false; search.semanticStarted = false;
     search.error.clear(); search.status.clear();
-    search.literal.clear(); search.fuzzy.clear(); search.semantic.clear();
+    if (!preserveContext) { search.literal.clear(); search.fuzzy.clear(); search.semantic.clear(); }
     if (clearResults) {
         if (channel == 0) emit resultsAboutToChange();
         search.results.clear();
-        if (channel == 0) emit resultsChanged();
-        else emit deckResultsChanged();
+        if (channel == 0) { emit resultsSnapshotChanged(); emit resultsChanged(); }
+        else { emit deckResultsSnapshotChanged(); emit deckResultsChanged(); }
     }
     if (search.query.size() > 256) { setFailure(QStringLiteral("SEARCH_QUERY_LENGTH: Keep the search query to 256 characters or fewer."), channel); return; }
     if (search.active && !search.query.trimmed().isEmpty()) {
@@ -431,10 +462,15 @@ void SearchController::publish(int channel) {
         card.insert(QStringLiteral("groupStart"), tier != previousTier); previousTier = tier;
         next.append(card);
     }
-    if (channel == 0) emit resultsAboutToChange();
+    if (channel == 0 && !search.preserveContext) emit resultsAboutToChange();
     search.results = next;
-    if (channel == 0) emit resultsChanged();
-    else emit deckResultsChanged();
+    if (channel == 0) {
+        emit resultsSnapshotChanged();
+        if (!search.preserveContext) emit resultsChanged();
+    } else {
+        emit deckResultsSnapshotChanged();
+        if (!search.preserveContext) emit deckResultsChanged();
+    }
 }
 void SearchController::runSemantic(int channel) {
     struct QueryState &search = state(channel);

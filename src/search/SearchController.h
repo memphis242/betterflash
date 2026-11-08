@@ -24,8 +24,8 @@ class QNetworkReply;
 
 class SearchController final : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QVariantList results READ results NOTIFY resultsChanged)
-    Q_PROPERTY(QVariantList deckResults READ deckResults NOTIFY deckResultsChanged)
+    Q_PROPERTY(QVariantList results READ results NOTIFY resultsSnapshotChanged)
+    Q_PROPERTY(QVariantList deckResults READ deckResults NOTIFY deckResultsSnapshotChanged)
     Q_PROPERTY(bool deckBusy READ deckBusy NOTIFY deckChanged)
     Q_PROPERTY(QString deckStatus READ deckStatus NOTIFY deckChanged)
     Q_PROPERTY(QString deckError READ deckError NOTIFY deckChanged)
@@ -84,7 +84,7 @@ public:
     void setLocalProfile(const QString &profile);
     Q_INVOKABLE void setSearch(const QString &deckId, const QString &query);
     Q_INVOKABLE void setActive(bool active);
-    Q_INVOKABLE void setCardFilter(const QVariantList &cardIds, bool enabled);
+    Q_INVOKABLE void setCardFilter(const QVariantList &cardIds, bool enabled, bool preserveContext = false);
     Q_INVOKABLE void setDeckSearch(const QString &query);
     Q_INVOKABLE void setDeckSearchActive(bool active);
     Q_INVOKABLE void retryDeckSearch();
@@ -99,6 +99,8 @@ public:
 signals:
     void resultsAboutToChange();
     void resultsChanged();
+    void resultsSnapshotChanged();
+    void deckResultsSnapshotChanged();
     void changed();
     void deckResultsChanged();
     void deckChanged();
@@ -121,13 +123,15 @@ private:
         bool busy = false;
         bool lexicalComplete = false;
         bool semanticStarted = false;
+        bool preserveContext = false;
         QString status;
         QString error;
     };
     struct QueryState &state(int channel);
     void notify(int channel);
-    void restart(int channel, bool clearResults = false);
+    void restart(int channel, bool clearResults = false, bool preserveContext = false);
     void restartAll(bool clearResults = false);
+    void refreshDueCountMetadata();
     void runSearch(int channel);
     void runSemantic(int channel);
     void publish(int channel);

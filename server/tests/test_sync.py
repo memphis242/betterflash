@@ -164,6 +164,14 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("graduated", legacy_response["events"][-1]["event"]["payload"]["variant"])
 
+        legacy_new = json.loads(json.dumps(legacy_event))
+        legacy_new["id"] = str(uuid4())
+        legacy_new["payload"]["variant"]["reviewCount"] = 0
+        legacy_new["payload"]["variant"]["stability"] = 1.0
+        status, legacy_new_response = self.sync([legacy_new])
+        self.assertEqual(status, 200)
+        self.assertNotIn("graduated", legacy_new_response["events"][-1]["event"]["payload"]["variant"])
+
         for invalid_stability in (9 / 1440, 3650.001):
             event = {"id": str(uuid4()), "deviceId": self.device,
                      "type": "variant.upsert", "createdAt": "2026-11-08T00:00:00Z",
@@ -177,6 +185,20 @@ class SyncTests(unittest.TestCase):
             event["id"] = str(uuid4())
             event["payload"]["variant"]["graduated"] = invalid_graduated
             self.assertEqual(self.sync([event])[0], 400)
+
+        valid = json.loads(json.dumps(legacy_event))
+        valid["id"] = str(uuid4())
+        invalid_phase = json.loads(json.dumps(valid))
+        invalid_phase["id"] = str(uuid4())
+        invalid_phase["payload"]["variant"].update(reviewCount=1, stability=1.0, graduated=False)
+        event_count = len(self.sync([])[1]["events"])
+        self.assertEqual(self.sync([valid, invalid_phase])[0], 400)
+        self.assertEqual(len(self.sync([])[1]["events"]), event_count)
+
+        invalid_unreviewed_graduate = json.loads(json.dumps(legacy_event))
+        invalid_unreviewed_graduate["id"] = str(uuid4())
+        invalid_unreviewed_graduate["payload"]["variant"].update(reviewCount=0, stability=1.0, graduated=True)
+        self.assertEqual(self.sync([invalid_unreviewed_graduate])[0], 400)
 
     def test_media_round_trip_and_hash_integrity(self):
         data = png_bytes()

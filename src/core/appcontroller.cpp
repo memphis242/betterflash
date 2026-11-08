@@ -2,6 +2,7 @@
 #include "databaseworker.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QMetaObject>
@@ -10,6 +11,33 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+
+namespace {
+QVariantList withoutFields(const QVariantList &items,const QStringList &fields)
+{
+    QVariantList result;
+    result.reserve(items.size());
+    for (const QVariant &item:items) {
+        QVariantMap value=item.toMap();
+        for (const QString &field:fields) (void)value.remove(field);
+        result.append(value);
+    }
+    return result;
+}
+
+QVariantList selectFields(const QVariantList &items,const QStringList &fields)
+{
+    QVariantList result;
+    result.reserve(items.size());
+    for (const QVariant &item:items) {
+        const QVariantMap source=item.toMap();
+        QVariantMap value;
+        for (const QString &field:fields) if (source.contains(field)) value.insert(field,source.value(field));
+        result.append(value);
+    }
+    return result;
+}
+}
 
 AppController::AppController(const QString &storageDir,QObject *parent)
     : QObject(parent),m_worker(new DatabaseWorker(QDir(storageDir).filePath(QStringLiteral("betterflash.sqlite")))),
@@ -51,11 +79,14 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_thread,&QThread::finished,m_worker,&QObject::deleteLater);
     m_elapsedTick.setInterval(250);
     connect(&m_elapsedTick,&QTimer::timeout,this,&AppController::updateElapsed);
+    m_dueRefreshTimer.setSingleShot(true);
+    connect(&m_dueRefreshTimer,&QTimer::timeout,this,&AppController::checkDueRefresh);
     m_thread->start();
 }
 AppController::~AppController()
 {
     m_elapsedTick.stop();
+    m_dueRefreshTimer.stop();
     // SQLite connections are closed and removed by the thread that owns them.
     QMetaObject::invokeMethod(m_worker,[worker=m_worker]{worker->shutdown();},Qt::BlockingQueuedConnection);
     m_thread->quit();m_thread->wait();
@@ -439,25 +470,121 @@ void AppController::loadStudyAnalytics(const QStringList &deckIds, const QString
 }
 void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history,const QVariantList &reviewSessions)
 {
+    static const QStringList deckDueFields{
+        QStringLiteral("ownDueCount"),QStringLiteral("ownLaterCount"),QStringLiteral("ownNewDueCount"),
+        QStringLiteral("ownReviewDueCount"),QStringLiteral("dueCount"),QStringLiteral("laterCount"),
+        QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount")};
+    static const QStringList cardDueFields{QStringLiteral("dueCount")};
+    const bool cardsContentChanged=withoutFields(m_cards,cardDueFields)!=withoutFields(cards,cardDueFields);
+    const bool decksContentChanged=withoutFields(m_decks,deckDueFields)!=withoutFields(decks,deckDueFields);
+    const bool dueCountsChanged=selectFields(m_cards,cardDueFields)!=selectFields(cards,cardDueFields)
+        ||selectFields(m_decks,deckDueFields)!=selectFields(decks,deckDueFields);
+    const bool historySnapshotChanged=m_history!=history;
     const bool sessionsChanged=m_reviewSessions!=reviewSessions;
     m_decks=decks;m_cards=cards;m_history=history;m_reviewSessions=reviewSessions;
-    emit decksChanged();emit cardsChanged();emit historyChanged();if (sessionsChanged) emit reviewSessionsChanged();
+    emit decksSnapshotChanged();emit cardsSnapshotChanged();
+    if (decksContentChanged) emit decksChanged();
+    if (cardsContentChanged) emit cardsChanged();
+    if (dueCountsChanged) emit this->dueCountsChanged();
+    if (historySnapshotChanged) emit historyChanged();
+    if (sessionsChanged) emit reviewSessionsChanged();
     if (!m_selectedDeckId.isEmpty()) {
         const bool exists=std::any_of(m_decks.begin(),m_decks.end(),[&](const QVariant &d){return d.toMap().value("id").toString()==m_selectedDeckId;});
         if (!exists) setSelectedDeckId({});
     }
+    if (!m_automaticDueRefreshPending) scheduleDueRefresh();
 }
 void AppController::handleOperation(bool ok,const QString &message,const QVariantMap &error)
 {
     assert(!m_operationContexts.isEmpty());
     m_completedOperationContext=m_operationContexts.takeFirst();
+    const bool automaticDueRefresh=m_completedOperationContext.value("automaticDueRefresh").toBool();
     assert(m_pendingOperations>0);--m_pendingOperations;setBusy(m_pendingOperations>0||m_pendingCompletions>0);
+    if (automaticDueRefresh) m_automaticDueRefreshPending=false;
+    if (automaticDueRefresh&&ok) {
+        scheduleDueRefresh();
+        return;
+    }
     if (!message.isEmpty()) {m_statusMessage=message;emit statusMessageChanged();}
     if (!ok) {
         if (m_completedOperationContext.value("restoreOnFailure").toBool()) restoreHistoryContext(m_completedOperationContext);
         setError(error);
+        if (automaticDueRefresh) scheduleDueRefresh(true);
     }
     else if (!m_lastError.isEmpty()) {m_lastError.clear();emit lastErrorChanged();}
+}
+void AppController::scheduleDueRefresh(bool retry)
+{
+    m_dueRefreshTimer.stop();
+    if (retry) {
+        m_dueRefreshTimer.start(30000);
+        return;
+    }
+    const QDateTime now=QDateTime::currentDateTimeUtc();
+    QDateTime earliest;
+    const bool countsMismatch=dueCountsMismatch(now,&earliest);
+    if (countsMismatch) {
+        m_dueRefreshTimer.start(1);
+        return;
+    }
+    if (earliest.isValid()) {
+        const qint64 remaining=now.msecsTo(earliest);
+        m_dueRefreshTimer.start(static_cast<int>(std::clamp<qint64>(remaining,1,60000)));
+    } else if (!m_cards.isEmpty()) {
+        m_dueRefreshTimer.start(60000);
+    }
+}
+bool AppController::dueCountsMismatch(const QDateTime &now,QDateTime *earliestFutureDue) const
+{
+    assert(earliestFutureDue);
+    bool mismatch=false;
+    for (const QVariant &cardValue : m_cards) {
+        const QVariantMap card=cardValue.toMap();
+        int actualDueCount=0;
+        for (const QVariant &variantValue : card.value("variants").toList()) {
+            const QString text=variantValue.toMap().value("due").toString();
+            QDateTime due=QDateTime::fromString(text,Qt::ISODateWithMs);
+            if (!due.isValid()) due=QDateTime::fromString(text,Qt::ISODate);
+            if (!due.isValid()) continue;
+            if (due<=now) ++actualDueCount;
+            else if (!earliestFutureDue->isValid()||due<*earliestFutureDue) *earliestFutureDue=due;
+        }
+        if (actualDueCount!=card.value("dueCount").toInt()) mismatch=true;
+    }
+    return mismatch;
+}
+void AppController::checkDueRefresh()
+{
+    if (m_busy||m_automaticDueRefreshPending) {
+        m_dueRefreshTimer.start(500);
+        return;
+    }
+    const QDateTime now=QDateTime::currentDateTimeUtc();
+    QDateTime earliest;
+    if (dueCountsMismatch(now,&earliest)) {
+        refreshDueCounts();
+        return;
+    }
+    if (earliest.isValid()) {
+        const qint64 remaining=now.msecsTo(earliest);
+        m_dueRefreshTimer.start(static_cast<int>(std::clamp<qint64>(remaining,1,60000)));
+    } else if (!m_cards.isEmpty()) {
+        m_dueRefreshTimer.start(60000);
+    }
+}
+void AppController::refreshDueCounts()
+{
+    if (m_busy||m_automaticDueRefreshPending) {
+        m_dueRefreshTimer.start(500);
+        return;
+    }
+    QVariantMap context=historyContext();
+    context.insert("automaticDueRefresh",true);
+    m_automaticDueRefreshPending=true;
+    if (!invoke([](DatabaseWorker *worker){worker->snapshot();},context)) {
+        assert(!m_automaticDueRefreshPending);
+        return;
+    }
 }
 QVariantMap AppController::historyContext() const
 {

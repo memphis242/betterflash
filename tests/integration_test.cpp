@@ -2,6 +2,7 @@
 #include "core/cardmodel.h"
 #include "core/mediabackup.h"
 #include "core/schedulelimits.h"
+#include "core/syncprotocol.h"
 #include "integrations/MediaStore.h"
 #include "integrations/ShortcutManager.h"
 #include "integrations/SyncController.h"
@@ -262,6 +263,7 @@ private slots:
         qputenv("BETTERFLASH_SYNC_TOKEN", token);
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         environment.insert(QStringLiteral("BETTERFLASH_SYNC_TOKEN"), QString::fromLatin1(token));
+        environment.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
         environment.remove(QStringLiteral("GROQ_API_KEY"));
         environment.remove(QStringLiteral("BETTERFLASH_LLM_API_KEY"));
         m_server.setProcessEnvironment(environment);
@@ -387,6 +389,26 @@ private slots:
         return QTest::qWaitFor([&app] { return !app.busy(); }, 5000) && applied.first().first().toBool();
     }
     bool exchange(AppController &app) { return receive(app, upload(prepare(app))); }
+    bool exchangeOneEventPages(AppController &app) {
+        bool more = true;
+        for (int page=0; more && page<100; ++page) {
+            QVariantMap result = upload(prepare(app));
+            const QVariantList pageEvents = result.value("events").toList();
+            if (pageEvents.size() > 1) {
+                const QVariantMap first = pageEvents.first().toMap();
+                const qint64 seq = first.value("seq").toLongLong();
+                QVariantList pageConflicts;
+                for (const QVariant &value : result.value("contentConflicts").toList())
+                    if (value.toMap().value("seq").toLongLong() == seq) pageConflicts.append(value);
+                result.insert("events", QVariantList{first}); result.insert("cursor", seq); result.insert("hasMore", true);
+                result.insert("contentConflicts", pageConflicts); result.insert("contentConflictCount", pageConflicts.size());
+                result.insert("hierarchyResolutionCount", 0);
+            }
+            more = result.value("hasMore").toBool();
+            if (!receive(app,result)) return false;
+        }
+        return !more;
+    }
     QString create(AppController &app, const QString &name) {
         QSet<QString> before;
         for (const QVariant &deck : app.decks()) before.insert(deck.toMap().value("id").toString());
@@ -428,6 +450,15 @@ private slots:
         QVERIFY(!explicitlyYoung->graduated);
         variant.insert(QStringLiteral("graduated"), QStringLiteral("true"));
         QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+        variant.insert(QStringLiteral("graduated"), false);
+        variant.insert(QStringLiteral("reviewCount"), 1);
+        variant.insert(QStringLiteral("stability"), 1.0);
+        QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+        variant.insert(QStringLiteral("graduated"), true);
+        variant.insert(QStringLiteral("reviewCount"), 0);
+        QVERIFY(!betterflash::model::variantFromMap(variant).has_value());
+        variant.insert(QStringLiteral("graduated"), false);
+        QVERIFY(betterflash::model::variantFromMap(variant).has_value());
     }
     void backupVersionsRetainCheckpointsAndShortIntervals() {
         const QString deckId = QStringLiteral("11111111-1111-4111-8111-111111111111");
@@ -435,11 +466,11 @@ private slots:
         const struct betterflash::model::Deck deck{deckId, QStringLiteral("Deck"), {}, QStringLiteral("2026-11-08T00:00:00Z"), {}};
         const struct betterflash::model::Card card{cardId, deckId, QStringLiteral("basic"),
             QStringLiteral("Question"), QStringLiteral("Answer"), {}, 1, {}, {}};
-        const auto collection = [&](const int version, const double stability, const bool checkpoints) {
+        const auto collection = [&](const int version, const double stability, const bool checkpoints, const bool includePhase = true) {
             const struct betterflash::model::Variant variant{betterflash::model::variantId(cardId, QStringLiteral("forward")),
                 cardId, QStringLiteral("forward"), QStringLiteral("2026-11-08T00:10:00Z"), version == 5 ? 3 : 1, stability, 0.5};
             QVariantMap variantMap = betterflash::model::toMap(variant);
-            if (version < 6) variantMap.remove(QStringLiteral("graduated"));
+            if (version < 6 || !includePhase) variantMap.remove(QStringLiteral("graduated"));
             QJsonObject value{{QStringLiteral("version"), version},
                 {QStringLiteral("decks"), QJsonArray::fromVariantList({betterflash::model::toMap(deck)})},
                 {QStringLiteral("cards"), QJsonArray::fromVariantList({betterflash::model::toMap(card)})},
@@ -456,6 +487,7 @@ private slots:
         const auto currentBackup = collection(6, betterflash::scheduler::minimumStabilityDays, false);
         QVERIFY(currentBackup.has_value());
         QVERIFY(!currentBackup->variants.first().graduated);
+        QVERIFY(!collection(6, betterflash::scheduler::minimumStabilityDays, false, false).has_value());
     }
     void authoritativeDeletionSurvivesMoveOutAndFreshReplay() {
         AppController desktop(m_temporary.filePath("scope-desktop")), phone(m_temporary.filePath("scope-phone"));
@@ -810,6 +842,170 @@ private slots:
         QVERIFY(reviewed.value(QStringLiteral("reviewCount")).toInt() >= 1);
         QVERIFY(untouched.value(QStringLiteral("reviewCount")).toInt() == 0);
         QCOMPARE(state.historyCount, 2);
+    }
+    void concurrentGraduationPreservesDailySchedule_data() {
+        QTest::addColumn<bool>("graduationFirst");
+        QTest::addColumn<int>("staleReviews");
+        QTest::addColumn<bool>("resetAfterReview");
+        QTest::addColumn<bool>("phonePaged");
+        QTest::addColumn<bool>("neverReviewedPostponement");
+        QTest::newRow("graduation-first-equal-count") << true << 1 << false << false << false;
+        QTest::newRow("learning-first-equal-count") << false << 1 << false << false << false;
+        QTest::newRow("graduation-first-higher-stale-count") << true << 3 << false << false << false;
+        QTest::newRow("learning-first-higher-stale-count") << false << 3 << false << false << false;
+        QTest::newRow("graduation-first-stale-postponement") << true << 0 << false << false << false;
+        QTest::newRow("explicit-reset-after-graduation-conflict") << true << 1 << true << false << false;
+        QTest::newRow("paged-phone-graduation-first") << true << 3 << false << true << false;
+        QTest::newRow("paged-phone-learning-first") << false << 3 << false << true << false;
+        QTest::newRow("paged-phone-explicit-reset") << true << 1 << true << true << false;
+        QTest::newRow("unreviewed-postpone-after-graduation") << true << 0 << false << true << true;
+        QTest::newRow("unreviewed-postpone-before-graduation") << false << 0 << false << true << true;
+    }
+    void resetIntentIsStrictlyValidated() {
+        const QString cardId = betterflash::model::uuid();
+        const struct betterflash::model::Variant fresh{betterflash::model::variantId(cardId, "forward"),
+            cardId, "forward", betterflash::model::nowUtc()};
+        const QVariantMap base{{"id",betterflash::model::uuid()},{"deviceId",betterflash::model::uuid()},
+            {"type",QStringLiteral("variant.upsert")},{"createdAt",betterflash::model::nowUtc()}};
+        const auto valid = [&](const QVariantMap &payload) {
+            QVariantMap event=base; event.insert("payload",payload);
+            return betterflash::protocol::validateEvent(event).has_value();
+        };
+        QVERIFY(valid({{"variant",betterflash::model::toMap(fresh)}}));
+        QVERIFY(valid({{"variant",betterflash::model::toMap(fresh)},{"reset",false}}));
+        QVERIFY(valid({{"variant",betterflash::model::toMap(fresh)},{"reset",true}}));
+        QVERIFY(!valid({{"variant",betterflash::model::toMap(fresh)},{"reset",QStringLiteral("true")}}));
+        QVariantMap reviewed=betterflash::model::toMap(fresh); reviewed.insert("reviewCount",1);
+        QVERIFY(!valid({{"variant",reviewed},{"reset",true}}));
+        QVariantMap wrongKind=base; wrongKind.insert("type",QStringLiteral("deck.upsert"));
+        wrongKind.insert("payload",QVariantMap{{"reset",false}});
+        QVERIFY(!betterflash::protocol::validateEvent(wrongKind));
+    }
+    void concurrentGraduationPreservesDailySchedule() {
+        QFETCH(bool, graduationFirst); QFETCH(int, staleReviews); QFETCH(bool, resetAfterReview); QFETCH(bool, phonePaged); QFETCH(bool, neverReviewedPostponement);
+        const QString tag = QString::fromLatin1(QTest::currentDataTag());
+        AppController seed(m_temporary.filePath("graduate-seed-" + tag)); QVERIFY(waitIdle(seed));
+        const QString deck = create(seed, "Graduation conflict"); QVERIFY(!deck.isEmpty());
+        QVERIFY(seed.saveCard({}, deck, "basic", "Question", "Answer", {}, 1)); QVERIFY(waitIdle(seed));
+        const QString cardId = seed.cards().first().toMap().value("id").toString();
+        QVariantMap initial = prepare(seed); QVariantList events = initial.value("events").toList();
+        bool seeded = false;
+        for (QVariant &value : events) {
+            QVariantMap event = value.toMap();
+            if (event.value("type") != QStringLiteral("card.upsert")) continue;
+            QVariantMap payload = event.value("payload").toMap();
+            QVariantList variants = payload.value("variants").toList();
+            QVERIFY(variants.size() == 1);
+            QVariantMap variant = variants.first().toMap();
+            variant.insert("due", QDateTime::currentDateTimeUtc().addSecs(-60).toString(Qt::ISODateWithMs));
+            variant.insert("reviewCount", neverReviewedPostponement ? 0 : 3);
+            variant.insert("stability", neverReviewedPostponement ? betterflash::scheduler::minimumStabilityDays : 1.0/3.0);
+            variant.insert("graduated", false);
+            variants[0] = variant; payload.insert("variants", variants); event.insert("payload", payload); value = event; seeded = true;
+        }
+        QVERIFY(seeded); initial.insert("events", events); QVERIFY(!upload(initial).contains("error"));
+        AppController desktop(m_temporary.filePath("graduate-desktop-" + tag)), phone(m_temporary.filePath("graduate-phone-" + tag));
+        QVERIFY(waitIdle(desktop)); QVERIFY(waitIdle(phone)); QVERIFY(exchange(desktop)); QVERIFY(exchange(phone));
+        const auto makeDue = [&](AppController &app) {
+            const QString connection = betterflash::model::uuid();
+            bool ok = false;
+            {
+                QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
+                db.setDatabaseName(app.storagePath());
+                if (db.open()) {
+                    QSqlQuery q(db); q.prepare("UPDATE review_variants SET due=? WHERE card_id=?");
+                    q.addBindValue(QDateTime::currentDateTimeUtc().addSecs(-60).toString(Qt::ISODateWithMs)); q.addBindValue(cardId);
+                    ok = q.exec() && q.numRowsAffected() == 1;
+                    db.close();
+                }
+            }
+            QSqlDatabase::removeDatabase(connection);
+            return ok;
+        };
+        const int desktopReviews = neverReviewedPostponement ? 4 : 1;
+        for (int index=0; index<desktopReviews; ++index) {
+            if (index) { desktop.stopReview(); QVERIFY(waitIdle(desktop)); QVERIFY(makeDue(desktop)); }
+            desktop.startReview(deck); QVERIFY(waitIdle(desktop)); desktop.revealAnswer(); QVERIFY(waitIdle(desktop));
+            desktop.grade(3); QVERIFY(waitIdle(desktop));
+        }
+        if (staleReviews == 0) {
+            phone.startReview(deck); QVERIFY(waitIdle(phone));
+            phone.postponeDays(1); QVERIFY(waitIdle(phone));
+        }
+        for (int index = 0; index < staleReviews; ++index) {
+            if (index) {
+                phone.stopReview(); QVERIFY(waitIdle(phone));
+                QVERIFY(makeDue(phone));
+            }
+            phone.startReview(deck); QVERIFY(waitIdle(phone)); phone.revealAnswer(); QVERIFY(waitIdle(phone));
+            phone.grade(0); QVERIFY(waitIdle(phone));
+        }
+        if (resetAfterReview) { phone.resetCard(cardId); QVERIFY(waitIdle(phone)); }
+        if (resetAfterReview || neverReviewedPostponement) {
+            const QVariantList pending = prepare(phone).value("events").toList();
+            bool observedIntent = false;
+            for (const QVariant &value : pending) {
+                const QVariantMap event = value.toMap();
+                if (event.value("type") != QStringLiteral("variant.upsert")) continue;
+                const QVariantMap payload = event.value("payload").toMap();
+                observedIntent = payload.contains("reset") && payload.value("reset").toBool() == resetAfterReview;
+            }
+            QVERIFY(observedIntent);
+        }
+        const auto syncPhone = [&] { return phonePaged ? exchangeOneEventPages(phone) : exchange(phone); };
+        if (graduationFirst) { QVERIFY(exchange(desktop)); QVERIFY(syncPhone()); }
+        else { QVERIFY(syncPhone()); QVERIFY(exchange(desktop)); }
+        QVERIFY(exchange(desktop)); QVERIFY(syncPhone());
+        AppController fresh(m_temporary.filePath("graduate-fresh-" + tag)); QVERIFY(waitIdle(fresh)); QVERIFY(exchange(fresh));
+        AppController paged(m_temporary.filePath("graduate-paged-" + tag)); QVERIFY(waitIdle(paged));
+        QVERIFY(exchangeOneEventPages(paged));
+        const struct DatabaseSnapshot a = readSnapshot(desktop.storagePath(), cardId), b = readSnapshot(phone.storagePath(), cardId), c = readSnapshot(fresh.storagePath(), cardId), d = readSnapshot(paged.storagePath(), cardId);
+        QVERIFY(a.valid && b.valid && c.valid && d.valid);
+        QCOMPARE(a.forward.value("graduated").toBool(), !resetAfterReview);
+        QCOMPARE(b.forward.value("graduated").toBool(), !resetAfterReview);
+        QCOMPARE(c.forward.value("graduated").toBool(), !resetAfterReview);
+        QCOMPARE(d.forward.value("graduated").toBool(), !resetAfterReview);
+        QCOMPARE(a.forward, b.forward); QCOMPARE(a.forward, c.forward); QCOMPARE(a.forward, d.forward);
+        QCOMPARE(a.historyCount, staleReviews+desktopReviews); QCOMPARE(b.historyCount, staleReviews+desktopReviews); QCOMPARE(c.historyCount, staleReviews+desktopReviews); QCOMPARE(d.historyCount, staleReviews+desktopReviews);
+    }
+    void orphanGraduationDoesNotOverrideLegacyCreation() {
+        AppController seed(m_temporary.filePath("orphan-seed")); QVERIFY(waitIdle(seed));
+        const QString deck = create(seed, "Orphan generation"); QVERIFY(!deck.isEmpty());
+        QVERIFY(seed.saveCard({}, deck, "basic", "Question", "Answer", {}, 1)); QVERIFY(waitIdle(seed));
+        const QString cardId = seed.cards().first().toMap().value("id").toString();
+        QVariantMap batch = prepare(seed); QVariantList events = batch.value("events").toList();
+        int cardIndex = -1;
+        QVariantMap orphan;
+        for (int i=0; i<events.size(); ++i) {
+            QVariantMap event = events[i].toMap();
+            if (event.value("type") != QStringLiteral("card.upsert")) continue;
+            QVariantMap payload = event.value("payload").toMap();
+            payload.remove("freshVariantIds");
+            payload.remove("restore");
+            QVariantList variants = payload.value("variants").toList();
+            QCOMPARE(variants.size(), 1);
+            QVariantMap initial = variants.first().toMap();
+            initial.insert("due", QDateTime::currentDateTimeUtc().addSecs(-60).toString(Qt::ISODateWithMs));
+            variants[0] = initial; payload.insert("variants", variants); event.insert("payload", payload); events[i] = event;
+            QVariantMap prior = initial; prior.insert("reviewCount", 1); prior.insert("stability", 1.0); prior.insert("graduated", true);
+            orphan = {{"id",betterflash::model::uuid()},{"deviceId",event.value("deviceId")},
+                      {"type",QStringLiteral("variant.upsert")},{"createdAt",betterflash::model::nowUtc()},
+                      {"payload",QVariantMap{{"variant",prior}}}};
+            cardIndex = i; break;
+        }
+        QVERIFY(cardIndex >= 0); events.insert(cardIndex, orphan); batch.insert("events", events);
+        QVERIFY(!upload(batch).contains("error"));
+        AppController author(m_temporary.filePath("orphan-author")); QVERIFY(waitIdle(author));
+        QVERIFY(exchangeOneEventPages(author));
+        const struct DatabaseSnapshot initial = readSnapshot(author.storagePath(), cardId);
+        QVERIFY(initial.valid); QVERIFY(!initial.forward.value("graduated").toBool());
+        author.startReview(deck); QVERIFY(waitIdle(author)); author.revealAnswer(); QVERIFY(waitIdle(author));
+        author.grade(0); QVERIFY(waitIdle(author)); QVERIFY(exchange(author));
+        AppController fresh(m_temporary.filePath("orphan-fresh")); QVERIFY(waitIdle(fresh)); QVERIFY(exchangeOneEventPages(fresh));
+        const struct DatabaseSnapshot a = readSnapshot(author.storagePath(), cardId), b = readSnapshot(fresh.storagePath(), cardId);
+        QVERIFY(a.valid && b.valid); QVERIFY(!a.forward.value("graduated").toBool());
+        QCOMPARE(a.forward, b.forward); QCOMPARE(a.historyCount, 1); QCOMPARE(b.historyCount, 1);
+        QCOMPARE(prepare(author).value("syncNotices").toMap().value("contentConflictCount").toLongLong(), qint64(0));
     }
     void subdayScheduleRoundTripsAcrossDevices() {
         AppController desktop(m_temporary.filePath(QStringLiteral("subday-sync-desktop")));

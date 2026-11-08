@@ -195,7 +195,7 @@ request field `hasMoreLocal` is client bookkeeping for batches limited by size.
 | `card.delete` | source `id` |
 | `review.add` | initial `review` and its updated `variant` |
 | `review.correct` | corrected `review` and recalculated `variant`, with `previousReview` and `previousVariant` snapshots; review identity, timestamp, response duration, and review count are preserved |
-| `variant.upsert` | `variant`, including a postponed due date |
+| `variant.upsert` | `variant`, including a postponed due date; `reset: true` explicitly resets an ungraduated zero-review schedule, while postponements use `reset: false` |
 | `history.apply` | Flat `changes` list of `{entity, id, before, after}` compensations for decks, cards, variants, reviews, and review owners |
 
 Undo and redo enqueue `history.apply` after a strict local expected-state check.
@@ -315,6 +315,26 @@ choose the retained schedule; this is not a mathematical replay combining two
 offline learning sessions. A review correction cannot rewind a schedule owned
 by a subsequent review. Conflicts can require ending an active review session
 before grading that card again.
+
+Graduation from short learning steps is explicit schedule state. A concurrent
+offline learning review or postponement cannot replace a graduated daily
+schedule with a short interval. The server projects schedule ownership and
+appends an authoritative `variant.upsert` repair in the same transaction as the
+conflicting event. It retains the graduated schedule with the greatest observed
+review count and reports the affected card through the durable conflict notice
+mechanism. Both original events and all review records remain available. The
+repair is an ordinary schedule barrier, so author echoes, paged downloads, and
+fresh replay agree. Explicit resets, fresh variants, history compensation, and
+applicable owner corrections can intentionally restore a learning state.
+Projection initialization repairs final unresolved historical conflicts without
+overriding a later reset, deletion, or restoration.
+Reset intent is never inferred solely from a zero review count: postponing a
+never-reviewed direction has that count too. Historical protocol-3 log entries
+without reset or graduation fields retain their original full-schedule reset
+meaning during projection rebuild. An ambiguous legacy write newly arriving
+after upgrade cannot reverse graduation; it produces a retained conflict notice.
+If that pending operation was an intended reset, repeat the reset from an
+upgraded client. The original event remains immutable in the log.
 
 Concurrent edits of the same card or deck use server arrival order, independent
 of device wall clocks. This is whole-record resolution; different text fields

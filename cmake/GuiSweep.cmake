@@ -17,6 +17,7 @@ execute_process(
         --unset=GROQ_API_KEY --unset=GROQ_TTS_API_KEY --unset=BETTERFLASH_LLM_API_KEY --unset=BETTERFLASH_SYNC_TOKEN
         ${sweep_timezone_environment}
         "PATH=${sweep_data}/bin:$ENV{PATH}"
+        "BETTERFLASH_GUI_CASE=${BETTERFLASH_GUI_CASE}"
         QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
         "QT_LOGGING_RULES=*.warning=true;*.critical=true" QT_FORCE_STDERR_LOGGING=1
         "${BETTERFLASH_EXECUTABLE}" --data-dir "${sweep_data}"

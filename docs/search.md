@@ -26,6 +26,11 @@ selects a range. Filters apply before retrieval, including the semantic candidat
 limit, so unrelated tags cannot crowd matching cards out of the results.
 Closing the filter popup preserves its selections.
 
+Due and Later filters update as time passes. A changed eligible set refreshes
+retrieval within the selected filters while preserving the current result-page
+context. Cached embeddings are reused when available. Due-count changes that
+do not alter eligibility update result metadata without restarting retrieval.
+
 ## Result layers
 
 The worker publishes the inexpensive text results first, then fuzzy results,

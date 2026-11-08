@@ -477,7 +477,7 @@ void SyncController::setSyncNotices(const QVariantMap &notices) {
     Q_ASSERT(m_conflictedRecords.size() <= 10);
     m_notice.clear();
     if (m_contentConflicts > 0) {
-        m_notice = QStringLiteral("SYNC_CONTENT_CONFLICT: %1 content conflict(s) were resolved using server order. Conflicts can include cards deleted after an offline write into a deleted deck. The server event log retains the submitted content and resolution. Review the affected records and recover earlier content from that log if needed.").arg(m_contentConflicts);
+        m_notice = QStringLiteral("SYNC_CONTENT_CONFLICT: %1 conflicting change(s) were resolved. Resolutions can include preserving an established daily schedule after conflicting offline reviews or postponements, or deleting cards written into a deleted deck. Review history is retained, and the server event log retains the submitted content and resolution. Inspect the affected cards and their history; recover earlier content from that log if needed.").arg(m_contentConflicts);
         if (!m_conflictedRecords.isEmpty()) m_notice += QStringLiteral(" Affected records (up to 10): ") + m_conflictedRecords.join(QStringLiteral(", "));
     }
     if (m_hierarchyResolutions > 0) {

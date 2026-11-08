@@ -39,7 +39,9 @@ remains 1 day. It does not restart the short learning sequence.
 
 Review sessions use a fixed queue. Finish the session and start another review
 to pick up directions that have become due again; they do not automatically
-reappear within an active session.
+reappear within an active session. Due counts refresh as time passes, without
+restarting searches, discarding loaded card history, or changing the active
+review. Clock changes are checked at least every minute while cards are loaded.
 
 ## Recall and timing
 
@@ -110,6 +112,11 @@ graduation field use the same rule. Their next grade uses daily scheduling;
 they cannot be mistaken for directions still learning. Unreviewed directions
 enter the 10-minute step after their first grade. A learning schedule between
 short steps is treated as the next allowed step before applying a grade.
+Conflicting offline learning reviews cannot reverse graduation. The server
+retains the graduated schedule and greatest observed review count, preserves
+both review records, and reports the affected card in retained sync notices.
+Explicit reset, fresh direction creation, and applicable undo or rating
+correction operations can deliberately restore a learning state.
 Portable backup version 6 and sync protocol 4 support short intervals. Upgrade
 the server and every device together; older clients cannot read these schedules.
 
