@@ -36,7 +36,9 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
 - **Generate like this:** one-card model drafts are available in Review and
   Library, with Markdown preview and editing before saving. Independent answer
-  verification and optional difficulty controls remain follow-ups. See the same
+  verification and optional difficulty controls remain follow-ups. TODO: support
+  "Generate like this" for cloze card types, including valid cloze syntax and
+  numbered cloze groups in generated drafts. See the same
   study-support notes.
 - **Learning statistics:** refine the provisional library/deck learning score,
   coverage, and consistency measures; account for unreviewed material rather
