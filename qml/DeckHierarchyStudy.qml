@@ -428,7 +428,10 @@ Item {
                             if (graph.navigate(modelData.id, event.key)) event.accepted = true
                         }
                         contentItem: Label {
-                            text: node.modelData.deck.label
+                            text: {
+                                const characters = Array.from(node.modelData.deck.label)
+                                return characters.length > 20 ? characters.slice(0, 20).join("") + "…" : characters.join("")
+                            }
                             textFormat: Text.PlainText
                             color: node.chosen ? Theme.accent : Theme.ink
                             font.pixelSize: node.modelData.root ? 20 : 18

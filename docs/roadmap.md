@@ -41,6 +41,8 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 - **Review deck key:** the deck diagram includes a visible key for its encircled
   R badge: review items are due in the deck or its subdecks, including new cards.
   Each badge also provides the due-item count in a tooltip.
+- **Review deck names:** circle labels show at most 20 characters followed by
+  an ellipsis for longer names; hovering shows the full name.
 
 ## Deferred desktop work
 
