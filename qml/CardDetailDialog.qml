@@ -175,11 +175,11 @@ Dialog {
                     onClicked: detail.ui.openStudyGuidance(detail.cardId, "")
                 }
                 AppButton {
-                    text: detail.width < 900 ? "Generate" : "Generate like this"
+                    text: detail.width < 900 ? "Generate" : "Generate similar card"
                     glyph: "cards"
                     hint: "Draft a varied card testing the same concept with the configured language model. Review it before saving."
                     enabled: !app.busy
-                    onClicked: detail.ui.openGenerateLike(detail.cardId)
+                    onClicked: detail.ui.openGenerateSimilar(detail.cardId)
                 }
                 AppButton {
                     text: detail.width < 620 ? "Narrate" : "Record narration"

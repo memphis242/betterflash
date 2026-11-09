@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Dialog {
     id: dialog
+    objectName: "generateCardDialog"
     required property var ui
     property string sourceId: ""
     property bool resumePending: false
@@ -15,7 +16,7 @@ Dialog {
     padding: 24
     modal: true
     focus: true
-    title: "Generate like this"
+    title: "Generate similar card"
     closePolicy: Popup.CloseOnEscape
     background: Rectangle {
         radius: 16
@@ -28,6 +29,7 @@ Dialog {
 
     function openFor(cardId) {
         sourceId = cardId;
+        generationInstructions.text = "";
         cardGenerator.clear();
         resumePending = ui.page === 0 && app.reviewing && !app.paused;
         pausedVariantId = app.currentCard.variantId || "";
@@ -45,6 +47,15 @@ Dialog {
     onClosed: {
         cardGenerator.cancel();
         Qt.callLater(resumeIfReady);
+    }
+    Connections {
+        target: cardGenerator
+        function onGenerated() {
+            if (!dialog.visible)
+                return;
+            dialog.ui.editGeneratedCard(cardGenerator.draft);
+            dialog.close();
+        }
     }
     Connections {
         target: app
@@ -74,6 +85,38 @@ Dialog {
             wrapMode: Text.Wrap
             color: Theme.inkMuted
         }
+        Label {
+            text: "Additional instructions (optional)"
+            color: Theme.ink
+            font.bold: true
+        }
+        ScrollView {
+            id: instructionsScroll
+            Layout.fillWidth: true
+            Layout.preferredHeight: 100
+            contentWidth: availableWidth
+            clip: true
+            TextArea {
+                id: generationInstructions
+                objectName: "generationInstructions"
+                width: instructionsScroll.availableWidth
+                height: Math.max(instructionsScroll.availableHeight, implicitHeight)
+                enabled: !cardGenerator.busy
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                selectByMouse: true
+                padding: 12
+                color: Theme.ink
+                placeholderText: "For example: use a clinical example and focus on the mechanism."
+                Accessible.name: "Additional generation instructions"
+                background: Rectangle {
+                    radius: 8
+                    color: Theme.editorField
+                    border.color: generationInstructions.activeFocus ? Theme.accent : Theme.rule
+                    border.width: generationInstructions.activeFocus ? 2 : 1
+                }
+            }
+        }
         ErrorBlock {
             Layout.fillWidth: true
             message: cardGenerator.error
@@ -84,6 +127,7 @@ Dialog {
             color: Theme.inkMuted
         }
         ScrollView {
+            objectName: "generationSourcePreview"
             id: preview
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -92,9 +136,9 @@ Dialog {
             ColumnLayout {
                 width: preview.availableWidth
                 spacing: 16
-                readonly property var shownCard: cardGenerator.draft.front ? cardGenerator.draft : dialog.ui.cardById(dialog.sourceId)
+                readonly property var shownCard: dialog.ui.cardById(dialog.sourceId)
                 Label {
-                    text: cardGenerator.draft.front ? "New card draft" : "Source card"
+                    text: "Source card"
                     color: Theme.accent
                     font.pixelSize: 18
                     font.bold: true
@@ -141,19 +185,11 @@ Dialog {
             Layout.fillWidth: true
         }
         AppButton {
-            text: cardGenerator.draft.front ? "Generate another" : "Generate card"
-            enabled: !cardGenerator.busy && !app.busy
-            onClicked: cardGenerator.generate(dialog.sourceId)
-        }
-        AppButton {
-            text: "Edit and save draft"
+            objectName: "generateSimilarSubmit"
+            text: "Generate card"
             primary: true
-            visible: !!cardGenerator.draft.front
             enabled: !cardGenerator.busy && !app.busy
-            onClicked: {
-                dialog.ui.editGeneratedCard(cardGenerator.draft);
-                dialog.close();
-            }
+            onClicked: cardGenerator.generate(dialog.sourceId, generationInstructions.text)
         }
     }
 }

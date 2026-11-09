@@ -239,9 +239,9 @@ Item {
                             onTriggered: ui.openCardEditor(app.currentCard.cardId || app.currentCard.id)
                         }
                         AppMenuItem { glyph: "cards"
-                            text: "Generate like this"
+                            text: "Generate similar card"
                             enabled: !app.busy && page.hasCard
-                            onTriggered: ui.openGenerateLike(app.currentCard.cardId || app.currentCard.id)
+                            onTriggered: ui.openGenerateSimilar(app.currentCard.cardId || app.currentCard.id)
                         }
                         AppMenuItem { glyph: "book"
                             text: "Recall & study help"
@@ -827,11 +827,11 @@ Item {
                                         }
                                     }
                                     AppButton {
-                                        text: page.ui.width < 700 ? "Generate" : "Generate like this"
+                                        text: page.ui.width < 700 ? "Generate" : "Generate similar card"
                                         glyph: "cards"
                                         hint: "Draft a varied card testing the same concept. Review it before saving."
                                         enabled: !app.busy && page.hasCard
-                                        onClicked: ui.openGenerateLike(app.currentCard.cardId || app.currentCard.id)
+                                        onClicked: ui.openGenerateSimilar(app.currentCard.cardId || app.currentCard.id)
                                     }
                                     AppButton {
                                         text: page.ui.width < 700 ? "Recall & help" : "Recall & study help"

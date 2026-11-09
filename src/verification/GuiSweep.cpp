@@ -150,7 +150,7 @@ public:
     bool run()
     {
         const QString selectedCase=qEnvironmentVariable("BETTERFLASH_GUI_CASE");
-        if (!check(selectedCase.isEmpty()||selectedCase==QStringLiteral("due-search"),"gui_case_supported",
+        if (!check(selectedCase.isEmpty()||selectedCase==QStringLiteral("due-search")||selectedCase==QStringLiteral("generation"),"gui_case_supported",
                    QStringLiteral("BETTERFLASH_GUI_CASE=%1; use an empty value for the complete sweep or due-search for the focused case.").arg(selectedCase))) return finish();
         if (!check(m_window != nullptr, "window_created")) return finish();
         assert(m_window);
@@ -177,6 +177,9 @@ public:
         seedCards(image);
         check(m_app.cards().size() >= 22, "fixture_cards_created");
         if (visible("cardDetailDialog")) close("cardDetailDialog");
+        generatedCardVisibility();
+        generatedCardRequest();
+        if (selectedCase==QStringLiteral("generation")) return finish();
         reviewIdleBrowser();
         dueSearchPreservesContext();
         if (selectedCase==QStringLiteral("due-search")) return finish();
@@ -990,6 +993,132 @@ private:
         call("showError",{QStringLiteral("GUI_FIXTURE"),QStringLiteral("A verification error."),QStringLiteral("Isolated fixture details.")});
         checkDialog("errorDialog");
     }
+    void generatedCardVisibility()
+    {
+        call("setDeck",{m_deckA});
+        m_window->setProperty("page",1);
+        const int initial = m_app.cards().size();
+        check(m_app.saveCard({},m_deckA,QStringLiteral("reverse"),QStringLiteral("Fixture reversible source"),
+                            QStringLiteral("Source answer"),{},1)
+              && waitUntil([this,initial] {return !m_app.busy()&&m_app.cards().size()==initial+1;}),
+              "generation_reverse_source_saved");
+        QString sourceId;
+        for (const QVariant &value:m_app.cards()) {
+            const QVariantMap card=value.toMap();
+            if (card.value("front").toString()==QStringLiteral("Fixture reversible source"))
+                sourceId=card.value("id").toString();
+        }
+        m_window->setProperty("cardSearchText",QStringLiteral("Fixture"));
+        require("libraryPage")->setProperty("filterKind",QStringLiteral("reverse"));
+        call("pickCard",{sourceId});
+        call("openSelectedDetail");
+        const int before = m_app.cards().size();
+        const QVariantMap draft{{"front",QStringLiteral("A distinct generated question?")},
+            {"back",QStringLiteral("An answer to the new question.")},{"kind","basic"},
+            {"deckId",m_deckA},{"tags","generated"},{"pointCount",1}};
+        call("editGeneratedCard",{draft});
+        check(visible("cardDialog"),"generated_draft_opens_card_editor");
+        require("editorSource")->setProperty("text",QStringLiteral("An edited generated question?\n\n---\n\nAn edited answer."));
+        call("submitCard");
+        check(waitUntil([this,before] {return !m_app.busy()&&m_app.cards().size()==before+1&&!visible("cardDialog");}),
+              "generated_card_save_is_durable");
+        const QString saved = m_window->property("selectedCardId").toString();
+        check(visible("cardDetailDialog")&&require("cardDetailDialog")->property("cardId").toString()==saved,
+              "generated_save_opens_saved_detail");
+        close("cardDetailDialog");
+        check(waitUntil([this,&saved] {
+            const QVariant raw=require("libraryPage")->property("visibleCards");
+            const QVariantList cards=raw.metaType()==QMetaType::fromType<QJSValue>()
+                ? raw.value<QJSValue>().toVariant().toList() : raw.toList();
+            return std::any_of(cards.cbegin(),cards.cend(),[&saved](const QVariant &value) {
+                return value.toMap().value("id").toString()==saved;
+            });
+        }),"generated_saved_card_visible_in_library");
+        m_window->setProperty("cardSearchText",QString{});
+        require("libraryPage")->setProperty("filterKind",QString{});
+    }
+
+    void generatedCardRequest()
+    {
+        QObject *const ai=m_engine.rootContext()->contextProperty("ai").value<QObject *>();
+        QObject *const generator=m_engine.rootContext()->contextProperty("cardGenerator").value<QObject *>();
+        if (!ai||!generator) throw std::runtime_error("Generation model contexts are unavailable.");
+        LoopbackProvider provider;
+        const QString originalEndpoint=ai->property("endpoint").toString();
+        const QString originalProvider=ai->property("provider").toString();
+        ai->setProperty("provider",QStringLiteral("remote"));
+        ai->setProperty("endpoint",provider.endpoint());
+        QObject *const binding=ai->property("apiKey").value<QObject *>();
+        if (!binding||!waitUntil([binding] {return !binding->property("ownKeyId").toString().isEmpty();}))
+            throw std::runtime_error("The isolated generation credential binding is unavailable.");
+        check(QMetaObject::invokeMethod(ai,"setApiKey",Q_ARG(QString,QStringLiteral("gui-fixture-only")))
+              &&ai->property("hasApiKey").toBool(),"generation_uses_isolated_mock_credential");
+        const int initial=m_app.cards().size();
+        check(m_app.saveCard({},m_deckA,QStringLiteral("cloze"),QStringLiteral("The capital is {{c1::Paris}}."),{}, {},1)
+              &&waitUntil([this,initial] {return !m_app.busy()&&m_app.cards().size()==initial+1;}),"generation_cloze_source_saved");
+        QString sourceId;
+        for (const QVariant &value:m_app.cards()) {
+            const QVariantMap card=value.toMap();
+            if (card.value("front").toString()==QStringLiteral("The capital is {{c1::Paris}}."))
+                sourceId=card.value("id").toString();
+        }
+        assert(!sourceId.isEmpty());
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Rome}} is in {{c2::Italy}}."},
+                                     {"back",""},{"pointCount",1}});
+        m_app.startReview(m_deckA);
+        check(waitUntil([this] {return !m_app.busy()&&m_app.reviewing();}),"generation_review_started");
+        const QVariantList queue=m_app.pendingCards();
+        const QString variant=m_app.currentCard().value("variantId").toString();
+        call("openGenerateSimilar",{sourceId});
+        check(provider.requests==0&&visible("generateCardDialog")&&m_app.paused(),"generation_open_is_explicit_and_pauses_review");
+        require("generationInstructions")->setProperty("text",QStringLiteral("Use another European capital."));
+        resize(390,780);
+        check(require("generateCardDialog")->property("width").toDouble()<=m_window->width()
+              &&require("generateCardDialog")->property("height").toDouble()<=m_window->height(),
+              "generation_phone_dialog_fits");
+        wheel("generationSourcePreview","generation_phone_source");
+        screenshot("generate-similar-phone");
+        click("generateSimilarSubmit");
+        check(waitUntil([this,generator] {return !generator->property("busy").toBool()&&visible("cardDialog")&&!visible("generateCardDialog");}),
+              "generation_result_opens_editable_draft");
+        check(m_app.cards().size()==initial+1&&m_app.paused()&&m_app.pendingCards()==queue,
+              "generation_draft_preserves_collection_and_review");
+        check(require("editorSource")->property("text").toString().contains(QStringLiteral("{{c2::Italy}}")),
+              "generation_cloze_draft_reaches_editor");
+        check(provider.lastBody.contains("Use another European capital."),"generation_dialog_forwards_instructions");
+        close("cardDialog");
+        check(waitUntil([this] {return !m_app.paused();})&&m_app.cards().size()==initial+1,
+              "generation_cancel_discards_draft_and_resumes_review");
+        resize(1320,860);
+        call("openGenerateSimilar",{sourceId});
+        check(require("generationInstructions")->property("text").toString().isEmpty(),"generation_new_request_resets_guidance");
+        screenshot("generate-similar-desktop");
+        click("generateSimilarSubmit");
+        check(waitUntil([this] {return visible("cardDialog");}),"generation_second_draft_ready");
+        require("editorSource")->setProperty("text",QStringLiteral("{{c1::Madrid}} is in {{c2::Spain}}."));
+        call("submitCard");
+        check(waitUntil([this,initial] {return !m_app.busy()&&!visible("cardDialog")&&m_app.cards().size()==initial+2;}),
+              "generation_edited_cloze_saved");
+        const QString saved=m_window->property("selectedCardId").toString();
+        bool valid=false;
+        for (const QVariant &value:m_app.cards()) {
+            const QVariantMap card=value.toMap();
+            if (card.value("id").toString()==saved)
+                valid=card.value("kind").toString()==QStringLiteral("cloze")
+                    &&card.value("front").toString()==QStringLiteral("{{c1::Madrid}} is in {{c2::Spain}}.")
+                    &&card.value("variants").toList().size()==2;
+        }
+        check(valid,"generation_edited_cloze_preserves_groups");
+        close("cardDetailDialog");
+        check(waitUntil([this] {return !m_app.paused();})&&m_app.pendingCards()==queue
+              &&m_app.currentCard().value("variantId").toString()==variant,"generation_saved_detail_resumes_same_review");
+        check(provider.requests==2&&provider.onlyFixtureCredentials,"generation_only_explicit_mock_requests");
+        m_app.stopReview();
+        check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing();}),"generation_review_finished");
+        ai->setProperty("endpoint",originalEndpoint);
+        ai->setProperty("provider",originalProvider);
+    }
+
     void atomicize()
     {
         QObject *const ai = m_engine.rootContext()->contextProperty("ai").value<QObject *>();

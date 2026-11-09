@@ -246,7 +246,7 @@ content/history on desktop without duplicate review mutations.
 | TTS | Evaluate installed Android TTS voices, including offline availability |
 | Custom narration | Preserve precedence over generated speech |
 | Remote providers | Retain explicit BYOK options for all supported categories |
-| LLM actions | Reuse summaries, atomicization, study help, correction and Generate like this |
+| LLM actions | Reuse summaries, atomicization, study help, correction and Generate similar card |
 
 Local remains the intended sensible default; remote options also provide a useful
 reference while local quality is evaluated. Do not automatically send content to

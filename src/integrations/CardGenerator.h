@@ -24,7 +24,7 @@ public:
     [[nodiscard]] QVariantMap draft() const { return m_draft; }
     [[nodiscard]] QVariantMap sourceCard() const { return m_source; }
 
-    Q_INVOKABLE void generate(const QString &cardId);
+    Q_INVOKABLE void generate(const QString &cardId, const QString &instructions = QString{});
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clear();
 

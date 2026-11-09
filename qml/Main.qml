@@ -52,6 +52,7 @@ ApplicationWindow {
     property string editingDeckParentId: ""
     property string editingCardId: ""
     property var generatedCardDraft: null
+    property bool editingGeneratedCard: false
     readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible
     property bool cardInverted: false
     property bool initializingDeckParent: false
@@ -542,7 +543,14 @@ ApplicationWindow {
         }
         if (app.selectedDeckId && deckId !== app.selectedDeckId)
             setDeck(deckId, true)
+        if (editingGeneratedCard) {
+            setDeck(deckId, true)
+            cardSearchText = ""
+            library.clearFilters()
+        }
         pickCard(cardId)
+        if (editingGeneratedCard)
+            Qt.callLater(function () { library.restoreScroll(0) })
         cardDialog.close()
         openSelectedDetail()
     }
@@ -1409,6 +1417,7 @@ ApplicationWindow {
             clearPendingEditorSave()
             window.editorSession += 1
             const c = generatedCardDraft || editingCard()
+            editingGeneratedCard = !!generatedCardDraft
             localCardError = ""
             cardDeck.currentIndex = cardDeck.indexOfValue(c.deckId || app.selectedDeckId)
             cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
@@ -1423,6 +1432,7 @@ ApplicationWindow {
         }
         onClosed: {
             window.imageSession = -1
+            editingGeneratedCard = false
             clearPendingEditorSave()
         }
         contentItem: ColumnLayout {
@@ -2639,7 +2649,7 @@ ApplicationWindow {
     function openPartial() {
         partialDialog.open()
     }
-    function openGenerateLike(cardId) {
+    function openGenerateSimilar(cardId) {
         if (!app.busy && cardId)
             generateCardDialog.openFor(cardId)
     }

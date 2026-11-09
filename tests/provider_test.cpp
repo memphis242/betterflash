@@ -1,5 +1,6 @@
 #include "core/appcontroller.h"
 #include "integrations/Atomicizer.h"
+#include "integrations/CardGenerator.h"
 #include "integrations/SecretStore.h"
 #include "integrations/Summarizer.h"
 
@@ -17,6 +18,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#include <algorithm>
 
 class MockChat final : public QTcpServer {
 public:
@@ -101,6 +103,32 @@ private:
         const QJsonArray choices{QJsonObject{{QStringLiteral("message"), message}}};
         return QJsonDocument(QJsonObject{{QStringLiteral("choices"), choices}}).toJson(QJsonDocument::Compact);
     }
+    QByteArray generationResponse(const QString &front, const QString &back, int pointCount = 1) {
+        const QJsonObject proposal{{QStringLiteral("decision"), QStringLiteral("generate")},
+            {QStringLiteral("front"), front}, {QStringLiteral("back"), back},
+            {QStringLiteral("pointCount"), pointCount}};
+        const QJsonObject message{{QStringLiteral("content"),
+            QString::fromUtf8(QJsonDocument(proposal).toJson(QJsonDocument::Compact))}};
+        const QJsonArray choices{QJsonObject{{QStringLiteral("message"), message}}};
+        return QJsonDocument(QJsonObject{{QStringLiteral("choices"), choices}}).toJson(QJsonDocument::Compact);
+    }
+    QByteArray generationRefusal(const QString &reason) {
+        const QJsonObject refusal{{QStringLiteral("decision"), QStringLiteral("refuse")},
+            {QStringLiteral("reason"), reason}};
+        const QJsonObject message{{QStringLiteral("content"),
+            QString::fromUtf8(QJsonDocument(refusal).toJson(QJsonDocument::Compact))}};
+        const QJsonArray choices{QJsonObject{{QStringLiteral("message"), message}}};
+        return QJsonDocument(QJsonObject{{QStringLiteral("choices"), choices}}).toJson(QJsonDocument::Compact);
+    }
+    QString addClozeSource(AppController &app) {
+        if (!settle(app)) return {};
+        app.createDeck(QStringLiteral("Cloze generation fixture"));
+        if (!settle(app) || app.decks().isEmpty()) return {};
+        const QString deck = app.decks().first().toMap().value(QStringLiteral("id")).toString();
+        const QString front = QStringLiteral("{{c1::Mercury}} is closest to the Sun; {{c2::Venus}} follows it.");
+        if (!app.saveCard({}, deck, QStringLiteral("cloze"), front, {}, {}, 1) || !settle(app)) return {};
+        return app.cards().first().toMap().value(QStringLiteral("id")).toString();
+    }
     QJsonArray atomicCards(int count = 2) {
         QJsonArray cards;
         for (int index = 0; index < count; ++index)
@@ -146,6 +174,145 @@ private slots:
         QVERIFY(prompts.contains(QStringLiteral("remaining review items: 2")));
         QVERIFY(!prompts.contains(QStringLiteral("Private solution")));
         QVERIFY(!provider.requestBody.contains("mock-provider-key"));
+    }
+    void similarCardClozeDraftPreservesNumberedGroupsAndUserInstructions() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path());
+        const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
+        QCOMPARE(app.cards().size(), 1);
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("On a clear night, {{c1::Mercury}} appears near the Sun, while {{c2::Venus}} is farther away."), {}, 1);
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        QSignalSpy generated(&generator, &CardGenerator::generated);
+        generator.generate(sourceId, QStringLiteral("Use an astronomy observation a student could make."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QCOMPARE(generated.size(), 1);
+        const QVariantMap draft = generator.draft();
+        QCOMPARE(draft.value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
+        QCOMPARE(draft.value(QStringLiteral("back")).toString(), QString{});
+        QCOMPARE(app.cards().size(), 1);
+        const QJsonObject request = QJsonDocument::fromJson(provider.requestBody).object();
+        const QJsonArray messages = request.value(QStringLiteral("messages")).toArray();
+        QVERIFY(messages.size() >= 2);
+        const QString user = messages.last().toObject().value(QStringLiteral("content")).toString();
+        const qsizetype jsonStart = user.indexOf(u'\n');
+        QVERIFY(jsonStart >= 0);
+        const QJsonObject requestData = QJsonDocument::fromJson(user.sliced(jsonStart + 1).toUtf8()).object();
+        QVERIFY(requestData.contains(QStringLiteral("sourceCard")));
+        QVERIFY(requestData.contains(QStringLiteral("userInstructions")));
+        QCOMPARE(requestData.value(QStringLiteral("userInstructions")).toString(),
+                 QStringLiteral("Use an astronomy observation a student could make."));
+        const QJsonObject sourceCard = requestData.value(QStringLiteral("sourceCard")).toObject();
+        QCOMPARE(sourceCard.value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
+        QVERIFY(sourceCard.value(QStringLiteral("front")).toString().contains(QStringLiteral("Mercury")));
+        QVERIFY(!provider.requestBody.contains("mock-provider-key"));
+
+        QVERIFY(app.saveCard({}, draft.value(QStringLiteral("deckId")).toString(),
+            draft.value(QStringLiteral("kind")).toString(), draft.value(QStringLiteral("front")).toString(),
+            draft.value(QStringLiteral("back")).toString(), draft.value(QStringLiteral("tags")).toString(),
+            draft.value(QStringLiteral("pointCount")).toInt()));
+        QVERIFY(settle(app));
+        QCOMPARE(app.cards().size(), 2);
+        QVariantMap saved;
+        for (const QVariant &entry : app.cards()) {
+            const QVariantMap card = entry.toMap();
+            if (card.value(QStringLiteral("front")).toString() == draft.value(QStringLiteral("front")).toString())
+                saved = card;
+        }
+        QVERIFY(!saved.isEmpty());
+        const QVariantList variants = saved.value(QStringLiteral("variants")).toList();
+        QCOMPARE(variants.size(), 2);
+        QStringList keys;
+        for (const QVariant &entry : variants) {
+            const QVariantMap variant = entry.toMap();
+            keys.append(variant.value(QStringLiteral("key")).toString());
+            QCOMPARE(variant.value(QStringLiteral("reviewCount")).toInt(), 0);
+            QVERIFY(!variant.value(QStringLiteral("graduated")).toBool());
+        }
+        std::sort(keys.begin(), keys.end());
+        QCOMPARE(keys, QStringList({QStringLiteral("c1"), QStringLiteral("c2")}));
+        bool sourceUnchanged = false;
+        for (const QVariant &entry : app.cards()) {
+            const QVariantMap card = entry.toMap();
+            if (card.value(QStringLiteral("id")).toString() == sourceId)
+                sourceUnchanged = card.value(QStringLiteral("front")).toString()
+                    == QStringLiteral("{{c1::Mercury}} is closest to the Sun; {{c2::Venus}} follows it.");
+        }
+        QVERIFY(sourceUnchanged);
+    }
+    void similarCardClozeDraftRejectsMalformedNumberedGroups() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path());
+        const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("{{c0::Invalid}} is not a valid cloze group."), {}, 1);
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY(!generator.error().isEmpty());
+        QVERIFY(generator.draft().isEmpty());
+        QCOMPARE(app.cards().size(), 1);
+    }
+    void similarCardRejectsOversizedUserInstructionsBeforeProviderCall() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path());
+        const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId, QString(2001, QLatin1Char('x')));
+        QVERIFY(!generator.busy());
+        QVERIFY(!generator.error().isEmpty());
+        QCOMPARE(provider.requestCount, 0);
+        QCOMPARE(app.cards().size(), 1);
+    }
+    void similarCardBasicDraftCanBeSavedWithoutChangingItsSource() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path()); QVERIFY(seed(app, 1));
+        const QVariantMap source = app.cards().first().toMap();
+        const QString sourceId = source.value(QStringLiteral("id")).toString();
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("A different example of the same concept?"),
+                                           QStringLiteral("The independently solved answer."));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QCOMPARE(generator.draft().value(QStringLiteral("kind")).toString(), QStringLiteral("basic"));
+        QCOMPARE(app.cards().size(), 1);
+        const QVariantMap draft = generator.draft();
+        QVERIFY(app.saveCard({}, draft.value(QStringLiteral("deckId")).toString(),
+            draft.value(QStringLiteral("kind")).toString(), draft.value(QStringLiteral("front")).toString(),
+            draft.value(QStringLiteral("back")).toString(), draft.value(QStringLiteral("tags")).toString(),
+            draft.value(QStringLiteral("pointCount")).toInt()));
+        QVERIFY(settle(app));
+        QCOMPARE(app.cards().size(), 2);
+        bool originalPreserved = false;
+        for (const QVariant &entry : app.cards()) {
+            const QVariantMap card = entry.toMap();
+            if (card.value(QStringLiteral("id")).toString() == sourceId)
+                originalPreserved = card.value(QStringLiteral("front")).toString()
+                    == source.value(QStringLiteral("front")).toString();
+        }
+        QVERIFY(originalPreserved);
+    }
+    void similarCardRefusalReturnsActionableErrorAndNoDraft() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path()); QVERIFY(seed(app, 1));
+        const QString sourceId = app.cards().first().toMap().value(QStringLiteral("id")).toString();
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationRefusal(QStringLiteral("The source question is too ambiguous to vary responsibly."));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY(generator.error().startsWith(QStringLiteral("CARD_GENERATION_REFUSED:")));
+        QVERIFY(generator.draft().isEmpty());
+        QCOMPARE(app.cards().size(), 1);
     }
     void providerFailures_data() {
         QTest::addColumn<int>("status");

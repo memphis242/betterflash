@@ -49,11 +49,11 @@ AppMenu {
     }
     AppMenuSeparator {}
     AppMenuItem { glyph: "cards"
-        text: "Generate like this"
+        text: "Generate similar card"
         enabled: menu.cardAvailable && !app.busy
         onTriggered: {
             menu.beforeAction()
-            menu.ui.openGenerateLike(menu.cardId)
+            menu.ui.openGenerateSimilar(menu.cardId)
         }
     }
     AppMenuItem { glyph: "atom"

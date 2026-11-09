@@ -56,25 +56,35 @@ The Library's best-time statistic is the fastest recorded review graded Hard,
 Good or Easy. It can provide a personal time to beat, but its introduction does
 not decide a weakness formula or change the spaced-repetition algorithm.
 
-## Generate like this
+## Generate similar card
 
-Available from the card detail view, card action menus and the active review
-card: **Generate like this** opens a preview of the source. Press **Generate
-card** to ask the configured local or remote language model for one new basic
-card targeting the same concept with a different question, example or numbers.
-The request includes the front, back, deck name, tags and answer-point count.
-It does not include recordings, schedules, other cards or credentials.
+Available from card detail, card action menus and the active review card:
+**Generate similar card** opens a source preview with an optional **Additional
+instructions** field. Ask for a particular example, emphasis or constraint, then
+press **Generate card**. Instructions are limited to 2,000 characters and apply
+to this request. Opening the dialog does not call a model.
+
+The configured local or remote model receives only this source card's front,
+back, deck name, tags, answer-point count and the optional user instructions.
+Source content is separated from user instructions and treated as untrusted
+study material. Recordings, schedules, other cards and credentials are excluded.
+Basic and reverse sources produce a basic draft. Cloze sources produce a cloze
+note with validated numbered groups; a back is optional. Each new cloze group
+has its own fresh schedule.
 
 The model is instructed to solve the new problem independently and preserve
-Markdown, code and LaTeX. The response must pass strict field, size, media and
-duplicate-question checks. A model may decline when the source cannot be varied
-responsibly. These checks do not verify factual or mathematical correctness.
+Markdown, code and LaTeX. The response must pass strict field, size, cloze, media
+and duplicate-question checks. A model may decline when the source cannot be
+varied responsibly. These checks do not verify factual or mathematical
+correctness; check the answer before saving.
 
-The result appears as rendered Markdown. **Generate another** replaces the
-unsaved suggestion. **Edit and save draft** opens the regular card editor with
-the source deck and tags preselected; only **Save card** persists it. The source
-card and its history stay intact. The new card gets a fresh schedule and normal
-undo support. Custom narration is not copied to the new text.
+The result opens directly in the regular new-card editor, with the source deck
+and tags preselected. Edit the content, kind, deck, tags or answer points, and
+use Preview to inspect the result. Only **Save card** persists the draft.
+Canceling leaves the source and collection unchanged. Saving opens the new
+card's detail and reveals it in the Library, clearing the card search and
+filters that could hide it. The source and its history stay intact. The new
+card has fresh schedules and normal undo support; custom narration is not copied.
 
 Generation pauses an active review and preserves its current card. Closing the
 generation/editor/detail workflow resumes only a review that was running when

@@ -15,6 +15,13 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Deferred desktop work
 
+- **Cloze markers and preview:** adopt `[clozeX:<hidden text>]` in place of
+  `{{c1::<hidden text>}}`, where `X` is the cloze group number, for example
+  `[cloze1:Paris]` and `[cloze2:France]`. Include compatibility handling for existing cards,
+  backups and synced content. In editor previews, distinguish cloze spans so
+  it is apparent which text will be hidden before reveal during review.
+  Consider faded or italic text, a different background, or a covering block;
+  settle the visual treatment during refinement.
 - **Library scope:** support viewing every card in a selected deck and its
   subdecks, as well as all cards across the entire collection.
 - **New-card deck picker:** display hierarchical deck paths with `::`
@@ -38,17 +45,11 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   model guidance are implemented. Refine weights and thresholds during use;
   deck topic grouping and completed-run rankings remain follow-ups. See
   [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
-- **Generate like this:** one-card model drafts are available in Review and
-  Library, with Markdown preview. Present generated drafts in a modal consistent
-  with the new-card editor, with fully editable content before saving. Independent answer
-  verification and optional difficulty controls remain follow-ups. TODO: support
-  "Generate like this" for cloze card types, including valid cloze syntax and
-  numbered cloze groups in generated drafts. Investigate the reported bug where
-  saving a generated card from card detail leaves the card nowhere to be found;
-  verify persistence, destination deck, filtering, and navigation to the saved
-  card. Allow optional additional prompt instructions so the user can influence
-  generation. See the same
-  study-support notes.
+- **Generate similar card:** one-card generation supports cloze notes and
+  optional user instructions. Drafts open in the regular card editor for changes
+  and preview before saving. Saved cards are selected and revealed in the Library.
+  Independent answer verification and optional difficulty controls remain
+  follow-ups. See [study support notes](study-support-ideas.md).
 - **Logo:** replace the current walnut mark with a deliberately drawn design.
   The user may draw it digitally or commission an artist; the current mark
   looks too AI-generated.
@@ -67,7 +68,7 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 ## Android completion
 
 As of 2026-10-19, the desktop baseline is **v0.1.0-beta**. The user accepted
-the initial study-guidance and Generate like this features and paused the
+the initial study-guidance and Generate similar card features and paused the
 desktop TODO sweep to plan Android. Android implementation is not yet
 authorized by that planning request. Start with the
 [Android handoff plan](android-plan.md), targeting a Samsung Galaxy S26 Ultra
