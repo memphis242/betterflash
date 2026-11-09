@@ -85,9 +85,12 @@ correctness; check the answer before accepting.
 **Accept generated card** saves the current edited draft to the chosen deck.
 Nothing is saved during generation or refinement. Saving opens a preview of the
 persisted card and reveals it in the Library, clearing card searches and filters
-that could hide it. The preview offers **Add another card** in the same deck.
-Ordinary new-card saves also open this preview; editing an existing card returns
-to its detail. Canceling a draft leaves the collection unchanged. The source and
+that could hide it. The preview offers **Add another card** in the same deck
+and **Edit card** to reopen the saved content and deck in the editor. Saving from
+that editor updates the same card and returns to its preview. Canceling an edit
+keeps the saved card. Rendered preview text can be highlighted and copied.
+Ordinary new-card saves also open this preview; other existing-card edits return
+to their detail. Canceling a draft leaves the collection unchanged. The source and
 its history stay intact. Each accepted card has fresh schedules and normal undo
 support; custom narration is not copied.
 

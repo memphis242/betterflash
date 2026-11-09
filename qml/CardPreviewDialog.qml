@@ -7,8 +7,8 @@ Dialog {
     objectName: "cardPreviewDialog"
     required property var ui
     property string cardId: ""
-    property string deckId: ""
     readonly property var card: ui.cardById(cardId)
+    readonly property string deckId: card.deckId || ""
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(1000, ui.width - 2 * ui.gutter)
@@ -27,7 +27,6 @@ Dialog {
 
     function openFor(id) {
         cardId = id
-        deckId = ui.cardById(id).deckId || ""
         open()
     }
 
@@ -53,6 +52,7 @@ Dialog {
                 Layout.preferredHeight: implicitHeight
                 markdown: preview.card.front || ""
                 clozePreview: preview.card.kind === "cloze"
+                selectable: true
                 mediaRoot: media.rootPath
                 baseFontSize: 19
             }
@@ -62,15 +62,25 @@ Dialog {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
                 markdown: preview.card.back || ""
+                selectable: true
                 mediaRoot: media.rootPath
                 baseFontSize: 19
             }
         }
     }
-    footer: RowLayout {
+    footer: Flow {
         spacing: 10
         AppButton { text: "Close"; onClicked: preview.close() }
-        Item { Layout.fillWidth: true }
+        AppButton {
+            objectName: "previewEditCard"
+            text: "Edit card"
+            enabled: !app.busy && !!preview.card.id
+            onClicked: {
+                const savedId = preview.cardId
+                preview.close()
+                preview.ui.openCardEditor(savedId, true)
+            }
+        }
         AppButton {
             objectName: "previewAddAnotherCard"
             text: "Add another card"

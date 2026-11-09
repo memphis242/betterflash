@@ -58,7 +58,7 @@ ApplicationWindow {
     readonly property bool repairingStoredCard: !!editingCardId && !!((editingCard().loadError || {}).code)
     readonly property int unreadableCardCount: app.cards.filter(card => !!(card.loadError && card.loadError.code)).length
     readonly property bool editorRefining: editingGeneratedCard && cardGenerator.busy
-    readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible || cardPreviewDialog.visible
+    readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible || cardPreviewDialog.visible || editorReturnToPreview
     property bool cardInverted: false
     property bool initializingDeckParent: false
     property string localCardError: ""
@@ -72,6 +72,7 @@ ApplicationWindow {
     property int editorSaveSession: -1
     property var editorSaveFields: ({})
     property string editorSaveDestination: ""
+    property bool editorReturnToPreview: false
     property string editorSaveRequestId: ""
     property int editorSaveSerial: 0
     readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
@@ -446,7 +447,7 @@ ApplicationWindow {
         editingDeckParentId = parentId || ""
         deckDialog.open()
     }
-    function openCardEditor(id) {
+    function openCardEditor(id, returnToPreview) {
         if (editorSavePending)
             return
         if (!app.decks.length) {
@@ -454,6 +455,7 @@ ApplicationWindow {
             return
         }
         editingCardId = id || ""
+        editorReturnToPreview = !!returnToPreview && !!editingCardId
         cardDialog.open()
     }
     function openCardNarration(id) {
@@ -560,8 +562,9 @@ ApplicationWindow {
         pickCard(cardId)
         if (editingGeneratedCard)
             Qt.callLater(function () { library.restoreScroll(0) })
+        editorReturnToPreview = false
         cardDialog.close()
-        if (created)
+        if (created || destination === "preview")
             cardPreviewDialog.openFor(cardId)
         else
             openSelectedDetail()
@@ -710,7 +713,7 @@ ApplicationWindow {
         const submission = cardSubmission()
         if (!submission)
             return
-        beginEditorSave(submission, "detail")
+        beginEditorSave(submission, editorReturnToPreview ? "preview" : "detail")
     }
     function refineGeneratedCard() {
         if (!editingGeneratedCard || editorSavePending || app.busy || media.busy)
@@ -1562,6 +1565,10 @@ ApplicationWindow {
             refinementPending = false
             editingGeneratedCard = false
             clearPendingEditorSave()
+            if (window.editorReturnToPreview) {
+                cardPreviewDialog.openFor(window.editingCardId)
+                window.editorReturnToPreview = false
+            }
         }
         contentItem: ColumnLayout {
             enabled: !editorSavePending

@@ -33,16 +33,17 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   creation icons and consistent primary action backgrounds.
 - **Deck pickers:** new-card destinations and deck parent choices use `::`
   hierarchy paths. Card destinations retain their record ID when choices reorder.
+- **Preview editing:** saved-card previews offer **Edit card**, returning to the
+  editor with the saved content and deck. Saving updates the same card and returns
+  to its preview; canceling leaves the saved card intact.
+- **Selectable card preview:** highlight and copy rendered front and back text
+  in saved-card previews, including cloze answers.
+- **Review deck key:** the deck diagram includes a visible key for its encircled
+  R badge: review items are due in the deck or its subdecks, including new cards.
+  Each badge also provides the due-item count in a tooltip.
 
 ## Deferred desktop work
 
-- **Return from card preview to editing:** when creating a card, provide a
-  clear action in Card preview to return to the new-card modal with the current
-  content and deck selection preserved, so the user can edit or refine it.
-- **Selectable card preview:** allow highlighting and copying text in the
-  saved-card preview.
-- **Review deck key:** briefly explain the encircled R mark on decks in the
-  Review page, using a visible key or legend and a tooltip where appropriate.
 - **Delayed startup feedback:** when startup takes more than one second, show
   a "Starting up..." dialog so the user knows the launch is in progress.
   Fast normal launches should not show it. Address repeated launch attempts

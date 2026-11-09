@@ -281,6 +281,38 @@ Item {
                 onClicked: graph.showDetailsRequested()
             }
         }
+        RowLayout {
+            objectName: "reviewDeckKey"
+            visible: graph.decks.some(deck => Number(deck.due || 0) > 0)
+            Layout.fillWidth: true
+            Layout.leftMargin: 24
+            Layout.rightMargin: 18
+            Layout.bottomMargin: 12
+            spacing: 8
+            Rectangle {
+                Layout.preferredWidth: 26
+                Layout.preferredHeight: 26
+                radius: width / 2
+                color: Theme.canvas
+                border.color: Theme.accent
+                border.width: 1.5
+                Label {
+                    anchors.centerIn: parent
+                    text: "R"
+                    color: Theme.accent
+                    font.family: Theme.monoFont
+                    font.pixelSize: 12
+                    font.bold: true
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Review due (includes subdecks)"
+                color: Theme.inkMuted
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+            }
+        }
         Flickable {
             id: viewport
             Layout.fillWidth: true
@@ -444,6 +476,8 @@ Item {
                             border.color: Theme.accent
                             border.width: 1.5
                             z: 2
+                            Accessible.name: "Review due"
+                            Accessible.description: node.modelData.deck.due + " review items due, including subdecks"
                             Label {
                                 anchors.fill: parent
                                 text: "R"
@@ -455,7 +489,7 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             ToolTip.visible: reviewBadgeHover.hovered
-                            ToolTip.text: "Pending review: " + node.modelData.deck.due + " review item" + (node.modelData.deck.due === 1 ? "" : "s")
+                            ToolTip.text: "Review due: " + node.modelData.deck.due + " review item" + (node.modelData.deck.due === 1 ? "" : "s") + ", including subdecks. New cards are included."
                             HoverHandler { id: reviewBadgeHover }
                         }
                     }

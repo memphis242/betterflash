@@ -5,6 +5,8 @@
 #include <QAbstractTextDocumentLayout>
 #include <QCache>
 #include <QCryptographicHash>
+#include <QClipboard>
+#include <QCursor>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -12,6 +14,9 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
+#include <QKeyEvent>
+#include <QKeySequence>
+#include <QMouseEvent>
 #include <QBuffer>
 #include <QPainter>
 #include <QRegularExpression>
@@ -20,6 +25,7 @@
 #include <QStandardPaths>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTextDocumentFragment>
 #include <QTextImageFormat>
 #include <QTextList>
 #include <QTextFrame>
@@ -100,8 +106,9 @@ QImage renderMath(const QString &formula, const QColor &foreground, const qreal 
 
 }
 
-MarkdownView::MarkdownView(QQuickItem *parent) : QQuickPaintedItem(parent), m_document(this) {
+MarkdownView::MarkdownView(QQuickItem *parent) : QQuickPaintedItem(parent), m_document(this), m_selection(&m_document) {
     setAntialiasing(true);
+    setAcceptedMouseButtons(Qt::NoButton);
     m_document.setUndoRedoEnabled(false);
     m_document.setDocumentMargin(0);
     connect(this, &QQuickItem::visibleChanged, this, [this] {
@@ -130,11 +137,138 @@ void MarkdownView::setDarkMode(const bool dark) {
 void MarkdownView::setMarkdown(const QString &markdown) {
     if (m_markdown == markdown) return;
     m_markdown = markdown;
+    clearSelection();
     m_requestedCodeKeys.clear();
     CodeRendering::instance()->setVisibleSources(this, {});
     m_imageErrors.clear();
     emit markdownChanged();
     scheduleRender();
+}
+void MarkdownView::setSelectable(const bool enabled) {
+    if (m_selectable == enabled) return;
+    m_selectable = enabled;
+    m_selecting = false;
+    setKeepMouseGrab(false);
+    setAcceptedMouseButtons(enabled ? Qt::LeftButton | Qt::RightButton : Qt::NoButton);
+    setActiveFocusOnTab(enabled);
+    if (enabled) setCursor(QCursor(Qt::IBeamCursor));
+    else { unsetCursor(); clearSelection(); }
+    emit selectableChanged();
+}
+void MarkdownView::setSelectionBackground(const QColor &color) {
+    if (m_selectionBackground == color) return;
+    m_selectionBackground = color;
+    emit styleChanged(); update();
+}
+void MarkdownView::setSelectionForeground(const QColor &color) {
+    if (m_selectionForeground == color) return;
+    m_selectionForeground = color;
+    emit styleChanged(); update();
+}
+void MarkdownView::setSelection(const QTextCursor &cursor) {
+    Q_ASSERT(cursor.document() == &m_document);
+    if (m_selection.position() == cursor.position() && m_selection.anchor() == cursor.anchor()) return;
+    m_selection = cursor;
+    emit selectionChanged(); update();
+}
+void MarkdownView::clearSelection() {
+    m_selecting = false;
+    setKeepMouseGrab(false);
+    setSelection(QTextCursor(&m_document));
+}
+int MarkdownView::textPosition(const QPointF &point) const {
+    return std::clamp(m_document.documentLayout()->hitTest(point, Qt::FuzzyHit), 0, m_document.characterCount() - 1);
+}
+void MarkdownView::selectAll() {
+    if (!m_selectable) return;
+    forceActiveFocus(Qt::ShortcutFocusReason);
+    QTextCursor cursor(&m_document);
+    cursor.select(QTextCursor::Document);
+    setSelection(cursor);
+}
+void MarkdownView::copySelection() const {
+    if (!m_selectable || !m_selection.hasSelection()) return;
+    class CopyDocument final : public QTextDocument {
+    protected:
+        QVariant loadResource(int, const QUrl &) override { return QImage(); }
+    } document;
+    document.setLayoutEnabled(false);
+    QTextCursor copied(&document);
+    copied.insertFragment(QTextDocumentFragment(m_selection));
+    struct ImageText { int position = 0; int length = 0; QString alternative; };
+    QList<struct ImageText> images;
+    for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.charFormat().isImageFormat()) continue;
+            const QString alternative = fragment.charFormat().property(QTextFormat::ImageAltText).toString();
+            images.append({fragment.position(), fragment.length(), alternative.isEmpty() ? QStringLiteral("[image]") : alternative});
+        }
+    }
+    for (auto it = images.crbegin(); it != images.crend(); ++it) {
+        copied.setPosition(it->position);
+        copied.setPosition(it->position + it->length, QTextCursor::KeepAnchor);
+        copied.insertText(it->alternative.repeated(it->length), QTextCharFormat{});
+    }
+    QClipboard *const clipboard = QGuiApplication::clipboard();
+    Q_ASSERT(clipboard);
+    clipboard->setText(document.toPlainText());
+}
+void MarkdownView::mousePressEvent(QMouseEvent *event) {
+    if (!m_selectable) { event->ignore(); return; }
+    forceActiveFocus(Qt::MouseFocusReason);
+    if (event->button() == Qt::RightButton) {
+        emit contextMenuRequested(event->position().x(), event->position().y());
+        event->accept(); return;
+    }
+    if (event->button() != Qt::LeftButton) { event->ignore(); return; }
+    QTextCursor cursor = m_selection;
+    cursor.setPosition(textPosition(event->position()), event->modifiers().testFlag(Qt::ShiftModifier) ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor);
+    setSelection(cursor);
+    m_selecting = true;
+    setKeepMouseGrab(true);
+    event->accept();
+}
+void MarkdownView::mouseMoveEvent(QMouseEvent *event) {
+    if (!m_selectable || !m_selecting) { event->ignore(); return; }
+    QTextCursor cursor = m_selection;
+    cursor.setPosition(textPosition(event->position()), QTextCursor::KeepAnchor);
+    setSelection(cursor);
+    event->accept();
+}
+void MarkdownView::mouseReleaseEvent(QMouseEvent *event) {
+    m_selecting = false;
+    setKeepMouseGrab(false);
+    event->setAccepted(m_selectable);
+}
+void MarkdownView::mouseDoubleClickEvent(QMouseEvent *event) {
+    if (!m_selectable || event->button() != Qt::LeftButton) { event->ignore(); return; }
+    QTextCursor cursor(&m_document);
+    cursor.setPosition(textPosition(event->position()));
+    cursor.select(QTextCursor::WordUnderCursor);
+    setSelection(cursor);
+    event->accept();
+}
+void MarkdownView::mouseUngrabEvent() { m_selecting = false; setKeepMouseGrab(false); }
+void MarkdownView::keyPressEvent(QKeyEvent *event) {
+    if (!m_selectable) { event->ignore(); return; }
+    if (event->matches(QKeySequence::Copy)) { copySelection(); event->accept(); return; }
+    if (event->matches(QKeySequence::SelectAll)) { selectAll(); event->accept(); return; }
+    QTextCursor::MoveOperation operation = QTextCursor::NoMove;
+    const bool control = event->modifiers().testFlag(Qt::ControlModifier);
+    switch (event->key()) {
+    case Qt::Key_Left: operation = control ? QTextCursor::PreviousWord : QTextCursor::Left; break;
+    case Qt::Key_Right: operation = control ? QTextCursor::NextWord : QTextCursor::Right; break;
+    case Qt::Key_Up: operation = QTextCursor::Up; break;
+    case Qt::Key_Down: operation = QTextCursor::Down; break;
+    case Qt::Key_Home: operation = control ? QTextCursor::Start : QTextCursor::StartOfLine; break;
+    case Qt::Key_End: operation = control ? QTextCursor::End : QTextCursor::EndOfLine; break;
+    default: event->ignore(); return;
+    }
+    QTextCursor cursor = m_selection;
+    const bool moved = cursor.movePosition(operation, event->modifiers().testFlag(Qt::ShiftModifier) ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor);
+    if (moved) setSelection(cursor);
+    event->accept();
 }
 void MarkdownView::setForeground(const QColor &color) {
     if (m_foreground == color) return;
@@ -167,6 +301,7 @@ void MarkdownView::setMediaRoot(const QString &directory) {
 void MarkdownView::setClozePreview(const bool enabled) {
     if (m_clozePreview == enabled) return;
     m_clozePreview = enabled;
+    clearSelection();
     emit styleChanged(); scheduleRender();
 }
 void MarkdownView::reportImageError(const QString &message) {
@@ -227,6 +362,8 @@ void MarkdownView::scheduleRender() {
 }
 void MarkdownView::rebuild() {
     if (width() <= 0 || !m_foreground.isValid()) return;
+    const int selectionAnchor = m_selection.anchor();
+    const int selectionPosition = m_selection.position();
     if (!m_renderError.isEmpty()) { m_renderError.clear(); emit renderErrorChanged(); }
     const qreal documentWidth = std::max(1.0, width());
     QFont font(QStringLiteral("IBM Plex Mono"));
@@ -420,6 +557,7 @@ void MarkdownView::rebuild() {
             m_document.addResource(QTextDocument::ImageResource, resource, image);
             QTextImageFormat format;
             format.setName(resource.toString());
+            format.setProperty(QTextFormat::ImageAltText, formula.source);
             const qreal imageWidth = image.width() / image.devicePixelRatio();
             const qreal imageHeight = image.height() / image.devicePixelRatio();
             const qreal scale = std::min(1.0, documentWidth / imageWidth);
@@ -621,12 +759,26 @@ void MarkdownView::rebuild() {
         emit renderErrorChanged();
     }
     setImplicitHeight(std::ceil(m_document.size().height()) + 2);
+    QTextCursor selection(&m_document);
+    const int lastPosition = m_document.characterCount() - 1;
+    Q_ASSERT(lastPosition >= 0);
+    selection.setPosition(std::clamp(selectionAnchor, 0, lastPosition));
+    selection.setPosition(std::clamp(selectionPosition, 0, lastPosition), QTextCursor::KeepAnchor);
+    m_selection = selection;
+    emit selectionChanged();
     update();
 }
 void MarkdownView::paint(QPainter *painter) {
     if (!m_foreground.isValid()) return;
     QAbstractTextDocumentLayout::PaintContext context;
     context.palette.setColor(QPalette::Text, m_foreground);
+    if (m_selectable && m_selection.hasSelection()) {
+        struct QAbstractTextDocumentLayout::Selection selection{};
+        selection.cursor = m_selection;
+        selection.format.setBackground(m_selectionBackground.isValid() ? m_selectionBackground : m_accent);
+        selection.format.setForeground(m_selectionForeground.isValid() ? m_selectionForeground : m_foreground);
+        context.selections.append(selection);
+    }
     painter->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
     m_document.documentLayout()->draw(painter, context);
 }
