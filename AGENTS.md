@@ -62,14 +62,15 @@ pinned, actions visible, and lists bounded.
 
 ## Collaboration and Git
 
-- Inspect `git status` and `git worktree list` before editing. Worktrees are
-  required for parallel or backend work. Sequential UI refinement may use the
-  authorized primary checkout.
+- Inspect `git status` and `git worktree list` before editing. Until the user
+  says otherwise, work directly on `main` in the primary checkout, as authorized
+  on 2026-11-08. Coordinate file ownership for parallel work and preserve
+  concurrent edits.
 - Preserve foreign edits. Stage only named files belonging to this change; do
   not use `git add .` or `git add -A` in a shared checkout.
 - The root agent owns Git writes in coordinated work. Commit and push completed
-  work to the worktree's branch regularly. Do not merge into a trunk branch
-  without explicit user approval.
+  work regularly, including direct work on `main` under the standing authorization.
+  Merging a separate feature branch still requires explicit user approval.
 - Do not reset, stash, clean, or switch branches in a shared checkout while
   another session may be active.
 
