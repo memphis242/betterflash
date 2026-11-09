@@ -1124,15 +1124,44 @@ Item {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     spacing: 8
-                    GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
-                    Label {
-                        text: library.cardPages.length > 0 ? (library.boundedPageIndex + 1) + " / " + library.cardPages.length : "0 / 0"
-                        color: Theme.ink; font.family: Theme.monoFont; font.pixelSize: 12
-                        ToolTip.visible: pageHover.hovered
-                        ToolTip.text: "Page " + (library.cardPages.length > 0 ? library.boundedPageIndex + 1 : 0) + " of " + library.cardPages.length + ". Page size fits the available height."
-                        HoverHandler { id: pageHover }
+                    Row {
+                        objectName: "libraryCardPagination"
+                        height: 40
+                        spacing: 8
+                        rightPadding: 16
+                        GlyphButton {
+                            anchors.verticalCenter: parent.verticalCenter
+                            glyph: "chevron-left-bold"
+                            hint: "Previous page (Page Up)"
+                            implicitWidth: 32
+                            implicitHeight: 32
+                            glyphSize: 15
+                            enabled: library.boundedPageIndex > 0
+                            onClicked: library.changePage(library.boundedPageIndex - 1)
+                        }
+                        Label {
+                            objectName: "libraryCardPageNumber"
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            text: library.cardPages.length > 0 ? (library.boundedPageIndex + 1) + " / " + library.cardPages.length : "0 / 0"
+                            color: Theme.ink
+                            font.family: Theme.monoFont
+                            font.pixelSize: 16
+                            ToolTip.visible: pageHover.hovered
+                            ToolTip.text: "Page " + (library.cardPages.length > 0 ? library.boundedPageIndex + 1 : 0) + " of " + library.cardPages.length + ". Page size fits the available height."
+                            HoverHandler { id: pageHover }
+                        }
+                        GlyphButton {
+                            anchors.verticalCenter: parent.verticalCenter
+                            glyph: "chevron-right-bold"
+                            hint: "Next page (Page Down)"
+                            implicitWidth: 32
+                            implicitHeight: 32
+                            glyphSize: 15
+                            enabled: library.boundedPageIndex + 1 < library.cardPages.length
+                            onClicked: library.changePage(library.boundedPageIndex + 1)
+                        }
                     }
-                    GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
                     ToolButton {
                         id: addCardButton
                         implicitWidth: 40

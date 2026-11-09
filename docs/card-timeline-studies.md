@@ -17,16 +17,25 @@ and width settings. The card pane is closed on first use.
 ## Card detail layout
 
 The detail modal grows to fit the window, up to 1240 by 900 pixels. Front and
-Back tabs share the upper reading area. Review statistics and the recall trace
-remain below it, in that order. Actions and side tabs stay visible while the
-card text scrolls.
+Back tabs share the upper reading area, which automatically fills the remaining
+height above the statistics. Review statistics and the recall trace remain
+below it, in that order. Actions and side tabs stay visible while the card text
+scrolls.
 
-Review statistics remain visible above the recall trace. The trace starts
-expanded and can be collapsed to give more space to the card content. When
-expanded, it receives enough height for the entire graph, readout and timeline
-controls. Short windows scroll the dialog body instead of clipping the trace
+Review statistics form a compact block immediately above the recall trace.
+Their height follows their content, with spare vertical space above the block.
+They remain visible. The trace starts expanded and can be collapsed to give
+more space to the card content. Its arrow points down to collapse and up to
+expand. When expanded, it receives enough height for the entire graph, readout
+and timeline controls. Short windows scroll the dialog body instead of clipping the trace
 inside a separate viewport. Timeline data refreshes retain the selected side and
 the trace's expanded or collapsed state.
+
+Cloze cards show a small key below the reading area in both Card detail and
+Card preview. Its opening phrase, "Highlighted, italicized text", uses the
+same cloze highlighting and italics as card content. It explains that these
+spans belong to a cloze group whose answer is hidden until reveal. The key
+stays visible while card text scrolls.
 
 ## Calendar trace
 

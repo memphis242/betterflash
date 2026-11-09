@@ -30,42 +30,51 @@ Dialog {
         open()
     }
 
-    contentItem: ScrollView {
-        id: contents
-        objectName: "savedCardPreviewScroll"
-        contentWidth: availableWidth
-        clip: true
-        ColumnLayout {
-            width: contents.availableWidth
-            spacing: 16
-            Label {
-                Layout.fillWidth: true
-                text: preview.card.id ? "Saved to " + (preview.ui.deckById(preview.deckId).name || "deck")
-                    : "This card is no longer available. Close the preview and check the Library."
-                textFormat: Text.PlainText
-                wrapMode: Text.Wrap
-                color: Theme.inkMuted
+    contentItem: ColumnLayout {
+        spacing: 12
+        ScrollView {
+            id: contents
+            objectName: "savedCardPreviewScroll"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+                width: contents.availableWidth
+                spacing: 16
+                Label {
+                    Layout.fillWidth: true
+                    text: preview.card.id ? "Saved to " + (preview.ui.deckById(preview.deckId).name || "deck")
+                        : "This card is no longer available. Close the preview and check the Library."
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    color: Theme.inkMuted
+                }
+                Label { text: "Front"; color: Theme.inkMuted; visible: !!preview.card.id }
+                MarkdownPane {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    markdown: preview.card.front || ""
+                    clozePreview: preview.card.kind === "cloze"
+                    selectable: true
+                    mediaRoot: media.rootPath
+                    baseFontSize: 19
+                }
+                Label { text: "Back"; color: Theme.inkMuted; visible: !!preview.card.back }
+                MarkdownPane {
+                    visible: !!preview.card.back
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    markdown: preview.card.back || ""
+                    selectable: true
+                    mediaRoot: media.rootPath
+                    baseFontSize: 19
+                }
             }
-            Label { text: "Front"; color: Theme.inkMuted; visible: !!preview.card.id }
-            MarkdownPane {
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-                markdown: preview.card.front || ""
-                clozePreview: preview.card.kind === "cloze"
-                selectable: true
-                mediaRoot: media.rootPath
-                baseFontSize: 19
-            }
-            Label { text: "Back"; color: Theme.inkMuted; visible: !!preview.card.back }
-            MarkdownPane {
-                visible: !!preview.card.back
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-                markdown: preview.card.back || ""
-                selectable: true
-                mediaRoot: media.rootPath
-                baseFontSize: 19
-            }
+        }
+        ClozePreviewKey {
+            Layout.fillWidth: true
+            visible: preview.card.kind === "cloze"
         }
     }
     footer: Flow {
