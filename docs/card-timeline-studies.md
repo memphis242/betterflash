@@ -10,8 +10,21 @@ and width settings. The card pane is closed on first use.
 - Ctrl+L focuses deck search. Tree arrow keys navigate and expand branches.
 - Drag the divider to resize the panes, or focus it and use Left/Right.
   Home restores equal widths.
-- Card detail renders both Markdown sides, including images, code and math.
+- Card detail uses Front and Back tabs for its Markdown sides, including images,
+  code and math. Each side has its own scroll position and selectable text.
   Editing, atomicizing, resetting and deleting remain available there.
+
+## Card detail layout
+
+The detail modal grows to fit the window, up to 1240 by 900 pixels. Front and
+Back tabs share the upper reading area. Review statistics and the recall trace
+remain below it, in that order. Actions and side tabs stay visible while the
+card text scrolls.
+
+Recall trace and Review statistics collapse independently. Both start expanded;
+their controls remain available when collapsed. Collapsing evidence gives more
+space to the card content. Timeline data refreshes retain the selected side and
+the expanded or collapsed state.
 
 ## Calendar trace
 
