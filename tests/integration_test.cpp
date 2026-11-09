@@ -33,6 +33,7 @@ struct HttpRequest {
     QByteArray method;
     QByteArray path;
     QByteArray body;
+    QByteArray authorization;
 };
 struct HttpResponse {
     QByteArray body;
@@ -56,14 +57,16 @@ public:
                     if (headerEnd < 0) return;
                     const QList<QByteArray> headers = buffer.left(headerEnd).split('\n');
                     qint64 length = 0;
+                    QByteArray authorization;
                     for (const QByteArray &header : headers) {
                         if (header.toLower().startsWith("content-length:")) length = header.mid(15).trimmed().toLongLong();
+                        if (header.toLower().startsWith("authorization:")) authorization = header.mid(14).trimmed();
                     }
                     if (length < 0 || length > 4 * 1024 * 1024) { socket->disconnectFromHost(); return; }
                     if (buffer.size() - headerEnd - 4 < length) return;
                     const QList<QByteArray> line = headers.first().trimmed().split(' ');
                     if (line.size() < 2) { socket->disconnectFromHost(); return; }
-                    const struct HttpRequest request{line[0], line[1], buffer.mid(headerEnd + 4, length)};
+                    const struct HttpRequest request{line[0], line[1], buffer.mid(headerEnd + 4, length), authorization};
                     m_buffers.remove(socket);
                     socket->disconnect(this);
                     connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -1405,36 +1408,94 @@ private slots:
         const QVariantMap outgoing = QJsonDocument::fromJson(server.requests.first().body).toVariant().toMap();
         QVERIFY(!outgoing.contains(QStringLiteral("requestId")));
     }
-    void cancelAfterApplyDispatchDoesNotCompleteRestartedSync() {
+    void cancelWhileBatchNoticesPublishCanRestart() {
         LocalHttpFixture server([](const struct HttpRequest &request) {
-            QVariantMap response = emptyResponse(request);
-            response.insert(QStringLiteral("requestId"), QStringLiteral("server-controlled-id"));
-            return HttpResponse{json(response)};
+            return HttpResponse{json(emptyResponse(request))};
         });
         QVERIFY(server.listen());
+        AppController app(m_temporary.filePath(QStringLiteral("cancel-during-batch-notices")));
+        QVERIFY(waitIdle(app));
+        SyncController sync(&app,app.mediaPath());
+        configureSync(sync,server.endpoint());
+        int notifications=0;
+        bool canceled=false;
+        connect(&sync,&SyncController::changed,this,[&] {
+            if (!canceled&&++notifications==2&&sync.busy()) {
+                canceled=true;
+                sync.cancel();
+            }
+        });
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&] {return canceled&&!sync.busy()&&!app.busy();},5000));
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&] {return !sync.busy()&&!app.busy();},5000));
+        QVERIFY2(sync.error().isEmpty(),qPrintable(sync.error()));
+        QCOMPARE(server.infoRequests,1);
+        QCOMPARE(server.requests.size(),1);
+    }
+    void cancelAfterApplyDispatchFinalizesBeforeAccountChanges() {
+        const struct betterflash::model::Deck deck{betterflash::model::uuid(), QStringLiteral("Incoming deck"),
+            QString(), betterflash::model::nowUtc()};
+        const QVariantMap event{{QStringLiteral("id"), betterflash::model::uuid()},
+            {QStringLiteral("deviceId"), betterflash::model::uuid()}, {QStringLiteral("type"), QStringLiteral("deck.upsert")},
+            {QStringLiteral("createdAt"), betterflash::model::nowUtc()},
+            {QStringLiteral("payload"), QVariantMap{{QStringLiteral("deck"), betterflash::model::toMap(deck)}}}};
+        QVariantMap response = responseWithEvent(event);
+        response.insert(QStringLiteral("hasMore"), true);
+        response.insert(QStringLiteral("requestId"), QStringLiteral("server-controlled-id"));
+        int page = 0;
+        LocalHttpFixture server([response, &page](const struct HttpRequest &request) {
+            return HttpResponse{json(++page == 1 ? response : emptyResponse(request))};
+        });
+        LocalHttpFixture other([](const struct HttpRequest &request) { return HttpResponse{json(emptyResponse(request))}; },
+            QStringLiteral("22222222-2222-4222-8222-222222222222"));
+        QVERIFY(server.listen());
+        QVERIFY(other.listen());
         AppController app(m_temporary.filePath(QStringLiteral("cancel-after-apply")));
         QVERIFY(waitIdle(app));
         SyncController sync(&app, app.mediaPath());
         configureSync(sync, server.endpoint());
         QSignalSpy applied(&app, &AppController::syncResponseApplied);
         bool canceled = false;
-        int completions = 0;
+        bool remainedBusy = false;
+        bool endpointPreserved = false;
+        bool tokenPreserved = false;
         connect(&sync, &SyncController::changed, this, [&] {
             if (!canceled && sync.busy() && sync.status() == QStringLiteral("Applying received changes.")) {
                 canceled = true;
                 sync.cancel();
+                remainedBusy = sync.busy();
+                sync.setEndpoint(other.endpoint());
+                endpointPreserved = sync.endpoint() == server.endpoint();
+                sync.clearToken();
+                sync.setToken(QStringLiteral("replacement-token-0123456789"));
+                tokenPreserved = sync.hasToken();
                 sync.synchronize();
             }
-            if (!sync.busy() && sync.status() == QStringLiteral("Collection synced.")) ++completions;
         });
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return canceled && !sync.busy() && !app.busy(); }, 10000));
+        QVERIFY(remainedBusy);
+        QVERIFY(endpointPreserved);
+        QVERIFY(tokenPreserved);
+        QCOMPARE(server.requests.size(), 1);
+        QCOMPARE(applied.size(), 1);
+        QVERIFY(applied[0][0].toString() != QStringLiteral("server-controlled-id"));
+        QVERIFY(applied[0][1].toBool());
+        QCOMPARE(app.decks().size(), 1);
+        QCOMPARE(app.decks().first().toMap().value(QStringLiteral("id")).toString(), deck.id);
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&] { return !sync.busy() && !app.busy(); }, 10000));
         QVERIFY2(sync.error().isEmpty(), qPrintable(sync.error()));
         QCOMPARE(server.requests.size(), 2);
-        QCOMPARE(applied.size(), 2);
-        QVERIFY(applied[0][0] != applied[1][0]);
-        QVERIFY(applied[0][0].toString() != QStringLiteral("server-controlled-id"));
-        QCOMPARE(completions, 1);
+        QVERIFY(!server.requests[0].authorization.isEmpty());
+        QCOMPARE(server.requests[1].authorization, server.requests[0].authorization);
+        sync.setEndpoint(other.endpoint());
+        configureSync(sync, other.endpoint());
+        sync.synchronize();
+        QVERIFY(QTest::qWaitFor([&] { return !sync.busy(); }, 10000));
+        QVERIFY(sync.error().contains(QStringLiteral("SYNC_COLLECTION_MISMATCH")));
+        QCOMPARE(other.requests.size(), 0);
     }
     void localChangeDuringExchangeIsUploadedBeforeCompletion() {
         AppController app(m_temporary.filePath(QStringLiteral("delayed-loopback")));

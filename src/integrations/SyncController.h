@@ -32,8 +32,8 @@ public:
     QString lastSync() const { return m_lastSync; }
     bool busy() const { return m_busy; }
     void setEndpoint(const QString &endpoint);
-    Q_INVOKABLE void setToken(const QString &token) { cancel(); m_credentials->setKey(token); }
-    Q_INVOKABLE void clearToken() { cancel(); m_credentials->clear(); }
+    Q_INVOKABLE void setToken(const QString &token);
+    Q_INVOKABLE void clearToken();
     Q_INVOKABLE void synchronize();
     Q_INVOKABLE void cancel();
 signals:
@@ -53,6 +53,8 @@ private:
     void finishApply(const QString &requestId, bool success, bool hasMore);
     void fail(const QString &code, const QString &message);
     void configureCredentials();
+    bool rejectAccountChangeDuringApply();
+    void reportAccountChangeBlocked(const QString &error);
     void setSyncNotices(const QVariantMap &notices);
     QUrl mediaUrl(const QString &name) const;
     QNetworkRequest request(const QUrl &url) const;
@@ -76,6 +78,8 @@ private:
     QStringList m_downloads;
     bool m_busy = false;
     bool m_batchWasFull = false;
+    bool m_cancelRequested = false;
+    bool m_reportingAccountChange = false;
     int m_rounds = 0;
     qint64 m_contentConflicts = 0;
     qint64 m_hierarchyResolutions = 0;

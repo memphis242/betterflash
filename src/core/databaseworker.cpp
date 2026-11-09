@@ -23,7 +23,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <cmath>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace model = betterflash::model;
 namespace {
@@ -110,23 +115,27 @@ QVariantList variantMaps(const QList<struct model::Variant> &variants)
     return result;
 }
 
-QVariantMap aggregateWeakness(const QList<struct model::Variant> &variants,
-                              const QHash<QString, QVariantMap> &byVariant)
+struct WeaknessSummary {
+    QVariantMap strongest{};
+    QVariantMap byVariant{};
+};
+struct WeaknessSummary aggregateWeakness(const QList<struct model::Variant> &variants,
+                                        const QHash<QString, QVariantMap> &byVariant)
 {
-    QVariantMap best{{"score", 0.0}, {"tier", QStringLiteral("unassessed")},
-                     {"label", QStringLiteral("Not assessed")}, {"reviewCount", 0},
-                     {"sampleCount", 0}, {"provisional", true}, {"reasons", QStringList{}},
-                     {"recommendation", QStringLiteral("Build a little review history before interpreting weakness.")},
-                     {"variantId", QString()}, {"variantKey", QString()}, {"factors", QVariantList{}}, {"assessed", false}};
+    static const QVariantMap unassessed{{"score", 0.0}, {"tier", QStringLiteral("unassessed")},
+        {"label", QStringLiteral("Not assessed")}, {"reviewCount", 0},
+        {"sampleCount", 0}, {"provisional", true}, {"reasons", QStringList{}},
+        {"recommendation", QStringLiteral("Build a little review history before interpreting weakness.")},
+        {"variantId", QString()}, {"variantKey", QString()}, {"factors", QVariantList{}}, {"assessed", false}};
+    struct WeaknessSummary result{unassessed,{}};
     for (const struct model::Variant &variant : variants) {
         const QVariantMap candidate = byVariant.value(variant.id);
-        if (candidate.value("score").toDouble() > best.value("score").toDouble()
-            || (!best.value("assessed").toBool() && candidate.value("assessed").toBool())) best = candidate;
+        result.byVariant.insert(variant.id,candidate);
+        if (candidate.value("score").toDouble() > result.strongest.value("score").toDouble()
+            || (!result.strongest.value("assessed").toBool() && candidate.value("assessed").toBool()))
+            result.strongest = candidate;
     }
-    QVariantMap all;
-    for (const struct model::Variant &variant : variants) all.insert(variant.id, byVariant.value(variant.id));
-    best.insert("_variantWeaknesses", all);
-    return best;
+    return result;
 }
 
 }
@@ -699,8 +708,10 @@ bool DatabaseWorker::publishSnapshot()
             if (readable&&schedule.due<=now) {++dueCount;if (schedule.reviewCount==0) ++newDue;else ++reviewDue;}
         }
         map.insert("variants",scheduleMaps);map.insert("due",earliest);map.insert("reviewCount",reviewCount);map.insert("dueCount",dueCount);
-        QVariantMap weakness=readable?aggregateWeakness(schedules,m_weaknessByVariant):QVariantMap{};
-        const QVariant variantWeaknesses=weakness.take("_variantWeaknesses");map.insert("weakness",weakness);map.insert("variantWeaknesses",variantWeaknesses);entry=map;
+        const struct WeaknessSummary unassessed{};
+        const struct WeaknessSummary weakness=readable?aggregateWeakness(schedules,m_weaknessByVariant):unassessed;
+        map.insert("weakness",weakness.strongest);
+        map.insert("variantWeaknesses",readable?QVariant(weakness.byVariant):QVariant{});entry=map;
         if (deckIndexes.contains(note.deckId)) {
             QVariantMap deckMap=decks.at(deckIndexes.value(note.deckId)).toMap();
             const QVariantMap increments{{"cardCount",1},{"totalCount",1},{"variantCount",schedules.size()},{"dueCount",dueCount},
@@ -2296,17 +2307,14 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     m_queueDirty=true;
     const bool hasMore=response.value("hasMore").toBool()||hasPendingOutbox;
     emit syncNoticesChanged(notices);
+    if (!publishSnapshot()||!publishQueue(false)) {appliedSignal(false,false);return;}
     if (!responseCollectionId.isEmpty()&&!hasMore&&unresolvedDependencies) {
-        const bool published=publishSnapshot()&&publishQueue(false);
-        (void)published;
         fail("SYNC_DEPENDENCY","Sync retained remote changes whose dependencies are unavailable. Update every client and the server, then retry; preserve the collection if this continues.");
         appliedSignal(false,false);return;
     }
-    if (publishSnapshot()&&publishQueue(false)) {
-        if (!m_syncHistoryConflicts.isEmpty()) fail("SYNC_UNDO_CONFLICT","Sync finished with an undo or redo conflict. Changed records were preserved; review them before repeating the action.","Record identifiers: "+m_syncHistoryConflicts.join(", "));
-        else if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
-        else fail("SYNC_REVIEW_CONFLICT","Sync finished with conflicting review schedules. The latest review results are in History; a newer or explicitly changed schedule was preserved. End this review session before grading these cards again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
-    }
+    if (!m_syncHistoryConflicts.isEmpty()) fail("SYNC_UNDO_CONFLICT","Sync finished with an undo or redo conflict. Changed records were preserved; review them before repeating the action.","Record identifiers: "+m_syncHistoryConflicts.join(", "));
+    else if (m_syncReviewConflicts.isEmpty()) done("Sync applied");
+    else fail("SYNC_REVIEW_CONFLICT","Sync finished with conflicting review schedules. The latest review results are in History; a newer or explicitly changed schedule was preserved. End this review session before grading these cards again.","Review identifiers: "+m_syncReviewConflicts.join(", "));
     appliedSignal(true,hasMore);
 }
 
@@ -2464,11 +2472,30 @@ void DatabaseWorker::importCollection(const QString &path)
     const struct HistoryScope history(this, QStringLiteral("Import collection"));
     if (!history) return;
     if (!ready()) return;
-    QFile file(path);
-    if (path.trimmed().isEmpty()||path.size()>4096||!file.open(QIODevice::ReadOnly)) {fail("IMPORT_READ","Could not open the collection. Choose a readable JSON file.",file.errorString());return;}
-    if (file.size()>model::maxBackupBytes) {fail("IMPORT_LIMIT","The collection exceeds the 128 MiB import limit.");return;}
+    if (path.trimmed().isEmpty()||path.size()>4096||path.contains(QChar::Null)) {
+        fail("IMPORT_READ","Could not open the collection. Choose a readable JSON file.","The import path is empty, too long, or contains a null character.");return;
+    }
+    const QByteArray encodedPath=QFile::encodeName(path);
+    const int descriptor=::open(encodedPath.constData(),O_RDONLY|O_CLOEXEC|O_NONBLOCK);
+    if (descriptor<0) {fail("IMPORT_READ","Could not open the collection. Choose a readable JSON file.",QStringLiteral("%1: %2").arg(path,QString::fromLocal8Bit(std::strerror(errno))));return;}
+    const auto closeDescriptor=qScopeGuard([descriptor] { (void)::close(descriptor); });
+    struct stat info{};
+    if (::fstat(descriptor,&info)!=0) {fail("IMPORT_READ","Could not inspect the collection. Choose a readable JSON file.",QStringLiteral("%1: %2").arg(path,QString::fromLocal8Bit(std::strerror(errno))));return;}
+    if (!S_ISREG(info.st_mode)) {fail("IMPORT_READ","Choose a regular JSON file for import.",QStringLiteral("%1 is not a regular file.").arg(path));return;}
+    if (info.st_size>model::maxBackupBytes) {fail("IMPORT_LIMIT","The collection exceeds the 128 MiB import limit. Choose a smaller backup.",QStringLiteral("%1: %2 bytes.").arg(path).arg(info.st_size));return;}
+    QFile file;
+    if (!file.open(descriptor,QIODevice::ReadOnly)) {fail("IMPORT_READ","Could not read the collection. Choose a readable JSON file.",QStringLiteral("%1: %2").arg(path,file.errorString()));return;}
+    QByteArray bytes;
+    constexpr qint64 chunkSize=64*1024;
+    while (bytes.size()<=model::maxBackupBytes) {
+        const QByteArray chunk=file.read(std::min(chunkSize,model::maxBackupBytes+1-bytes.size()));
+        if (file.error()!=QFileDevice::NoError) {fail("IMPORT_READ","Could not read the collection. Choose a readable JSON file.",QStringLiteral("%1: %2").arg(path,file.errorString()));return;}
+        if (chunk.isEmpty()) break;
+        bytes.append(chunk);
+    }
+    if (bytes.size()>model::maxBackupBytes) {fail("IMPORT_LIMIT","The collection exceeds the 128 MiB import limit. Choose a smaller backup.",QStringLiteral("%1: more than %2 bytes were read.").arg(path).arg(model::maxBackupBytes));return;}
     QJsonParseError parseError;
-    const QJsonDocument document=QJsonDocument::fromJson(file.readAll(),&parseError);
+    const QJsonDocument document=QJsonDocument::fromJson(bytes,&parseError);
     if (!document.isObject()) {fail("INVALID_IMPORT","The collection is not a JSON object. Choose a BetterFlash export.",parseError.errorString());return;}
     const auto validated=model::collectionFromJson(document.object());
     if (!validated) {fail("INVALID_IMPORT","The collection was rejected. No records were changed.",validated.error());return;}

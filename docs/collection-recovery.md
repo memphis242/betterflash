@@ -49,5 +49,9 @@ writing the destination. A portable export is not a substitute for the raw
 SQLite recovery copy when investigating damaged data. Preserve the collection's
 media directory alongside SQLite copies to retain image and narration assets.
 
+Import accepts regular JSON files up to 128 MiB, including symbolic links to
+regular files. Pipes, devices, and oversized files are rejected before any
+collection records are changed.
+
 Never replace a collection database while BetterFlash is running. Preserve both
 the original and recovery copy before attempting manual restoration.

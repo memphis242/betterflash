@@ -114,16 +114,57 @@ void SyncController::setEndpoint(const QString &endpoint) {
         value = url.toString();
     }
     if (m_endpoint == value) return;
+    if (rejectAccountChangeDuringApply()) return;
     if (!m_credentials->finishPending()) {
         m_error = QStringLiteral("KEYRING_PENDING: Finish the pending credential change before switching endpoints.");
         emit changed();
         return;
     }
+    if (rejectAccountChangeDuringApply()) return;
     cancel();
+    if (m_busy) {
+        const QString error = QStringLiteral("SYNC_BUSY: Wait for the current sync to finish before changing the endpoint.");
+        reportAccountChangeBlocked(error);
+        return;
+    }
     m_endpoint = value;
     m_settings.setValue(QStringLiteral("sync/endpoint"), value);
     configureCredentials();
     emit configurationChanged();
+}
+void SyncController::reportAccountChangeBlocked(const QString &error) {
+    if (m_error == error) return;
+    m_error = error;
+    if (m_reportingAccountChange) return;
+    m_reportingAccountChange = true;
+    emit changed();
+    m_reportingAccountChange = false;
+}
+bool SyncController::rejectAccountChangeDuringApply() {
+    if (!m_busy || m_phase != Phase::Applying) return false;
+    const QString error = QStringLiteral("SYNC_FINALIZING: Wait for saved sync changes to finish applying before changing the endpoint or credentials.");
+    reportAccountChangeBlocked(error);
+    return true;
+}
+void SyncController::setToken(const QString &token) {
+    if (rejectAccountChangeDuringApply()) return;
+    cancel();
+    if (m_busy) {
+        const QString error = QStringLiteral("SYNC_BUSY: Wait for the current sync to finish before changing credentials.");
+        reportAccountChangeBlocked(error);
+        return;
+    }
+    m_credentials->setKey(token);
+}
+void SyncController::clearToken() {
+    if (rejectAccountChangeDuringApply()) return;
+    cancel();
+    if (m_busy) {
+        const QString error = QStringLiteral("SYNC_BUSY: Wait for the current sync to finish before changing credentials.");
+        reportAccountChangeBlocked(error);
+        return;
+    }
+    m_credentials->clear();
 }
 QNetworkRequest SyncController::request(const QUrl &url) const {
     QNetworkRequest result(url);
@@ -148,6 +189,7 @@ void SyncController::resetPending() {
     m_requestId.clear();
     m_phase = Phase::Idle;
     m_busy = false;
+    m_cancelRequested = false;
     if (m_reply) {
         QNetworkReply *const reply = m_reply;
         m_reply = nullptr;
@@ -169,6 +211,14 @@ void SyncController::fail(const QString &code, const QString &message) {
     emit changed();
 }
 void SyncController::cancel() {
+    if (m_busy && m_phase == Phase::Applying) {
+        if (m_cancelRequested) return;
+        m_cancelRequested = true;
+        m_status = QStringLiteral("Finalizing saved sync changes before stopping.");
+        m_error.clear();
+        emit changed();
+        return;
+    }
     const bool wasBusy = m_busy;
     resetPending();
     if (wasBusy) {
@@ -209,6 +259,7 @@ void SyncController::handleBatch(const QVariantMap &batch) {
     const QString requestId = batch.value(QStringLiteral("requestId")).toString();
     if (!active(requestId, Phase::Preparing)) return;
     if (batch.contains(QStringLiteral("syncNotices"))) setSyncNotices(batch.value(QStringLiteral("syncNotices")).toMap());
+    if (!active(requestId, Phase::Preparing)) return;
     const auto names = mediaReferences(batch.value(QStringLiteral("events")).toList(), false);
     if (!names) { fail(QStringLiteral("SYNC_IMAGE_LIMIT"), names.error()); return; }
     m_batch = batch;
@@ -457,7 +508,14 @@ void SyncController::downloadNext() {
 }
 void SyncController::finishApply(const QString &requestId, const bool success, const bool hasMore) {
     if (!active(requestId, Phase::Applying)) return;
-    if (!success) { fail(QStringLiteral("SYNC_APPLY"), QStringLiteral("Cannot apply remote changes. See the collection's storage error details.")); return; }
+    if (!success) { fail(QStringLiteral("SYNC_APPLY"), QStringLiteral("Sync could not finish applying or refreshing received changes. Any changes already saved remain saved. See the collection storage error details.")); return; }
+    if (m_cancelRequested) {
+        resetPending();
+        m_status = QStringLiteral("Sync stopped after saving received changes. Sync again to continue.");
+        m_error.clear();
+        emit changed();
+        return;
+    }
     if (hasMore || m_batchWasFull) { beginBatch(); return; }
     resetPending();
     m_error.clear();

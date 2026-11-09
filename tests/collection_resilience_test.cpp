@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QProcess>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -13,6 +14,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <sys/stat.h>
 
 namespace {
 bool idle(AppController &app)
@@ -52,6 +54,41 @@ struct Storage {
 class CollectionResilienceTest final : public QObject {
     Q_OBJECT
 private slots:
+    void importRejectsNonRegularAndOversizedInputs_data() {
+        QTest::addColumn<bool>("fifo");
+        QTest::newRow("fifo-with-valid-backup") << true;
+        QTest::newRow("oversized-sparse-file") << false;
+    }
+    void importRejectsNonRegularAndOversizedInputs() {
+        QFETCH(bool,fifo);
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const QString database=directory.filePath(QStringLiteral("betterflash.sqlite"));
+        AppController app(directory.path()); QVERIFY(idle(app));
+        app.createDeck(QStringLiteral("Preserved learning")); QVERIFY(idle(app));
+        const QString deck=app.decks().first().toMap().value("id").toString();
+        QVERIFY(app.saveCard({},deck,QStringLiteral("basic"),QStringLiteral("Question"),QStringLiteral("Answer"),{},1)); QVERIFY(idle(app));
+        app.startReview(deck); QVERIFY(idle(app)); app.revealAnswer(); QVERIFY(idle(app)); app.grade(3); QVERIFY(idle(app));
+        const QString backup=directory.filePath(QStringLiteral("valid.json"));
+        app.exportCollection(backup); QVERIFY(idle(app)); QVERIFY(app.lastError().isEmpty());
+        QByteArray learning;
+        { struct Storage storage(database); QVERIFY(storage.db.open()); learning=storage.preservedLearning(); QVERIFY(!learning.isEmpty()); }
+        const QVariantList cards=app.cards();
+        const QString input=directory.filePath(fifo?QStringLiteral("pipe.json"):QStringLiteral("large.json"));
+        QProcess writer;
+        const auto cleanup=qScopeGuard([&writer] { if (writer.state()!=QProcess::NotRunning) { writer.kill(); writer.waitForFinished(5000); } });
+        if (fifo) {
+            QCOMPARE(::mkfifo(QFile::encodeName(input).constData(),0600),0);
+            writer.start(QStringLiteral("/bin/sh"),{QStringLiteral("-c"),QStringLiteral("cat -- \"$1\" > \"$2\""),QStringLiteral("writer"),backup,input});
+            QVERIFY(writer.waitForStarted());
+        } else {
+            QFile large(input); QVERIFY(large.open(QIODevice::WriteOnly)); QVERIFY(large.resize(128LL*1024*1024+1));
+        }
+        app.importCollection(input); QVERIFY(idle(app));
+        QCOMPARE(app.lastError().value("code").toString(),fifo?QStringLiteral("IMPORT_READ"):QStringLiteral("IMPORT_LIMIT"));
+        QVERIFY(app.lastError().value("detail").toString().contains(input));
+        QCOMPARE(app.cards(),cards);
+        { struct Storage storage(database); QVERIFY(storage.db.open()); QCOMPARE(storage.preservedLearning(),learning); }
+    }
     void invalidSavedReviewGradesDoNotHideCollection_data() {
         QTest::addColumn<QVariant>("grade");
         QTest::newRow("out-of-range") << QVariant(99);
@@ -358,6 +395,86 @@ private slots:
         worker.gradeCard(3,1.0,2.0,betterflash::model::variantId(id,QStringLiteral("forward")));
         QVERIFY(completed.last().at(0).toBool());
         QCOMPARE(snapshots.last().at(1).toList().first().toMap().value("reviewCount").toInt(),1);
+    }
+    void syncRefreshFailureHasOneFailedCompletion_data() {
+        QTest::addColumn<bool>("queueFailure");
+        QTest::addColumn<bool>("unresolvedDependency");
+        QTest::newRow("snapshot") << false << false;
+        QTest::newRow("queue") << true << false;
+        QTest::newRow("snapshot-with-dependency") << false << true;
+        QTest::newRow("queue-with-dependency") << true << true;
+    }
+    void syncRefreshFailureHasOneFailedCompletion() {
+        QFETCH(bool, queueFailure);
+        QFETCH(bool, unresolvedDependency);
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const QString path=QDir(directory.path()).filePath(QStringLiteral("betterflash.sqlite"));
+        DatabaseWorker worker(path);
+        const QScopeGuard close([&worker] {worker.shutdown();});
+        QSignalSpy snapshots(&worker,&DatabaseWorker::snapshotReady);
+        QSignalSpy completed(&worker,&DatabaseWorker::operationFinished);
+        QSignalSpy batches(&worker,&DatabaseWorker::syncBatchReady);
+        QSignalSpy applied(&worker,&DatabaseWorker::syncResponseApplied);
+        worker.initialize(); worker.createDeck(QStringLiteral("Study"),{},{});
+        const QString deck=snapshots.last().at(0).toList().first().toMap().value("id").toString();
+        worker.saveCard({},deck,QStringLiteral("basic"),QStringLiteral("Question"),QStringLiteral("Answer"),{},1);
+        worker.beginReview(deck); QVERIFY(completed.last().at(0).toBool());
+        const QString requestId=betterflash::model::uuid();
+        worker.requestSyncBatch(requestId); QCOMPARE(batches.size(),1);
+        QVariantList accepted;
+        for (const QVariant &value:batches.first().first().toMap().value("events").toList())
+            accepted.append(value.toMap().value("id"));
+        QVariantList events;
+        if (unresolvedDependency) {
+            const struct betterflash::model::Card note{betterflash::model::uuid(),betterflash::model::uuid(),
+                QStringLiteral("basic"),QStringLiteral("Remote question"),QStringLiteral("Answer"),{},1};
+            const struct betterflash::model::Variant schedule{betterflash::model::variantId(note.id,QStringLiteral("forward")),
+                note.id,QStringLiteral("forward"),betterflash::model::nowUtc()};
+            const QVariantMap event{{"id",betterflash::model::uuid()},{"deviceId",betterflash::model::uuid()},
+                {"type","card.upsert"},{"createdAt",betterflash::model::nowUtc()},
+                {"payload",QVariantMap{{"card",betterflash::model::toMap(note)},
+                    {"variants",QVariantList{betterflash::model::toMap(schedule)}}}}};
+            events.append(QVariantMap{{"seq",1},{"event",event}});
+        }
+        const QString collectionId=betterflash::model::uuid();
+        const QVariantMap response{{"requestId",requestId},{"collectionId",collectionId},{"acceptedIds",accepted},
+            {"events",events},{"cursor",events.size()},{"hasMore",false}};
+        bool committed=false;
+        bool injected=false;
+        const auto inject=[&] {
+            for (const QString &name:QSqlDatabase::connectionNames()) {
+                QSqlDatabase db=QSqlDatabase::database(name,false);
+                if (db.databaseName()!=path) continue;
+                QSqlQuery fault(db);
+                injected=fault.exec(QStringLiteral("ALTER TABLE decks RENAME TO unavailable_decks"));
+                break;
+            }
+        };
+        connect(&worker,&DatabaseWorker::syncNoticesChanged,&worker,[&] {
+            committed=true;
+            if (!queueFailure) inject();
+        });
+        connect(&worker,&DatabaseWorker::snapshotReady,&worker,[&] {
+            if (committed&&queueFailure&&!injected) inject();
+        });
+        completed.clear();
+        worker.applySyncResponse(response);
+        QVERIFY(committed); QVERIFY(injected);
+        QCOMPARE(completed.size(),1);
+        QVERIFY(!completed.first().at(0).toBool());
+        QCOMPARE(completed.first().at(2).toMap().value("code").toString(),
+            queueFailure?QStringLiteral("REVIEW_LOAD"):QStringLiteral("STORAGE_READ"));
+        QCOMPARE(applied.size(),1);
+        QCOMPARE(applied.first().at(0).toString(),requestId);
+        QVERIFY(!applied.first().at(1).toBool());
+        QVERIFY(!applied.first().at(2).toBool());
+        struct Storage storage(path); QVERIFY(storage.db.open()); QSqlQuery persisted(storage.db);
+        QVERIFY(persisted.exec(QStringLiteral("SELECT value FROM metadata WHERE key='sync_collection_id'")));
+        QVERIFY(persisted.next()); QCOMPARE(persisted.value(0).toString(),collectionId);
+        QVERIFY(persisted.exec(QStringLiteral("SELECT value FROM metadata WHERE key='sync_cursor'")));
+        QVERIFY(persisted.next()); QCOMPARE(persisted.value(0).toInt(),events.size());
+        QVERIFY(persisted.exec(QStringLiteral("SELECT COUNT(*) FROM sync_outbox")));
+        QVERIFY(persisted.next()); QCOMPARE(persisted.value(0).toInt(),0);
     }
     void failedCollectionLoadIsDistinctFromEmptyAndCanRetry() {
         QTemporaryDir original; QTemporaryDir target; QVERIFY(original.isValid()); QVERIFY(target.isValid());
