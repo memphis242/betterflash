@@ -59,37 +59,43 @@ not decide a weakness formula or change the spaced-repetition algorithm.
 ## Generate similar card
 
 Available from card detail, card action menus and the active review card:
-**Generate similar card** opens a source preview with an optional **Additional
-instructions** field. Ask for a particular example, emphasis or constraint, then
-press **Generate card**. Instructions are limited to 2,000 characters and apply
-to this request. Opening the dialog does not call a model.
+**Generate similar card** requests one new variation from the configured local
+or remote model. This explicit action starts generation; selecting a card or
+opening the Library does not. A progress dialog offers cancellation and retry
+when generation fails.
 
-The configured local or remote model receives only this source card's front,
-back, deck name, tags, answer-point count and the optional user instructions.
-Source content is separated from user instructions and treated as untrusted
-study material. Recordings, schedules, other cards and credentials are excluded.
-Basic and reverse sources produce a basic draft. Cloze sources produce a cloze
-note with validated numbered groups; a back is optional. Each new cloze group
-has its own fresh schedule.
+The result opens as an editable draft with the source deck and tags preselected.
+Edit its content, kind, deck, tags or answer points. Add optional **Refinement
+instructions**, then press **Generate refinement**. Each request uses the latest
+edited draft, the original source card and these instructions, rather than an
+accumulating conversation. Repeat as needed. Instructions are limited to 2,000
+characters per request and clear after a successful refinement. During a request,
+fields are read-only and **Cancel refinement** stops it. Refusals, invalid
+responses and request failures preserve the editable draft and its instructions.
 
-The model is instructed to solve the new problem independently and preserve
-Markdown, code and LaTeX. The response must pass strict field, size, cloze, media
-and duplicate-question checks. A model may decline when the source cannot be
-varied responsibly. These checks do not verify factual or mathematical
-correctness; check the answer before saving.
+Source and draft content are separated from direct user instructions and treated
+as untrusted study material. Recordings, schedules, unrelated cards and credentials
+are excluded from prompts. Basic and reverse sources initially produce a basic
+draft; cloze sources produce a cloze note with validated numbered groups and an
+optional back. Refinement respects the current draft's card kind. Model responses
+must pass field, size, cloze, media and duplicate-question checks. Managed images
+must come from the source. These checks do not establish factual or mathematical
+correctness; check the answer before accepting.
 
-The result opens directly in the regular new-card editor, with the source deck
-and tags preselected. Edit the content, kind, deck, tags or answer points, and
-use Preview to inspect the result. Only **Save card** persists the draft.
-Canceling leaves the source and collection unchanged. Saving opens the new
-card's detail and reveals it in the Library, clearing the card search and
-filters that could hide it. The source and its history stay intact. The new
-card has fresh schedules and normal undo support; custom narration is not copied.
+**Accept generated card** saves the current edited draft to the chosen deck.
+Nothing is saved during generation or refinement. Saving opens a preview of the
+persisted card and reveals it in the Library, clearing card searches and filters
+that could hide it. The preview offers **Add another card** in the same deck.
+Ordinary new-card saves also open this preview; editing an existing card returns
+to its detail. Canceling a draft leaves the collection unchanged. The source and
+its history stay intact. Each accepted card has fresh schedules and normal undo
+support; custom narration is not copied.
 
 Generation pauses an active review and preserves its current card. Closing the
-generation/editor/detail workflow resumes only a review that was running when
+generation/editor/preview workflow resumes only a review that was running when
 the workflow opened, on the same review direction. An already paused review
-stays paused. Closing the generation window cancels its outstanding request.
-Source edits or removal invalidate the suggestion.
+stays paused. Adding another card keeps the workflow open until its editor or
+preview is closed. Source edits or removal invalidate further model requests;
+the user's editable draft remains available for inspection and manual saving.
 
 Follow-ups: independent answer verification, quantity and difficulty controls.

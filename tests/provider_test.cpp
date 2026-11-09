@@ -300,6 +300,197 @@ private slots:
         }
         QVERIFY(originalPreserved);
     }
+    void similarCardRefinementUsesEditedDraftAndKeepsLastSuccessfulResult() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path()); QVERIFY(seed(app, 1));
+        const QVariantMap source = app.cards().first().toMap();
+        const QString sourceId = source.value(QStringLiteral("id")).toString();
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("Initial generated question?"),
+                                           QStringLiteral("Initial generated answer."));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QVariantMap currentDraft = generator.draft();
+        QVERIFY(!currentDraft.isEmpty());
+        currentDraft.insert(QStringLiteral("front"), QStringLiteral("Edited before the first refinement?"));
+        currentDraft.insert(QStringLiteral("back"), QStringLiteral("User-edited answer before round one."));
+        currentDraft.insert(QStringLiteral("tags"), QStringLiteral("manual,round-one"));
+        currentDraft.insert(QStringLiteral("pointCount"), 2);
+
+        provider.body = generationResponse(QStringLiteral("First refined question?"),
+                                           QStringLiteral("First refined answer."), 3);
+        generator.refine(currentDraft, QStringLiteral("Use one concrete example."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QVariantMap firstRefinement = generator.draft();
+        QCOMPARE(firstRefinement.value(QStringLiteral("front")).toString(), QStringLiteral("First refined question?"));
+        QCOMPARE(firstRefinement.value(QStringLiteral("tags")).toString(), QStringLiteral("manual,round-one"));
+        QCOMPARE(firstRefinement.value(QStringLiteral("pointCount")).toInt(), 3);
+
+        const QJsonObject firstRequest = QJsonDocument::fromJson(provider.requestBody).object();
+        const QString firstUser = firstRequest.value(QStringLiteral("messages")).toArray().last()
+                                      .toObject().value(QStringLiteral("content")).toString();
+        const qsizetype firstJsonStart = firstUser.indexOf(u'\n');
+        QVERIFY(firstJsonStart >= 0);
+        const QJsonObject firstData = QJsonDocument::fromJson(firstUser.sliced(firstJsonStart + 1).toUtf8()).object();
+        QCOMPARE(firstData.value(QStringLiteral("userInstructions")).toString(), QStringLiteral("Use one concrete example."));
+        const QJsonObject firstRequestDraft = firstData.value(QStringLiteral("currentDraft")).toObject();
+        QCOMPARE(firstRequestDraft.value(QStringLiteral("front")).toString(), QStringLiteral("Edited before the first refinement?"));
+        QCOMPARE(firstRequestDraft.value(QStringLiteral("back")).toString(), QStringLiteral("User-edited answer before round one."));
+        QCOMPARE(firstRequestDraft.value(QStringLiteral("tags")).toString(), QStringLiteral("manual,round-one"));
+        QVERIFY(firstData.value(QStringLiteral("sourceCard")).toObject().value(QStringLiteral("front")).toString()
+                    .contains(source.value(QStringLiteral("front")).toString()));
+        QVERIFY(!provider.requestBody.contains("mock-provider-key"));
+
+        firstRefinement.insert(QStringLiteral("front"), source.value(QStringLiteral("front")).toString());
+        firstRefinement.insert(QStringLiteral("back"), QStringLiteral("Manual detail to retain for round two."));
+        firstRefinement.insert(QStringLiteral("tags"), QStringLiteral("manual,round-two"));
+        provider.body = generationResponse(source.value(QStringLiteral("front")).toString(),
+                                           QStringLiteral("Second refined answer."), 4);
+        generator.refine(firstRefinement, QStringLiteral("Keep the user-supplied terminology."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QVariantMap lastSuccessfulDraft = generator.draft();
+        QCOMPARE(lastSuccessfulDraft.value(QStringLiteral("front")).toString(), source.value(QStringLiteral("front")).toString());
+        QCOMPARE(lastSuccessfulDraft.value(QStringLiteral("tags")).toString(), QStringLiteral("manual,round-two"));
+        QCOMPARE(lastSuccessfulDraft.value(QStringLiteral("pointCount")).toInt(), 4);
+        const QJsonObject secondRequest = QJsonDocument::fromJson(provider.requestBody).object();
+        QCOMPARE(secondRequest.value(QStringLiteral("messages")).toArray().size(), 2);
+        const QString secondUser = secondRequest.value(QStringLiteral("messages")).toArray().last()
+                                       .toObject().value(QStringLiteral("content")).toString();
+        const qsizetype secondJsonStart = secondUser.indexOf(u'\n');
+        QVERIFY(secondJsonStart >= 0);
+        const QJsonObject secondData = QJsonDocument::fromJson(secondUser.sliced(secondJsonStart + 1).toUtf8()).object();
+        QCOMPARE(secondData.value(QStringLiteral("userInstructions")).toString(), QStringLiteral("Keep the user-supplied terminology."));
+        const QJsonObject secondRequestDraft = secondData.value(QStringLiteral("currentDraft")).toObject();
+        QCOMPARE(secondRequestDraft.value(QStringLiteral("front")).toString(), source.value(QStringLiteral("front")).toString());
+        QCOMPARE(secondRequestDraft.value(QStringLiteral("back")).toString(), QStringLiteral("Manual detail to retain for round two."));
+        QCOMPARE(secondRequestDraft.value(QStringLiteral("tags")).toString(), QStringLiteral("manual,round-two"));
+        QVERIFY(secondData.value(QStringLiteral("sourceCard")).toObject().value(QStringLiteral("front")).toString()
+                    .contains(source.value(QStringLiteral("front")).toString()));
+
+        const int beforeFailedRefinement = provider.requestCount;
+        provider.status = 503;
+        provider.body = QByteArrayLiteral("{\"error\":{\"message\":\"temporary provider failure\"}}");
+        generator.refine(lastSuccessfulDraft, QStringLiteral("Try a failed refinement."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY(generator.error().contains(QStringLiteral("503")));
+        QCOMPARE(provider.requestCount, beforeFailedRefinement + 1);
+        QCOMPARE(generator.draft(), lastSuccessfulDraft);
+        QCOMPARE(app.cards().size(), 1);
+
+        provider.status = 200;
+        provider.delayMs = 300;
+        generator.refine(lastSuccessfulDraft, QStringLiteral("Cancel this refinement."));
+        QVERIFY(QTest::qWaitFor([&provider, beforeFailedRefinement] {
+            return provider.requestCount == beforeFailedRefinement + 2;
+        }, 5000));
+        QVERIFY(generator.busy());
+        generator.cancel();
+        QVERIFY(!generator.busy());
+        QCOMPARE(generator.draft(), lastSuccessfulDraft);
+        QTest::qWait(provider.delayMs + 50);
+        QCOMPARE(generator.draft(), lastSuccessfulDraft);
+        QCOMPARE(app.cards().size(), 1);
+
+        QVariantMap accepted = generator.draft();
+        accepted.insert(QStringLiteral("front"), QStringLiteral("Accepted after a final manual edit?"));
+        accepted.insert(QStringLiteral("back"), QStringLiteral("Accepted answer with the user's correction."));
+        QVERIFY(app.saveCard({}, accepted.value(QStringLiteral("deckId")).toString(),
+            accepted.value(QStringLiteral("kind")).toString(), accepted.value(QStringLiteral("front")).toString(),
+            accepted.value(QStringLiteral("back")).toString(), accepted.value(QStringLiteral("tags")).toString(),
+            accepted.value(QStringLiteral("pointCount")).toInt()));
+        QVERIFY(settle(app));
+        QCOMPARE(app.cards().size(), 2);
+        bool acceptedFieldsSaved = false;
+        bool sourceUnchanged = false;
+        for (const QVariant &entry : app.cards()) {
+            const QVariantMap card = entry.toMap();
+            if (card.value(QStringLiteral("id")).toString() == sourceId)
+                sourceUnchanged = card.value(QStringLiteral("front")).toString()
+                        == source.value(QStringLiteral("front")).toString()
+                    && card.value(QStringLiteral("back")).toString() == source.value(QStringLiteral("back")).toString();
+            if (card.value(QStringLiteral("front")).toString() == accepted.value(QStringLiteral("front")).toString())
+                acceptedFieldsSaved = card.value(QStringLiteral("back")).toString()
+                        == accepted.value(QStringLiteral("back")).toString()
+                    && card.value(QStringLiteral("pointCount")).toInt() == accepted.value(QStringLiteral("pointCount")).toInt();
+        }
+        QVERIFY(acceptedFieldsSaved);
+        QVERIFY(sourceUnchanged);
+    }
+    void similarCardRefinementValidatesAnEditedClozeKind() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path()); QVERIFY(seed(app, 1));
+        const QString sourceId = app.cards().first().toMap().value(QStringLiteral("id")).toString();
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("A generated basic question?"),
+                                           QStringLiteral("A generated answer."));
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+
+        QVariantMap edited = generator.draft();
+        edited.insert(QStringLiteral("kind"), QStringLiteral("cloze"));
+        edited.insert(QStringLiteral("front"), QStringLiteral("The student crosses {{c1::the Atlantic}}."));
+        edited.insert(QStringLiteral("back"), QString{});
+        provider.body = generationResponse(QStringLiteral("A new cloze note with {{c1::a numbered group}} and {{c2::another group}}."), {}, 2);
+        generator.refine(edited, QStringLiteral("Keep the card as cloze."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        const QVariantMap accepted = generator.draft();
+        QCOMPARE(accepted.value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
+        QCOMPARE(accepted.value(QStringLiteral("back")).toString(), QString{});
+        QCOMPARE(app.cards().size(), 1);
+
+        QVERIFY(app.saveCard({}, accepted.value(QStringLiteral("deckId")).toString(),
+            accepted.value(QStringLiteral("kind")).toString(), accepted.value(QStringLiteral("front")).toString(),
+            accepted.value(QStringLiteral("back")).toString(), accepted.value(QStringLiteral("tags")).toString(),
+            accepted.value(QStringLiteral("pointCount")).toInt()));
+        QVERIFY(settle(app));
+        QCOMPARE(app.cards().size(), 2);
+        QVariantMap saved;
+        for (const QVariant &entry : app.cards()) {
+            const QVariantMap card = entry.toMap();
+            if (card.value(QStringLiteral("front")).toString() == accepted.value(QStringLiteral("front")).toString())
+                saved = card;
+        }
+        QCOMPARE(saved.value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
+        const QVariantList variants = saved.value(QStringLiteral("variants")).toList();
+        QCOMPARE(variants.size(), 2);
+        QStringList keys;
+        for (const QVariant &entry : variants) keys.append(entry.toMap().value(QStringLiteral("key")).toString());
+        std::sort(keys.begin(), keys.end());
+        QCOMPARE(keys, QStringList({QStringLiteral("c1"), QStringLiteral("c2")}));
+    }
+    void similarCardClozeRefinementPreservesClozeKindAndNumberedGroups() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        AppController app(directory.path());
+        const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
+        MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
+        provider.body = generationResponse(QStringLiteral("{{c1::Mercury}} circles the Sun."), {}, 1);
+        Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
+        CardGenerator generator(&app, &configuration);
+        generator.generate(sourceId);
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QVariantMap edited = generator.draft();
+        edited.insert(QStringLiteral("front"), QStringLiteral("Student edit: {{c1::Mercury}} orbits."));
+        provider.body = generationResponse(QStringLiteral("A year on {{c1::Mercury}} is shorter than one on {{c2::Venus}}."), {}, 2);
+        generator.refine(edited, QStringLiteral("Keep this as a cloze card."));
+        QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
+        QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
+        QCOMPARE(generator.draft().value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
+        QCOMPARE(generator.draft().value(QStringLiteral("back")).toString(), QString{});
+        QCOMPARE(generator.draft().value(QStringLiteral("pointCount")).toInt(), 2);
+        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("{{c1::")));
+        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("{{c2::")));
+        QCOMPARE(app.cards().size(), 1);
+    }
     void similarCardRefusalReturnsActionableErrorAndNoDraft() {
         QTemporaryDir directory; QVERIFY(directory.isValid());
         AppController app(directory.path()); QVERIFY(seed(app, 1));

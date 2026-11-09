@@ -484,6 +484,8 @@ private:
         check(card.value("kind").toString() == QStringLiteral("cloze") && card.value("front").toString().contains(image)
               && card.value("back").toString().contains(image), "cloze_inferred_and_images_on_both_sides");
         const QString editableId = card.value("id").toString();
+        check(visible("cardPreviewDialog"),"new_card_opens_preview");
+        close("cardPreviewDialog");
         call("openCardEditor",{editableId});
         check(visible("cardDialog"), "inversion_editor_opens_existing_card");
         require("cardKind")->setProperty("currentIndex",0);
@@ -1023,9 +1025,9 @@ private:
         check(waitUntil([this,before] {return !m_app.busy()&&m_app.cards().size()==before+1&&!visible("cardDialog");}),
               "generated_card_save_is_durable");
         const QString saved = m_window->property("selectedCardId").toString();
-        check(visible("cardDetailDialog")&&require("cardDetailDialog")->property("cardId").toString()==saved,
-              "generated_save_opens_saved_detail");
-        close("cardDetailDialog");
+        check(visible("cardPreviewDialog")&&require("cardPreviewDialog")->property("cardId").toString()==saved,
+              "generated_save_opens_saved_preview");
+        close("cardPreviewDialog");
         check(waitUntil([this,&saved] {
             const QVariant raw=require("libraryPage")->property("visibleCards");
             const QVariantList cards=raw.metaType()==QMetaType::fromType<QJSValue>()
@@ -1070,49 +1072,68 @@ private:
         const QVariantList queue=m_app.pendingCards();
         const QString variant=m_app.currentCard().value("variantId").toString();
         call("openGenerateSimilar",{sourceId});
-        check(provider.requests==0&&visible("generateCardDialog")&&m_app.paused(),"generation_open_is_explicit_and_pauses_review");
-        require("generationInstructions")->setProperty("text",QStringLiteral("Use another European capital."));
-        resize(390,780);
-        check(require("generateCardDialog")->property("width").toDouble()<=m_window->width()
-              &&require("generateCardDialog")->property("height").toDouble()<=m_window->height(),
-              "generation_phone_dialog_fits");
-        wheel("generationSourcePreview","generation_phone_source");
-        screenshot("generate-similar-phone");
-        click("generateSimilarSubmit");
         check(waitUntil([this,generator] {return !generator->property("busy").toBool()&&visible("cardDialog")&&!visible("generateCardDialog");}),
-              "generation_result_opens_editable_draft");
-        check(m_app.cards().size()==initial+1&&m_app.paused()&&m_app.pendingCards()==queue,
-              "generation_draft_preserves_collection_and_review");
-        check(require("editorSource")->property("text").toString().contains(QStringLiteral("{{c2::Italy}}")),
-              "generation_cloze_draft_reaches_editor");
-        check(provider.lastBody.contains("Use another European capital."),"generation_dialog_forwards_instructions");
-        close("cardDialog");
-        check(waitUntil([this] {return !m_app.paused();})&&m_app.cards().size()==initial+1,
-              "generation_cancel_discards_draft_and_resumes_review");
-        resize(1320,860);
-        call("openGenerateSimilar",{sourceId});
-        check(require("generationInstructions")->property("text").toString().isEmpty(),"generation_new_request_resets_guidance");
-        screenshot("generate-similar-desktop");
-        click("generateSimilarSubmit");
-        check(waitUntil([this] {return visible("cardDialog");}),"generation_second_draft_ready");
+              "generation_action_opens_editable_result");
+        check(provider.requests==1&&m_app.paused()&&m_app.cards().size()==initial+1&&m_app.pendingCards()==queue,
+              "generation_initial_draft_preserves_collection_and_review");
         require("editorSource")->setProperty("text",QStringLiteral("{{c1::Madrid}} is in {{c2::Spain}}."));
-        call("submitCard");
+        require("refinementInstructions")->setProperty("text",QStringLiteral("Use a coastal European capital."));
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Lisbon}} is in {{c2::Portugal}}."},
+                                     {"back",""},{"pointCount",1}});
+        click("refineGeneratedCard");
+        check(waitUntil([this,generator] {return !generator->property("busy").toBool()
+                  &&require("editorSource")->property("text").toString().contains(QStringLiteral("Lisbon"));}),
+              "generation_refinement_updates_editable_draft");
+        check(provider.lastBody.contains("Madrid")&&provider.lastBody.contains("Use a coastal European capital."),
+              "generation_refinement_uses_manual_edits_and_instructions");
+        check(require("refinementInstructions")->property("text").toString().isEmpty(),"generation_refinement_consumes_guidance");
+        const QString edited=QStringLiteral("{{c1::Lisbon}} is a coastal capital in {{c2::Portugal}}.");
+        require("editorSource")->setProperty("text",edited);
+        require("refinementInstructions")->setProperty("text",QStringLiteral("Try a different example."));
+        provider.proposal(QJsonObject{{"decision","refuse"},{"reason","No suitable variation in this fixture."}});
+        click("refineGeneratedCard");
+        check(waitUntil([generator] {return !generator->property("busy").toBool()&&!generator->property("error").toString().isEmpty();})
+              &&require("editorSource")->property("text").toString()==edited&&m_app.cards().size()==initial+1,
+              "generation_refusal_preserves_edited_draft");
+        resize(390,780);
+        check(require("cardDialog")->property("width").toDouble()<=m_window->width()
+              &&require("cardDialog")->property("height").toDouble()<=m_window->height(),"generation_phone_editor_fits");
+        wheel("editorScroll","generation_phone_draft");
+        screenshot("generate-refinement-phone");
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Vienna}} is in {{c2::Austria}}."},
+                                     {"back",""},{"pointCount",1}});
+        click("refineGeneratedCard");
+        check(waitUntil([this,generator] {return !generator->property("busy").toBool()
+                  &&require("editorSource")->property("text").toString().contains(QStringLiteral("Vienna"));}),
+              "generation_repeated_refinement_succeeds");
+        check(provider.lastBody.contains("coastal capital"),"generation_later_refinement_uses_latest_draft");
+        resize(1320,860);
+        screenshot("generate-refinement-desktop");
+        const QString accepted=QStringLiteral("{{c1::Vienna}} is the capital of {{c2::Austria}}.");
+        require("editorSource")->setProperty("text",accepted);
+        click("saveCard");
         check(waitUntil([this,initial] {return !m_app.busy()&&!visible("cardDialog")&&m_app.cards().size()==initial+2;}),
-              "generation_edited_cloze_saved");
+              "generation_accept_saves_current_edited_cloze");
         const QString saved=m_window->property("selectedCardId").toString();
         bool valid=false;
         for (const QVariant &value:m_app.cards()) {
             const QVariantMap card=value.toMap();
             if (card.value("id").toString()==saved)
                 valid=card.value("kind").toString()==QStringLiteral("cloze")
-                    &&card.value("front").toString()==QStringLiteral("{{c1::Madrid}} is in {{c2::Spain}}.")
-                    &&card.value("variants").toList().size()==2;
+                    &&card.value("front").toString()==accepted&&card.value("variants").toList().size()==2;
         }
-        check(valid,"generation_edited_cloze_preserves_groups");
-        close("cardDetailDialog");
+        check(valid&&visible("cardPreviewDialog")&&require("cardPreviewDialog")->property("cardId").toString()==saved,
+              "generation_accept_opens_persisted_card_preview");
+        check(m_app.paused(),"generation_preview_keeps_review_paused");
+        wheel("savedCardPreviewScroll","generation_saved_preview");
+        screenshot("generated-card-saved-preview");
+        click("previewAddAnotherCard");
+        check(visible("cardDialog")&&!visible("cardPreviewDialog")&&!m_window->property("editingGeneratedCard").toBool()
+              &&call("currentCardDraft").property("deckId").toString()==m_deckA,"generation_preview_add_another_in_same_deck");
+        close("cardDialog");
         check(waitUntil([this] {return !m_app.paused();})&&m_app.pendingCards()==queue
-              &&m_app.currentCard().value("variantId").toString()==variant,"generation_saved_detail_resumes_same_review");
-        check(provider.requests==2&&provider.onlyFixtureCredentials,"generation_only_explicit_mock_requests");
+              &&m_app.currentCard().value("variantId").toString()==variant,"generation_preview_flow_resumes_same_review");
+        check(provider.requests==4&&provider.onlyFixtureCredentials,"generation_only_explicit_mock_requests");
         m_app.stopReview();
         check(waitUntil([this] {return !m_app.busy()&&!m_app.reviewing();}),"generation_review_finished");
         ai->setProperty("endpoint",originalEndpoint);

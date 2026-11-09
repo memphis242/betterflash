@@ -15,6 +15,8 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Deferred desktop work
 
+- **Card line spacing:** support line-spacing formatting in cards, or at least
+  increase the default spacing between lines and newlines for readability.
 - **Cloze markers and preview:** adopt `[clozeX:<hidden text>]` in place of
   `{{c1::<hidden text>}}`, where `X` is the cloze group number, for example
   `[cloze1:Paris]` and `[cloze2:France]`. Include compatibility handling for existing cards,
@@ -26,10 +28,9 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   subdecks, as well as all cards across the entire collection.
 - **New-card deck picker:** display hierarchical deck paths with `::`
   separators, for example `School::Biology::Cell structure`.
-- **Library card creation follow-up:** after saving a new card from the Library,
-  show a preview modal instead of the card detail modal. Include a readily
-  apparent **Add another card** action to continue creating cards for the same
-  deck without having to rediscover the new-card action.
+- **Library card creation:** new-card saves open a preview with an
+  **Add another card** action that continues in the same deck. Refine this
+  workflow during manual use.
 - **Library creation buttons:** replace the large plus-only root-deck creation
   icon with an icon that communicates adding a root deck, following the visual
   approach of the add-subdeck button. Likewise, make the add-card icon clearly
@@ -59,7 +60,9 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   [study guidance](study-guidance.md) and [study support ideas](study-support-ideas.md).
 - **Generate similar card:** one-card generation supports cloze notes and
   optional user instructions. Drafts open in the regular card editor for changes
-  and preview before saving. Saved cards are selected and revealed in the Library.
+  and preview before saving. Refine edited drafts repeatedly with optional
+  instructions, then accept the current draft into the deck. Saved cards open
+  a preview and are selected and revealed in the Library.
   Independent answer verification and optional difficulty controls remain
   follow-ups. See [study support notes](study-support-ideas.md).
 - **Logo:** replace the current walnut mark with a deliberately drawn design.

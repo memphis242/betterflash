@@ -29,13 +29,13 @@ Dialog {
 
     function openFor(cardId) {
         sourceId = cardId;
-        generationInstructions.text = "";
         cardGenerator.clear();
         resumePending = ui.page === 0 && app.reviewing && !app.paused;
         pausedVariantId = app.currentCard.variantId || "";
         if (resumePending)
             app.pauseReview();
         open();
+        cardGenerator.generate(cardId);
     }
     function resumeIfReady() {
         if (!resumePending || visible || ui.generationContextOpen || app.busy)
@@ -84,38 +84,6 @@ Dialog {
             text: ai.provider === "local" ? "Uses " + ai.localModelLabel + " on this device." : "Sends this card and its deck context to " + ai.endpoint + " using " + ai.model + "."
             wrapMode: Text.Wrap
             color: Theme.inkMuted
-        }
-        Label {
-            text: "Additional instructions (optional)"
-            color: Theme.ink
-            font.bold: true
-        }
-        ScrollView {
-            id: instructionsScroll
-            Layout.fillWidth: true
-            Layout.preferredHeight: 100
-            contentWidth: availableWidth
-            clip: true
-            TextArea {
-                id: generationInstructions
-                objectName: "generationInstructions"
-                width: instructionsScroll.availableWidth
-                height: Math.max(instructionsScroll.availableHeight, implicitHeight)
-                enabled: !cardGenerator.busy
-                wrapMode: TextEdit.Wrap
-                textFormat: TextEdit.PlainText
-                selectByMouse: true
-                padding: 12
-                color: Theme.ink
-                placeholderText: "For example: use a clinical example and focus on the mechanism."
-                Accessible.name: "Additional generation instructions"
-                background: Rectangle {
-                    radius: 8
-                    color: Theme.editorField
-                    border.color: generationInstructions.activeFocus ? Theme.accent : Theme.rule
-                    border.width: generationInstructions.activeFocus ? 2 : 1
-                }
-            }
         }
         ErrorBlock {
             Layout.fillWidth: true
@@ -186,10 +154,11 @@ Dialog {
         }
         AppButton {
             objectName: "generateSimilarSubmit"
-            text: "Generate card"
+            text: "Retry generation"
             primary: true
-            enabled: !cardGenerator.busy && !app.busy
-            onClicked: cardGenerator.generate(dialog.sourceId, generationInstructions.text)
+            visible: !cardGenerator.busy && !!cardGenerator.error
+            enabled: !app.busy
+            onClicked: cardGenerator.generate(dialog.sourceId)
         }
     }
 }

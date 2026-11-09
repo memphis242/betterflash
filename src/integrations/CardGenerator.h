@@ -25,6 +25,7 @@ public:
     [[nodiscard]] QVariantMap sourceCard() const { return m_source; }
 
     Q_INVOKABLE void generate(const QString &cardId, const QString &instructions = QString{});
+    Q_INVOKABLE void refine(const QVariantMap &draft, const QString &instructions);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clear();
 
@@ -40,6 +41,7 @@ private:
     [[nodiscard]] QString deckName(const QString &deckId) const;
     [[nodiscard]] QByteArray fingerprint(const QVariantMap &card) const;
     [[nodiscard]] QString systemInstructions() const;
+    void requestCompletion(const QString &instructions, bool refinement);
     void receiveContent(const QString &response, quint64 generation);
 
     QPointer<AppController> m_app{};
@@ -50,5 +52,7 @@ private:
     QString m_error{};
     QVariantMap m_source{};
     QVariantMap m_draft{};
+    QVariantMap m_requestDraft{};
+    bool m_isRefinement = false;
     QByteArray m_sourceFingerprint{};
 };
