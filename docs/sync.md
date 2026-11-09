@@ -181,7 +181,15 @@ The request envelope is:
 ```
 
 Each event contains `id`, `deviceId`, `type`, `payload`, and an ISO `createdAt`
-timestamp with a UTC offset. The response contains `acceptedIds`,
+timestamp with a UTC offset. New event and payload timestamps must use the form
+`YYYY-MM-DDTHH:MM:SS[.sss](Z|+HH:MM|-HH:MM)`, with one to three optional
+fractional digits and an offset no greater than 14:00 in either direction.
+Calendar dates and times must be valid, and both the local date and the UTC
+instant must fall in years 0001 through 9999. Compact forms, leap seconds, and
+24:00 are not accepted. Native clients produce millisecond precision. External
+producers must follow this format. Clients continue to read legacy timestamps
+that Qt accepts and whose UTC instant is in range; other older log entries may
+need recovery before a client can replay them. The response contains `acceptedIds`,
 `events: [{"seq": 1, "event": {...}}]`, `cursor`, `hasMore`, and `media`.
 Clients apply a received page, acknowledge their outbox, and advance the cursor in
 one local transaction. Interrupted requests can safely be retried. The optional
@@ -267,7 +275,12 @@ recovery route; the server does not silently discard poisoned history.
 
 Cards can contain a `narrations` object mapping a review variant and side, such
 as `forward/front`, `reverse/back`, or `c1/front`, to a SHA-256 WAV filename.
-Markdown `media:` references remain image-only. A narration change emits an
+Markdown `media:` references remain image-only. A media reference ends at ASCII
+whitespace (space, tab, newline, vertical tab, form feed, or carriage return),
+`)`, `]`, `>`, a quote, or a backtick. Non-ASCII whitespace is part of the
+reference and therefore makes the filename invalid. Both saved states of a card
+in a history event must contain valid references; a historical before state does
+not require its old attachments to be uploaded. A narration change emits an
 ordinary `card.upsert` without changing the review schedule. An incoming legacy
 card event without `narrations` preserves compatible saved recordings; an explicit
 empty object clears them. Upgrade the server and clients before using audio
@@ -335,6 +348,12 @@ meaning during projection rebuild. An ambiguous legacy write newly arriving
 after upgrade cannot reverse graduation; it produces a retained conflict notice.
 If that pending operation was an intended reset, repeat the reset from an
 upgraded client. The original event remains immutable in the log.
+
+Canceling sync stops network work immediately until a received page has been
+submitted for local application. Once application begins, that page must finish
+saving before sync stops; its changes and collection binding are retained, and
+no further page is requested. Endpoint and credential changes are unavailable
+until the local application finishes. Sync again to continue any remaining work.
 
 Concurrent edits of the same card or deck use server arrival order, independent
 of device wall clocks. This is whole-record resolution; different text fields

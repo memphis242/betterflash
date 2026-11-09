@@ -1,0 +1,156 @@
+[
+  {
+    "value": "2026-01-01T00:00:00Z",
+    "utc": "2026-01-01T00:00:00.000Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "2026-01-01T00:00:00.123Z",
+    "utc": "2026-01-01T00:00:00.123Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "2026-01-01T00:00:00.1+05:30",
+    "utc": "2025-12-31T18:30:00.100Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "2026-01-01T00:00:00.12-14:00",
+    "utc": "2026-01-01T14:00:00.120Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "0001-01-01T14:00:00+14:00",
+    "utc": "0001-01-01T00:00:00.000Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "9999-12-31T09:59:59.999-14:00",
+    "utc": "9999-12-31T23:59:59.999Z",
+    "serverAccepted": true,
+    "clientAccepted": true
+  },
+  {
+    "value": "20260101T000000Z",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "2026-01-01 00:00:00Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "value": "2026-01-01T00:00:00,1Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-01T00:00:00.100Z"
+  },
+  {
+    "value": "2026-01-01T00:00:00.1234Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-01T00:00:00.123Z"
+  },
+  {
+    "value": "2026-01-01T00:00:00",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "2026-01-01T00:00:00+14:01",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2025-12-31T09:59:00.000Z"
+  },
+  {
+    "value": "2026-01-01T00:00:00+23:59",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "2026-01-01T24:00:00Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-02T00:00:00.000Z"
+  },
+  {
+    "value": "2026-02-29T00:00:00Z",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "0000-01-01T00:00:00Z",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "0001-01-01T00:00:00+01:00",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "9999-12-31T23:59:59-01:00",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "2026-01-01T23:59:59.9999-01:00",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-02T01:00:00.000Z"
+  },
+  {
+    "value": "9999-12-31T23:59:59.9999Z",
+    "serverAccepted": false,
+    "clientAccepted": false
+  },
+  {
+    "value": "9999-12-31T23:59:59.9999+01:00",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "9999-12-31T23:00:00.000Z"
+  },
+  {
+    "value": "9999-12-31T24:00:00+01:00",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "9999-12-31T23:00:00.000Z"
+  },
+  {
+    "value": "0001-01-01T00:59:59.9999+01:00",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "0001-01-01T00:00:00.000Z"
+  },
+  {
+    "value": "2026-11-08T12Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-11-08T12:00:00.000Z"
+  },
+  {
+    "value": "2026-11-08t12:34:56Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-11-08T12:34:56.000Z"
+  },
+  {
+    "value": "2026-01-01T12.5Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-01T12:30:00.000Z"
+  },
+  {
+    "value": "2026-01-01T12:30.5Z",
+    "serverAccepted": false,
+    "clientAccepted": true,
+    "utc": "2026-01-01T12:30:30.000Z"
+  }
+]

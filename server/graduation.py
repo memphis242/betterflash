@@ -190,8 +190,11 @@ class GraduationProjection:
             raise self.protocol_error("STORAGE_ERROR", f"Graduation resolution for event {source_event['id']} "
                                       f"already references sequence {existing[0]}. Preserve the account database and inspect its event log.", 500)
         identifier = str(uuid4())
+        variant = dict(conflict["variant"])
+        variant["due"] = self.instant(variant["due"]).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        created_at = self.instant(source_event["createdAt"]).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         event = {"id": identifier, "deviceId": self.collection_id, "type": "variant.upsert",
-                 "createdAt": source_event["createdAt"], "payload": {"variant": conflict["variant"]}}
+                 "createdAt": created_at, "payload": {"variant": variant}}
         canonical = self.validate_event(event, self.collection_id)
         cursor = self.database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
                                        (identifier, self.collection_id, canonical, event["createdAt"]))

@@ -129,7 +129,7 @@ std::expected<void,QString> validateMediaAttachment(const QString &name,const QB
 }
 std::expected<QStringList,QString> mediaReferences(const QList<struct Card> &cards)
 {
-    static const QRegularExpression pattern(QStringLiteral("media:([^\\s\\)\\]>\\\"'`]+)"));
+    static const QRegularExpression pattern(QStringLiteral("media:([^\\x09-\\x0d\\x20\\)\\]>\\\"'`]+)"));
     QSet<QString> unique;
     for (const struct Card &card:cards) {
         for (const QString &side:{card.front,card.back}) {

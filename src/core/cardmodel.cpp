@@ -96,12 +96,15 @@ bool validUuid(const QString &value)
 QString nowUtc() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
 std::expected<QString, QString> utcInstant(const QString &value)
 {
-    if (value.size() > 40 || !(value.endsWith(QLatin1Char('Z'))
-            || QRegularExpression(QStringLiteral("[+-]\\d{2}:\\d{2}$")).match(value).hasMatch()))
+    static const QRegularExpression offset(QStringLiteral("[+-]\\d{2}:\\d{2}$"));
+    if (value.size() > 40 || !(value.endsWith(QLatin1Char('Z')) || offset.match(value).hasMatch()))
         return std::unexpected(QStringLiteral("Timestamp must include a UTC offset."));
     const QDateTime date = QDateTime::fromString(value, Qt::ISODateWithMs);
-    if (!date.isValid()) return std::unexpected(QStringLiteral("Timestamp is invalid."));
-    return date.toUTC().toString(Qt::ISODateWithMs);
+    if (!date.isValid()) return std::unexpected(QStringLiteral("Timestamp date is invalid."));
+    const QDateTime utc = date.toUTC();
+    if (!utc.isValid() || utc.date().year() < 1 || utc.date().year() > 9999)
+        return std::unexpected(QStringLiteral("Timestamp UTC instant must be within years 0001 through 9999."));
+    return utc.toString(Qt::ISODateWithMs);
 }
 
 std::expected<QList<struct ClozePart>, QString> parseCloze(const QString &source)

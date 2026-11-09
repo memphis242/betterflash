@@ -1,0 +1,93 @@
+[
+  {
+    "text": "Question ![image](media:{image})",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\n",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\tother",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\u000bother",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\fother",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\rother",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image} other",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:",
+    "valid": true,
+    "references": []
+  },
+  {
+    "text": "Question media:\u00a0foo",
+    "valid": false,
+    "references": []
+  },
+  {
+    "text": "Question media:{image}\u00a0suffix",
+    "valid": false,
+    "references": []
+  },
+  {
+    "text": "Question media:\u2003foo",
+    "valid": false,
+    "references": []
+  },
+  {
+    "text": "Question media:\u0085foo",
+    "valid": false,
+    "references": []
+  },
+  {
+    "text": "Question media:bad.png",
+    "valid": false,
+    "references": []
+  },
+  {
+    "text": "Question media:{image}] media:{image})",
+    "valid": true,
+    "references": [
+      "{image}"
+    ]
+  },
+  {
+    "text": "Question media:{image}\u00e9",
+    "valid": false,
+    "references": []
+  }
+]

@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import main
@@ -237,6 +237,63 @@ class ConvergenceTests(unittest.TestCase):
                 again = main.Store(store.path, store.media)
                 with closing(again.connect()) as database:
                     self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], after)
+
+    def test_rebuild_repairs_legacy_deck_and_card_timestamps_without_rewriting_events(self):
+        parent, other = self.deck(), self.deck()
+        first = self.event("deck.upsert", {"deck": parent})
+        second = self.event("deck.upsert", {"deck": other})
+        moved = self.event("deck.upsert", {"deck": {**parent, "parentId": other["id"]}})
+        cycle = self.event("deck.upsert", {"deck": {**other, "parentId": parent["id"],
+                                                    "createdAt": "2026-10-20 00:00:00.1239Z"}})
+        deleted = self.event("deck.delete", {"id": parent["id"]})
+        rejected = self.card_event(parent["id"])
+        rejected["createdAt"] = "2026-10-20 00:00:00.1239Z"
+        events = [first, second, moved, cycle, deleted, rejected]
+        with closing(self.store.connect()) as database:
+            for event in events:
+                encoded = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                                 (event["id"], self.device, encoded, event["createdAt"]))
+            database.execute("DELETE FROM projection_versions WHERE name='deleted-parent-cards-v1'")
+            before = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            after = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+        self.assertEqual(after[:len(before)], before)
+        repairs = [json.loads(row[1]) for row in after[len(before):]]
+        deck_repair = next(event for event in repairs if event["type"] == "deck.upsert")
+        card_repair = next(event for event in repairs if event["type"] == "card.delete")
+        self.assertEqual(deck_repair["payload"]["deck"]["createdAt"], "2026-10-20T00:00:00.124Z")
+        self.assertEqual(card_repair["createdAt"], "2026-10-20T00:00:00.124Z")
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], after)
+
+    def test_rebuild_keeps_existing_legacy_generated_card_deletion(self):
+        deck = self.deck()
+        source = self.card_event(deck["id"])
+        source["createdAt"] = "2026-10-20 00:00:00.1239Z"
+        deletion = {"id": str(uuid5(UUID(source["id"]), "deleted-parent-card")),
+                    "deviceId": self.store.collection_id, "type": "card.delete",
+                    "createdAt": source["createdAt"], "payload": {"id": source["payload"]["card"]["id"]}}
+        events = [self.event("deck.upsert", {"deck": deck}), self.event("deck.delete", {"id": deck["id"]}),
+                  source, deletion]
+        with closing(self.store.connect()) as database:
+            for event in events:
+                encoded = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                database.execute("INSERT INTO events(event_id,device_id,event_json,created_at) VALUES(?,?,?,?)",
+                                 (event["id"], event["deviceId"], encoded, event["createdAt"]))
+            deletion_seq = database.execute("SELECT seq FROM events WHERE event_id=?", (deletion["id"],)).fetchone()[0]
+            database.execute("INSERT INTO card_resolutions VALUES(?,?)", (source["id"], deletion_seq))
+            database.execute("DELETE FROM projection_versions WHERE name='deleted-parent-cards-v1'")
+            before = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], before)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM card_resolutions WHERE original_event_id=?", (source["id"],)).fetchone()[0], 1)
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], before)
 
     def test_client_cannot_supply_authoritative_scope(self):
         parent = self.deck()

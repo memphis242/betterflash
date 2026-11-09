@@ -1,4 +1,5 @@
 from contextlib import closing
+from datetime import datetime, timezone
 import copy
 import json
 from pathlib import Path
@@ -216,6 +217,148 @@ class GraduationTests(unittest.TestCase):
         with closing(self.store.connect()) as database:
             self.assertFalse(json.loads(database.execute("SELECT variant_json FROM graduation_heads WHERE variant_id=?",
                                                        (self.variant["id"],)).fetchone()[0])["graduated"])
+
+    @staticmethod
+    def legacy_instant(value):
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+    def test_upgrade_rebuilds_existing_session_projection_with_qt_rounding(self):
+        event = self.review(self.pc, False, 4)
+        session_id = str(uuid4())
+        event["payload"]["review"].update(sessionId=session_id, sessionDeckName="Study",
+                                          sessionStartedAt="2026-11-08 00:00:00.1239Z")
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.sync(self.pc, [event])
+        with closing(self.store.connect()) as database:
+            original = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+            database.execute("DELETE FROM projection_versions WHERE name='review-sessions-qt-milliseconds-v1'")
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual(database.execute("SELECT started_at FROM review_sessions WHERE session_id=?", (session_id,)).fetchone()[0],
+                             "2026-11-08T00:00:00.124+00:00")
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], original)
+        next_review = self.review(self.pc, False, 5)
+        next_review["payload"]["review"].update(sessionId=session_id, sessionDeckName="Study",
+                                                 sessionStartedAt="2026-11-08T00:00:00.124Z")
+        self.assertEqual(self.sync(self.pc, [next_review])["acceptedIds"], [next_review["id"]])
+
+    def test_session_projection_upgrade_rolls_back_conflicting_legacy_metadata(self):
+        first, second = self.review(self.pc, False, 4), self.review(self.pc, False, 5)
+        session_id = str(uuid4())
+        for event, start in ((first, "2026-11-08 00:00:00.1234Z"), (second, "2026-11-08 00:00:00.1239Z")):
+            event["payload"]["review"].update(sessionId=session_id, sessionDeckName="Study", sessionStartedAt=start)
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.sync(self.pc, [first, second])
+        with closing(self.store.connect()) as database:
+            database.execute("DELETE FROM projection_versions WHERE name='review-sessions-qt-milliseconds-v1'")
+            original = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+            sessions = [tuple(row) for row in database.execute("SELECT * FROM review_sessions")]
+        with self.assertRaises(main.ProtocolError) as failure:
+            main.Store(self.store.path, self.store.media)
+        self.assertEqual(failure.exception.code, "STORAGE_ERROR")
+        with closing(self.store.connect()) as database:
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], original)
+            self.assertEqual([tuple(row) for row in database.execute("SELECT * FROM review_sessions")], sessions)
+            self.assertIsNone(database.execute("SELECT 1 FROM projection_versions WHERE name='review-sessions-qt-milliseconds-v1'").fetchone())
+
+    def test_rebuild_review_sessions_accepts_legacy_start_time(self):
+        event = self.review(self.pc, False, 4)
+        event["payload"]["review"].update(sessionId=str(uuid4()), sessionDeckName="Study",
+                                          sessionStartedAt="2026-11-08 00:00:00.1239Z")
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.sync(self.pc, [event])
+        with closing(self.store.connect()) as database:
+            original = [tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")]
+            database.execute("DROP TABLE review_sessions")
+        self.store = main.Store(self.store.path, self.store.media)
+        with closing(self.store.connect()) as database:
+            self.assertEqual(database.execute("SELECT started_at FROM review_sessions").fetchone()[0],
+                             "2026-11-08T00:00:00.124+00:00")
+            self.assertEqual([tuple(row) for row in database.execute("SELECT seq,event_json FROM events ORDER BY seq")], original)
+
+    def test_stored_timestamp_conversion_matches_qt_vectors(self):
+        vectors = json.loads((Path(__file__).parents[2] / "tests/fixtures/sync-timestamps.json").read_text())
+        for vector in vectors:
+            with self.subTest(timestamp=vector["value"]):
+                if vector["clientAccepted"]:
+                    actual = main.stored_instant(vector["value"]).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                    self.assertEqual(actual, vector["utc"])
+                else:
+                    with self.assertRaises(main.ProtocolError) as failure:
+                        main.stored_instant(vector["value"])
+                    self.assertEqual(failure.exception.code, "STORAGE_ERROR")
+
+    def test_upgraded_projection_matches_legacy_head_for_correction(self):
+        legacy = {**self.variant, "due": "2026-11-08 00:00:00.1239Z"}
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.sync(self.pc, [self.event(self.pc, "variant.upsert", {"variant": legacy})])
+        previous = {**legacy, "due": "2026-11-08T00:00:00.124Z"}
+        review = self.review(self.pc, False, 3)["payload"]["review"]
+        previous_review = {**review, "due": previous["due"]}
+        changed = {**previous, "due": "2026-11-08T08:00:00Z", "difficulty": .3}
+        correction = self.event(self.pc, "review.correct", {"review": {**previous_review, "due": changed["due"]},
+                                "variant": changed, "previousReview": previous_review, "previousVariant": previous})
+        response = self.sync(self.pc, [correction], self.sync(self.pc)["cursor"])
+        self.assertEqual(response["events"][-1]["event"], correction)
+        with closing(self.store.connect()) as database:
+            head = json.loads(database.execute("SELECT variant_json FROM graduation_heads WHERE variant_id=?",
+                                               (self.variant["id"],)).fetchone()[0])
+            self.assertEqual(head, changed)
+
+    def test_upgraded_projection_normalizes_legacy_conflict_repair(self):
+        graduation = self.review(self.pc, True, 4)
+        graduation["createdAt"] = "2026-11-08 00:00:00Z"
+        graduation["payload"]["variant"]["due"] = "2026-11-09 00:00:00.1239Z"
+        graduation["payload"]["review"]["due"] = graduation["payload"]["variant"]["due"]
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.sync(self.pc, [graduation])
+        cursor = self.sync(self.pc)["cursor"]
+        stale = self.review(self.phone, False, 6)
+        response = self.sync(self.phone, [stale], cursor)
+        repair = response["events"][-1]["event"]
+        self.assertEqual(repair["type"], "variant.upsert")
+        self.assertEqual(repair["payload"]["variant"]["due"], "2026-11-09T00:00:00.124Z")
+        self.assertEqual(self.sync(self.pc)["events"][-3]["event"], graduation)
+        self.assertEqual(self.sync(self.phone, [stale], cursor)["events"], response["events"])
+
+    def test_rebuild_keeps_hour_only_and_lowercase_legacy_schedule_comparable(self):
+        for legacy_due, canonical in (("2026-11-08T12Z", "2026-11-08T12:00:00.000Z"),
+                                      ("2026-11-08t12:34:56Z", "2026-11-08T12:34:56.000Z")):
+            with self.subTest(due=legacy_due):
+                legacy = {**self.variant, "due": legacy_due}
+                source = self.event(self.pc, "variant.upsert", {"variant": legacy})
+                with patch.object(main, "instant", side_effect=self.legacy_instant):
+                    self.append_old_log([source])
+                self.store = main.Store(self.store.path, self.store.media)
+                previous = {**legacy, "due": canonical}
+                review = self.review(self.pc, False, 3)["payload"]["review"]
+                previous_review = {**review, "due": canonical}
+                changed = {**previous, "due": "2026-11-09T08:00:00Z", "difficulty": .3}
+                correction = self.event(self.pc, "review.correct", {"review": {**previous_review, "due": changed["due"]},
+                                        "variant": changed, "previousReview": previous_review, "previousVariant": previous})
+                cursor = self.sync(self.pc)["cursor"]
+                response = self.sync(self.pc, [correction], cursor)
+                self.assertEqual(response["events"][-1]["event"], correction)
+                with closing(self.store.connect()) as database:
+                    self.assertEqual(json.loads(database.execute("SELECT variant_json FROM graduation_heads WHERE variant_id=?",
+                                                                 (self.variant["id"],)).fetchone()[0]), changed)
+                    original = json.loads(database.execute("SELECT event_json FROM events WHERE event_id=?", (source["id"],)).fetchone()[0])
+                    self.assertEqual(original, source)
+
+    def test_rebuild_normalizes_legacy_source_and_repair_without_rewriting_log(self):
+        graduation, stale = self.review(self.pc, True, 4), self.review(self.phone, False, 6)
+        graduation["payload"]["variant"]["due"] = "2026-11-09 00:00:00Z"
+        graduation["payload"]["review"]["due"] = "2026-11-09 00:00:00Z"
+        stale["createdAt"] = "2026-11-08 00:00:00Z"
+        with patch.object(main, "instant", side_effect=self.legacy_instant):
+            self.append_old_log([graduation, stale])
+        self.store = main.Store(self.store.path, self.store.media)
+        events = [row["event"] for row in self.sync(self.pc)["events"]]
+        self.assertEqual(events[-3:-1], [graduation, stale])
+        self.assertEqual(events[-1]["createdAt"], "2026-11-08T00:00:00.000Z")
+        self.assertEqual(events[-1]["payload"]["variant"]["due"], "2026-11-09T00:00:00.000Z")
+        self.store = main.Store(self.store.path, self.store.media)
+        self.assertEqual([row["event"] for row in self.sync(self.pc)["events"]], events)
 
     def test_valid_grade_correction_may_undo_graduation(self):
         graduation = self.review(self.pc, True, 4)

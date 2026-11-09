@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -148,6 +149,8 @@ private slots:
     void retainedDeletedHistoryRoundTrips();
     void mediaBackupsRoundTripAndRejectUnsafeData();
     void preserveDamagedMediaUsesDirectoryFd();
+    void syncMediaReferenceVectors();
+    void syncTimestampVectors();
     void syncRoundTripIdempotenceAndDeletion();
     void syncProtectsPendingEditsAcrossDownloadPages();
     void syncMissingDependenciesAreDurable();
@@ -894,6 +897,59 @@ void CoreTest::preserveDamagedMediaUsesDirectoryFd()
     const auto absent=model::preserveDamagedMedia(directory.path(),name);QVERIFY(absent.has_value());QVERIFY(absent->isEmpty());
     QVERIFY(QFile::link(QDir(directory.path()).filePath(*preserved),QDir(directory.path()).filePath(name)));
     QVERIFY(!model::preserveDamagedMedia(directory.path(),name));
+}
+
+void CoreTest::syncMediaReferenceVectors()
+{
+    const QString path = QFINDTESTDATA("fixtures/sync-media-references.json");
+    QVERIFY2(!path.isEmpty(), "Media reference vectors were not found.");
+    QFile fixture(path);
+    QVERIFY2(fixture.open(QIODevice::ReadOnly), qPrintable(fixture.errorString()));
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(fixture.readAll(), &error);
+    QVERIFY2(error.error == QJsonParseError::NoError && document.isArray(), qPrintable(error.errorString()));
+    const QJsonArray vectors = document.array();
+    QVERIFY(!vectors.isEmpty());
+    const QString image = QString(64, QLatin1Char('a')) + QStringLiteral(".png");
+    for (const QJsonValue &entry : vectors) {
+        const QVariantMap vector = entry.toObject().toVariantMap();
+        const QString content = vector.value(QStringLiteral("text")).toString().replace(QStringLiteral("{image}"), image);
+        for (const bool front : {false, true}) {
+            struct model::Card card{};
+            (front ? card.front : card.back) = content;
+            const auto result = model::cardMediaReferences(card);
+            const bool valid = vector.value(QStringLiteral("valid")).toBool();
+            QVERIFY2(result.has_value() == valid, qPrintable(content));
+            if (valid) {
+                QStringList expected;
+                for (const QVariant &reference : vector.value(QStringLiteral("references")).toList())
+                    expected.append(reference.toString().replace(QStringLiteral("{image}"), image));
+                QCOMPARE(*result, expected);
+            }
+        }
+    }
+}
+
+void CoreTest::syncTimestampVectors()
+{
+    const QString path = QFINDTESTDATA("fixtures/sync-timestamps.json");
+    QVERIFY2(!path.isEmpty(), "Timestamp vectors were not found.");
+    QFile fixture(path);
+    QVERIFY2(fixture.open(QIODevice::ReadOnly), qPrintable(fixture.errorString()));
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(fixture.readAll(), &error);
+    QVERIFY2(error.error == QJsonParseError::NoError && document.isArray(), qPrintable(error.errorString()));
+    const QJsonArray vectors = document.array();
+    QVERIFY(!vectors.isEmpty());
+    for (const QJsonValue &entry : vectors) {
+        const QVariantMap vector = entry.toObject().toVariantMap();
+        const QString value = vector.value(QStringLiteral("value")).toString();
+        const auto result = model::utcInstant(value);
+        const bool valid = vector.value(QStringLiteral("clientAccepted")).toBool();
+        QVERIFY(!vector.value(QStringLiteral("serverAccepted")).toBool() || valid);
+        QVERIFY2(result.has_value() == valid, qPrintable(value));
+        if (valid) QCOMPARE(*result, vector.value(QStringLiteral("utc")).toString());
+    }
 }
 
 void CoreTest::syncRoundTripIdempotenceAndDeletion()

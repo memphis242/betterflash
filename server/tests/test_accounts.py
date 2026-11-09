@@ -8,7 +8,7 @@ import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import main
@@ -72,6 +72,102 @@ class AccountTests(unittest.TestCase):
     def sync(self, events, token="alpha-token", cursor=0, device="33333333-3333-4333-8333-333333333333"):
         return self.request("POST", "/v1/sync", {"deviceId": device,
                                                    "cursor": cursor, "events": events}, token)
+
+    def test_timestamp_vectors_reject_atomically_and_replay(self):
+        vectors = json.loads((Path(__file__).parents[2] / "tests/fixtures/sync-timestamps.json").read_text())
+        for vector in vectors:
+            for field in ("event", "payload"):
+                with self.subTest(timestamp=vector["value"], field=field):
+                    event = self.event()
+                    if field == "event":
+                        event["createdAt"] = vector["value"]
+                    else:
+                        event["payload"]["deck"]["createdAt"] = vector["value"]
+                    cursor = self.sync([])[1]["cursor"]
+                    prior = self.event()
+                    status, body = self.sync([event] if vector["serverAccepted"] else [prior, event], cursor=cursor)
+                    if vector["serverAccepted"]:
+                        self.assertEqual(status, 200)
+                        self.assertEqual(body["events"][0]["event"], event)
+                        self.assertEqual(self.sync([], cursor=cursor)[1]["events"][0]["event"], event)
+                        self.assertEqual(main.instant(vector["value"]).isoformat(timespec="milliseconds").replace("+00:00", "Z"), vector["utc"])
+                    else:
+                        self.assertEqual(status, 400)
+                        self.assertEqual(body["error"]["code"], "INVALID_EVENT")
+                        page = self.sync([], cursor=cursor)[1]
+                        self.assertEqual(page["cursor"], cursor)
+                        self.assertEqual(page["events"], [])
+
+    def test_media_reference_vectors_reject_atomically_and_replay(self):
+        data = png_bytes()
+        image = hashlib.sha256(data).hexdigest() + ".png"
+        self.assertEqual(self.request("PUT", "/v1/media/" + image, data, raw=True)[0], 201)
+        deck = self.event()
+        self.assertEqual(self.sync([deck])[0], 200)
+        vectors = json.loads((Path(__file__).parents[2] / "tests/fixtures/sync-media-references.json").read_text())
+        for vector in vectors:
+            for side in ("front", "back"):
+                with self.subTest(text=vector["text"], side=side):
+                    card_id = str(uuid4())
+                    card = {"id": card_id, "deckId": deck["payload"]["deck"]["id"], "kind": "basic",
+                            "front": "Question", "back": "Answer", "tags": "", "pointCount": 1}
+                    card[side] = vector["text"].replace("{image}", image)
+                    variant = {"id": str(uuid5(UUID(card_id), "forward")), "cardId": card_id, "key": "forward",
+                               "due": "2026-01-01T00:00:00Z", "reviewCount": 0, "stability": 1, "difficulty": 0.5}
+                    event = self.event()
+                    event.update(type="card.upsert", payload={"card": card, "variants": [variant]})
+                    cursor = self.sync([])[1]["cursor"]
+                    prior = self.event()
+                    status, body = self.sync([event] if vector["valid"] else [prior, event], cursor=cursor)
+                    if vector["valid"]:
+                        self.assertEqual(status, 200)
+                        self.assertEqual(body["events"][0]["event"], event)
+                        self.assertEqual(self.sync([], cursor=cursor)[1]["events"][0]["event"], event)
+                        self.assertEqual(main.card_media(card), {name.replace("{image}", image) for name in vector["references"]})
+                    else:
+                        self.assertEqual(status, 400)
+                        self.assertEqual(body["error"]["code"], "MEDIA_REFERENCE")
+                        page = self.sync([], cursor=cursor)[1]
+                        self.assertEqual(page["cursor"], cursor)
+                        self.assertEqual(page["events"], [])
+
+    def test_history_card_media_validation_in_both_snapshots(self):
+        deck = self.event()
+        self.assertEqual(self.sync([deck])[0], 200)
+        for side in ("before", "after"):
+            for excessive in (False, True):
+                with self.subTest(side=side, excessive=excessive):
+                    card_id = str(uuid4())
+                    front = (" ".join("media:" + format(n, "064x") + ".png" for n in range(65))
+                             if excessive else "Question media:invalid")
+                    card = {"id": card_id, "deckId": deck["payload"]["deck"]["id"], "kind": "basic",
+                            "front": front, "back": "Answer", "tags": "", "pointCount": 1}
+                    change = {"entity": "card", "id": card_id, "before": None, "after": None}
+                    change[side] = card
+                    event = self.event()
+                    event.update(type="history.apply", payload={"changes": [change]})
+                    cursor = self.sync([])[1]["cursor"]
+                    status, body = self.sync([self.event(), event], cursor=cursor)
+                    self.assertEqual(status, 413 if excessive else 400)
+                    self.assertEqual(body["error"]["code"], "MEDIA_EVENT_LIMIT" if excessive else "MEDIA_REFERENCE")
+                    page = self.sync([], cursor=cursor)[1]
+                    self.assertEqual(page["cursor"], cursor)
+                    self.assertEqual(page["events"], [])
+
+    def test_history_before_card_does_not_require_old_media(self):
+        deck = self.event()
+        self.assertEqual(self.sync([deck])[0], 200)
+        card_id = str(uuid4())
+        card = {"id": card_id, "deckId": deck["payload"]["deck"]["id"], "kind": "basic",
+                "front": "Question media:" + "a" * 64 + ".png", "back": "Answer", "tags": "", "pointCount": 1}
+        event = self.event()
+        event.update(type="history.apply", payload={"changes": [{"entity": "card", "id": card_id,
+                                                                   "before": card, "after": None}]})
+        cursor = self.sync([])[1]["cursor"]
+        status, body = self.sync([event], cursor=cursor)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["events"][0]["event"], event)
+        self.assertEqual(self.sync([], cursor=cursor)[1]["events"][0]["event"], event)
 
     def test_accounts_have_independent_logs_and_media(self):
         event = self.event()

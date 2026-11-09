@@ -3,7 +3,7 @@
 
 import argparse
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import io
@@ -62,7 +62,7 @@ Image.MAX_IMAGE_PIXELS = IMAGE_PIXELS
 warnings.filterwarnings("error", category=Image.DecompressionBombWarning)
 MEDIA_RE = re.compile(r"^/v1/media/([0-9a-f]{64}\.(?:png|jpg|jpeg|webp|gif|wav))$")
 EVENT_TYPES = frozenset(("deck.upsert", "deck.delete", "card.upsert", "card.delete", "review.add", "review.correct", "variant.upsert", "history.apply"))
-MEDIA_REFERENCE = re.compile(r'''media:([^\s\)\]>"'`]+)''')
+MEDIA_REFERENCE = re.compile(r'''media:([^\x09-\x0d\x20\)\]>"'`]+)''')
 
 
 class ProtocolError(Exception):
@@ -134,15 +134,50 @@ def valid_uuid(value):
 
 
 def instant(value):
-    if not isinstance(value, str) or len(value) > 40 or not re.search(r"(?:Z|[+-][0-9]{2}:[0-9]{2})$", value):
-        raise ProtocolError("INVALID_EVENT", "Timestamps must include a UTC offset.")
+    pattern = (r"[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):"
+               r"[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,3})?"
+               r"(?:Z|[+-](?:(?:0[0-9]|1[0-3]):[0-5][0-9]|14:00))")
+    if not isinstance(value, str) or not re.fullmatch(pattern, value):
+        raise ProtocolError("INVALID_EVENT", "Timestamp must use YYYY-MM-DDTHH:MM:SS, optional milliseconds, and a UTC offset within 14 hours.")
     try:
-        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if result.tzinfo is None:
-            raise ValueError()
-        return result.astimezone(timezone.utc)
-    except ValueError:
-        raise ProtocolError("INVALID_EVENT", "A timestamp is invalid.") from None
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        raise ProtocolError("INVALID_EVENT", "Timestamp has an invalid calendar date or its UTC instant is outside years 0001 through 9999.") from None
+
+
+def stored_instant(value):
+    # Persisted log timestamps use Qt millisecond precision in projections and derived events.
+    pattern = (r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})[Tt ](?P<hour>[01][0-9]|2[0-4])"
+               r"(?::(?P<minute>[0-5][0-9])(?::(?P<second>[0-5][0-9]))?)?"
+               r"(?:[.,](?P<fraction>[0-9]+))?"
+               r"(?P<offset>Z|[+-](?:(?:0[0-9]|1[0-5]):[0-5][0-9]|16:00))")
+    try:
+        match = re.fullmatch(pattern, value) if isinstance(value, str) and len(value) <= 40 else None
+        if match is None:
+            raise ValueError("timestamp format is not interoperable with Qt")
+        hour = int(match.group("hour"))
+        minute = int(match.group("minute") or "0")
+        second = int(match.group("second") or "0")
+        fraction = match.group("fraction") or ""
+        if hour == 24 and (minute or second or any(digit != "0" for digit in fraction)):
+            raise ValueError("24-hour time must be exactly midnight")
+        offset_text = match.group("offset").replace("Z", "+00:00")
+        result = datetime.fromisoformat(match.group("date") + "T00:00:00" + offset_text)
+        offset = result.utcoffset()
+        assert offset is not None
+        unit_ms = 1000 if match.group("second") is not None else 60000 if match.group("minute") is not None else 3600000
+        divisor = 10 ** len(fraction)
+        fractional_ms = (int(fraction or "0") * unit_ms * 2 + divisor) // (2 * divisor)
+        day_ms = 24 * 60 * 60 * 1000
+        milliseconds = ((result.toordinal() - 1) * day_ms
+                        + (hour * 3600 + minute * 60 + second) * 1000
+                        + fractional_ms - int(offset.total_seconds()) * 1000)
+        if not 0 <= milliseconds < datetime.max.toordinal() * day_ms:
+            raise ValueError("UTC instant is outside years 0001 through 9999")
+        return datetime(1, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=milliseconds)
+    except (ValueError, OverflowError) as error:
+        detail = repr(value[:40]) if isinstance(value, str) else f"<{type(value).__name__}>"
+        raise ProtocolError("STORAGE_ERROR", f"A stored timestamp {detail} cannot be converted for sync projection: {error}. Preserve the server database and restore or inspect the affected event.", 500) from error
 
 
 def text(record, key, maximum, required=False):
@@ -271,7 +306,7 @@ def validate_variant(record):
         raise ProtocolError("INVALID_EVENT", f"Variant {record['id']} has inconsistent graduation: graduated={graduated}, reviewCount={record['reviewCount']}, stability={record['stability']} days. A graduated direction needs a saved review; a reviewed learning direction must have stability below one day.")
 
 
-def review_session(record):
+def review_session(record, stored=False):
     fields = ("sessionId", "sessionDeckName", "sessionStartedAt")
     present = sum(key in record for key in fields)
     if present == 0:
@@ -280,7 +315,7 @@ def review_session(record):
         raise ProtocolError("INVALID_EVENT", "Review session metadata must be supplied as a complete set.")
     identifiers(record, "sessionId")
     return (record["sessionId"], text(record, "sessionDeckName", 256, True),
-            instant(text(record, "sessionStartedAt", 40, True)))
+            (stored_instant if stored else instant)(text(record, "sessionStartedAt", 40, True)))
 
 
 def validate_review(record):
@@ -316,6 +351,8 @@ def validate_history_record(entity, identifier, record):
             validate_deck(record)
         case "card":
             card_keys(record)
+            if len(card_media(record)) > PAGE_MEDIA_COUNT:
+                raise ProtocolError("MEDIA_EVENT_LIMIT", "A card can reference at most 64 images and narration attachments.", 413)
         case "variant":
             validate_variant(record)
         case "review":
@@ -554,9 +591,17 @@ class Store:
                 projected = database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_sessions'").fetchone()
                 database.execute("CREATE TABLE IF NOT EXISTS review_sessions("
                                  "session_id TEXT PRIMARY KEY,deck_name TEXT NOT NULL,started_at TEXT NOT NULL)")
-                if not projected:
+                database.execute("CREATE TABLE IF NOT EXISTS projection_versions(name TEXT PRIMARY KEY)")
+                if not projected or not database.execute("SELECT 1 FROM projection_versions WHERE name='review-sessions-qt-milliseconds-v1'").fetchone():
+                    database.execute("DELETE FROM review_sessions")
                     for row in database.execute("SELECT event_json FROM events ORDER BY seq"):
-                        self.record_review_session(database, json.loads(row["event_json"]))
+                        try:
+                            self.record_review_session(database, json.loads(row["event_json"]), stored=True)
+                        except ProtocolError as error:
+                            if error.code != "SESSION_CONFLICT":
+                                raise
+                            raise ProtocolError("STORAGE_ERROR", "Stored review events contain conflicting session metadata after millisecond normalization. Preserve the server database and inspect the affected events.", 500) from error
+                    database.execute("INSERT OR IGNORE INTO projection_versions(name) VALUES('review-sessions-qt-milliseconds-v1')")
                 if database.execute("SELECT 1 FROM content_heads LIMIT 1").fetchone() is None:
                     for row in database.execute("SELECT seq,event_id,device_id,event_json FROM events ORDER BY seq"):
                         for entity, entity_id, content in self.content_targets(json.loads(row["event_json"])):
@@ -566,7 +611,6 @@ class Store:
                 database.execute("CREATE TABLE IF NOT EXISTS card_locations(card_id TEXT PRIMARY KEY,deck_id TEXT NOT NULL,deleted INTEGER NOT NULL)")
                 database.execute("CREATE INDEX IF NOT EXISTS card_locations_deck ON card_locations(deck_id,deleted)")
                 database.execute("CREATE INDEX IF NOT EXISTS deck_parents_parent ON deck_parents(parent_id,deleted)")
-                database.execute("CREATE TABLE IF NOT EXISTS projection_versions(name TEXT PRIMARY KEY)")
                 database.execute("CREATE TABLE IF NOT EXISTS card_resolutions(original_event_id TEXT PRIMARY KEY,resolution_seq INTEGER UNIQUE NOT NULL)")
                 if (not database.execute("SELECT 1 FROM projection_versions WHERE name='authoritative-deletions-v1'").fetchone()
                         or not database.execute("SELECT 1 FROM projection_versions WHERE name='deleted-parent-cards-v1'").fetchone()):
@@ -599,7 +643,7 @@ class Store:
                 if not database.execute("SELECT 1 FROM projection_versions WHERE name='deleted-parent-card-notices-v1'").fetchone():
                     self.record_card_deletion_notices(database)
                     database.execute("INSERT INTO projection_versions(name) VALUES('deleted-parent-card-notices-v1')")
-                phase = GraduationProjection(database, self.collection_id, validate_event, instant, ProtocolError, replay=True)
+                phase = GraduationProjection(database, self.collection_id, validate_event, stored_instant, ProtocolError, replay=True)
                 phase.initialize()
                 if not database.execute("SELECT 1 FROM projection_versions WHERE name='graduation-v2-reset-intent'").fetchone():
                     database.execute("DELETE FROM graduation_heads")
@@ -788,11 +832,14 @@ class Store:
     def append_card_deletion(self, database, source_event, card_id):
         generated = {"id": str(uuid5(UUID(source_event["id"]), "deleted-parent-card")),
                      "deviceId": self.collection_id, "type": "card.delete",
-                     "createdAt": source_event["createdAt"], "payload": {"id": card_id}}
+                     "createdAt": stored_instant(source_event["createdAt"]).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                     "payload": {"id": card_id}}
         canonical = validate_event(generated, self.collection_id)
         existing = database.execute("SELECT seq,event_json FROM events WHERE event_id=?", (generated["id"],)).fetchone()
         if existing is not None:
-            if existing["event_json"] != canonical:
+            previous = json.loads(existing["event_json"])
+            previous["createdAt"] = stored_instant(previous["createdAt"]).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            if previous != generated:
                 raise ProtocolError("STORAGE_ERROR", "A generated card deletion conflicts with its source. Preserve the server database for inspection.", 500)
             self.record_card_deletion_notices(database, source_event["id"])
             return
@@ -807,6 +854,8 @@ class Store:
 
     def append_repairs(self, database, source_event, corrections):
         for corrected, container_restore in corrections:
+            corrected = dict(corrected)
+            corrected["createdAt"] = stored_instant(corrected["createdAt"]).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             generated = {"id": str(uuid4()), "deviceId": self.collection_id,
                          "type": "deck.upsert", "createdAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                          "payload": {"deck": corrected, "resolvedEventId": source_event["id"]}}
@@ -850,7 +899,7 @@ class Store:
         return []
 
     @staticmethod
-    def record_review_session(database, event):
+    def record_review_session(database, event, stored=False):
         match event["type"]:
             case "review.add" | "review.correct":
                 reviews = [event["payload"]["review"]]
@@ -861,7 +910,7 @@ class Store:
             case _:
                 return
         for review in reviews:
-            session = review_session(review)
+            session = review_session(review, stored=stored)
             if session is None:
                 continue
             session_id, deck_name, started = session
@@ -924,7 +973,7 @@ class Store:
         with closing(self.connect()) as database:
             database.execute("BEGIN IMMEDIATE")
             try:
-                phase = GraduationProjection(database, self.collection_id, validate_event, instant, ProtocolError)
+                phase = GraduationProjection(database, self.collection_id, validate_event, stored_instant, ProtocolError)
                 latest = database.execute("SELECT COALESCE(MAX(seq),0) FROM events").fetchone()[0]
                 if cursor < 0 or cursor > latest:
                     raise ProtocolError("INVALID_CURSOR", "The cursor is outside this server's event log.")
