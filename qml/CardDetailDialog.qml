@@ -9,11 +9,8 @@ Dialog {
     property string cardId: ""
     property int activeSide: 0
     property bool traceExpanded: true
-    property bool statsExpanded: true
     property var contentPositions: ({})
     property real evidenceHeight: -1
-    readonly property bool evidenceCollapsed: !traceExpanded && !statsExpanded
-    readonly property real collapsedEvidenceHeight: 112 + (loadError.code ? 88 : 0)
     readonly property bool actionMenuOpen: cardMenu.visible
     readonly property var card: ui.cardById(cardId)
     readonly property var weaknessAssessment: {
@@ -105,18 +102,14 @@ Dialog {
         restore(backContents, saved.back)
     }
     function resizeEvidence() {
-        if (!evidencePane || !bodySplit) return
-        const statisticsHeight = Math.min(170, statistics.implicitHeight) + 8
-        const expandedHeight = evidenceHeight >= 0 ? evidenceHeight : (bodySplit.height - 12) / 2
-        const desiredHeight = collapsedEvidenceHeight
-            + (statsExpanded ? statisticsHeight : 0)
-            + (traceExpanded ? Math.max(160, expandedHeight - collapsedEvidenceHeight - statisticsHeight) : 0)
-        evidencePane.SplitView.preferredHeight = Math.min(desiredHeight,
-            Math.max(collapsedEvidenceHeight, bodySplit.height - 152))
+        if (!evidencePane || !bodySplit || !cardSides) return
+        const minimumHeight = evidencePane.SplitView.minimumHeight
+        const desiredHeight = !traceExpanded ? minimumHeight
+            : evidenceHeight >= 0 ? evidenceHeight : (bodySplit.height - 12) / 2
+        const maximumHeight = bodySplit.height - cardSides.SplitView.minimumHeight - 12
+        evidencePane.SplitView.preferredHeight = Math.max(minimumHeight, Math.min(desiredHeight, maximumHeight))
     }
     onTraceExpandedChanged: resizeEvidence()
-    onStatsExpandedChanged: resizeEvidence()
-    onLoadErrorChanged: resizeEvidence()
     function openFor(id) {
         const alreadyOpen = visible
         if (alreadyOpen) rememberContentPosition()
@@ -313,10 +306,8 @@ Dialog {
                 orientation: Qt.Vertical
                 onHeightChanged: detail.resizeEvidence()
                 onResizingChanged: {
-                    if (!resizing && !detail.evidenceCollapsed) {
+                    if (!resizing && detail.traceExpanded)
                         detail.evidenceHeight = evidencePane.height
-                            + (detail.statsExpanded ? 0 : Math.min(170, statistics.implicitHeight) + 8)
-                    }
                 }
                 handle: Rectangle {
                     id: splitHandle
@@ -326,7 +317,7 @@ Dialog {
                     activeFocusOnTab: true
                     Accessible.name: "Resize card content and recall evidence"
                     ToolTip.visible: SplitHandle.hovered || activeFocus
-                    ToolTip.text: "Drag to resize, or focus this divider and use Up/Down; Home restores equal space"
+                    ToolTip.text: "Drag to resize, or focus this divider and use Up/Down; Home restores the default sizes"
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Home) {
                             detail.evidenceHeight = -1
@@ -337,9 +328,8 @@ Dialog {
                         if (event.key !== Qt.Key_Up && event.key !== Qt.Key_Down) return
                         const amount = event.key === Qt.Key_Up ? 24 : -24
                         const height = Math.max(evidencePane.SplitView.minimumHeight,
-                            Math.min(bodySplit.height - 152, evidencePane.height + amount))
-                        detail.evidenceHeight = height
-                            + (detail.statsExpanded ? 0 : Math.min(170, statistics.implicitHeight) + 8)
+                            Math.min(bodySplit.height - cardSides.SplitView.minimumHeight - 12, evidencePane.height + amount))
+                        if (detail.traceExpanded) detail.evidenceHeight = height
                         evidencePane.SplitView.preferredHeight = height
                         event.accepted = true
                     }
@@ -355,7 +345,7 @@ Dialog {
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     SplitView.minimumWidth: 0
-                    SplitView.minimumHeight: 140
+                    SplitView.minimumHeight: 200
                     currentIndex: detail.activeSide
                     ScrollView {
                         id: frontContents
@@ -408,9 +398,9 @@ Dialog {
                 ColumnLayout {
                     id: evidencePane
                     SplitView.minimumWidth: 0
-                    SplitView.minimumHeight: detail.collapsedEvidenceHeight
-                        + (detail.traceExpanded ? 160 : 0) + (detail.statsExpanded ? 36 : 0)
+                    SplitView.minimumHeight: Math.ceil(implicitHeight)
                     spacing: 8
+                    onImplicitHeightChanged: detail.resizeEvidence()
                     RowLayout {
                         visible: !!detail.loadError.code
                         Layout.fillWidth: true
@@ -429,75 +419,58 @@ Dialog {
                         }
                         AppButton { text: "Retry"; onClicked: detail.load(detail.nextOffset > 0) }
                     }
-                    RowLayout {
+                    Label {
+                        text: "Review statistics"
+                        color: Theme.ink
+                        font.family: Theme.uiFont
+                        font.bold: true
                         Layout.fillWidth: true
-                        Label {
-                            text: "Review statistics"
-                            color: Theme.ink
-                            font.family: Theme.uiFont
-                            font.bold: true
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            elide: Text.ElideRight
-                        }
-                        GlyphButton {
-                            objectName: "cardDetailStatsToggle"
-                            glyph: detail.statsExpanded ? "up" : "down"
-                            hint: detail.statsExpanded ? "Collapse review statistics" : "Expand review statistics"
-                            onClicked: detail.statsExpanded = !detail.statsExpanded
-                        }
+                        Layout.minimumWidth: 0
+                        elide: Text.ElideRight
                     }
-                    ScrollView {
-                        id: statsViewport
-                        visible: detail.statsExpanded
+                    ColumnLayout {
+                        id: statistics
                         Layout.fillWidth: true
-                        Layout.fillHeight: !detail.traceExpanded
-                        Layout.minimumHeight: visible ? 36 : 0
-                        Layout.preferredHeight: Math.min(170, statistics.implicitHeight)
-                        contentWidth: availableWidth
-                        clip: true
-                        ColumnLayout {
-                            id: statistics
-                            width: statsViewport.availableWidth
-                            Label {
-                                visible: detail.summary.reviewCount === undefined
-                                text: detail.loading ? "Loading review statistics..." : "Review statistics are unavailable. Retry loading the card history."
-                                textFormat: Text.PlainText
-                                wrapMode: Text.Wrap
-                                color: Theme.inkMuted
-                                Layout.fillWidth: true
-                            }
-                            Flow {
-                                visible: detail.summary.reviewCount !== undefined
-                                Layout.fillWidth: true
-                                spacing: 18
-                                Repeater {
-                                    model: [
-                                        {label: "Next review", value: detail.countdown, hint: detail.card.due ? "Earliest scheduled variant: " + detail.ui.dateTime(detail.card.due) : "This card has no scheduled review."},
-                                        {label: "Successful reviews", value: detail.summary.reviewCount ? detail.summary.successfulCount + " of " + detail.summary.reviewCount : "No reviews", hint: "Hard, Good and Easy count as successful. Partial recall is tracked separately."},
-                                        {label: "Average recall", value: detail.summary.reviewCount ? Math.round(detail.summary.averageRecall * 100) + "%" : "Not yet reviewed", color: detail.averageRatingColor, hint: "Average recalled fraction, including partial recall. Color follows the average review rating rounded to Missed, Partial, Hard, Good or Easy."},
-                                        {label: "Best time", value: detail.summary.hasSuccessfulReview ? Number(detail.summary.bestSuccessfulSeconds).toFixed(1) + " s" : "No qualifying review", hint: "Your time to beat: fastest recorded response graded Hard, Good or Easy, across this card's review variants. Missed and Partial reviews do not qualify."},
-                                        {label: "Recorded history", value: detail.summary.firstRecordedAt ? detail.recordedDays + " days" : "Unknown", hint: "Time since the earliest retained save or review. Original creation may be earlier."}
-                                    ]
-                                    delegate: Column {
-                                        required property var modelData
-                                        width: Math.min(statistics.width, Math.max(145, valueLabel.implicitWidth))
-                                        spacing: 6
-                                        Label { text: modelData.label; color: Theme.inkMuted; font.pixelSize: 11 }
-                                        Label {
-                                            id: valueLabel
-                                            width: parent.width
-                                            text: modelData.value
-                                            color: modelData.color || Theme.ink
-                                            font.family: Theme.monoFont
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            wrapMode: Text.Wrap
-                                        }
-                                        HoverHandler { id: statHover }
-                                        ToolTip.visible: statHover.hovered
-                                        ToolTip.text: modelData.hint
+                        Layout.minimumHeight: implicitHeight
+                        Layout.preferredHeight: implicitHeight
+                        Label {
+                            visible: detail.summary.reviewCount === undefined
+                            text: detail.loading ? "Loading review statistics..." : "Review statistics are unavailable. Retry loading the card history."
+                            textFormat: Text.PlainText
+                            wrapMode: Text.Wrap
+                            color: Theme.inkMuted
+                            Layout.fillWidth: true
+                        }
+                        Flow {
+                            visible: detail.summary.reviewCount !== undefined
+                            Layout.fillWidth: true
+                            spacing: 18
+                            Repeater {
+                                model: [
+                                    {label: "Next review", value: detail.countdown, hint: detail.card.due ? "Earliest scheduled variant: " + detail.ui.dateTime(detail.card.due) : "This card has no scheduled review."},
+                                    {label: "Successful reviews", value: detail.summary.reviewCount ? detail.summary.successfulCount + " of " + detail.summary.reviewCount : "No reviews", hint: "Hard, Good and Easy count as successful. Partial recall is tracked separately."},
+                                    {label: "Average recall", value: detail.summary.reviewCount ? Math.round(detail.summary.averageRecall * 100) + "%" : "Not yet reviewed", color: detail.averageRatingColor, hint: "Average recalled fraction, including partial recall. Color follows the average review rating rounded to Missed, Partial, Hard, Good or Easy."},
+                                    {label: "Best time", value: detail.summary.hasSuccessfulReview ? Number(detail.summary.bestSuccessfulSeconds).toFixed(1) + " s" : "No qualifying review", hint: "Your time to beat: fastest recorded response graded Hard, Good or Easy, across this card's review variants. Missed and Partial reviews do not qualify."},
+                                    {label: "Recorded history", value: detail.summary.firstRecordedAt ? detail.recordedDays + " days" : "Unknown", hint: "Time since the earliest retained save or review. Original creation may be earlier."}
+                                ]
+                                delegate: Column {
+                                    required property var modelData
+                                    width: Math.min(statistics.width, Math.max(145, valueLabel.implicitWidth))
+                                    spacing: 6
+                                    Label { text: modelData.label; color: Theme.inkMuted; font.pixelSize: 11 }
+                                    Label {
+                                        id: valueLabel
+                                        width: parent.width
+                                        text: modelData.value
+                                        color: modelData.color || Theme.ink
+                                        font.family: Theme.monoFont
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        wrapMode: Text.Wrap
                                     }
+                                    HoverHandler { id: statHover }
+                                    ToolTip.visible: statHover.hovered
+                                    ToolTip.text: modelData.hint
                                 }
                             }
                         }
@@ -521,29 +494,21 @@ Dialog {
                             onClicked: detail.traceExpanded = !detail.traceExpanded
                         }
                     }
-                    ScrollView {
-                        id: traceViewport
+                    CalendarTrace {
+                        id: recallTrace
                         visible: detail.traceExpanded
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.minimumHeight: visible ? 40 : 0
+                        Layout.minimumHeight: 362
                         Layout.preferredHeight: 362
-                        contentWidth: availableWidth
-                        clip: true
-                        ScrollBar.vertical.policy: availableHeight < 342 ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
-                        CalendarTrace {
-                            width: traceViewport.availableWidth
-                            height: Math.max(342, traceViewport.availableHeight)
-                            historyKey: detail.cardId
-                            historyStart: detail.summary.firstRecordedAt || ""
-                            events: detail.timelineEvents
-                            loading: detail.loading
-                            hasMore: detail.hasMore
-                            canLoadEarlier: !detail.loadError.code
-                            onLoadOlderRequested: detail.load(true)
-                        }
+                        historyKey: detail.cardId
+                        historyStart: detail.summary.firstRecordedAt || ""
+                        events: detail.timelineEvents
+                        loading: detail.loading
+                        hasMore: detail.hasMore
+                        canLoadEarlier: !detail.loadError.code
+                        onLoadOlderRequested: detail.load(true)
                     }
-                    Item { visible: detail.evidenceCollapsed; Layout.fillHeight: true }
                 }
             }
         }

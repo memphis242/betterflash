@@ -21,10 +21,12 @@ Back tabs share the upper reading area. Review statistics and the recall trace
 remain below it, in that order. Actions and side tabs stay visible while the
 card text scrolls.
 
-Recall trace and Review statistics collapse independently. Both start expanded;
-their controls remain available when collapsed. Collapsing evidence gives more
-space to the card content. Timeline data refreshes retain the selected side and
-the expanded or collapsed state.
+Review statistics remain visible above the recall trace. The trace starts
+expanded and can be collapsed to give more space to the card content. When
+expanded, it receives enough height for the entire graph, readout and timeline
+controls. Short windows scroll the dialog body instead of clipping the trace
+inside a separate viewport. Timeline data refreshes retain the selected side and
+the trace's expanded or collapsed state.
 
 ## Calendar trace
 

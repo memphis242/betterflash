@@ -44,8 +44,9 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 - **Review deck names:** circle labels show at most 20 characters followed by
   an ellipsis for longer names; hovering shows the full name.
 - **Card detail layout:** a larger modal uses Front and Back tabs, with separate
-  scrolling for each side. Recall trace and review statistics collapse
-  independently and start expanded. See [card details](card-timeline-studies.md).
+  scrolling for each side. Review statistics stay visible above a collapsible,
+  initially expanded recall trace with room for its full graph and readout.
+  See [card details](card-timeline-studies.md).
 
 ## Deferred desktop work
 
