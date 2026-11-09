@@ -30,6 +30,14 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   show a preview modal instead of the card detail modal. Include a readily
   apparent **Add another card** action to continue creating cards for the same
   deck without having to rediscover the new-card action.
+- **Library creation buttons:** replace the large plus-only root-deck creation
+  icon with an icon that communicates adding a root deck, following the visual
+  approach of the add-subdeck button. Likewise, make the add-card icon clearly
+  communicate card creation. Give all Library creation buttons the orange
+  background currently used by the large plus button.
+- **Light-mode accent:** replace the dark orange-brown counterpart of dark
+  mode's orange/apricot accent with light blue or teal. Choose the precise shade
+  during visual refinement and retain readable text and control contrast.
 - **Checkpoint follow-ups:** checkpoint creation and content restoration are
   implemented, including child decks, deterministic changes, optional model
   annotations, recovery checkpoints, and portable backups. Checkpoint history
