@@ -26,6 +26,10 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   subdecks, as well as all cards across the entire collection.
 - **New-card deck picker:** display hierarchical deck paths with `::`
   separators, for example `School::Biology::Cell structure`.
+- **Library card creation follow-up:** after saving a new card from the Library,
+  show a preview modal instead of the card detail modal. Include a readily
+  apparent **Add another card** action to continue creating cards for the same
+  deck without having to rediscover the new-card action.
 - **Checkpoint follow-ups:** checkpoint creation and content restoration are
   implemented, including child decks, deterministic changes, optional model
   annotations, recovery checkpoints, and portable backups. Checkpoint history
