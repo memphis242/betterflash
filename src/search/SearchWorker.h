@@ -20,7 +20,7 @@ public:
                           std::shared_ptr<std::atomic<quint64>> testEpoch);
     ~SearchWorker() override;
     void search(int channel, quint64 epoch, const QVariantList &cards, const QVariantList &decks,
-                const QString &deck, const QString &query);
+                const QString &deck, const QString &query, const QVariantList &collection);
     void semantic(int channel, quint64 epoch, const QString &profile, const QString &directory,
                   const QString &scope, bool remote);
     void acceptRemote(int channel, quint64 epoch, const QVariantList &vectors);
@@ -65,6 +65,7 @@ private:
     const Epochs m_currentEpochs;
     const std::shared_ptr<std::atomic<quint64>> m_testEpoch;
     std::array<struct QueryState, channelCount> m_states;
+    betterflash::search::DocumentCache m_documents;
     QString m_loadedProfile;
     QString m_loadedDirectory;
     QSqlDatabase m_cache;

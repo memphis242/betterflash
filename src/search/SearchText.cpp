@@ -34,13 +34,14 @@ QString markdownText(QString value) {
     static const QRegularExpression url(R"((?:https?://|media:)[^\s)]+)", QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression html(R"(<\/?(?:p|br|div|span|em|strong|code|pre|h[1-6]|ul|ol|li|blockquote)(?:\s[^>]*)?>)",
                                           QRegularExpression::CaseInsensitiveOption);
-    Q_ASSERT(html.isValid());
+    static const QRegularExpression marker(R"((^|\s)[>#*_`~-]+(?=\S))");
+    Q_ASSERT(html.isValid() && marker.isValid());
     value.replace(image, QStringLiteral("\\1"));
     value.replace(link, QStringLiteral("\\1"));
     value.replace(url, QStringLiteral(" "));
     value.replace(html, QStringLiteral(" "));
     value.replace(QStringLiteral("```"), QStringLiteral(" "));
-    value.replace(QRegularExpression(R"((^|\s)[>#*_`~-]+(?=\S))"), QStringLiteral("\\1"));
+    value.replace(marker, QStringLiteral("\\1"));
     return value;
 }
 
@@ -85,6 +86,11 @@ QString deckPath(const QString &id, const QHash<QString, QVariantMap> &byId) {
 }
 
 QString semanticHints(const QString &text) {
+    static const QRegularExpression division(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\b)"));
+    static const QRegularExpression multiplication(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*[×*]\s*\d+(?:\.\d+)?\b)"));
+    static const QRegularExpression equation(QStringLiteral(R"(\b\d+\s*[a-zA-Z]\s*=)"));
+    static const QRegularExpression percentageWord(QStringLiteral(R"(\b(?:of|times)\b)"));
+    Q_ASSERT(division.isValid() && multiplication.isValid() && equation.isValid() && percentageWord.isValid());
     QString lower = text.toCaseFolded();
     lower.replace(QStringLiteral("\\div"), QStringLiteral("÷"));
     lower.replace(QStringLiteral("\\times"), QStringLiteral("×"));
@@ -92,17 +98,17 @@ QString semanticHints(const QString &text) {
     QStringList hints;
     const bool percentage = lower.contains(QLatin1Char('%'));
     if (percentage) hints << QStringLiteral("percentage proportion percent calculation");
-    if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\b)")))
+    if (lower.contains(division)
         || lower.contains(QStringLiteral("÷")) || lower.contains(QStringLiteral("\\frac{")))
         hints << QStringLiteral("division quotient ratio inverse of multiplication");
-    if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+(?:\.\d+)?\s*[×*]\s*\d+(?:\.\d+)?\b)")))
+    if (lower.contains(multiplication)
         || lower.contains(QStringLiteral("×"))
-        || lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+\s*[a-zA-Z]\s*=)")))) {
+        || lower.contains(equation)) {
         hints << QStringLiteral("multiplication product times");
     }
-    if (percentage && lower.contains(QRegularExpression(QStringLiteral(R"(\b(?:of|times)\b)"))))
+    if (percentage && lower.contains(percentageWord))
         hints << QStringLiteral("multiplication product times");
-    if (lower.contains(QRegularExpression(QStringLiteral(R"(\b\d+\s*[a-zA-Z]\s*=)"))))
+    if (lower.contains(equation))
         hints << QStringLiteral("algebra equation solving division");
     if (lower.contains(QStringLiteral("∫")) || lower.contains(QStringLiteral("\\int")) || lower.contains(QStringLiteral("integral"))) hints << QStringLiteral("integral calculus antiderivative");
     if (lower.contains(QStringLiteral("∂")) || lower.contains(QStringLiteral("derivative"))) hints << QStringLiteral("derivative calculus rate of change");
@@ -146,21 +152,54 @@ QString normalizedQuery(const QString &query) {
     return fold(query);
 }
 
-QList<SearchDocument> documents(const QVariantList &cards, const QVariantList &decks, const QString &deckId) {
-    QList<SearchDocument> result;
+DocumentCache::DocumentCache(int costLimit) : m_entries(costLimit) {
+    Q_ASSERT(costLimit > 0);
+}
+
+std::optional<struct DocumentBatch> DocumentCache::build(const QVariantList &cards, const QVariantList &decks,
+                                                          const QString &deckId,
+                                                          const std::function<bool()> &current,
+                                                          const QVariantList *collection) {
+    const auto active = [&current] { return !current || current(); };
+    struct DocumentBatch result;
+    result.documents.reserve(cards.size());
     QHash<QString, QVariantMap> byId;
     for (const QVariant &entry : decks) {
+        if (!active()) return std::nullopt;
         const QVariantMap deck = entry.toMap();
         const QString id = deck.value(QStringLiteral("id")).toString();
         if (!id.isEmpty()) byId.insert(id, deck);
     }
+    QHash<QString, QString> paths;
+    QSet<QString> presentIds;
+    if (collection) {
+        for (const QVariant &entry : *collection) {
+            if (!active()) return std::nullopt;
+            const QString id = entry.toMap().value(QStringLiteral("id")).toString();
+            if (!id.isEmpty()) presentIds.insert(id);
+        }
+    }
     for (const QVariant &entry : cards) {
+        if (!active()) return std::nullopt;
         const QVariantMap card = entry.toMap();
-        if (!deckId.isEmpty() && card.value(QStringLiteral("deckId")).toString() != deckId) continue;
-        const QString path = deckPath(card.value(QStringLiteral("deckId")).toString(), byId);
+        const QString id = card.value(QStringLiteral("id")).toString();
+        if (!collection && !id.isEmpty()) presentIds.insert(id);
+        const QString cardDeck = card.value(QStringLiteral("deckId")).toString();
+        if (!deckId.isEmpty() && cardDeck != deckId) continue;
+        auto pathIt = paths.constFind(cardDeck);
+        if (pathIt == paths.cend()) pathIt = paths.insert(cardDeck, deckPath(cardDeck, byId));
+        const QString path = *pathIt;
         const QString front = card.value(QStringLiteral("front")).toString();
         const QString back = card.value(QStringLiteral("back")).toString();
         const QString tags = card.value(QStringLiteral("tags")).toString();
+        const struct Entry *cached = id.isEmpty() ? nullptr : m_entries.object(id);
+        if (cached && cached->front == front && cached->back == back
+            && cached->tags == tags && cached->path == path) {
+            struct SearchDocument document = cached->document;
+            document.card = card;
+            result.documents.append(std::move(document));
+            continue;
+        }
         const QStringList fields{normalizedField(front), normalizedField(back), normalizedField(tags)};
         QString embedding = markdownText(front) + QLatin1Char('\n') + markdownText(back);
         if (!tags.trimmed().isEmpty()) embedding += QStringLiteral("\nTags: ") + tags;
@@ -171,11 +210,43 @@ QList<SearchDocument> documents(const QVariantList &cards, const QVariantList &d
         const QString hashInput = QStringLiteral("betterflash-search-v1\n") + embedding;
         const QString hash = QString::fromLatin1(QCryptographicHash::hash(hashInput.toUtf8(), QCryptographicHash::Sha256).toHex());
         const QStringList allTokens = words(fields.join(QLatin1Char(' ')));
-        const struct SearchDocument document{card.value(QStringLiteral("id")).toString(), hash, fields,
-                                             allTokens.mid(0, maxCardTokens), embedding, card};
-        result.append(document);
+        struct SearchDocument document{id, hash, fields, allTokens.mid(0, maxCardTokens), embedding, card};
+        ++result.builtCount;
+        if (!id.isEmpty()) {
+            // Include string and container overhead in the bounded cache cost.
+            qint64 cost = 512 + 2 * (front.size() + back.size() + tags.size() + path.size()
+                                      + id.size() + hash.size() + embedding.size());
+            for (const QString &field : fields) cost += 32 + 2 * field.size();
+            for (const QString &token : document.tokens) cost += 32 + 2 * token.size();
+            const int entryCost = static_cast<int>(qMin<qint64>(cost, std::numeric_limits<int>::max()));
+            const bool wasCached = cached != nullptr;
+            if (wasCached) (void)m_entries.remove(id);
+            const bool fits = entryCost <= m_entries.maxCost() - m_entries.totalCost();
+            // Sampling admissions when full keeps a sequential scan from evicting the entire working set.
+            const bool admit = fits || wasCached || (++m_fullMisses % 64 == 0);
+            if (admit && entryCost <= m_entries.maxCost()) {
+                struct SearchDocument cachedDocument = document;
+                cachedDocument.card.clear();
+                (void)m_entries.insert(id, new Entry{front, back, tags, path, std::move(cachedDocument)}, entryCost);
+            }
+        }
+        result.documents.append(std::move(document));
     }
+    for (const QString &id : m_entries.keys()) {
+        if (!active()) return std::nullopt;
+        if (!presentIds.contains(id)) (void)m_entries.remove(id);
+    }
+    if (!active()) return std::nullopt;
     return result;
+}
+
+void DocumentCache::clear() { m_entries.clear(); m_fullMisses = 0; }
+
+QList<SearchDocument> documents(const QVariantList &cards, const QVariantList &decks, const QString &deckId) {
+    DocumentCache cache;
+    auto result = cache.build(cards, decks, deckId);
+    Q_ASSERT(result);
+    return std::move(result->documents);
 }
 
 QList<SearchHit> literalMatches(const QList<SearchDocument> &docs, const QString &query) {

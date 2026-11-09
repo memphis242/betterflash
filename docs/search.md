@@ -134,6 +134,16 @@ its own connection and schema. It never modifies the collection's card or
 scheduling tables. No vector database or approximate-nearest-neighbor server
 is required for a selected-deck or library-wide search.
 
+Normalized card documents are also kept in a bounded in-memory cache (estimated
+512 MiB on desktop and 64 MiB on Android), shared by both search channels. The cache compares card faces, tags and effective
+deck ancestry, refreshes card metadata from the current snapshot, and removes
+deleted cards. Scope changes retain eligible cached documents. When the cache is
+full, sampled admissions limit churn during scans larger than the cache. Document
+construction checks for cancellation as it scans, so a superseded query can stop
+before processing the full collection. The cost limit is an estimate of retained
+strings and container overhead; active snapshots and result lists use additional
+memory.
+
 Card search and deck-content search keep independent query state, cancellation,
 results and errors. They share one worker thread, embedding model and vector
 cache. Local inference yields between passages so one search can progress while
@@ -194,3 +204,11 @@ downloads were checked against pinned sizes and SHA-256 hashes. Automated tests
 remain paused at the user's request. Live provider requests and an Android APK
 have not been verified. Focused behavioral coverage for ranking, cancellation,
 cache changes and provider errors should follow when testing resumes.
+
+Search preparation compiles its fixed Markdown and mathematical-hint patterns
+once and reuses them. A synthetic 100,000-card comparison during the November
+2026 audit produced identical normalized output: preparation took 12.807 seconds
+at the audit baseline and 1.404 seconds with shared patterns and the document
+cache. Repeating preparation with unchanged cards took 59 milliseconds. These
+are local measurements of short synthetic cards, not device-wide latency or
+memory guarantees.

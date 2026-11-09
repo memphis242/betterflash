@@ -121,14 +121,15 @@ bool SearchWorker::current(int channel, quint64 epoch) const {
 }
 
 void SearchWorker::search(int channel, quint64 epoch, const QVariantList &cards, const QVariantList &decks,
-                          const QString &deck, const QString &query) {
+                          const QString &deck, const QString &query, const QVariantList &collection) {
     if (!current(channel, epoch)) return;
     struct QueryState &work = state(channel);
     work = QueryState{};
     work.epoch = epoch;
     work.query = betterflash::search::normalizedQuery(query);
-    work.documents = betterflash::search::documents(cards, decks, deck);
-    if (!current(channel, epoch)) return;
+    auto documents = m_documents.build(cards, decks, deck, [this, channel, epoch] { return current(channel, epoch); }, &collection);
+    if (!documents || !current(channel, epoch)) return;
+    work.documents = std::move(documents->documents);
     const auto literal = betterflash::search::literalMatches(work.documents, work.query);
     for (const struct betterflash::search::SearchHit &hit : literal) work.textMatchIds.insert(hit.id);
     emit literalReady(channel, epoch, hitMaps(literal));
@@ -174,6 +175,7 @@ bool SearchWorker::pruneCache() {
 void SearchWorker::clearCache() {
     Q_ASSERT(QThread::currentThread() == thread());
     m_memoryCache.clear();
+    m_documents.clear();
     for (struct QueryState &work : m_states) work = QueryState{};
     QString error;
     if (!openCache()) error = QStringLiteral("SEARCH_CACHE_OPEN: Cannot rebuild the search cache. Check storage access.");

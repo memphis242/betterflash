@@ -479,8 +479,8 @@ void SearchController::runSearch(int channel) {
         if (channel == 0 && m_cardFilterEnabled && !m_cardFilter.contains(id)) continue;
         search.cards.insert(id, card); cards.append(card);
     }
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, channel, epoch, cards, decks, deck = channel == 0 ? QString{} : search.deck, query = search.query] {
-        worker->search(channel, epoch, cards, decks, deck, query);
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, channel, epoch, cards, decks, snapshot, deck = channel == 0 ? QString{} : search.deck, query = search.query] {
+        worker->search(channel, epoch, cards, decks, deck, query, snapshot);
     }, Qt::QueuedConnection);
 }
 void SearchController::publish(int channel) {

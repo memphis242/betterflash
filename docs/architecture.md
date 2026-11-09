@@ -35,7 +35,13 @@ Provider changes, cancellation, and card changes invalidate recognition epochs.
 Markdown rebuilds are coalesced; rendered math and decoded images are cached.
 Formula painting remains on the graphics thread. The prototype uses snapshot
 lists rather than a paged database model, so very large collections still need
-profiling and a paged model before making performance claims.
+profiling and a paged model before making performance claims. The November
+2026 audit measured roughly 3.5 seconds to initialize and 2.1 seconds to save
+and publish a snapshot for 100,000 short synthetic cards. Sharing immutable
+weakness summaries reduced the worker probe's peak resident memory from about
+974 MiB to 798 MiB, but this does not bound the complete application's memory.
+Paged library models and incremental publication remain architectural work;
+the record validation limit is not a responsiveness guarantee.
 
 The desktop application uses native ONNX Runtime for local semantic retrieval.
 The selected embedding model downloads on first semantic search; text matching
