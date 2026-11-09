@@ -19,7 +19,7 @@ Popup {
     readonly property var states: [
         { value: "", label: "Any review state" }, { value: "new", label: "Never reviewed" },
         { value: "reviewed", label: "Reviewed before" }, { value: "due", label: "Due now" },
-        { value: "later", label: "Due later" }
+        { value: "later", label: "Due later" }, { value: "unreadable", label: "Needs repair" }
     ]
     signal tagsChosen(var tags)
     signal kindChosen(string kind)

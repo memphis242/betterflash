@@ -51,9 +51,12 @@ ApplicationWindow {
     property string editingDeckId: ""
     property string editingDeckParentId: ""
     property string editingCardId: ""
+    property string editorDestinationDeckId: ""
     property var generatedCardDraft: null
     property bool editingGeneratedCard: false
     property bool refinementPending: false
+    readonly property bool repairingStoredCard: !!editingCardId && !!((editingCard().loadError || {}).code)
+    readonly property int unreadableCardCount: app.cards.filter(card => !!(card.loadError && card.loadError.code)).length
     readonly property bool editorRefining: editingGeneratedCard && cardGenerator.busy
     readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible || cardPreviewDialog.visible
     property bool cardInverted: false
@@ -317,22 +320,10 @@ ApplicationWindow {
         return ({})
     }
     function compactText(source) {
-        const paragraph = String(source || "").split(/\n\s*\n/)[0]
-        return paragraph.replace(/\{\{c[1-9]\d*::([\s\S]+?)\}\}/g, function (marker, body) {
-            const delimiters = /(\\*)::/g;
-            let end = body.length
-            let match
-            while ((match = delimiters.exec(body)) !== null) {
-                if (match[1].length % 2 === 0) {
-                    end = match.index + match[1].length
-                    break
-                }
-            }
-            return body.slice(0, end).replace(/(\\+)::/g, function (separator, run) {
-                return run.length % 2 ? "\\".repeat((run.length - 1) / 2) + "::" : separator
-            })
-        }).replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[#*_`{}]/g, "").replace(/\s+/g, " ").trim()
+        const paragraph = app.clozePlainText(String(source || "")).split(/\n\s*\n/)[0]
+        return paragraph.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[#*_`{}]/g, "").replace(/\s+/g, " ").trim()
     }
+
     function dateTime(value) {
         const d = new Date(value)
         return isNaN(d.getTime()) ? String(value || "") : Qt.formatDateTime(d, "yyyy-MM-dd HH:mm")
@@ -431,8 +422,23 @@ ApplicationWindow {
         }
         return false
     }
+    function deckPath(id) {
+        const names = []
+        const visited = []
+        let deck = deckById(id)
+        while (deck.id && visited.indexOf(deck.id) < 0) {
+            visited.push(deck.id)
+            names.unshift(deck.name)
+            deck = deckById(deck.parentId || "")
+        }
+        return names.join("::")
+    }
+    function deckPathChoices() {
+        return app.decks.map(deck => Object.assign({}, deck, {name: deckPath(deck.id)}))
+            .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    }
     function deckParentChoices() {
-        return [{ id: "", name: "Top level" }].concat(app.decks.filter(d => d.id !== editingDeckId && !deckIsDescendant(d.id, editingDeckId)))
+        return [{ id: "", name: "Top level" }].concat(deckPathChoices().filter(d => d.id !== editingDeckId && !deckIsDescendant(d.id, editingDeckId)))
     }
     function openDeckEditor(id, parentId) {
         initializingDeckParent = true
@@ -469,11 +475,11 @@ ApplicationWindow {
     }
     function currentCardDraft() {
         const parts = splitSource(editorSource.text)
-        const cloze = /\{\{c\d+::/.test(parts.front)
+        const cloze = app.hasClozeMarkers(parts.front)
         const stored = editingCard()
         return {
             id: editingCardId,
-            deckId: cardDeck.currentValue,
+            deckId: editorDestinationDeckId,
             kind: cloze || cardKind.currentValue === "cloze" ? "cloze" : cardInverted ? "reverse" : "basic",
             front: parts.front,
             back: parts.back,
@@ -486,7 +492,7 @@ ApplicationWindow {
     }
     function cardSubmission() {
         const draft = currentCardDraft()
-        if (!draft.deckId) {
+        if (!draft.deckId || !deckById(draft.deckId).id) {
             localCardError = "CARD_DECK: Choose a deck for this card."
             return null
         }
@@ -661,19 +667,27 @@ ApplicationWindow {
         }
         const selected = editorSource.selectedText
         const at = editorSource.selectionStart
-        const expression = /\{\{c(\d+)::/g
+        const clozeSource = parts.start >= 0 ? editorSource.text.slice(0, parts.start) : editorSource.text
+        if (app.clozeSelectionOverlaps(clozeSource, at, editorSource.selectionEnd)) {
+            localCardError = "CLOZE_OVERLAP: Select text outside existing cloze spans and finish incomplete markers. Edit a marker directly to change its group."
+            return
+        }
+        const expression = /\[cloze(\d+):/g
         let maximum = 0
         let match
-        while ((match = expression.exec(editorSource.text)) !== null)
-            maximum = Math.max(maximum, Number(match[1]))
+        while ((match = expression.exec(editorSource.text)) !== null) {
+            let slashes = 0
+            for (let i = match.index - 1; i >= 0 && editorSource.text[i] === "\\"; --i)
+                ++slashes
+            if (slashes % 2 === 0)
+                maximum = Math.max(maximum, Number(match[1]))
+        }
         if (maximum >= 999) {
             localCardError = "CLOZE_LIMIT: Use an existing cloze group, or create another card."
             return
         }
-        const escaped = selected.replace(/(\\*)::/g, function (separator, run) {
-            return "\\".repeat(run.length * 2 + 1) + "::"
-        })
-        const insertion = "{{c" + (maximum + 1) + "::" + escaped + "}}"
+        const escaped = selected.replace(/[\\[\]|]/g, function (character) { return "\\" + character })
+        const insertion = "[cloze" + (maximum + 1) + ":" + escaped + "]"
         editorSource.remove(editorSource.selectionStart, editorSource.selectionEnd)
         editorSource.insert(at, insertion)
         editorSource.cursorPosition = at + insertion.length
@@ -717,18 +731,36 @@ ApplicationWindow {
         setDeck(deckId, true)
         openCardEditor("")
     }
+    function showUnreadableCards() {
+        setDeck("", true)
+        page = 1
+        cardSearchText = ""
+        library.cardScope = "collection"
+        library.clearFilters()
+        library.filterState = "unreadable"
+        library.showDeck("", false)
+    }
+    function showCollectionIssues() {
+        const details = app.collectionIssues.map(issue => (issue.code || "COLLECTION_RECORD") + ": "
+            + (issue.message || "") + "\n" + (issue.detail || "")).join("\n\n")
+        showError("COLLECTION_RECORDS", "Some collection records or supporting features need attention. Saved card content remains available.", details)
+    }
     function submitDeck() {
         if (!deckName.text.trim()) {
             localDeckError = "DECK_NAME: Enter a deck name."
             deckName.forceActiveFocus()
             return
         }
+        if (editingDeckParentId && !deckById(editingDeckParentId).id) {
+            localDeckError = "DECK_PARENT: The chosen parent deck is no longer available. Choose an existing parent or Top level."
+            return
+        }
         if (editingDeckId)
-            app.updateDeck(editingDeckId, deckName.text.trim(), deckDescription.text, deckParent.currentValue || "")
+            app.updateDeck(editingDeckId, deckName.text.trim(), deckDescription.text, editingDeckParentId)
         else {
             knownDeckIds = app.decks.map(deck => deck.id)
             pendingDeckName = deckName.text.trim()
-            app.createDeck(deckName.text.trim(), deckDescription.text, deckParent.currentValue || "")
+            app.createDeck(deckName.text.trim(), deckDescription.text, editingDeckParentId)
         }
         deckDialog.close()
     }
@@ -1102,15 +1134,76 @@ ApplicationWindow {
             onToggleRequested: window.navCollapsed = !window.navCollapsed
             onPageRequested: index => window.page = index
         }
-        StackLayout {
-            id: pageStack
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: window.page
-            ReviewPage { id: review; ui: window; objectName: "reviewPage" }
-            LibraryPage { id: library; ui: window; objectName: "libraryPage" }
-            HistoryPage { ui: window; objectName: "historyPage" }
-            SettingsPage { id: settings; ui: window; objectName: "settingsPage" }
+            spacing: 0
+            Rectangle {
+                objectName: "collectionIssueNotice"
+                visible: app.collectionLoaded && app.collectionIssues.length > 0
+                Layout.fillWidth: true
+                Layout.preferredHeight: issueContents.implicitHeight + 24
+                color: Theme.accentSoft
+                border.color: Theme.warning
+                ColumnLayout {
+                    id: issueContents
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: window.unreadableCardCount > 0
+                            ? window.unreadableCardCount + " card(s) need repair. Your other saved cards remain available."
+                            : "Collection notice: some supporting features need attention. Your saved cards remain available."
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        color: Theme.ink
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 8
+                        AppButton { objectName: "showUnreadableCards"; visible: window.unreadableCardCount > 0; text: "Show affected cards"; onClicked: window.showUnreadableCards() }
+                        AppButton { text: "Details"; onClicked: window.showCollectionIssues() }
+                    }
+                }
+            }
+            ColumnLayout {
+                objectName: "collectionUnavailable"
+                visible: !app.collectionLoaded && window.page !== 3
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.margins: window.gutter
+                spacing: 16
+                Item { Layout.fillHeight: true }
+                Label {
+                    Layout.fillWidth: true
+                    text: app.busy ? "Loading collection..." : "The collection could not be opened. No cards have been deleted by this failed load."
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    color: Theme.ink
+                    font.pixelSize: 19
+                }
+                ErrorBlock {
+                    Layout.fillWidth: true
+                    message: app.lastError.message || ""
+                    code: app.lastError.code || ""
+                    details: (app.lastError.detail || "") + "\nCollection file: " + app.storagePath
+                }
+                AppButton { text: "Retry loading"; visible: !app.busy; onClicked: app.refresh() }
+                Item { Layout.fillHeight: true }
+            }
+            StackLayout {
+                id: pageStack
+                visible: app.collectionLoaded || window.page === 3
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: window.page
+                ReviewPage { id: review; ui: window; objectName: "reviewPage" }
+                LibraryPage { id: library; ui: window; objectName: "libraryPage" }
+                HistoryPage { ui: window; objectName: "historyPage" }
+                SettingsPage { id: settings; ui: window; objectName: "settingsPage" }
+            }
         }
     }
 
@@ -1362,7 +1455,11 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 ToolTip.visible: hovered
                 ToolTip.text: "Place this deck under another deck"
-                onCurrentValueChanged: if (!initializingDeckParent) editingDeckParentId = currentValue || ""
+                onActivated: if (!initializingDeckParent) editingDeckParentId = currentValue || ""
+                onModelChanged: Qt.callLater(function () {
+                    if (deckDialog.visible)
+                        deckParent.currentIndex = deckParent.indexOfValue(window.editingDeckParentId)
+                })
             }
             ErrorBlock {
                 message: localDeckError
@@ -1389,7 +1486,7 @@ ApplicationWindow {
     Sheet {
         id: cardDialog
         objectName: "cardDialog"
-        title: editingGeneratedCard ? "Generated card draft" : editingCardId ? "Edit card" : "New card"
+        title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
         closePolicy: editorSavePending ? Popup.NoAutoClose : Popup.CloseOnEscape
         width: Math.min(1120, window.width - 2 * window.gutter)
         height: Math.min(800, window.height - 2 * window.gutter)
@@ -1428,7 +1525,7 @@ ApplicationWindow {
                           ? "Saving card before opening narration" : "Saving card before opening detail")
                           : editorDraftDirty ? "Save this card, then record narration"
                           : "Record narration for this card"
-                    enabled: !editorSavePending && !app.busy && !media.busy
+                    enabled: !editorSavePending && !app.busy && !media.busy && !window.repairingStoredCard
                     onClicked: requestCardNarration()
                 }
                 NarrationWarning {
@@ -1446,7 +1543,8 @@ ApplicationWindow {
             refinementPending = false
             refinementInstructions.text = ""
             localCardError = ""
-            cardDeck.currentIndex = cardDeck.indexOfValue(c.deckId || app.selectedDeckId)
+            editorDestinationDeckId = c.deckId || app.selectedDeckId
+            cardDeck.currentIndex = cardDeck.indexOfValue(editorDestinationDeckId)
             cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
             cardInverted = c.kind === "reverse"
             editorSource.text = (c.id || generatedCardDraft) ? c.front + (c.back ? "\n\n---\n\n" + c.back : "") : "\n\n---\n\n"
@@ -1484,7 +1582,12 @@ ApplicationWindow {
                     id: cardDeck
                     enabled: !window.editorRefining
                     objectName: "cardDeck"
-                    model: app.decks
+                    model: window.deckPathChoices()
+                    onActivated: window.editorDestinationDeckId = currentValue || ""
+                    onModelChanged: Qt.callLater(function () {
+                        if (cardDialog.visible)
+                            cardDeck.currentIndex = cardDeck.indexOfValue(window.editorDestinationDeckId)
+                    })
                     textRole: "name"
                     valueRole: "id"
                     displayText: currentIndex < 0 ? "Choose a deck" : currentText
@@ -1675,6 +1778,7 @@ ApplicationWindow {
                         }
                         MarkdownPane {
                             markdown: splitSource(editorSource.text).front
+                            clozePreview: currentCardDraft().kind === "cloze"
                             mediaRoot: media.rootPath
                             Layout.fillWidth: true
                             Layout.preferredHeight: implicitHeight
@@ -1793,7 +1897,8 @@ ApplicationWindow {
             }
             ScrollView {
                 id: editorErrors
-                readonly property string message: localCardError || media.error || (editingGeneratedCard ? cardGenerator.error : "")
+                readonly property var sourceIssue: window.editingCardId ? (window.editingCard().loadError || {}) : ({})
+                readonly property string message: localCardError || media.error || (editingGeneratedCard ? cardGenerator.error : "") || sourceIssue.message || ""
                 visible: message.length > 0
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(96, editorErrorBlock.implicitHeight)
@@ -1803,6 +1908,8 @@ ApplicationWindow {
                     id: editorErrorBlock
                     width: editorErrors.availableWidth
                     message: editorErrors.message
+                    code: editorErrors.sourceIssue.code || ""
+                    details: (editorErrors.sourceIssue.detail || "") + (window.repairingStoredCard ? "\nSaving a repair first creates a recovery copy beside the collection, in its recovery folder, and clears session Undo/Redo. Existing learning records are retained." : "")
                 }
             }
             ColumnLayout {
@@ -1862,7 +1969,7 @@ ApplicationWindow {
             }
             AppButton {
                 objectName: "saveCard"
-                text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : "Save card"
+                text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
                 primary: true
                 hint: shortcuts.bindings.saveCard
                 enabled: !media.busy && !editorSavePending && !editorRefining && !app.busy

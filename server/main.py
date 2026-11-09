@@ -36,7 +36,7 @@ else:
     from graduation import GraduationProjection
 
 TOKEN = os.environ.get("BETTERFLASH_SYNC_TOKEN", "")
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 MIN_STABILITY_DAYS = 1.0 / 144.0
 MAX_STABILITY_DAYS = 3650.0
 EVENT_LIMIT = 100
@@ -197,35 +197,56 @@ def card_keys(card):
     if kind != "cloze":
         raise ProtocolError("INVALID_EVENT", "Cards must have a supported kind and the required sides.")
     groups, offset = set(), 0
+
+    def escaped(index):
+        slash, cursor = 0, index - 1
+        while cursor >= 0 and front[cursor] == "\\":
+            slash += 1
+            cursor -= 1
+        return slash % 2 == 1
+
+    def opening_at(index):
+        return front.startswith("[cloze", index)
+
     while offset < len(front):
-        opening, stray = front.find("{{", offset), front.find("}}", offset)
-        if stray >= 0 and (opening < 0 or stray < opening):
-            raise ProtocolError("INVALID_EVENT", "A cloze marker is unmatched.")
-        if opening < 0:
-            break
-        closing, nested = front.find("}}", opening + 2), front.find("{{", opening + 2)
-        body = front[opening + 2:closing] if closing >= 0 else ""
-        match = re.match(r"c([1-9][0-9]{0,2})::", body)
-        if not match or (nested >= 0 and nested < closing):
-            raise ProtocolError("INVALID_EVENT", "Cloze markers must have a group from 1 through 999 and a nonempty answer.")
-        remaining = body[match.end():]
-        separator, search = -1, 0
-        while (candidate := remaining.find("::", search)) >= 0:
-            slash, position = 0, candidate - 1
-            while position >= 0 and remaining[position] == "\\":
-                slash += 1
-                position -= 1
-            if slash % 2 == 0:
-                separator = candidate
+        opening = offset
+        while opening < len(front):
+            if opening_at(opening) and not escaped(opening):
                 break
-            search = candidate + 2
-        answer = remaining if separator < 0 else remaining[:separator]
-        if not answer.strip() or (separator >= 0 and not remaining[separator + 2:].strip()):
+            opening += 1
+        if opening >= len(front):
+            break
+
+        digits_start = opening + 6
+        digits_end = digits_start
+        while digits_end < len(front) and "0" <= front[digits_end] <= "9":
+            digits_end += 1
+        digit_count = digits_end - digits_start
+        if (digit_count < 1 or digit_count > 3 or front[digits_start] == "0"
+                or digits_end >= len(front) or front[digits_end] != ":"):
+            raise ProtocolError("INVALID_EVENT", "Use [cloze1:answer] or [cloze1:answer|hint], with groups 1 through 999.")
+        group, answer_start = int(front[digits_start:digits_end]), digits_end + 1
+        closing = answer_start
+        separator = -1
+        while closing < len(front):
+            if front[closing] == "]" and not escaped(closing):
+                break
+            if front[closing] == "[" and not escaped(closing):
+                raise ProtocolError("INVALID_EVENT", "Escape literal opening brackets in a cloze answer as \\[.")
+            if front[closing] == "|" and not escaped(closing) and separator < 0:
+                separator = closing
+            closing += 1
+        if closing >= len(front):
+            raise ProtocolError("INVALID_EVENT", "A numbered cloze marker has no unescaped closing bracket.")
+        answer_end = closing if separator < 0 else separator
+        answer = front[answer_start:answer_end]
+        hint = "" if separator < 0 else front[separator + 1:closing]
+        if not answer.strip() or (separator >= 0 and not hint.strip()):
             raise ProtocolError("INVALID_EVENT", "A cloze answer and its optional hint must be nonempty.")
-        groups.add(int(match[1]))
-        offset = closing + 2
+        groups.add(group)
+        offset = closing + 1
     if not groups:
-        raise ProtocolError("INVALID_EVENT", "A cloze card needs at least one hidden answer.")
+        raise ProtocolError("INVALID_EVENT", "A cloze card needs at least one [cloze1:answer] marker.")
     keys = [f"c{group}" for group in sorted(groups)]
     validate_narrations(keys)
     return keys
@@ -1111,7 +1132,7 @@ class Handler(BaseHTTPRequestHandler):
             store = self.authorized(body=body)
             if store is not None:
                 self.send_json(200, {"collectionId": store.collection_id, "protocolVersion": PROTOCOL_VERSION,
-                                     "capabilities": ["independent-schedules", "hierarchy-repair", "short-interval-schedules"]}, body=body)
+                                     "capabilities": ["independent-schedules", "hierarchy-repair", "short-interval-schedules", "numbered-cloze-markers"]}, body=body)
             return
         match = MEDIA_RE.fullmatch(path)
         if not match:
@@ -1200,7 +1221,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = decode_json(self.read_body(BODY_LIMIT))
             if self.headers.get("X-BetterFlash-Protocol") != str(PROTOCOL_VERSION):
-                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 4 with short-interval schedule support before syncing this collection.", 426)
+                raise ProtocolError("CLIENT_UPGRADE_REQUIRED", "Upgrade every synced client to protocol 5 with short-interval schedules and numbered cloze markers before syncing this collection.", 426)
             self.send_json(200, store.sync(body))
         except ProtocolError as failure:
             self.send_error_value(failure)

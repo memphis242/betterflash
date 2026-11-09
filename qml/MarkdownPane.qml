@@ -9,6 +9,7 @@ ColumnLayout {
     property alias baseFontSize: view.baseFontSize
     property alias mediaRoot: view.mediaRoot
     property alias renderError: view.renderError
+    property alias clozePreview: view.clozePreview
     spacing: 8
     implicitHeight: view.implicitHeight + (failure.visible ? failure.implicitHeight + spacing : 0)
     Native.MarkdownView {

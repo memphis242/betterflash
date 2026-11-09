@@ -351,8 +351,21 @@ void SearchController::setActive(bool active) {
 }
 void SearchController::setSearch(const QString &deckId, const QString &query) {
     struct QueryState &search = state(0);
-    if (search.deck == deckId && search.query == query) return;
-    search.deck = deckId; search.query = query; restart(0, true);
+    if (search.deck == deckId && search.query == query && search.scope == QStringLiteral("deck")) return;
+    search.deck = deckId; search.query = query; search.scope = QStringLiteral("deck"); restart(0, true);
+}
+void SearchController::setSearchScope(const QString &deckId, const QString &query, const QString &scope) {
+    if (scope != QStringLiteral("deck") && scope != QStringLiteral("subdecks")
+        && scope != QStringLiteral("collection")) {
+        setFailure(QStringLiteral("SEARCH_SCOPE: Choose this deck, its subdecks, or the whole collection."));
+        return;
+    }
+    struct QueryState &search = state(0);
+    if (search.deck == deckId && search.query == query && search.scope == scope) return;
+    search.deck = deckId;
+    search.query = query;
+    search.scope = scope;
+    restart(0, true);
 }
 void SearchController::setCardFilter(const QVariantList &cardIds, bool enabled, bool preserveContext) {
     QSet<QString> ids;
@@ -434,15 +447,39 @@ void SearchController::runSearch(int channel) {
     const quint64 epoch = search.epoch->load();
     const QVariantList snapshot = m_app->cards(); const QVariantList decks = m_app->decks();
     QVariantList cards;
+    QSet<QString> allowedDecks;
+    if (channel == 0 && !search.deck.isEmpty() && search.scope != QStringLiteral("collection")) {
+        allowedDecks.insert(search.deck);
+        if (search.scope == QStringLiteral("subdecks")) {
+            QHash<QString, QStringList> children;
+            for (const QVariant &entry : decks) {
+                const QVariantMap deck = entry.toMap();
+                const QString id = deck.value(QStringLiteral("id")).toString();
+                const QString parentId = deck.value(QStringLiteral("parentId")).toString();
+                if (!id.isEmpty() && !parentId.isEmpty()) children[parentId].append(id);
+            }
+            QStringList pending{search.deck};
+            while (!pending.isEmpty()) {
+                const QString parentId = pending.takeLast();
+                for (const QString &childId : children.value(parentId)) {
+                    if (allowedDecks.contains(childId)) continue;
+                    allowedDecks.insert(childId);
+                    pending.append(childId);
+                }
+            }
+        }
+    }
     search.cards.clear();
     for (const QVariant &entry : snapshot) {
         const QVariantMap card = entry.toMap();
         const QString id = card.value(QStringLiteral("id")).toString();
-        if (!search.deck.isEmpty() && card.value(QStringLiteral("deckId")).toString() != search.deck) continue;
+        if (channel == 1 && !search.deck.isEmpty() && card.value(QStringLiteral("deckId")).toString() != search.deck) continue;
+        if (channel == 0 && search.scope != QStringLiteral("collection") && !search.deck.isEmpty()
+            && !allowedDecks.contains(card.value(QStringLiteral("deckId")).toString())) continue;
         if (channel == 0 && m_cardFilterEnabled && !m_cardFilter.contains(id)) continue;
         search.cards.insert(id, card); cards.append(card);
     }
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, channel, epoch, cards, decks, deck = search.deck, query = search.query] {
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, channel, epoch, cards, decks, deck = channel == 0 ? QString{} : search.deck, query = search.query] {
         worker->search(channel, epoch, cards, decks, deck, query);
     }, Qt::QueuedConnection);
 }

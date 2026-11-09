@@ -13,32 +13,42 @@ Recorded 2026-10-17:
 The desktop list is an inventory, not an instruction to implement every item
 at once. Feature details and priorities remain to be agreed as work resumes.
 
+## Completed desktop follow-ups
+
+- **Collection recovery:** unreadable cards remain visible with a repair action;
+  healthy cards remain available for review. Derived-view failures produce
+  warnings, repairs preserve recovery copies, and unsafe portable exports stop
+  with a record-specific error. See [collection recovery](collection-recovery.md).
+- **Cloze markers and preview:** numbered `[clozeN:answer]` markers with optional
+  hints and escaped content. Previews distinguish hidden spans with tint and
+  italic text; formulas and code retain their layout. Older marker forms are
+  unsupported. See [cloze markers](cloze-markers.md).
+- **Library scope:** choose the selected deck only, the deck and its subdecks,
+  or the entire collection. The scope also limits search candidates.
+- **Library card creation:** saved-card previews offer **Add another card** in
+  the same deck. Generated drafts use the same preview after acceptance.
+- **Light-mode accent:** pastel teal action backgrounds with contrasting teal
+  text and outlines; dark mode retains its apricot accent.
+- **Library creation buttons:** root decks, subdecks and cards have distinct
+  creation icons and consistent primary action backgrounds.
+- **Deck pickers:** new-card destinations and deck parent choices use `::`
+  hierarchy paths. Card destinations retain their record ID when choices reorder.
+
 ## Deferred desktop work
 
+- **Return from card preview to editing:** when creating a card, provide a
+  clear action in Card preview to return to the new-card modal with the current
+  content and deck selection preserved, so the user can edit or refine it.
+- **Selectable card preview:** allow highlighting and copying text in the
+  saved-card preview.
+- **Review deck key:** briefly explain the encircled R mark on decks in the
+  Review page, using a visible key or legend and a tooltip where appropriate.
+- **Delayed startup feedback:** when startup takes more than one second, show
+  a "Starting up..." dialog so the user knows the launch is in progress.
+  Fast normal launches should not show it. Address repeated launch attempts
+  spawning duplicate processes while startup is still underway.
 - **Card line spacing:** support line-spacing formatting in cards, or at least
   increase the default spacing between lines and newlines for readability.
-- **Cloze markers and preview:** adopt `[clozeX:<hidden text>]` in place of
-  `{{c1::<hidden text>}}`, where `X` is the cloze group number, for example
-  `[cloze1:Paris]` and `[cloze2:France]`. Include compatibility handling for existing cards,
-  backups and synced content. In editor previews, distinguish cloze spans so
-  it is apparent which text will be hidden before reveal during review.
-  Consider faded or italic text, a different background, or a covering block;
-  settle the visual treatment during refinement.
-- **Library scope:** support viewing every card in a selected deck and its
-  subdecks, as well as all cards across the entire collection.
-- **New-card deck picker:** display hierarchical deck paths with `::`
-  separators, for example `School::Biology::Cell structure`.
-- **Library card creation:** new-card saves open a preview with an
-  **Add another card** action that continues in the same deck. Refine this
-  workflow during manual use.
-- **Library creation buttons:** replace the large plus-only root-deck creation
-  icon with an icon that communicates adding a root deck, following the visual
-  approach of the add-subdeck button. Likewise, make the add-card icon clearly
-  communicate card creation. Give all Library creation buttons the orange
-  background currently used by the large plus button.
-- **Light-mode accent:** replace the dark orange-brown counterpart of dark
-  mode's orange/apricot accent with light blue or teal. Choose the precise shade
-  during visual refinement and retain readable text and control contrast.
 - **Checkpoint follow-ups:** checkpoint creation and content restoration are
   implemented, including child decks, deterministic changes, optional model
   annotations, recovery checkpoints, and portable backups. Checkpoint history

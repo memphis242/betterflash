@@ -1,5 +1,6 @@
 #include "MarkdownView.h"
 #include "CodeRendering.h"
+#include "core/cardmodel.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QCache>
@@ -163,6 +164,11 @@ void MarkdownView::setMediaRoot(const QString &directory) {
     m_imageErrors.clear();
     emit styleChanged(); scheduleRender();
 }
+void MarkdownView::setClozePreview(const bool enabled) {
+    if (m_clozePreview == enabled) return;
+    m_clozePreview = enabled;
+    emit styleChanged(); scheduleRender();
+}
 void MarkdownView::reportImageError(const QString &message) {
     if (m_renderError == message) return;
     m_renderError = message;
@@ -238,10 +244,19 @@ void MarkdownView::rebuild() {
     const QColor codeSurface(codeTheme.editorColor(CodeTheme::BackgroundColor));
     const QColor codeInk = CodeRendering::readableColor(QColor(codeTheme.textColor(CodeTheme::Normal)), codeSurface);
     m_codeKeys.clear();
-    struct Formula { QString marker; QString source; };
-    struct Fence { QString marker; QString language; QString source; };
+    struct Formula { QString marker; QString source; QList<int> clozeGroups; };
+    struct ClozeRange { int start = 0; int length = 0; int group = 1; };
+    struct Fence {
+        QString marker;
+        QString language;
+        QString source;
+        QList<struct ClozeRange> clozeRanges;
+        QString markerBefore;
+        QString markerAfter;
+    };
     QList<struct Formula> formulas;
     QList<struct Fence> fences;
+    QSet<QString> absorbedClozeMarkers;
     const QString markerPrefix = QStringLiteral("BF") + QUuid::createUuid().toString(QUuid::Id128);
     QString markdown;
     static const QRegularExpression mathPattern(QStringLiteral(R"((?<!\\)(\$\$[\s\S]+?\$\$|\$(?!\s|\$)[^\n$]+?\$|\\\[[\s\S]+?\\\]|\\\([^\n]+?\\\)))"));
@@ -251,6 +266,34 @@ void MarkdownView::rebuild() {
     QString sourceMarkdown = m_markdown.left(256 * 1024);
     sourceMarkdown.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     sourceMarkdown.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    struct ClozeMarker { QString start; QString end; int group = 1; };
+    QList<struct ClozeMarker> clozeMarkers;
+    const QString clozeMarkerPrefix = QStringLiteral("BF") + QUuid::createUuid().toString(QUuid::Id128);
+    QString error;
+    if (m_clozePreview && !sourceMarkdown.trimmed().isEmpty()) {
+        const auto parsedCloze = betterflash::model::parseCloze(sourceMarkdown);
+        if (!parsedCloze) {
+            error = QStringLiteral("CLOZE_PREVIEW: %1 Finish or correct the cloze marker to see its preview.")
+                        .arg(parsedCloze.error());
+        } else if (parsedCloze->size() > 256) {
+            error = QStringLiteral("CLOZE_PREVIEW_LIMIT: This card has %1 cloze spans; a preview can highlight at most 256. Split the card into smaller notes to preview the hidden spans.")
+                        .arg(parsedCloze->size());
+        } else {
+            clozeMarkers.reserve(parsedCloze->size());
+            for (qsizetype index = parsedCloze->size(); index > 0; --index) {
+                const struct betterflash::model::ClozePart &part = parsedCloze->at(index - 1);
+                Q_ASSERT(part.start >= 0 && part.length > 0 && part.start + part.length <= sourceMarkdown.size());
+                const QString startMarker = QStringLiteral("(.%1START%2.)").arg(clozeMarkerPrefix).arg(index - 1);
+                const QString endMarker = QStringLiteral("(.%1END%2.)").arg(clozeMarkerPrefix).arg(index - 1);
+                Q_ASSERT(part.answerStart >= part.start && part.answerLength > 0
+                         && part.answerStart + part.answerLength <= part.start + part.length);
+                const QString answer = sourceMarkdown.mid(part.answerStart, part.answerLength);
+                const QString replacement = startMarker + answer + endMarker;
+                sourceMarkdown.replace(part.start, part.length, replacement);
+                clozeMarkers.prepend({startMarker, endMarker, part.group});
+            }
+        }
+    }
     const QStringList lines = sourceMarkdown.split(QLatin1Char('\n'));
     QString prose;
     const auto flushProse = [&] {
@@ -270,8 +313,36 @@ void MarkdownView::rebuild() {
             }
             if (inCode) continue;
             const QString marker = markerPrefix + QStringLiteral("MATH%1TOKEN").arg(formulas.size());
-            markdown += prose.mid(previous, match.capturedStart() - previous) + marker;
-            formulas.append({marker, match.captured()});
+            const qsizetype formulaStart = match.capturedStart();
+            const qsizetype formulaEnd = match.capturedEnd();
+            QStringList movedStarts;
+            QStringList movedEnds;
+            QList<int> clozeGroups;
+            QString formulaSource = match.captured();
+            for (const struct ClozeMarker &cloze : clozeMarkers) {
+                const qsizetype startPosition = prose.indexOf(cloze.start);
+                const qsizetype endPosition = prose.indexOf(cloze.end);
+                const bool startInside = startPosition >= formulaStart && startPosition < formulaEnd;
+                const bool endInside = endPosition >= formulaStart && endPosition < formulaEnd;
+                const bool overlaps = startPosition >= 0 && endPosition >= 0
+                    && startPosition < formulaEnd && endPosition + cloze.end.size() > formulaStart;
+                if (overlaps && !clozeGroups.contains(cloze.group)) clozeGroups.append(cloze.group);
+                if (startInside) {
+                    formulaSource.remove(formulaSource.indexOf(cloze.start), cloze.start.size());
+                    if (!endInside) movedStarts.append(cloze.start);
+                }
+                if (endInside) {
+                    formulaSource.remove(formulaSource.indexOf(cloze.end), cloze.end.size());
+                    if (!startInside) movedEnds.append(cloze.end);
+                }
+                if (startInside && endInside) {
+                    absorbedClozeMarkers.insert(cloze.start);
+                    absorbedClozeMarkers.insert(cloze.end);
+                }
+            }
+            markdown += prose.mid(previous, formulaStart - previous) + movedStarts.join(QString{}) + marker
+                + movedEnds.join(QString{});
+            formulas.append({marker, formulaSource, clozeGroups});
             previous = match.capturedEnd();
         }
         markdown += prose.mid(previous);
@@ -294,8 +365,43 @@ void MarkdownView::rebuild() {
                 && closing.captured(1).size() >= delimiter.size() && closing.captured(2).trimmed().isEmpty()) break;
             source.append(lines.at(lineIndex));
         }
-        fences.append({marker, opening.captured(2).trimmed().section(QLatin1Char(' '), 0, 0), source.join(QLatin1Char('\n'))});
-        markdown += QLatin1Char('\n') + marker + QStringLiteral("\n\n");
+        QString fenceSource = source.join(QLatin1Char('\n'));
+        QList<QPair<qsizetype, QString>> removals;
+        QString markerBefore;
+        QString markerAfter;
+        QList<struct ClozeRange> clozeRanges;
+        for (const struct ClozeMarker &cloze : clozeMarkers) {
+            const qsizetype startPosition = fenceSource.indexOf(cloze.start);
+            const qsizetype endPosition = fenceSource.indexOf(cloze.end);
+            const bool startInside = startPosition >= 0;
+            const bool endInside = endPosition >= 0;
+            if (!startInside && !endInside) continue;
+            if (startInside) removals.append({startPosition, cloze.start});
+            if (endInside) removals.append({endPosition, cloze.end});
+            const qsizetype rawStart = startInside ? startPosition + cloze.start.size() : 0;
+            const qsizetype rawEnd = endInside ? endPosition : fenceSource.size();
+            qsizetype cleanStart = rawStart;
+            qsizetype cleanEnd = rawEnd;
+            for (const auto &[position, token] : removals) {
+                if (position < rawStart) cleanStart -= token.size();
+                if (position < rawEnd) cleanEnd -= token.size();
+            }
+            if (cleanEnd > cleanStart)
+                clozeRanges.append({static_cast<int>(cleanStart), static_cast<int>(cleanEnd - cleanStart), cloze.group});
+            if (startInside && !endInside) markerBefore += cloze.start;
+            if (endInside && !startInside) markerAfter += cloze.end;
+            if (startInside && endInside) {
+                absorbedClozeMarkers.insert(cloze.start);
+                absorbedClozeMarkers.insert(cloze.end);
+            }
+        }
+        std::sort(removals.begin(), removals.end(), [](const auto &left, const auto &right) {
+            return left.first > right.first;
+        });
+        for (const auto &[position, token] : removals) fenceSource.remove(position, token.size());
+        fences.append({marker, opening.captured(2).trimmed().section(QLatin1Char(' '), 0, 0),
+                       fenceSource, clozeRanges, markerBefore, markerAfter});
+        markdown += QLatin1Char('\n') + markerBefore + marker + markerAfter + QStringLiteral("\n\n");
     }
     flushProse();
     m_document.setMarkdown(markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) | QTextDocument::MarkdownNoHTML);
@@ -304,7 +410,6 @@ void MarkdownView::rebuild() {
     QTextCharFormat normal;
     normal.setForeground(m_foreground);
     entire.mergeCharFormat(normal);
-    QString error;
     for (const struct Formula &formula : formulas) {
         QTextCursor cursor = m_document.find(formula.marker);
         if (cursor.isNull()) continue;
@@ -321,7 +426,22 @@ void MarkdownView::rebuild() {
             format.setWidth(imageWidth * scale);
             format.setHeight(imageHeight * scale);
             format.setVerticalAlignment(QTextCharFormat::AlignMiddle);
+            if (!formula.clozeGroups.isEmpty()) {
+                QStringList groups;
+                for (const int group : formula.clozeGroups) groups.append(QString::number(group));
+                format.setToolTip(QStringLiteral("Contains cloze group(s): %1").arg(groups.join(QStringLiteral(", "))));
+                QColor highlightColor = m_accent;
+                highlightColor.setAlphaF(0.24);
+                format.setBackground(highlightColor);
+            }
+            const int imagePosition = cursor.selectionStart();
             cursor.insertImage(format);
+            if (!formula.clozeGroups.isEmpty()) {
+                QTextCursor formulaImage(&m_document);
+                formulaImage.setPosition(imagePosition);
+                formulaImage.setPosition(imagePosition + 1, QTextCursor::KeepAnchor);
+                formulaImage.mergeCharFormat(format);
+            }
         } catch (const std::exception &exception) {
             error = QStringLiteral("MATH_INVALID: %1").arg(QString::fromUtf8(exception.what()));
             cursor.insertText(formula.source);
@@ -386,6 +506,19 @@ void MarkdownView::rebuild() {
             token.setPosition(sourceStart + span.offset);
             token.setPosition(sourceStart + span.offset + span.length, QTextCursor::KeepAnchor);
             token.mergeCharFormat(span.format);
+        }
+        for (const struct ClozeRange &range : fence.clozeRanges) {
+            Q_ASSERT(range.start >= 0 && range.length > 0 && range.start + range.length <= fence.source.size());
+            QTextCursor answer(&m_document);
+            answer.setPosition(sourceStart + range.start);
+            answer.setPosition(sourceStart + range.start + range.length, QTextCursor::KeepAnchor);
+            QColor highlightColor = m_accent;
+            highlightColor.setAlphaF(0.24);
+            QTextCharFormat highlight;
+            highlight.setBackground(highlightColor);
+            highlight.setFontItalic(true);
+            highlight.setToolTip(QStringLiteral("Contains cloze group %1").arg(range.group));
+            answer.mergeCharFormat(highlight);
         }
     }
     qreal listIndentWidth = 40.0;
@@ -453,8 +586,40 @@ void MarkdownView::rebuild() {
             }
         }
     }
+    for (const struct ClozeMarker &cloze : clozeMarkers) {
+        if (absorbedClozeMarkers.contains(cloze.start) && absorbedClozeMarkers.contains(cloze.end))
+            continue;
+        QTextCursor start = m_document.find(cloze.start);
+        QTextCursor end = m_document.find(cloze.end);
+        if (start.isNull() || end.isNull() || end.selectionStart() < start.selectionEnd()) {
+            if (error.isEmpty())
+                error = QStringLiteral("CLOZE_PREVIEW: Could not locate a cloze answer in the rendered card.");
+            continue;
+        }
+        const int answerStart = start.selectionStart();
+        const int answerEndBeforeRemoval = end.selectionStart();
+        end.removeSelectedText();
+        start.removeSelectedText();
+        const int answerEnd = answerEndBeforeRemoval - cloze.start.size();
+        Q_ASSERT(answerEnd > answerStart);
+        QTextCursor answer(&m_document);
+        answer.setPosition(answerStart);
+        answer.setPosition(answerEnd, QTextCursor::KeepAnchor);
+        QColor highlightColor = m_accent;
+        highlightColor.setAlphaF(0.24);
+        QTextCharFormat highlight;
+        highlight.setBackground(highlightColor);
+        highlight.setFontItalic(true);
+        answer.mergeCharFormat(highlight);
+    }
     m_document.setIndentWidth(listIndentWidth);
-    if (!error.isEmpty() && error != m_renderError) { m_renderError = error; emit renderErrorChanged(); }
+    if (!error.isEmpty() && error != m_renderError) {
+        m_renderError = error;
+        emit renderErrorChanged();
+    } else if (error.isEmpty() && m_renderError.startsWith(QStringLiteral("CLOZE_PREVIEW:"))) {
+        m_renderError.clear();
+        emit renderErrorChanged();
+    }
     setImplicitHeight(std::ceil(m_document.size().height()) + 2);
     update();
 }

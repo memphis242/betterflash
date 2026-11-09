@@ -13,6 +13,7 @@ Item {
     property string deckContentSearchText: librarySettings.deckContentQuery
     property bool searchReady: false
     property string cardSearchScopeId: ""
+    property string cardScope: librarySettings.cardScope || "subdecks"
     property var searchCollapsedDecks: ({})
     readonly property bool searchingDeckContent: deckContentSearchText.trim().length > 0
     readonly property bool searchingDecks: DeckSearch.normalize(deckSearchText).length > 0 || searchingDeckContent
@@ -21,7 +22,7 @@ Item {
     property string filterKind: librarySettings.cardFilterKind
     property string filterState: librarySettings.cardFilterState
     readonly property int activeFilterCount: filterTags.length + (filterKind ? 1 : 0) + (filterState ? 1 : 0)
-    readonly property var scopedCards: app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id)
+    readonly property var scopedCards: cardsInScope()
     readonly property var availableTags: collectTags()
     property bool leftOpen: librarySettings.leftOpen
     property bool rightOpen: librarySettings.rightOpen
@@ -87,6 +88,7 @@ Item {
         property string cardFilterTags: "[]"
         property string cardFilterKind: ""
         property string cardFilterState: ""
+        property string cardScope: "subdecks"
     }
 
     Component.onCompleted: {
@@ -129,6 +131,17 @@ Item {
     onFilterTagsChanged: { librarySettings.cardFilterTags = JSON.stringify(filterTags); filtersChanged() }
     onFilterKindChanged: { librarySettings.cardFilterKind = filterKind; filtersChanged() }
     onFilterStateChanged: { librarySettings.cardFilterState = filterState; filtersChanged() }
+    onCardScopeChanged: {
+        librarySettings.cardScope = cardScope
+        const allowed = new Set(cardsInScope().filter(card => matchesCardFilter(card)).map(card => card.id))
+        selectedCardIds = selectedCardIds.filter(id => allowed.has(id))
+        if (!allowed.has(cardSelectionAnchorId)) cardSelectionAnchorId = ""
+        if (!searchReady) return
+        resetSearchPage = true
+        searchPageAnchorId = ""
+        resetPage()
+        updateCardSearch()
+    }
 
     function readStoredTags(value) {
         try {
@@ -138,6 +151,41 @@ Item {
     }
     function cardTags(card) {
         return String(card.tags || "").split(",").map(tag => tag.trim()).filter(tag => tag.length > 0)
+    }
+    function effectiveCardScope() {
+        return ui.selectedDeck.id ? cardScope : "collection"
+    }
+    function cardScopeChoices() {
+        if (!ui.selectedDeck.id) return [{ id: "collection", name: "Entire collection" }]
+        return [
+            { id: "subdecks", name: "This deck + subdecks" },
+            { id: "deck", name: "This deck only" },
+            { id: "collection", name: "Entire collection" }
+        ]
+    }
+    function cardsInScope() {
+        const scope = effectiveCardScope()
+        const rootId = ui.selectedDeck.id || ""
+        if (scope === "collection" || !rootId) return app.cards
+        if (scope === "deck") return app.cards.filter(card => card.deckId === rootId)
+        const decksById = new Map(app.decks.map(deck => [deck.id, deck]))
+        return app.cards.filter(card => {
+            let deck = decksById.get(card.deckId)
+            const visited = new Set()
+            while (deck && !visited.has(deck.id)) {
+                if (deck.id === rootId) return true
+                visited.add(deck.id)
+                deck = decksById.get(deck.parentId || "")
+            }
+            return false
+        })
+    }
+    function scopeDescription() {
+        switch (effectiveCardScope()) {
+        case "deck": return "This deck only"
+        case "subdecks": return "This deck and subdecks"
+        default: return "Entire collection"
+        }
     }
     function cardAssessment(card) {
         if (!card) return ({})
@@ -168,6 +216,7 @@ Item {
         const reviews = Number(card.reviewCount || 0)
         const due = Number(card.dueCount || 0)
         switch (filterState) {
+        case "unreadable": return !!(card.loadError && card.loadError.code)
         case "new": return reviews === 0
         case "reviewed": return reviews > 0
         case "due": return due > 0
@@ -530,10 +579,10 @@ Item {
     function updateCardSearch(dueOnly) {
         if (!searchReady) return
         searchEngine.setActive(ui.page === 1)
-        const ids = activeFilterCount > 0 ? app.cards.filter(card => matchesCardFilter(card)).map(card => card.id) : []
+        const ids = activeFilterCount > 0 ? scopedCards.filter(card => matchesCardFilter(card)).map(card => card.id) : []
         searchEngine.setCardFilter(ids, activeFilterCount > 0, dueOnly === true)
         cardSearchScopeId = app.selectedDeckId || ""
-        searchEngine.setSearch(cardSearchScopeId, ui.cardSearchText)
+        searchEngine.setSearchScope(cardSearchScopeId, ui.cardSearchText, effectiveCardScope())
     }
 
     function selectCardAfterSearch() {
@@ -557,6 +606,11 @@ Item {
             treeList.forceActiveFocus()
         }
         if (kind === "cards") {
+            if (searchingCards && searchEngine.busy) return false
+            const allowed = new Set(cardsInScope().filter(card => matchesCardFilter(card)).map(card => card.id))
+            const shown = new Set(visibleCards.filter(card => allowed.has(card.id)).map(card => card.id))
+            if (!shown.has(id)) return false
+            selectedCardIds = selectedCardIds.filter(cardId => shown.has(cardId))
             dragPageSnapshot = pageCards
             if (selectedCardIds.indexOf(id) < 0)
                 chooseCardWithModifiers(visibleCards.findIndex(card => card.id === id), Qt.NoModifier)
@@ -693,6 +747,7 @@ Item {
         }
         function onDecksChanged() {
             library.initializeExpansion()
+            library.updateCardSearch()
             if (ui.selectedDeck.id)
                 library.revealDeck(ui.selectedDeck.id)
         }
@@ -709,7 +764,7 @@ Item {
         }
         function onCardsChanged() {
             library.updateCardSearch()
-            const valid = new Set(app.cards.filter(card => !ui.selectedDeck.id || card.deckId === ui.selectedDeck.id).map(card => card.id))
+            const valid = new Set(library.scopedCards.map(card => card.id))
             library.selectedCardIds = library.selectedCardIds.filter(id => valid.has(id))
             if (library.cardSelectionAnchorId && !valid.has(library.cardSelectionAnchorId))
                 library.cardSelectionAnchorId = ""
@@ -782,11 +837,11 @@ Item {
                         ToolTip.visible: hovered || activeFocus
                         ToolTip.text: "Add a top-level deck"
                         Accessible.name: ToolTip.text
-                        contentItem: Item { Icon { kind: "plus"; width: 21; height: 21; anchors.centerIn: parent; stroke: Theme.onAccent; lineWidth: 1.8 } }
-                        background: Rectangle { radius: width / 2; color: Theme.accent; border.width: addDeckButton.activeFocus || addDeckButton.hovered ? 2 : 0; border.color: Theme.ink }
+                        contentItem: Item { Icon { kind: "root-deck-add"; width: 23; height: 23; anchors.centerIn: parent; stroke: Theme.actionInk; lineWidth: 1.8 } }
+                        background: Rectangle { radius: width / 2; color: Theme.actionFill; border.width: addDeckButton.activeFocus || addDeckButton.hovered ? 2 : 0; border.color: Theme.actionInk }
                         onClicked: ui.openDeckEditor("")
                     }
-                    GlyphButton { glyph: "subdeck-add"; hint: "Add a subdeck to the selected deck"; enabled: !!ui.selectedDeck.id && !app.busy; onClicked: ui.openDeckEditor("", ui.selectedDeck.id) }
+                    GlyphButton { glyph: "subdeck-add"; primary: true; hint: "Add a subdeck to the selected deck"; enabled: !!ui.selectedDeck.id && !app.busy; onClicked: ui.openDeckEditor("", ui.selectedDeck.id) }
                     Item { Layout.fillWidth: true }
                     GlyphButton {
                         glyph: "search"; selected: library.searchingDecks || library.deckSearchVisible
@@ -1058,14 +1113,16 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true; Layout.preferredHeight: 42
                     ColumnLayout {
-                        Layout.fillWidth: true; spacing: 2
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 2
                         Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
-                        Label { textFormat: Text.PlainText; text: (ui.selectedDeck.id ? ui.selectedDeck.name : "All decks") + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { Layout.minimumWidth: 0; textFormat: Text.PlainText; text: (ui.selectedDeck.id ? ui.selectedDeck.name + " / " + library.scopeDescription() : "Entire collection") + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
                     PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
                 }
-                RowLayout {
+                Flow {
+                    objectName: "libraryCardActions"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: 8
                     GlyphButton { glyph: "chevron-left-bold"; hint: "Previous page (Page Up)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex > 0; onClicked: library.changePage(library.boundedPageIndex - 1) }
                     Label {
@@ -1076,7 +1133,6 @@ Item {
                         HoverHandler { id: pageHover }
                     }
                     GlyphButton { glyph: "chevron-right-bold"; hint: "Next page (Page Down)"; implicitWidth: 32; implicitHeight: 32; glyphSize: 15; enabled: library.boundedPageIndex + 1 < library.cardPages.length; onClicked: library.changePage(library.boundedPageIndex + 1) }
-                    Item { Layout.fillWidth: true }
                     ToolButton {
                         id: addCardButton
                         implicitWidth: 40
@@ -1087,13 +1143,13 @@ Item {
                         Accessible.name: "Add card"
                         contentItem: Item {
                             anchors.fill: parent
-                            Icon { kind: "plus"; width: 21; height: 21; anchors.centerIn: parent; stroke: Theme.onAccent; lineWidth: 1.8 }
+                            Icon { kind: "card-add"; width: 23; height: 23; anchors.centerIn: parent; stroke: Theme.actionInk; lineWidth: 1.8 }
                         }
                         background: Rectangle {
                             radius: width / 2
-                            color: Theme.accent
+                            color: Theme.actionFill
                             border.width: addCardButton.activeFocus ? 2 : 0
-                            border.color: addCardButton.hovered || addCardButton.down ? Theme.ink : Theme.transparent
+                            border.color: addCardButton.hovered || addCardButton.down ? Theme.actionInk : Theme.transparent
                         }
                         onClicked: ui.openCardEditor("")
                     }
@@ -1104,7 +1160,15 @@ Item {
                         hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
                         onClicked: cardFilters.visible ? cardFilters.close() : cardFilters.open()
                     }
+                    GlyphButton {
+                        visible: cardPane.width < 440
+                        glyph: "review-ledger"
+                        selected: library.weakestFirst
+                        hint: library.weakestFirst ? "Return cards to their normal order" : "Sort cards by weakness within each search group"
+                        onClicked: library.weakestFirst = !library.weakestFirst
+                    }
                     AppButton {
+                        visible: cardPane.width >= 440
                         text: "Weakest first"
                         glyph: "review-ledger"
                         fill: library.weakestFirst ? Theme.accentSoft : Theme.transparent
@@ -1112,6 +1176,36 @@ Item {
                         foreground: library.weakestFirst ? Theme.accent : Theme.ink
                         hint: library.weakestFirst ? "Return cards to their normal order" : "Sort cards by weakness within each search group"
                         onClicked: library.weakestFirst = !library.weakestFirst
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        visible: cardPane.width >= 330
+                        text: "Scope"
+                        color: Theme.inkMuted
+                        font.family: Theme.uiFont
+                        font.pixelSize: 13
+                        Layout.minimumWidth: visible ? implicitWidth : 0
+                    }
+                    AppComboBox {
+                        id: cardScopePicker
+                        objectName: "libraryCardScope"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.maximumWidth: 320
+                        model: library.cardScopeChoices()
+                        textRole: "name"
+                        valueRole: "id"
+                        currentValue: library.effectiveCardScope()
+                        Accessible.name: "Choose which decks to show and search"
+                        comboHint: "Show cards from the selected deck, its subdecks, or the whole collection"
+                        onActivated: {
+                            if (library.searchReady && ui.selectedDeck.id && currentValue
+                                && library.cardScope !== currentValue)
+                                library.cardScope = currentValue
+                        }
                     }
                 }
                 RowLayout {
@@ -1262,14 +1356,23 @@ Item {
                                 spacing: 5
                                 RowLayout { Layout.fillWidth: true; spacing: 8
                                     Label { textFormat: Text.PlainText; text: ui.compactText(cardRow.modelData.front); color: Theme.ink; font.family: Theme.contentFont; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Label {
+                                        visible: !!(cardRow.modelData.loadError && cardRow.modelData.loadError.code)
+                                        text: "Needs repair"
+                                        color: Theme.error
+                                        font.pixelSize: 12
+                                        ToolTip.visible: issueHover.hovered
+                                        ToolTip.text: (cardRow.modelData.loadError || {}).message || ""
+                                        HoverHandler { id: issueHover }
+                                    }
                                     WeaknessBadge { assessment: library.cardAssessment(cardRow.modelData); compact: true; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label {
-                                        visible: !ui.selectedDeck.id
+                                        visible: library.effectiveCardScope() !== "deck"
                                         textFormat: Text.PlainText
-                                        text: ui.deckById(cardRow.modelData.deckId).name || ""
+                                        text: ui.deckPath(cardRow.modelData.deckId)
                                         color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 11
                                         elide: Text.ElideRight; Layout.maximumWidth: cardRow.width * 0.45
                                         ToolTip.visible: deckNameHover.hovered

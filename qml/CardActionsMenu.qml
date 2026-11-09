@@ -9,6 +9,7 @@ AppMenu {
 
     readonly property var card: ui.cardById(cardId)
     readonly property bool cardAvailable: !!card && !!card.id
+    readonly property bool cardReadable: cardAvailable && !(card.loadError && card.loadError.code)
 
     function cardName() {
         return ui.compactText(card.front || "").slice(0, 80)
@@ -50,7 +51,7 @@ AppMenu {
     AppMenuSeparator {}
     AppMenuItem { glyph: "cards"
         text: "Generate similar card"
-        enabled: menu.cardAvailable && !app.busy
+        enabled: menu.cardReadable && !app.busy
         onTriggered: {
             menu.beforeAction()
             menu.ui.openGenerateSimilar(menu.cardId)
@@ -58,7 +59,7 @@ AppMenu {
     }
     AppMenuItem { glyph: "atom"
         text: "Atomicize card"
-        enabled: menu.cardAvailable
+        enabled: menu.cardReadable
         ToolTip.visible: hovered
         ToolTip.text: "Preview proposed focused cards split from distinct ideas before applying them."
         onTriggered: {

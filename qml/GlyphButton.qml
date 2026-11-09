@@ -6,6 +6,7 @@ ToolButton {
     property string glyph: "more"
     property string hint: ""
     property bool selected: false
+    property bool primary: false
     property real glyphSize: 18
     property bool accentOnHover: false
     property bool toolTipOnFocus: false
@@ -20,12 +21,12 @@ ToolButton {
             width: control.glyphSize
             height: control.glyphSize
             kind: control.glyph
-            stroke: control.selected || control.enabled && control.accentOnHover && (control.hovered || control.down || control.activeFocus) ? Theme.accent : Theme.ink
+            stroke: control.primary && control.enabled ? Theme.actionInk : control.selected || control.enabled && control.accentOnHover && (control.hovered || control.down || control.activeFocus) ? Theme.accent : Theme.ink
         }
     }
     background: Rectangle {
         radius: width / 2
-        color: control.enabled && (control.hovered || control.down) ? Theme.accentSoft : Theme.transparent
+        color: control.primary && control.enabled ? Theme.actionFill : control.enabled && (control.hovered || control.down) ? Theme.accentSoft : Theme.transparent
         border.width: control.enabled && control.activeFocus || control.selected ? 2 : 1
         border.color: control.selected || control.enabled && (control.activeFocus || control.accentOnHover && (control.hovered || control.down)) ? Theme.accent : Theme.rule
     }

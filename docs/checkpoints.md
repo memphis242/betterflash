@@ -68,7 +68,7 @@ schedules. Checkpoints are immutable, survive restarts, and are retained if a de
 is deleted. This first UI accesses them through a live deck; a browser for
 checkpoints of entirely deleted root decks is not provided yet.
 
-Portable version 6 backups include checkpoint history and historical media,
+Portable version 7 backups include checkpoint history and historical media,
 including assets no longer referenced by live cards. Imports remain additive
 and reject differing records with the same immutable checkpoint identifier.
 Versions 2, 3, 4, and 5 remain readable. Checkpoint order is preserved on import.

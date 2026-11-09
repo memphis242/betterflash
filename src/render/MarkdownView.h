@@ -18,6 +18,7 @@ class MarkdownView : public QQuickPaintedItem {
     Q_PROPERTY(qreal baseFontSize READ baseFontSize WRITE setBaseFontSize NOTIFY styleChanged)
     Q_PROPERTY(QString renderError READ renderError NOTIFY renderErrorChanged)
     Q_PROPERTY(QString mediaRoot READ mediaRoot WRITE setMediaRoot NOTIFY styleChanged)
+    Q_PROPERTY(bool clozePreview READ clozePreview WRITE setClozePreview NOTIFY styleChanged)
 public:
     explicit MarkdownView(QQuickItem *parent = nullptr);
     void paint(QPainter *painter) override;
@@ -30,12 +31,14 @@ public:
     qreal baseFontSize() const { return m_baseFontSize; }
     QString renderError() const { return m_renderError; }
     QString mediaRoot() const { return m_mediaRoot; }
+    bool clozePreview() const { return m_clozePreview; }
     void setMarkdown(const QString &markdown);
     void setForeground(const QColor &color);
     void setCodeBackground(const QColor &color);
     void setAccent(const QColor &color);
     void setBaseFontSize(qreal size);
     void setMediaRoot(const QString &directory);
+    void setClozePreview(bool enabled);
     static QString plainText(const QString &markdown);
     // Returns prose suitable for narration, omitting fenced and indented code blocks.
     static QString spokenText(const QString &markdown);
@@ -74,6 +77,7 @@ private:
     qreal m_baseFontSize = 22.0;
     bool m_scheduled = false;
     bool m_darkMode = true;
+    bool m_clozePreview = false;
     QSet<QString> m_codeKeys;
     QSet<QString> m_requestedCodeKeys;
     bool m_waitingForCodeCapacity = false;

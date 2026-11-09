@@ -44,7 +44,7 @@ public:
     using Handler = std::function<struct HttpResponse(const struct HttpRequest &)>;
     explicit LocalHttpFixture(Handler handler,
                               QString collectionId = QStringLiteral("11111111-1111-4111-8111-111111111111"),
-                              const int protocolVersion = 4)
+                              const int protocolVersion = 5)
         : m_handler(std::move(handler)), m_collectionId(std::move(collectionId)), m_protocolVersion(protocolVersion) {
         connect(&m_server, &QTcpServer::newConnection, this, [this] {
             while (m_server.hasPendingConnections()) {
@@ -69,12 +69,13 @@ public:
                     connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
                     if (request.method == QByteArrayLiteral("GET") && request.path.endsWith("/v1/info")) {
                         ++infoRequests;
+                        QVariantList capabilities{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair")};
+                        if (m_protocolVersion >= 4) capabilities.append(QStringLiteral("short-interval-schedules"));
+                        if (m_protocolVersion >= 5) capabilities.append(QStringLiteral("numbered-cloze-markers"));
                         const QByteArray body = QJsonDocument::fromVariant(QVariantMap{
                             {QStringLiteral("collectionId"), m_collectionId},
                             {QStringLiteral("protocolVersion"), m_protocolVersion},
-                            {QStringLiteral("capabilities"), m_protocolVersion >= 4
-                                 ? QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair"), QStringLiteral("short-interval-schedules")}
-                                 : QVariantList{QStringLiteral("independent-schedules"), QStringLiteral("hierarchy-repair")}}}).toJson(QJsonDocument::Compact);
+                            {QStringLiteral("capabilities"), capabilities}}).toJson(QJsonDocument::Compact);
                         socket->write("HTTP/1.1 200 Fixture\r\nContent-Length: " + QByteArray::number(body.size())
                                       + "\r\nConnection: close\r\n\r\n" + body);
                         socket->disconnectFromHost();
@@ -372,7 +373,7 @@ private slots:
         QNetworkRequest request{QUrl(m_endpoint)};
         request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
         request.setRawHeader("Authorization", "Bearer local-integration-test-token-0123456789");
-        request.setRawHeader("X-BetterFlash-Protocol", "4");
+        request.setRawHeader("X-BetterFlash-Protocol", "5");
         QVariantMap outgoing = batch;
         if (outgoing.value("collectionId").toString().isEmpty()) outgoing.remove("collectionId");
         QNetworkReply *const reply = network.post(request, json(outgoing));
@@ -606,7 +607,7 @@ private slots:
         QTest::addColumn<QString>("front"); QTest::addColumn<QString>("reducedFront");
         QTest::addColumn<QString>("back"); QTest::addColumn<QString>("removedKey");
         QTest::newRow("reverse") << QString("reverse") << QString("basic") << QString("Question") << QString("Question") << QString("Answer") << QString("reverse");
-        QTest::newRow("numbered-cloze") << QString("cloze") << QString("cloze") << QString("{{c1::One}} {{c2::Two}}") << QString("{{c1::One}}") << QString() << QString("c2");
+        QTest::newRow("numbered-cloze") << QString("cloze") << QString("cloze") << QString("[cloze1:One] [cloze2:Two]") << QString("[cloze1:One]") << QString() << QString("c2");
     }
     void recreatedVariantRejectsReviewFromRemovedGeneration() {
         QFETCH(QString,kind); QFETCH(QString,reducedKind); QFETCH(QString,front);
@@ -1122,14 +1123,69 @@ private slots:
         QCOMPARE(second.infoRequests, 1);
         QCOMPARE(second.requests.size(), 0);
     }
+    void numberedClozeSyncAndBackupPreserveReviewedDirections() {
+        AppController source(m_temporary.filePath(QStringLiteral("numbered-cloze-source")));
+        AppController peer(m_temporary.filePath(QStringLiteral("numbered-cloze-peer")));
+        QVERIFY(waitIdle(source)); QVERIFY(waitIdle(peer));
+        source.createDeck(QStringLiteral("Numbered cloze compatibility")); QVERIFY(waitIdle(source));
+        const QString deckId = source.decks().first().toMap().value("id").toString();
+        QVERIFY(source.saveCard({}, deckId, QStringLiteral("cloze"),
+            QStringLiteral("[cloze1:Paris] is in [cloze2:France]."), {}, {}, 1));
+        QVERIFY(waitIdle(source));
+        const QString id = source.cards().first().toMap().value("id").toString();
+        source.startReview(deckId); QVERIFY(waitIdle(source));
+        source.selectReviewCard(betterflash::model::variantId(id, QStringLiteral("c1"))); QVERIFY(waitIdle(source));
+        source.revealAnswer(); source.grade(3); QVERIFY(waitIdle(source));
+        source.stopReview(); QVERIFY(waitIdle(source));
+        const auto schedules = [](const QVariantMap &card) {
+            QVariantList result;
+            for (const QVariant &value : card.value("variants").toList()) {
+                QVariantMap variant = value.toMap();
+                variant.remove("weakness");
+                result.append(variant);
+            }
+            return result;
+        };
+        const QVariantList retained = schedules(source.cards().first().toMap());
+        const QString reviewedFront=source.cards().first().toMap().value("front").toString();
+        QVERIFY(source.clozeSelectionOverlaps(reviewedFront,0,static_cast<int>(reviewedFront.size())));
+        QCOMPARE(schedules(source.cards().first().toMap()),retained);
+        const QString front = QStringLiteral("A location: [cloze1:Paris] lies within [cloze2:France].");
+        QVERIFY(source.saveCard(id, deckId, QStringLiteral("cloze"), front, {}, {}, 1));
+        QVERIFY(waitIdle(source));
+        QCOMPARE(schedules(source.cards().first().toMap()), retained);
+        SyncController sourceSync(&source, source.mediaPath()), peerSync(&peer, peer.mediaPath());
+        configureSync(sourceSync, m_endpoint); configureSync(peerSync, m_endpoint);
+        QVERIFY2(synchronize(sourceSync), qPrintable(sourceSync.error()));
+        QVERIFY2(synchronize(peerSync), qPrintable(peerSync.error()));
+        QVERIFY(waitIdle(peer));
+        QCOMPARE(peer.cards().size(), 1);
+        QCOMPARE(peer.cards().first().toMap().value("front").toString(), front);
+        QCOMPARE(schedules(peer.cards().first().toMap()), retained);
+        const QString backup = m_temporary.filePath(QStringLiteral("numbered-cloze-backup.json"));
+        source.exportCollection(backup); QVERIFY(waitIdle(source));
+        QFile file(backup); QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("version").toInt(), 7);
+        AppController restored(m_temporary.filePath(QStringLiteral("numbered-cloze-restored")));
+        QVERIFY(waitIdle(restored)); restored.importCollection(backup); QVERIFY(waitIdle(restored));
+        QCOMPARE(restored.cards().size(), 1);
+        QCOMPARE(restored.cards().first().toMap().value("front").toString(), front);
+        QCOMPARE(schedules(restored.cards().first().toMap()), retained);
+    }
+    void oldServerProtocolPreventsUploads_data() {
+        QTest::addColumn<int>("protocolVersion");
+        QTest::newRow("before-short-intervals") << 3;
+        QTest::newRow("before-numbered-clozes") << 4;
+    }
     void oldServerProtocolPreventsUploads() {
+        QFETCH(int, protocolVersion);
         const auto acknowledge = [](const struct HttpRequest &request) {
             return HttpResponse{json(emptyResponse(request))};
         };
         LocalHttpFixture server(acknowledge,
-            QStringLiteral("11111111-1111-4111-8111-111111111111"), 3);
+            QStringLiteral("11111111-1111-4111-8111-111111111111"), protocolVersion);
         QVERIFY(server.listen());
-        AppController app(m_temporary.filePath(QStringLiteral("old-server-protocol")));
+        AppController app(m_temporary.filePath(QStringLiteral("old-server-protocol-%1").arg(protocolVersion)));
         QVERIFY(waitIdle(app));
         app.createDeck(QStringLiteral("Pending upload"));
         QVERIFY(waitIdle(app));
@@ -1138,8 +1194,8 @@ private slots:
         sync.synchronize();
         QVERIFY(QTest::qWaitFor([&] { return !sync.busy() && !app.busy(); }, 10000));
         QVERIFY(sync.error().startsWith(QStringLiteral("SYNC_PROTOCOL")));
-        QVERIFY(sync.error().contains(QStringLiteral("GET /v1/info reports protocol 3")));
-        QVERIFY(sync.error().contains(QStringLiteral("short-interval-schedules")));
+        QVERIFY(sync.error().contains(QStringLiteral("GET /v1/info reports protocol %1").arg(protocolVersion)));
+        QVERIFY(sync.error().contains(QStringLiteral("numbered-cloze-markers")));
         QCOMPARE(server.infoRequests, 1);
         QCOMPARE(server.requests.size(), 0);
     }

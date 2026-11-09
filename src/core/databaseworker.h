@@ -60,6 +60,8 @@ public:
     void applySyncResponse(const QVariantMap &response);
 
 signals:
+    void collectionIssuesReady(const QVariantList &issues);
+    void historyClearedForRecovery();
     void actionRecorded(const QString &id, const QString &label);
     void historyError(const QString &code, const QString &message, const QString &detail);
     void historyApplied(const QString &id, bool redo, bool success);
@@ -126,6 +128,15 @@ private:
     QString m_sessionDeckName;
     QString m_sessionStartedAt;
     QString m_sqlDetail;
+    QHash<QString, QVariantMap> m_cardLoadErrors;
+    QVariantList m_collectionIssues;
+    QString m_lastRecoveryBackup;
+    QSet<QString> m_invalidScheduleValues;
+    QString m_historySetupError;
+    QString m_guidanceSetupError;
+    bool m_hasUnreadableHistory=false;
+    bool m_hasOrphanSchedules=false;
+    QVariantList m_recoveryNotices;
     struct HistorySession {
         QStringList queue;
         QStringList order;
@@ -149,7 +160,7 @@ private:
         DatabaseWorker *worker = nullptr;
         bool valid = true;
         explicit operator bool() const { return valid; }
-        HistoryScope(DatabaseWorker *value, const QString &label);
+        HistoryScope(DatabaseWorker *value, const QString &label, bool capture = true);
         ~HistoryScope();
         HistoryScope(const struct HistoryScope &) = delete;
         struct HistoryScope &operator=(const struct HistoryScope &) = delete;
@@ -189,6 +200,8 @@ private:
     void fail(const QString &code, const QString &message, const QString &detail = {});
     void done(const QString &message = {});
     bool publishSnapshot();
+    bool createRecoveryBackup();
+    void clearHistoryForRecovery(const QString &message, const QString &backupPath = {});
     bool initializeStudyGuidance();
     bool refreshStudyGuidance();
     bool publishQueue(bool resetCurrent);
@@ -197,7 +210,7 @@ private:
     QVariantMap sessionCard(const QString &variantId, const QVariantMap &card) const;
     std::optional<struct betterflash::model::Deck> deck(const QString &id);
     std::optional<struct betterflash::model::Card> card(const QString &id);
-    std::optional<struct betterflash::model::Variant> variant(const QString &id);
+    std::optional<struct betterflash::model::Variant> variant(const QString &id, bool validateStored = false);
     QList<struct betterflash::model::Variant> cardVariants(const QString &id);
     bool upsertDeck(const struct betterflash::model::Deck &record);
     bool upsertCard(const struct betterflash::model::Card &record);

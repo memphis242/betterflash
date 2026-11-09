@@ -37,7 +37,7 @@ class SyncTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def request(self, method, path, data=None, token=TOKEN, raw=False):
-        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "4"}
+        headers = {"Authorization": "Bearer " + token, "X-BetterFlash-Protocol": "5"}
         if method == "PUT":
             headers["X-BetterFlash-Collection"] = self.store.collection_id
         body = data if raw else json.dumps(data).encode() if data is not None else None
@@ -125,7 +125,7 @@ class SyncTests(unittest.TestCase):
         event["type"] = "card.upsert"
         event["payload"] = {
             "card": {"id": card_id, "deckId": str(uuid4()), "kind": "cloze",
-                     "front": "Use {{c1::std\\::expected}} with {{c2::first\nsecond::two lines}}.",
+                     "front": "Use [cloze1:std::expected] with [cloze2:first\nsecond|two lines].",
                      "back": "", "tags": "", "pointCount": 1},
             "variants": [{"id": str(uuid5(UUID(card_id), key)), "cardId": card_id, "key": key,
                           "due": "2026-01-01T00:00:00Z", "reviewCount": 0,
@@ -133,7 +133,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.sync([event])[0], 200)
         invalid = json.loads(json.dumps(event))
         invalid["id"] = str(uuid4())
-        invalid["payload"]["card"]["front"] = "{{c1::answer::}}"
+        invalid["payload"]["card"]["front"] = "[cloze1:answer|]"
         self.assertEqual(self.sync([invalid])[0], 400)
         self.assertEqual(len(self.sync([])[1]["events"]), 1)
 

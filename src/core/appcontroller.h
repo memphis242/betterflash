@@ -17,6 +17,8 @@ class AppController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList decks READ decks NOTIFY decksSnapshotChanged)
     Q_PROPERTY(QVariantList cards READ cards NOTIFY cardsSnapshotChanged)
+    Q_PROPERTY(QVariantList collectionIssues READ collectionIssues NOTIFY collectionIssuesChanged)
+    Q_PROPERTY(bool collectionLoaded READ collectionLoaded NOTIFY collectionLoadedChanged)
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QVariantList reviewSessions READ reviewSessions NOTIFY reviewSessionsChanged)
     Q_PROPERTY(QString selectedDeckId READ selectedDeckId WRITE setSelectedDeckId NOTIFY selectedDeckIdChanged)
@@ -47,6 +49,8 @@ public:
     ~AppController() override;
 
     QVariantList decks() const { return m_decks; }
+    QVariantList collectionIssues() const { return m_collectionIssues; }
+    bool collectionLoaded() const { return m_collectionLoaded; }
     QVariantList cards() const { return m_cards; }
     QVariantList history() const { return m_history; }
     QVariantList reviewSessions() const { return m_reviewSessions; }
@@ -91,6 +95,9 @@ public:
     Q_INVOKABLE bool saveCard(const QString &id, const QString &deckId, const QString &kind,
                               const QString &front, const QString &back, const QString &tags,
                               int pointCount = 1, const QString &requestId = {});
+    Q_INVOKABLE QString clozePlainText(const QString &source) const;
+    Q_INVOKABLE bool hasClozeMarkers(const QString &source) const;
+    Q_INVOKABLE bool clozeSelectionOverlaps(const QString &source, int start, int end) const;
     Q_INVOKABLE bool setCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
                                       const QString &mediaName, const QString &requestId = {}, const QString &fingerprint = {});
     Q_INVOKABLE bool confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
@@ -130,6 +137,8 @@ public:
     void reportHistoryError(const QString &code, const QString &message);
 
 signals:
+    void collectionIssuesChanged();
+    void collectionLoadedChanged();
     void decksChanged(); void cardsChanged(); void decksSnapshotChanged(); void cardsSnapshotChanged();
     void dueCountsChanged(); void historyChanged(); void reviewSessionsChanged(); void reviewOrderChanged();
     void selectedDeckIdChanged(); void statusMessageChanged(); void currentCardChanged();
@@ -191,6 +200,8 @@ private:
     QString m_spokenAnswer;
     QString m_reviewCursorVariantId;
     QVariantList m_decks,m_cards,m_history,m_reviewSessions,m_pendingCards,m_reviewCards;
+    QVariantList m_collectionIssues;
+    bool m_collectionLoaded = false;
     QVariantMap m_currentCard,m_lastError,m_pendingGradeCorrection;
     QSet<QString> m_leftReviewedVariants;
     bool m_busy = true;

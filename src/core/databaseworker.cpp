@@ -3,6 +3,7 @@
 #include "mediabackup.h"
 #include "syncprotocol.h"
 #include "studyguidance.h"
+#include "cardreadability.h"
 
 #include <QDate>
 #include <QDir>
@@ -30,16 +31,78 @@ QVariantMap object(const QVariantMap &map, const QString &key) { return map.valu
 QString json(const QVariantMap &map) { return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(QJsonDocument::Compact)); }
 struct model::Deck readDeck(const QSqlQuery &q)
 { return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString()}; }
-struct model::Card readCard(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),q.value(7).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(7).toString().toUtf8()).object().toVariantMap(),q.value(8).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(8).toString().toUtf8()).object().toVariantMap()}; }
-struct model::Variant readVariant(const QSqlQuery &q)
+QVariantMap readMetadata(const QString &source, const QString &field, QString *error)
+{
+    QJsonParseError parseError{};
+    const QJsonDocument document=QJsonDocument::fromJson(source.toUtf8(), &parseError);
+    if (parseError.error!=QJsonParseError::NoError || !document.isObject()) {
+        if (error) {
+            if (!error->isEmpty()) *error+=QStringLiteral(" ");
+            *error+=QStringLiteral("Stored %1 metadata is not a JSON object (%2). A recovery copy is required before replacing it.")
+                .arg(field, parseError.error==QJsonParseError::NoError?QStringLiteral("wrong JSON type"):parseError.errorString());
+        }
+        return {};
+    }
+    return document.object().toVariantMap();
+}
+struct model::Card readCard(const QSqlQuery &q, QString *metadataError=nullptr)
+{
+    if (metadataError) metadataError->clear();
+    if (metadataError) {
+        const int pointsType=q.value(6).metaType().id();
+        const bool numericPoints=pointsType==QMetaType::LongLong||pointsType==QMetaType::Int||pointsType==QMetaType::Double;
+        const double points=q.value(6).toDouble();
+        if (!numericPoints||!std::isfinite(points)||std::floor(points)!=points||points<1||points>1000)
+            *metadataError=QStringLiteral("Stored point_count value %1 must be an integer from 1 through 1000. Choose the correct point count when repairing the card.").arg(q.value(6).toString().left(128));
+        for (const int column:{0,1,2,3,4,5,7,8})
+            if (q.value(column).metaType().id()!=QMetaType::QString)
+                *metadataError+=QStringLiteral(" Stored %1 must be text; preserve a recovery copy before repairing it.").arg(q.record().fieldName(column));
+    }
+    return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),
+            readMetadata(q.value(7).toString(),QStringLiteral("narrations"),metadataError),
+            readMetadata(q.value(8).toString(),QStringLiteral("narration fingerprints"),metadataError)};
+}
+struct model::Variant readVariant(const QSqlQuery &q, QString *storageError=nullptr)
 {
     const int phaseColumn = q.record().indexOf(QStringLiteral("graduated"));
     assert(phaseColumn >= 0);
-    return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(phaseColumn).toBool()};
+    const struct model::Variant result{q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(phaseColumn).toBool()};
+    if (storageError) {
+        QVariantMap raw=model::toMap(result);
+        for (const int column:{0,1,2,3}) {
+            if (q.value(column).metaType().id()!=QMetaType::QString) {
+                *storageError=QStringLiteral("Stored schedule %1 field %2 must be text.").arg(result.id.left(128),q.record().fieldName(column));return result;
+            }
+        }
+        raw["reviewCount"]=q.value(4);raw["stability"]=q.value(5);raw["difficulty"]=q.value(6);
+        const QVariant phase=q.value(phaseColumn);
+        const bool numericPhase=!phase.isNull()&&phase.metaType().id()!=QMetaType::QString&&phase.metaType().id()!=QMetaType::QByteArray;
+        if (!numericPhase||(phase.toDouble()!=0.0&&phase.toDouble()!=1.0)) raw["graduated"]=phase;
+        const auto valid=model::variantFromMap(raw);
+        *storageError=valid?QString{}:QStringLiteral("Stored schedule %1 (direction %2, review count %3, graduated %4): %5")
+            .arg(result.id.left(128),result.key.left(128),q.value(4).toString().left(128),phase.toString().left(128),valid.error());
+    }
+    return result;
 }
-struct model::Review readReview(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString()}; }
+struct model::Review readReview(const QSqlQuery &q, QString *storageError=nullptr)
+{
+    const struct model::Review result{q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toInt(),q.value(5).toDouble(),q.value(6).toDouble(),q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString()};
+    if (storageError) {
+        QVariantMap raw=model::toMap(result);
+        for (const int column:{0,1,2,3,7,8,9,10,11}) {
+            if (q.value(column).metaType().id()!=QMetaType::QString) {
+                *storageError=QStringLiteral("Stored review %1 field %2 must be text.").arg(result.id.left(128),q.record().fieldName(column));return result;
+            }
+        }
+        raw["grade"]=q.value(4);raw["recallFraction"]=q.value(5);raw["responseSeconds"]=q.value(6);
+        if (!q.value(9).toString().isEmpty()||!q.value(10).toString().isEmpty()||!q.value(11).toString().isEmpty()) {
+            raw["sessionId"]=q.value(9);raw["sessionDeckName"]=q.value(10);raw["sessionStartedAt"]=q.value(11);
+        }
+        const auto valid=model::reviewFromMap(raw);
+        *storageError=valid?QString{}:QStringLiteral("Stored review %1 (grade %2): %3").arg(result.id.left(128),q.value(4).toString().left(128),valid.error());
+    }
+    return result;
+}
 QVariantList variantMaps(const QList<struct model::Variant> &variants)
 {
     QVariantList result;
@@ -127,12 +190,15 @@ void DatabaseWorker::initialize()
     m_db.setDatabaseName(m_path);
     if (!m_db.open()) { fail("STORAGE_OPEN","Could not open storage. Check the data directory permissions.",m_db.lastError().text());return; }
     if (!execute("PRAGMA foreign_keys=ON") || !execute("PRAGMA journal_mode=WAL")
-        || !execute("PRAGMA busy_timeout=5000") || !migrate()
-        || !execute("CREATE INDEX IF NOT EXISTS reviews_variant_recent ON reviews(variant_id,card_id,reviewed_at DESC,id DESC)")
-        || !initializeHistory() || !initializeStudyGuidance()) {
+        || !execute("PRAGMA busy_timeout=5000") || !migrate()) {
         fail("STORAGE_SCHEMA","Could not initialize storage. Preserve the database and inspect the details.",m_sqlDetail);
         shutdown();return;
     }
+    m_historySetupError.clear();m_guidanceSetupError.clear();
+    if (!initializeHistory()) m_historySetupError=m_sqlDetail;
+    if (!execute("CREATE INDEX IF NOT EXISTS reviews_variant_recent ON reviews(variant_id,card_id,reviewed_at DESC,id DESC)")
+        ||!initializeStudyGuidance()) m_guidanceSetupError=m_sqlDetail;
+    m_sqlDetail.clear();
     QSqlQuery query(m_db);
     if (!query.exec("SELECT key,value FROM metadata")) { fail("STORAGE_METADATA","Could not load device metadata.",query.lastError().text());shutdown();return; }
     while (query.next()) {
@@ -157,7 +223,11 @@ bool DatabaseWorker::migrate()
         m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 8. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
         return false;
     }
-    return mutate([&] {
+    const bool migrating=version<8;
+    if (migrating&&(m_db.tables().contains(QStringLiteral("notes"))||m_db.tables().contains(QStringLiteral("cards")))
+        &&!createRecoveryBackup()) return false;
+    if (migrating&&(!execute("PRAGMA foreign_keys=OFF")||!execute("PRAGMA ignore_check_constraints=ON"))) return false;
+    const bool migrated=mutate([&] {
         const auto variantsSchema = [](const QString &name, const bool ifNotExists) {
             assert(name == QStringLiteral("review_variants") || name == QStringLiteral("review_variants_v8"));
             return QStringLiteral("CREATE TABLE%1 %2(id TEXT PRIMARY KEY,card_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,variant_key TEXT NOT NULL,due TEXT NOT NULL,review_count INTEGER NOT NULL CHECK(review_count>=0),stability REAL NOT NULL CHECK(stability BETWEEN (1.0/144.0) AND 3650),difficulty REAL NOT NULL CHECK(difficulty BETWEEN 0 AND 1),graduated INTEGER NOT NULL DEFAULT 0 CHECK(graduated IN (0,1)),CHECK(graduated=0 OR review_count>0),CHECK(graduated=1 OR review_count=0 OR stability<1),UNIQUE(card_id,variant_key))")
@@ -237,8 +307,8 @@ bool DatabaseWorker::migrate()
             while (old.next()) {
                 const struct model::Card note{old.value(0).toString(),old.value(1).toString(),old.value(2).toString(),old.value(3).toString(),old.value(4).toString(),old.value(5).toString(),old.value(6).toInt()};
                 const auto valid = model::cardFromMap(model::toMap(note));
-                if (!valid) {m_sqlDetail=valid.error();return false;}
                 if (!upsertCard(note)) return false;
+                if (!valid) continue;
                 const QDate oldDue = QDate::fromString(old.value(7).toString(),Qt::ISODate);
                 const QString due = oldDue.isValid() ? oldDue.startOfDay(QTimeZone::systemTimeZone()).toUTC().toString(Qt::ISODateWithMs) : model::nowUtc();
                 for (const QString &key : *model::variantKeys(note)) {
@@ -250,7 +320,10 @@ bool DatabaseWorker::migrate()
             QSqlQuery allDecks(m_db);
             if (!allDecks.exec("SELECT id,name,description,created_at,parent_id FROM decks")) {m_sqlDetail=allDecks.lastError().text();return false;}
             while (allDecks.next()) if (!enqueue("deck.upsert",{{"deck",model::toMap(readDeck(allDecks))}})) return false;
-            for (const struct model::Card &note : migrated) if (!enqueue("card.upsert",cardPayload(note))) return false;
+            for (const struct model::Card &note : migrated) {
+                if (!model::cardReadIssue(note,cardVariants(note.id)).isEmpty()) continue;
+                if (!enqueue("card.upsert",cardPayload(note))) return false;
+            }
             if (m_db.tables().contains(QStringLiteral("history"))) {
                 QSqlQuery history(m_db);
                 if (!history.exec("SELECT id,card_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due FROM history")) {m_sqlDetail=history.lastError().text();return false;}
@@ -259,9 +332,10 @@ bool DatabaseWorker::migrate()
                     const int grade = QStringList{"Missed","Partial","Hard","Good","Easy"}.indexOf(history.value(3).toString());
                     const QDate oldDate = QDate::fromString(history.value(7).toString(),Qt::ISODate);
                     const auto reviewedAt = model::utcInstant(history.value(6).toString());
-                    if (!model::validUuid(cardId) || grade < 0 || !oldDate.isValid() || !reviewedAt) {m_sqlDetail="Legacy review is invalid.";return false;}
+                    if (!model::validUuid(cardId) || grade < 0 || !oldDate.isValid() || !reviewedAt) continue;
                     const struct model::Review review{history.value(0).toString(),cardId,model::variantId(cardId,"forward"),history.value(2).toString(),grade,history.value(4).toDouble(),history.value(5).toDouble(),*reviewedAt,oldDate.startOfDay(QTimeZone::systemTimeZone()).toUTC().toString(Qt::ISODateWithMs)};
-                    if (!model::reviewFromMap(model::toMap(review)) || !insertReview(review)) return false;
+                    if (!model::reviewFromMap(model::toMap(review))) continue;
+                    if (!insertReview(review)) return false;
                 }
             }
         }
@@ -269,12 +343,16 @@ bool DatabaseWorker::migrate()
         if (!pending.exec("SELECT id,device_id,event_type,payload,created_at,target_type,target_id FROM sync_outbox")) {m_sqlDetail=pending.lastError().text();return false;}
         while (pending.next()) {
             const QJsonDocument payload=QJsonDocument::fromJson(pending.value(3).toString().toUtf8());
-            if (!payload.isObject()) {m_sqlDetail="Stored upload payload is invalid.";return false;}
+            if (!payload.isObject()) continue;
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
         return execute("PRAGMA user_version=8");
     });
+    const QString migrationError=m_sqlDetail;
+    if (migrating&&(!execute("PRAGMA ignore_check_constraints=OFF")||!execute("PRAGMA foreign_keys=ON"))) return false;
+    if (!migrated) m_sqlDetail=migrationError;
+    return migrated;
 }
 std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
 {
@@ -286,20 +364,36 @@ std::optional<struct model::Card> DatabaseWorker::card(const QString &id)
 {
     QSqlQuery q(m_db);q.prepare("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
-    return q.next() ? std::optional<struct model::Card>(readCard(q)) : std::nullopt;
+    if (!q.next()) return std::nullopt;
+    QString metadataError;
+    const struct model::Card result=readCard(q,&metadataError);
+    const QVariantMap issue=model::cardReadIssue(result,cardVariants(id),metadataError);
+    if (!issue.isEmpty()) m_cardLoadErrors.insert(id,issue);
+    return result;
 }
-std::optional<struct model::Variant> DatabaseWorker::variant(const QString &id)
+std::optional<struct model::Variant> DatabaseWorker::variant(const QString &id, const bool validateStored)
 {
     QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
-    return q.next() ? std::optional<struct model::Variant>(readVariant(q)) : std::nullopt;
+    if (!q.next()) return std::nullopt;
+    QString storageError;
+    const struct model::Variant result=readVariant(q,validateStored?&storageError:nullptr);
+    if (!storageError.isEmpty()) {m_sqlDetail=storageError;return std::nullopt;}
+    return result;
 }
 QList<struct model::Variant> DatabaseWorker::cardVariants(const QString &id)
 {
     QList<struct model::Variant> result;
     QSqlQuery q(m_db);q.prepare("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants WHERE card_id=? ORDER BY variant_key");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return result;}
-    while (q.next()) result.append(readVariant(q));
+    while (q.next()) {
+        QString storageError;
+        const struct model::Variant schedule=readVariant(q,&storageError);result.append(schedule);
+        if (!storageError.isEmpty()) {
+            m_invalidScheduleValues.insert(id);
+            m_cardLoadErrors.insert(id,QVariantMap{{"code","CARD_SCHEDULE"},{"cardId",id},{"message","The saved schedule needs repair. Other cards remain available."},{"detail",storageError}});
+        }
+    }
     return result;
 }
 bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
@@ -523,75 +617,157 @@ bool DatabaseWorker::initializeStudyGuidance()
 bool DatabaseWorker::publishSnapshot()
 {
     assertThread();
-    if (!refreshStudyGuidance()) {
-        fail("STUDY_GUIDANCE_LOAD", "Study guidance could not be refreshed. Any change already saved remains saved. Refresh the library; if it keeps failing, inspect the details.", m_sqlDetail);
-        return false;
-    }
+    m_collectionIssues=m_recoveryNotices;
+    m_cardLoadErrors.clear();
+    m_invalidScheduleValues.clear();
+    m_hasUnreadableHistory=false;
+    m_hasOrphanSchedules=false;
+    QHash<QString,QString> rawScheduleErrors;
     QVariantList decks,cards,history;
+    QHash<QString,int> deckIndexes;
+    QHash<QString,QString> deckParents;
+    QHash<QString,QList<struct model::Variant>> schedulesByCard;
+    QHash<QString,struct model::Card> notes;
     const QString now=model::nowUtc();
-    QSqlQuery q(m_db);
-    q.prepare("SELECT d.id,d.name,d.description,d.created_at,d.parent_id,COUNT(DISTINCT n.id),COUNT(v.id),SUM(CASE WHEN v.due<=? THEN 1 ELSE 0 END),SUM(CASE WHEN v.due>? THEN 1 ELSE 0 END),SUM(CASE WHEN v.due<=? AND v.review_count=0 THEN 1 ELSE 0 END),SUM(CASE WHEN v.due<=? AND v.review_count>0 THEN 1 ELSE 0 END) FROM decks d LEFT JOIN notes n ON n.deck_id=d.id LEFT JOIN review_variants v ON v.card_id=n.id GROUP BY d.id ORDER BY d.name,d.id");q.addBindValue(now);q.addBindValue(now);q.addBindValue(now);q.addBindValue(now);
-    if (!q.exec()) {fail("STORAGE_READ","Could not load decks. Try refreshing.",q.lastError().text());return false;}
-    QHash<QString,int> deckIndexes;QHash<QString,QString> deckParents;
-    while (q.next()) {
-        QVariantMap map=model::toMap(readDeck(q));
+    const QStringList countFields{QStringLiteral("cardCount"),QStringLiteral("totalCount"),QStringLiteral("variantCount"),
+        QStringLiteral("dueCount"),QStringLiteral("laterCount"),QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount"),QStringLiteral("invalidCardCount")};
+    const auto warning=[this](const QString &code,const QString &message,const QString &detail) {
+        m_collectionIssues.append(QVariantMap{{"code",code},{"message",message},{"detail",detail.left(4096)}});
+    };
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY name,id")) {
+        fail("STORAGE_READ","Could not read saved decks. No cards have been removed by this failed load. Check storage and retry.",query.lastError().text());return false;
+    }
+    while (query.next()) {
+        QVariantMap map=model::toMap(readDeck(query));
         const QString id=map.value("id").toString();deckIndexes.insert(id,decks.size());deckParents.insert(id,map.value("parentId").toString());
-        map.insert("ownCardCount",q.value(5).toInt());map.insert("ownVariantCount",q.value(6).toInt());map.insert("ownDueCount",q.value(7).toInt());map.insert("ownLaterCount",q.value(8).toInt());map.insert("ownNewDueCount",q.value(9).toInt());map.insert("ownReviewDueCount",q.value(10).toInt());map.insert("cardCount",q.value(5).toInt());map.insert("totalCount",q.value(5).toInt());map.insert("variantCount",q.value(6).toInt());map.insert("dueCount",q.value(7).toInt());map.insert("laterCount",q.value(8).toInt());map.insert("newDueCount",q.value(9).toInt());map.insert("reviewDueCount",q.value(10).toInt());decks.append(map);
+        for (const QString &field:countFields) {map.insert(field,0);map.insert(QStringLiteral("own")+field.left(1).toUpper()+field.mid(1),0);}
+        decks.append(map);
+    }
+    if (query.lastError().isValid()) {fail("STORAGE_READ","Deck reading stopped before completion. Preserve the collection and retry.",query.lastError().text());return false;}
+    if (!query.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants ORDER BY variant_key")) {
+        fail("STORAGE_READ","Could not read review schedules. No saved cards or learning history have been removed. Check storage and retry.",query.lastError().text());return false;
+    }
+    while (query.next()) {
+        QString storageError;
+        const struct model::Variant schedule=readVariant(query,&storageError);
+        schedulesByCard[schedule.cardId].append(schedule);
+        if (!storageError.isEmpty()) {m_invalidScheduleValues.insert(schedule.cardId);rawScheduleErrors.insert(schedule.cardId,storageError);}
+    }
+    if (query.lastError().isValid()) {fail("STORAGE_READ","Schedule reading stopped before completion. Preserve the collection and retry.",query.lastError().text());return false;}
+    if (!query.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {
+        fail("STORAGE_READ","Could not read saved cards. No cards have been removed by this failed load. Check storage and retry.",query.lastError().text());return false;
+    }
+    while (query.next()) {
+        QString metadataError;
+        const struct model::Card note=readCard(query,&metadataError);
+        const QList<struct model::Variant> schedules=schedulesByCard.value(note.id);
+        QVariantMap issue=model::cardReadIssue(note,schedules,metadataError);
+        if (issue.isEmpty()&&rawScheduleErrors.contains(note.id))
+            issue={{"code","CARD_SCHEDULE"},{"cardId",note.id},{"message","The saved review schedule is invalid. The card and its learning history are retained; other cards remain available."},{"detail",rawScheduleErrors.value(note.id)}};
+        if (issue.isEmpty()&&!deckIndexes.contains(note.deckId))
+            issue={{"code","CARD_DECK"},{"cardId",note.id},{"message","This card's deck is missing. Its saved content and history are retained. Choose an existing deck when repairing it."},{"detail",QStringLiteral("Card %1 refers to missing deck %2.").arg(note.id,note.deckId)}};
+        if (!issue.isEmpty()) m_cardLoadErrors.insert(note.id,issue);
+        QVariantMap map=model::toMap(note);
+        map.insert("loadError",issue);map.insert("reviewable",issue.isEmpty());
+        notes.insert(note.id,note);cards.append(map);
+    }
+    if (query.lastError().isValid()) {fail("STORAGE_READ","Card reading stopped before completion. Preserve the collection and retry.",query.lastError().text());return false;}
+    for (auto it=schedulesByCard.cbegin();it!=schedulesByCard.cend();++it) {
+        if (!notes.contains(it.key())) {
+            m_hasOrphanSchedules=true;
+            warning("ORPHAN_SCHEDULE","A saved schedule refers to a missing card. The schedule is retained; readable cards remain available.",QStringLiteral("Missing card %1. Preserve the database and inspect review_variants before repair.").arg(it.key().left(128)));
+        }
+    }
+    if (!m_historySetupError.isEmpty()) warning("UNDO_UNAVAILABLE","Undo could not be prepared. Your saved cards remain available; check storage and restart before changing cards.",m_historySetupError);
+    if (!m_guidanceSetupError.isEmpty()||!refreshStudyGuidance()) {
+        warning("STUDY_GUIDANCE_UNAVAILABLE","Study guidance is unavailable. Your decks and cards remain accessible, and readable cards can still be reviewed.",m_guidanceSetupError.isEmpty()?m_sqlDetail:m_guidanceSetupError);
+        m_weaknessByVariant.clear();m_sqlDetail.clear();
+    }
+    for (QVariant &entry:cards) {
+        QVariantMap map=entry.toMap();const QString id=map.value("id").toString();
+        const struct model::Card note=notes.value(id);
+        const QList<struct model::Variant> schedules=schedulesByCard.value(id);
+        const bool readable=!m_cardLoadErrors.contains(id);
+        QVariantList scheduleMaps;QString earliest;qint64 reviewCount=0;int dueCount=0;int newDue=0;int reviewDue=0;
+        for (const struct model::Variant &schedule:schedules) {
+            QVariantMap saved=model::toMap(schedule);
+            if (readable) saved.insert("weakness",m_weaknessByVariant.value(schedule.id));
+            scheduleMaps.append(saved);
+            if (earliest.isEmpty()||schedule.due<earliest) earliest=schedule.due;
+            reviewCount+=std::max(0,schedule.reviewCount);
+            if (readable&&schedule.due<=now) {++dueCount;if (schedule.reviewCount==0) ++newDue;else ++reviewDue;}
+        }
+        map.insert("variants",scheduleMaps);map.insert("due",earliest);map.insert("reviewCount",reviewCount);map.insert("dueCount",dueCount);
+        QVariantMap weakness=readable?aggregateWeakness(schedules,m_weaknessByVariant):QVariantMap{};
+        const QVariant variantWeaknesses=weakness.take("_variantWeaknesses");map.insert("weakness",weakness);map.insert("variantWeaknesses",variantWeaknesses);entry=map;
+        if (deckIndexes.contains(note.deckId)) {
+            QVariantMap deckMap=decks.at(deckIndexes.value(note.deckId)).toMap();
+            const QVariantMap increments{{"cardCount",1},{"totalCount",1},{"variantCount",schedules.size()},{"dueCount",dueCount},
+                {"laterCount",readable?schedules.size()-dueCount:0},{"newDueCount",newDue},{"reviewDueCount",reviewDue},{"invalidCardCount",readable?0:1}};
+            for (const QString &field:countFields) {
+                const QString own=QStringLiteral("own")+field.left(1).toUpper()+field.mid(1);
+                deckMap[field]=deckMap.value(field).toLongLong()+increments.value(field).toLongLong();
+                deckMap[own]=deckMap.value(own).toLongLong()+increments.value(field).toLongLong();
+            }
+            decks[deckIndexes.value(note.deckId)]=deckMap;
+        }
+        if (!readable&&m_collectionIssues.size()<100) m_collectionIssues.append(m_cardLoadErrors.value(id));
     }
     QHash<QString,int> childCounts;QList<QString> ready;
-    for (const QString &id : deckIndexes.keys()) childCounts.insert(id,0);
-    for (const QString &id : deckIndexes.keys()) {
+    bool hierarchyValid=true;
+    for (const QString &id:deckIndexes.keys()) childCounts.insert(id,0);
+    for (const QString &id:deckIndexes.keys()) {
         const QString parent=deckParents.value(id);
         if (parent.isEmpty()) continue;
-        if (childCounts.contains(parent)) childCounts[parent]++;
-        else {fail("STORAGE_HIERARCHY","A deck refers to a missing parent. Repair the database and refresh.");return false;}
+        if (childCounts.contains(parent)) childCounts[parent]++;else hierarchyValid=false;
     }
-    for (const QString &id : deckIndexes.keys()) if (childCounts.value(id)==0) ready.append(id);
+    for (const QString &id:deckIndexes.keys()) if (childCounts.value(id)==0) ready.append(id);
     int processed=0;
-    while (!ready.isEmpty()) {
+    while (hierarchyValid&&!ready.isEmpty()) {
         const QString current=ready.takeLast();++processed;
         const QString parent=deckParents.value(current);if (parent.isEmpty()) continue;
-        QVariantMap child=decks.at(deckIndexes.value(current)).toMap();QVariantMap aggregate=decks.at(deckIndexes.value(parent)).toMap();
-        for (const QString &key : {QStringLiteral("cardCount"),QStringLiteral("totalCount"),QStringLiteral("variantCount"),QStringLiteral("dueCount"),QStringLiteral("laterCount"),QStringLiteral("newDueCount"),QStringLiteral("reviewDueCount")}) aggregate[key]=aggregate.value(key).toInt()+child.value(key).toInt();
+        const QVariantMap child=decks.at(deckIndexes.value(current)).toMap();QVariantMap aggregate=decks.at(deckIndexes.value(parent)).toMap();
+        for (const QString &field:countFields) aggregate[field]=aggregate.value(field).toLongLong()+child.value(field).toLongLong();
         decks[deckIndexes.value(parent)]=aggregate;
         const int remaining=childCounts.value(parent)-1;childCounts[parent]=remaining;if (remaining==0) ready.append(parent);
     }
-    if (processed!=deckIndexes.size()) {fail("STORAGE_HIERARCHY","The deck hierarchy contains a cycle. Repair the database and refresh.");return false;}
-    QHash<QString,QList<struct model::Variant>> variants;
-    if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants ORDER BY variant_key")) {fail("STORAGE_READ","Could not load review variants. Try refreshing.",q.lastError().text());return false;}
-    while (q.next()) {const struct model::Variant schedule=readVariant(q);variants[schedule.cardId].append(schedule);}
-    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("STORAGE_READ","Could not load cards. Try refreshing.",q.lastError().text());return false;}
-    while (q.next()) {
-        const struct model::Card note=readCard(q);
-        QVariantMap map=model::toMap(note);
-        const QList<struct model::Variant> schedules=variants.value(note.id);
-        QVariantList scheduleMaps;
-        for (const struct model::Variant &schedule : schedules) {
-            QVariantMap scheduleMap=model::toMap(schedule);
-            scheduleMap.insert("weakness",m_weaknessByVariant.value(schedule.id));
-            scheduleMaps.append(scheduleMap);
+    if (!hierarchyValid||processed!=deckIndexes.size()) {
+        warning("DECK_HIERARCHY","The deck hierarchy needs repair. All loaded decks are shown at the top level; their saved relationships are retained.","A deck has a missing parent or a parent cycle. Edit the affected deck's parent after preserving a backup.");
+        for (QVariant &entry:decks) {
+            QVariantMap map=entry.toMap();map.insert("storedParentId",map.value("parentId"));map.insert("parentId",QString{});
+            for (const QString &field:countFields) map[field]=map.value(QStringLiteral("own")+field.left(1).toUpper()+field.mid(1));
+            entry=map;
         }
-        map.insert("variants",scheduleMaps);
-        QVariantMap cardWeakness=aggregateWeakness(schedules,m_weaknessByVariant);
-        const QVariant variantWeaknesses=cardWeakness.take("_variantWeaknesses");
-        map.insert("weakness",cardWeakness);
-        map.insert("variantWeaknesses",variantWeaknesses);
-        QString earliest;qint64 reviewCount=0;int dueCount=0;
-        for (const struct model::Variant &v:schedules) {
-            if (earliest.isEmpty()||v.due<earliest) earliest=v.due;
-            reviewCount+=v.reviewCount;
-            if (v.due<=now) ++dueCount;
-        }
-        map.insert("due",earliest);map.insert("reviewCount",reviewCount);map.insert("dueCount",dueCount);cards.append(map);
     }
-    if (!q.exec("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due,session_id,session_deck_name,session_started_at FROM reviews ORDER BY reviewed_at DESC,id DESC LIMIT 200")) {fail("STORAGE_READ","Could not load review history. Try refreshing.",q.lastError().text());return false;}
-    while (q.next()) {
-        const struct model::Review review=readReview(q);
-        QVariantMap map=model::toMap(review);map.insert("gradeLabel",model::gradeLabel(review.grade));history.append(map);
+    if (!query.exec("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due,session_id,session_deck_name,session_started_at FROM reviews ORDER BY reviewed_at DESC,id DESC LIMIT 200")) {
+        warning("REVIEW_HISTORY_UNAVAILABLE","Review history could not be loaded. Card content remains available; saved history has not been removed.",query.lastError().text());
+    } else while (query.next()) {
+        QString storageError;
+        const struct model::Review review=readReview(query,&storageError);
+        QVariantMap map=model::toMap(review);
+        if (!storageError.isEmpty()) {
+            const QVariantMap issue{{"code","REVIEW_RECORD"},{"message","This saved review entry needs repair. Its stored data is retained."},{"detail",QStringLiteral("Review %1: %2").arg(review.id,storageError)}};
+            map.insert("loadError",issue);if (m_collectionIssues.size()<100) m_collectionIssues.append(issue);
+        } else map.insert("gradeLabel",model::gradeLabel(review.grade));
+        history.append(map);
+    }
+    if (!query.exec("SELECT id,payload FROM sync_outbox ORDER BY position")) {
+        warning("SYNC_STORAGE","Pending sync changes could not be inspected. Local cards remain available; preserve the database before attempting sync.",query.lastError().text());
+    } else while (query.next()) {
+        QJsonParseError error{};
+        const QJsonDocument payload=QJsonDocument::fromJson(query.value(1).toString().toUtf8(),&error);
+        if (!payload.isObject()&&m_collectionIssues.size()<100)
+            warning("SYNC_STORAGE","A pending sync change needs repair. Local cards remain available; the original change is retained and sync will stop before uploading it.",
+                QStringLiteral("sync_outbox event %1: %2. Preserve the database and repair the pending event before syncing.").arg(query.value(0).toString().left(128),error.error==QJsonParseError::NoError?QStringLiteral("payload must be a JSON object"):error.errorString()));
     }
     const auto sessions=reviewSessions();
-    if (!sessions) { fail("STORAGE_READ","Could not load review sessions. Try refreshing.",sessions.error()); return false; }
-    emit snapshotReady(decks,cards,history,*sessions);
+    if (m_hasUnreadableHistory) warning("REVIEW_RECORD","Some saved review entries need repair. Their stored data is retained; readable cards remain available.","Session summaries exclude unreadable entries, including entries outside the recent History window. Preserve a raw SQLite recovery copy before repairing history.");
+    if (m_db.tables().contains(QStringLiteral("history"))) warning("LEGACY_HISTORY_RETAINED","The collection retains its original legacy history table. Entries that could not be converted remain there unchanged.","Preserve the database and inspect the history table if past entries are absent from the current History view.");
+    if (!sessions) warning("REVIEW_SESSIONS_UNAVAILABLE","Review-session summaries are unavailable. Your decks, cards and stored reviews are retained.",sessions.error());
+    emit collectionIssuesReady(m_collectionIssues);
+    emit snapshotReady(decks,cards,history,sessions?*sessions:QVariantList{});
+    m_sqlDetail.clear();
     return true;
 }
 
@@ -615,20 +791,18 @@ bool DatabaseWorker::refreshStudyGuidance()
     while (variants.next()) {
         const QString id=variants.value(0).toString();
         const QString key=variants.value(1).toString();
-        if (id.isEmpty()||key.isEmpty()) { m_sqlDetail=QStringLiteral("Study guidance contains an invalid review variant."); return false; }
-        keys.insert(id,key);
+        if (id.isEmpty()||key.isEmpty()) continue;
         const int scheduleReviewCount=variants.value(2).toInt();
-        if (scheduleReviewCount < 0) { m_sqlDetail=QStringLiteral("Study guidance contains an invalid review count."); return false; }
-        activeReviewCounts.insert(id,scheduleReviewCount);
+        if (scheduleReviewCount < 0) continue;
         const struct model::Card note{variants.value(3).toString(),variants.value(4).toString(),variants.value(5).toString(),
                                       variants.value(6).toString(),variants.value(7).toString(),variants.value(8).toString(),
                                       variants.value(9).toInt(),variants.value(10).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(variants.value(10).toString().toUtf8()).object().toVariantMap(),
                                       variants.value(11).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(variants.value(11).toString().toUtf8()).object().toVariantMap()};
-        const auto supported = model::variantKeys(note);
-        if (!supported || !supported->contains(key)) {
-            m_sqlDetail=QStringLiteral("A saved card has an invalid review direction. Repair the card before refreshing study guidance.");
-            return false;
-        }
+        const auto valid=model::cardFromMap(model::toMap(note));
+        const auto supported=model::variantKeys(note);
+        if (!valid||!supported||!supported->contains(key)||m_cardLoadErrors.contains(note.id)) continue;
+        keys.insert(id,key);
+        activeReviewCounts.insert(id,scheduleReviewCount);
         budgets.insert(id,model::readingBudget(model::question(note,key)));
     }
     if (variants.lastError().isValid()) {
@@ -652,9 +826,12 @@ bool DatabaseWorker::refreshStudyGuidance()
         const double recall=reviews.value(2).toDouble();
         const double seconds=reviews.value(3).toDouble();
         if (grade<0||grade>4||!std::isfinite(recall)||recall<0.0||recall>1.0||!std::isfinite(seconds)||seconds<0.0) {
-            m_sqlDetail=QStringLiteral("Study guidance contains an invalid saved review.");
-            return false;
+            if (m_collectionIssues.size()<100)
+                m_collectionIssues.append(QVariantMap{{"code","REVIEW_EVIDENCE"},{"message","Some saved review evidence is invalid and is excluded from guidance. The stored review and card remain available."},
+                    {"detail",QStringLiteral("Review direction %1 has an invalid grade, recall fraction or response time.").arg(variantId)}});
+            continue;
         }
+        if (!keys.contains(variantId)) continue;
         const int activeCount=activeReviewCounts.value(variantId);
         if (evidence.value(variantId).size() < std::min(activeCount,12)) {
             evidence[variantId].append({grade,recall,seconds});
@@ -697,7 +874,9 @@ std::expected<QVariantList, QString> DatabaseWorker::reviewSessions()
     QString previousLegacyKey;
     QDateTime previousTime;
     while (q.next()) {
-        const struct model::Review review=readReview(q);
+        QString storageError;
+        const struct model::Review review=readReview(q,&storageError);
+        if (!storageError.isEmpty()) {m_hasUnreadableHistory=true;continue;}
         QString key=review.sessionId;
         bool estimated=false;
         const QDateTime at=QDateTime::fromString(review.reviewedAt,Qt::ISODateWithMs).toUTC();
@@ -716,7 +895,8 @@ std::expected<QVariantList, QString> DatabaseWorker::reviewSessions()
         } else if (!review.sessionId.isEmpty()
                    && (a.deck!=(review.sessionDeckName.isEmpty()?review.deckName:review.sessionDeckName)
                        ||a.started!=review.sessionStartedAt)) {
-            return std::unexpected(QStringLiteral("Review session metadata is inconsistent for session %1.").arg(key));
+            m_hasUnreadableHistory=true;
+            continue;
         }
         a.last=review.reviewedAt;
         a.cards.insert(review.cardId);
@@ -750,6 +930,8 @@ std::expected<QVariantList, QString> DatabaseWorker::reviewSessions()
 }
 void DatabaseWorker::snapshot()
 {
+    assertThread();
+    if (!m_db.isOpen()) { initialize(); return; }
     if (!ready()) return;
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Collection refreshed");
@@ -780,12 +962,13 @@ QVariantMap DatabaseWorker::sessionCard(const QString &variantId, const QVariant
 }
 std::optional<QVariantMap> DatabaseWorker::reviewCardByVariant(const QString &variantId)
 {
-    const auto schedule=variant(variantId);
+    const auto schedule=variant(variantId,true);
     const auto note=schedule?card(schedule->cardId):std::nullopt;
     const auto sourceDeck=note?deck(note->deckId):std::nullopt;
     if (!schedule||!note||!sourceDeck) return std::nullopt;
     const auto keys=model::variantKeys(*note);
-    if (!keys||!keys->contains(schedule->key)) return std::nullopt;
+    if (!model::cardFromMap(model::toMap(*note))||!model::variantFromMap(model::toMap(*schedule))
+        ||!keys||!keys->contains(schedule->key)||m_cardLoadErrors.contains(note->id)) return std::nullopt;
     return reviewCard(*note,*schedule,sourceDeck->name);
 }
 bool DatabaseWorker::publishQueue(bool resetCurrent)
@@ -799,11 +982,14 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name,v.graduated AS graduated FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
         if (!q.exec()) {fail("REVIEW_LOAD","Could not load the review queue. Refresh and try again.",q.lastError().text());return false;}
         while (q.next()) {
-            const struct model::Variant schedule=readVariant(q);
+            QString storageError;
+            const struct model::Variant schedule=readVariant(q,&storageError);
+            if (!storageError.isEmpty()) continue;
             if (!members.contains(schedule.id)||(!m_sessionGrades.contains(schedule.id)&&schedule.due>now)) continue;
             const struct model::Card note{schedule.cardId,q.value(7).toString(),q.value(8).toString(),q.value(9).toString(),q.value(10).toString(),q.value(11).toString(),q.value(12).toInt(),q.value(13).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(13).toString().toUtf8()).object().toVariantMap(),q.value(14).toString().isEmpty()?QVariantMap{}:QJsonDocument::fromJson(q.value(14).toString().toUtf8()).object().toVariantMap()};
             const auto keys=model::variantKeys(note);
-            if (!keys||!keys->contains(schedule.key)) continue;
+            if (!model::cardFromMap(model::toMap(note))||!model::variantFromMap(model::toMap(schedule))
+                ||!keys||!keys->contains(schedule.key)||m_cardLoadErrors.contains(note.id)) continue;
             cache.insert(schedule.id,reviewCard(note,schedule,q.value(15).toString()));
         }
         m_queueCache=std::move(cache);
@@ -888,8 +1074,6 @@ void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
 }
 void DatabaseWorker::deleteDeck(const QString &id)
 {
-    const struct HistoryScope history(this, QStringLiteral("Delete deck"));
-    if (!history) return;
     if (!ready()) return;
     if (!model::validUuid(id)) {fail("INVALID_DECK_ID","Choose a valid deck to delete.");return;}
     QSqlQuery hierarchy(m_db);hierarchy.prepare("WITH RECURSIVE descendants(id,parent_id) AS (SELECT id,parent_id FROM decks WHERE id=? UNION SELECT d.id,d.parent_id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,parent_id FROM descendants");hierarchy.addBindValue(id);
@@ -905,19 +1089,58 @@ void DatabaseWorker::deleteDeck(const QString &id)
     QStringList deckIds=parents.keys();
     const auto depth=[&](const QString &deckId) {int result=0;QSet<QString> seen;QString current=deckId;while (!current.isEmpty()&&!seen.contains(current)&&parents.contains(current)) {seen.insert(current);current=parents.value(current);++result;}return result;};
     std::sort(deckIds.begin(),deckIds.end(),[&](const QString &left,const QString &right){return depth(left)>depth(right);});
+    for (const QString &cardId:cardIds) {
+        const auto target=card(cardId);
+        if (!target) continue;
+        const QVariantMap issue=model::cardReadIssue(*target,cardVariants(cardId));
+        if (!issue.isEmpty()) m_cardLoadErrors.insert(cardId,issue);
+    }
+    const bool recovering=std::any_of(cardIds.cbegin(),cardIds.cend(),[this](const QString &cardId){return m_cardLoadErrors.contains(cardId);});
+    if (recovering&&!createRecoveryBackup()) {fail("DECK_RECOVERY_BACKUP","Could not preserve unreadable cards before deleting this deck. Nothing was deleted.",m_sqlDetail);return;}
+    const struct HistoryScope history(this,QStringLiteral("Delete deck"),!recovering);
+    if (!history) return;
     if (!mutate([&] {
         if (!eraseDeck(id)) return false;
         for (const QString &cardId : cardIds) if (!enqueue("card.delete",{{"id",cardId}})) return false;
         for (const QString &deckId : deckIds) if (!enqueue("deck.delete",{{"id",deckId}})) return false;
         return true;
     })) {fail("DECK_DELETE","Could not delete the deck. Check storage and try again.",m_sqlDetail);return;}
+    if (recovering) clearHistoryForRecovery(QStringLiteral("The deck was deleted by request. Unreadable card data and learning records remain in the recovery copy."),m_lastRecoveryBackup);
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck deleted");
 }
+bool DatabaseWorker::createRecoveryBackup()
+{
+    assertThread();
+    const QString directory=QDir(QFileInfo(m_path).absolutePath()).filePath(QStringLiteral("recovery"));
+    if (!QDir().mkpath(directory)||!QFile::setPermissions(directory,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ExeOwner)) {
+        m_sqlDetail=QStringLiteral("Cannot create a private recovery directory at %1. Check its permissions and available space.").arg(directory);return false;
+    }
+    const QString destination=QDir(directory).filePath(QStringLiteral("before-repair-%1-%2.sqlite")
+        .arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMddTHHmmsszzzZ")),model::uuid()));
+    QSqlQuery backup(m_db);
+    if (!backup.prepare(QStringLiteral("VACUUM main INTO ?"))) {m_sqlDetail=backup.lastError().text();return false;}
+    backup.addBindValue(destination);
+    if (!backup.exec()) {m_sqlDetail=QStringLiteral("SQLite recovery copy %1 failed: %2").arg(destination,backup.lastError().text());return false;}
+    if (!QFile::setPermissions(destination,QFileDevice::ReadOwner|QFileDevice::WriteOwner)) {
+        m_sqlDetail=QStringLiteral("Cannot secure recovery copy %1. No card repair was applied.").arg(destination);return false;
+    }
+    m_lastRecoveryBackup=destination;
+    return true;
+}
+void DatabaseWorker::clearHistoryForRecovery(const QString &message, const QString &backupPath)
+{
+    assertThread();
+    m_historyFrames.clear();m_historyOrder.clear();
+    if (!execute("DELETE FROM temp.history_frames")) {m_historyReady=false;m_historySetupError=m_sqlDetail;}
+    emit historyClearedForRecovery();
+    if (m_recoveryNotices.size()>=20) m_recoveryNotices.removeFirst();
+    m_recoveryNotices.append(QVariantMap{{"code",backupPath.isEmpty()?QStringLiteral("UNDO_ACTION_UNAVAILABLE"):QStringLiteral("RECOVERY_COPY")},{"message",message},
+        {"detail",(backupPath.isEmpty()?QStringLiteral("No recovery copy was created for this unexpected undo failure. Preserve a backup before further repairs."):
+            QStringLiteral("Original collection copy: %1.").arg(backupPath))+QStringLiteral(" Session Undo/Redo was cleared; subsequent saved actions are undoable normally.")}});
+}
 void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
-    const struct HistoryScope history(this, QStringLiteral("Save card"));
-    if (!history) { emit cardSaved(id,requestId,false); return; }
     const QString recordId = id.isEmpty() ? model::uuid() : id;
     if (!ready()) { emit cardSaved(recordId,requestId,false); return; }
     const auto failRequest = [&] (const QString &code, const QString &message, const QString &detail = QString()) {
@@ -932,8 +1155,12 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
         const QSet<QString> allowedKeys(draftKeys->cbegin(),draftKeys->cend());
         for (auto it = draft.narrations.cbegin(); it != draft.narrations.cend(); ++it)
             if (allowedKeys.contains(it.key().section(QLatin1Char('/'),0,0))) {
+                struct model::Card candidate=draft;
+                candidate.narrations={{it.key(),it.value()}};candidate.narrationFingerprints.clear();
+                if (!model::cardFromMap(model::toMap(candidate))) continue;
                 narrations.insert(it.key(),it.value());
-                if (draft.narrationFingerprints.contains(it.key())) fingerprints.insert(it.key(),draft.narrationFingerprints.value(it.key()));
+                candidate.narrationFingerprints={{it.key(),draft.narrationFingerprints.value(it.key())}};
+                if (model::cardFromMap(model::toMap(candidate))) fingerprints.insert(it.key(),draft.narrationFingerprints.value(it.key()));
             }
     }
     const struct model::Card record{recordId,deckId,kind,front,back,tags,points,narrations,fingerprints};
@@ -944,14 +1171,37 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
     if (!id.isEmpty() && (!card(id) || isDeleted("card",id))) {failRequest("CARD_NOT_FOUND","This card no longer exists. Refresh the collection.",m_sqlDetail);return;}
     QList<struct model::Variant> schedules;
     const QList<struct model::Variant> existing=cardVariants(record.id);
+    if (!m_sqlDetail.isEmpty()) {failRequest("CARD_SCHEDULE_READ","Could not read this card's saved schedules. No repair was applied.",m_sqlDetail);return;}
+    const bool repairing=previous&&(m_cardLoadErrors.contains(record.id)||!model::cardReadIssue(*previous,existing).isEmpty());
+    if (repairing) {
+        if (m_invalidScheduleValues.contains(record.id)) {
+            failRequest("CARD_SCHEDULE_REPAIR_REQUIRED","The stored schedule has invalid values. Restore a valid recovery copy or explicitly reset the schedule; a content repair will not silently change learning records.",m_cardLoadErrors.value(record.id).value("detail").toString());return;
+        }
+        const auto repairedKeys=model::variantKeys(record);
+        Q_ASSERT(repairedKeys);
+        for (const struct model::Variant &saved:existing) {
+            const auto validSaved=model::variantFromMap(model::toMap(saved));
+            if (!validSaved) {failRequest("CARD_SCHEDULE_REPAIR_REQUIRED","The saved schedule needs an explicit repair or reset; saving card text will not silently change it.",validSaved.error());return;}
+            if (!repairedKeys->contains(saved.key)) {
+                failRequest("CARD_REPAIR_DIRECTIONS","Retain the saved review directions while repairing this card.",
+                    QStringLiteral("Card %1 has a saved %2 direction. Restore that direction in the card text, or preserve a recovery copy before explicitly resetting its schedules.").arg(record.id,saved.key));return;
+            }
+        }
+        if (!createRecoveryBackup()) {failRequest("CARD_RECOVERY_BACKUP","Could not preserve a recovery copy. No repair was applied. Check storage and retry.",m_sqlDetail);return;}
+    }
+    const struct HistoryScope history(this,QStringLiteral("Save card"),!repairing);
+    if (!history) {emit cardSaved(recordId,requestId,false);return;}
     for (const QString &key : *model::variantKeys(record)) {
         const QString variantId=model::variantId(record.id,key);
         const auto found=std::find_if(existing.begin(),existing.end(),[&](const struct model::Variant &v){return v.id==variantId;});
         schedules.append(found==existing.end()?model::Variant{variantId,record.id,key,model::nowUtc()}:*found);
     }
     if (!mutate([&]{return upsertCard(record)&&replaceVariants(record,schedules)&&enqueue("card.upsert",cardPayload(record));})) {failRequest("CARD_SAVE","Could not save the card. Check storage and try again.",m_sqlDetail);return;}
+    if (repairing) {
+        clearHistoryForRecovery(QStringLiteral("The card was repaired. Its original stored data is retained in a recovery copy."),m_lastRecoveryBackup);
+    }
     m_queueDirty=true;
-    if (publishSnapshot()&&publishQueue(false)) done("Card saved");
+    if (publishSnapshot()&&publishQueue(false)) done(repairing?QStringLiteral("Card repaired. Recovery copy: %1").arg(m_lastRecoveryBackup):QStringLiteral("Card saved"));
     emit cardSaved(recordId,requestId,true);
 }
 void DatabaseWorker::setCardNarration(const QString &cardId,const QString &variantKey,const QString &side,const QString &mediaName,const QString &requestId,const QString &fingerprint)
@@ -964,6 +1214,7 @@ void DatabaseWorker::setCardNarration(const QString &cardId,const QString &varia
     };
     const auto existing = card(cardId);
     if (!existing || isDeleted("card",cardId)) { failRequest("CARD_NOT_FOUND","This card no longer exists. Refresh the collection."); return; }
+    if (m_cardLoadErrors.contains(cardId)) { failRequest("CARD_REPAIR_REQUIRED","Repair this card before changing its narration. Its saved content and learning history remain intact.",m_cardLoadErrors.value(cardId).value("detail").toString()); return; }
     if (side != QStringLiteral("front") && side != QStringLiteral("back")) { failRequest("NARRATION_SIDE_INVALID","Choose the front or back of the card."); return; }
     const auto keys = model::variantKeys(*existing);
     if (!keys || !keys->contains(variantKey)) { failRequest("NARRATION_VARIANT_INVALID","Choose a valid card direction."); return; }
@@ -1004,6 +1255,12 @@ void DatabaseWorker::confirmCardNarration(const QString &cardId,const QString &v
             return false;
         }
         if (!m_sqlDetail.isEmpty()) return false;
+        if (m_cardLoadErrors.contains(cardId)) {
+            failureCode = QStringLiteral("CARD_REPAIR_REQUIRED");
+            failureMessage = QStringLiteral("Repair this card before confirming its narration. Its saved content and learning history remain intact.");
+            m_sqlDetail = m_cardLoadErrors.value(cardId).value("detail").toString();
+            return false;
+        }
         const QString key = variantKey + QLatin1Char('/') + side;
         const QString currentFingerprint = model::narrationFingerprint(*existing,variantKey,side);
         if (currentFingerprint.isEmpty() || expectedFingerprint != currentFingerprint
@@ -1051,6 +1308,7 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
     const bool committed=mutate([&] {
         const auto stored=card(sourceId);
         if (!m_sqlDetail.isEmpty()) return false;
+        if (m_cardLoadErrors.contains(sourceId)) {m_sqlDetail=m_cardLoadErrors.value(sourceId).value("detail").toString();return false;}
         if (!stored||model::toMap(*stored)!=model::toMap(*expected)) {stale=true;return false;}
         if (!eraseCard(sourceId)||!enqueue("card.delete",{{"id",sourceId}})) return false;
         for (const struct model::Card &replacement:*replacements) {
@@ -1072,11 +1330,19 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
 }
 void DatabaseWorker::deleteCard(const QString &id)
 {
-    const struct HistoryScope history(this, QStringLiteral("Delete card"));
-    if (!history) return;
     if (!ready()) return;
     if (!model::validUuid(id)) {fail("INVALID_CARD_ID","Choose a valid card to delete.");return;}
+    const auto target=card(id);
+    if (target) {
+        const QVariantMap issue=model::cardReadIssue(*target,cardVariants(id));
+        if (!issue.isEmpty()) m_cardLoadErrors.insert(id,issue);
+    }
+    const bool recovering=m_cardLoadErrors.contains(id);
+    if (recovering&&!createRecoveryBackup()) {fail("CARD_RECOVERY_BACKUP","Could not preserve the unreadable card before deletion. No card was deleted.",m_sqlDetail);return;}
+    const struct HistoryScope history(this,QStringLiteral("Delete card"),!recovering);
+    if (!history) return;
     if (!mutate([&]{return eraseCard(id)&&enqueue("card.delete",{{"id",id}});})) {fail("CARD_DELETE","Could not delete the card. Check storage and try again.",m_sqlDetail);return;}
+    if (recovering) clearHistoryForRecovery(QStringLiteral("The unreadable card was deleted by request. Its original content and learning records remain in the recovery copy."),m_lastRecoveryBackup);
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
 }
@@ -1103,6 +1369,7 @@ void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &desti
     for (const QString &id : ids) {
         const auto existing = card(id);
         if (!existing) { reject("CARD_NOT_FOUND", "One or more selected cards no longer exists. Refresh the collection.", m_sqlDetail); return; }
+        if (m_cardLoadErrors.contains(id)) { reject("CARD_REPAIR_REQUIRED", "Repair the unreadable selected card before moving it. No selected cards were moved.", m_cardLoadErrors.value(id).value("detail").toString()); return; }
         cards.append(*existing);
     }
     if (std::all_of(cards.cbegin(), cards.cend(), [&](const struct model::Card &record) { return record.deckId == destinationDeckId; })) {
@@ -1135,8 +1402,6 @@ void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &desti
 }
 void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
 {
-    const struct HistoryScope history(this, QStringLiteral("Reset review state"));
-    if (!history) return;
     if (!ready()) return;
 #ifndef BETTERFLASH_DEVELOPMENT_TOOLS
     Q_UNUSED(id);
@@ -1146,18 +1411,37 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
     if (!model::validUuid(id)) {fail("RESET_TARGET_INVALID","Select a saved deck or card to reset.");return;}
     const bool exists=deckScope?deck(id).has_value():card(id).has_value();
     if (!exists) {fail("RESET_TARGET_MISSING","This deck or card is unavailable. Refresh the collection and try again.",m_sqlDetail);return;}
+    QSqlQuery query(m_db);
+    query.prepare(deckScope
+        ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
+        : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");
+    query.addBindValue(id);
+    if (!query.exec()) {fail("REVIEW_RESET_FAILED","Could not read the selected cards. No schedules were reset.",query.lastError().text());return;}
+    QList<struct model::Card> cards;
+    bool recovering=false;
+    while (query.next()) {
+        QString storageError;
+        const struct model::Card note=readCard(query,&storageError);
+        const auto valid=model::cardFromMap(model::toMap(note));
+        if (!storageError.isEmpty()||!valid) {fail("CARD_REPAIR_REQUIRED","Repair this card's content before resetting its schedules. No schedules were reset.",storageError.isEmpty()?valid.error():storageError);return;}
+        const auto keys=model::variantKeys(note);
+        Q_ASSERT(keys);
+        const QList<struct model::Variant> saved=cardVariants(note.id);
+        for (const struct model::Variant &schedule:saved) {
+            if (!keys->contains(schedule.key)||schedule.id!=model::variantId(note.id,schedule.key)) {
+                fail("CARD_SCHEDULE_REPAIR_REQUIRED","A stored review direction does not match the card. Preserve the database and repair its directions before resetting schedules.",QStringLiteral("Card %1, schedule %2, direction %3.").arg(note.id,schedule.id,schedule.key));return;
+            }
+        }
+        recovering=recovering||m_invalidScheduleValues.contains(note.id)||!model::cardReadIssue(note,saved).isEmpty();
+        cards.append(note);
+    }
+    if (query.lastError().isValid()) {fail("REVIEW_RESET_FAILED","Card reading stopped before completion. No schedules were reset.",query.lastError().text());return;}
+    query.finish();
+    if (recovering&&!createRecoveryBackup()) {fail("CARD_RECOVERY_BACKUP","Could not preserve the original schedules. No reset was applied. Check storage and retry.",m_sqlDetail);return;}
+    const struct HistoryScope history(this,QStringLiteral("Reset review state"),!recovering);
+    if (!history) return;
     int count=0;
     const bool committed=mutate([&] {
-        QSqlQuery query(m_db);
-        query.prepare(deckScope
-            ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
-            : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");
-        query.addBindValue(id);
-        if (!query.exec()) {m_sqlDetail=query.lastError().text();return false;}
-        QList<struct model::Card> cards;
-        while (query.next()) cards.append(readCard(query));
-        if (query.lastError().isValid()) {m_sqlDetail=query.lastError().text();return false;}
-        query.finish();
         const QString due=model::nowUtc();
         for (const struct model::Card &note:cards) {
             const auto keys=model::variantKeys(note);
@@ -1176,6 +1460,7 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
         return m_sqlDetail.isEmpty();
     });
     if (!committed) {fail("REVIEW_RESET_FAILED","Could not reset review state. Check storage and try again.",m_sqlDetail);return;}
+    if (recovering) clearHistoryForRecovery(QStringLiteral("Damaged schedules were explicitly reset. Their original values are retained in a recovery copy."),m_lastRecoveryBackup);
     m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
     m_selectedVariant.clear();m_sessionTotal=0;m_sessionActive=false;m_queueDirty=true;
     // End the session only after the reset is durable, even if refreshing later fails.
@@ -1192,10 +1477,7 @@ void DatabaseWorker::beginReview(const QString &deckId, const QString &order)
         fail("REVIEW_ORDER_INVALID", "Choose a supported review order.");
         return;
     }
-    if (!refreshStudyGuidance()) {
-        fail("REVIEW_GUIDANCE", "Could not calculate study guidance. Refresh and try again.", m_sqlDetail);
-        return;
-    }
+    if (!publishSnapshot()) return;
     if (!deckId.isEmpty() && (!model::validUuid(deckId)||!deck(deckId))) {fail("DECK_NOT_FOUND","Choose an existing deck to review.");return;}
     const QString sessionId=model::uuid();
     const QString sessionStartedAt=model::nowUtc();
@@ -1205,7 +1487,7 @@ void DatabaseWorker::beginReview(const QString &deckId, const QString &order)
         if (scoped) sessionDeckName=scoped->name;
     }
     QSqlQuery q(m_db);
-    q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION ALL SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants)")+" ORDER BY v.due,n.id,v.variant_key");
+    q.prepare("SELECT v.id FROM review_variants v JOIN notes n ON n.id=v.card_id WHERE v.due<=?"+QString(deckId.isEmpty()?"":" AND n.deck_id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id FROM descendants)")+" ORDER BY v.due,n.id,v.variant_key");
     q.addBindValue(model::nowUtc());if (!deckId.isEmpty()) q.addBindValue(deckId);
     if (!q.exec()) {fail("REVIEW_START","Could not start review. Refresh and try again.",q.lastError().text());return;}
     m_sessionId=sessionId;m_sessionStartedAt=sessionStartedAt;m_sessionDeckName=sessionDeckName;
@@ -1285,8 +1567,25 @@ void DatabaseWorker::postpone(const QString &date)
     if (!m_sessionActive||m_queue.isEmpty()) {fail("REVIEW_INACTIVE","Start a review before postponing a card.");return;}
     const qsizetype position=m_queue.indexOf(m_selectedVariant);
     if (position<0) {fail("REVIEW_COMPLETED","This card is already graded. Choose an ungraded card to postpone.");return;}
-    const auto existing=variant(m_selectedVariant);
-    if (!existing) {m_queueDirty=true;if (publishQueue(true)) fail("CARD_NOT_FOUND","This review card no longer exists. Continue with the next card.");return;}
+    const auto existing=variant(m_selectedVariant,true);
+    if (!existing) {
+        const QString cause=m_sqlDetail;
+        if (!publishSnapshot()) return;
+        m_queueDirty=true;
+        if (publishQueue(true)) {
+            if (cause.isEmpty()) fail("CARD_NOT_FOUND","This review card no longer exists. Continue with the next card.");
+            else fail("REVIEW_CARD_UNREADABLE","This card's stored schedule could not be read. It is excluded from review; other readable cards remain available.",cause);
+        }
+        return;
+    }
+    const auto note=card(existing->cardId);
+    if (!note||m_cardLoadErrors.contains(existing->cardId)) {
+        const QString cause=m_cardLoadErrors.value(existing->cardId).value("detail").toString();
+        if (!publishSnapshot()) return;
+        m_queueDirty=true;
+        if (publishQueue(true)) fail("REVIEW_CARD_UNREADABLE","Repair this card before postponing its schedule. Other readable cards remain available.",cause);
+        return;
+    }
     const QDateTime localStart=day.startOfDay(QTimeZone::systemTimeZone());
     if (!localStart.isValid()) {fail("INVALID_POSTPONE_DATE","The selected date has no local start of day. Choose another date.");return;}
     struct model::Variant schedule=*existing;schedule.due=localStart.toUTC().toString(Qt::ISODateWithMs);
@@ -1301,11 +1600,27 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     if (!ready()) return;
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
     if (!m_sessionActive||!m_sessionOrder.contains(expectedVariant)||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
-    const auto old=variant(expectedVariant);
+    const auto old=variant(expectedVariant,true);
     const auto note=old?card(old->cardId):std::nullopt;
     const auto sourceDeck=note?deck(note->deckId):std::nullopt;
-    if (!m_sqlDetail.isEmpty()) {fail("REVIEW_LOAD","Could not load this review. Refresh and try again.",m_sqlDetail);return;}
+    if (!m_sqlDetail.isEmpty()) {
+        const QString cause=m_sqlDetail;
+        if (!publishSnapshot()) return;
+        m_queueDirty=true;
+        if (publishQueue(false)) fail("REVIEW_CARD_UNREADABLE","This card's stored schedule could not be read. It is excluded from review; other readable cards remain available.",cause);
+        return;
+    }
     if (!old||!note||!sourceDeck) {m_queueDirty=true;if (publishQueue(false)) fail("CARD_NOT_FOUND","This review card no longer exists. Choose another card.");return;}
+    const auto validCard=model::cardFromMap(model::toMap(*note));
+    const auto validSchedule=model::variantFromMap(model::toMap(*old));
+    const auto keys=model::variantKeys(*note);
+    if (!validCard||!validSchedule||!keys||!keys->contains(old->key)||m_cardLoadErrors.contains(note->id)) {
+        const QString cause=!validCard?validCard.error():!validSchedule?validSchedule.error():m_cardLoadErrors.contains(note->id)?m_cardLoadErrors.value(note->id).value("detail").toString():QStringLiteral("The stored direction no longer matches the card.");
+        if (!publishSnapshot()) return;
+        m_queueDirty=true;
+        if (publishQueue(false)) fail("REVIEW_CARD_UNREADABLE","This card needs repair and has been removed from this review session. Other cards remain available.",QStringLiteral("Card %1: %2").arg(note->id,cause));
+        return;
+    }
     const bool correction=m_sessionGrades.contains(expectedVariant);
     if (old->reviewCount>=1000000000&&!correction) {fail("REVIEW_LIMIT","This variant has reached the review count limit. Export the collection and inspect its schedule.");return;}
     const struct SessionGrade previous=correction?m_sessionGrades.value(expectedVariant):SessionGrade{*old,{}, {},model::readingBudget(model::question(*note,old->key))};
@@ -1624,7 +1939,9 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         }
         const auto current=card(record.id);
         if (!current) {applied=false;return m_sqlDetail.isEmpty();}
-        const QStringList keys=*model::variantKeys(*current);
+        const auto parsedKeys=model::variantKeys(*current);
+        if (!parsedKeys) {m_sqlDetail=QStringLiteral("Card %1 must be repaired before applying its remote schedules: %2").arg(current->id,parsedKeys.error());return false;}
+        const QStringList keys=*parsedKeys;
         QSet<QString> freshVariantIds;
         for (const QVariant &id : payload.value("freshVariantIds").toList()) freshVariantIds.insert(id.toString());
         for (const struct model::Variant &v : schedules) {
@@ -1687,7 +2004,9 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
     const auto source=card(schedule.cardId);
     if (!source) {applied=false;return m_sqlDetail.isEmpty();}
     if (isDeleted("deck",source->deckId)) return m_sqlDetail.isEmpty();
-    if (!model::variantKeys(*source)->contains(schedule.key)) return true;
+    const auto sourceKeys=model::variantKeys(*source);
+    if (!sourceKeys) {m_sqlDetail=QStringLiteral("Card %1 must be repaired before applying its remote review: %2").arg(source->id,sourceKeys.error());return false;}
+    if (!sourceKeys->contains(schedule.key)) return true;
     const auto persistedSchedule=variant(schedule.id);
     const QString owner=reviewOwner(schedule.id);
     const qint64 variantSequence=entitySequence("variant",schedule.id);
@@ -1844,7 +2163,7 @@ void DatabaseWorker::requestSyncBatch(const QString &requestId)
     if (!q.exec("SELECT id,device_id,event_type,payload,created_at FROM sync_outbox ORDER BY position LIMIT 101")) {reject("SYNC_READ","Could not load pending sync changes. Try syncing again.",q.lastError().text());return;}
     while (q.next()) {
         const QJsonDocument payload=QJsonDocument::fromJson(q.value(3).toString().toUtf8());
-        if (!payload.isObject()) {reject("SYNC_STORAGE","A stored sync payload is invalid. Preserve the database and inspect details.");return;}
+        if (!payload.isObject()) {reject("SYNC_STORAGE","A stored sync payload is invalid. Preserve the database and repair the pending event before syncing.",QStringLiteral("sync_outbox event %1 has a payload that is not a JSON object.").arg(q.value(0).toString().left(128)));return;}
         const QVariantMap event{{"id",q.value(0)},{"deviceId",q.value(1)},{"type",q.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",q.value(4)}};
         const qsizetype size=json(event).toUtf8().size();
         if (size>model::maxSyncEventBytes) {reject("SYNC_EVENT_LIMIT","A stored change exceeds the sync limit. Shorten the affected card content before syncing.");return;}
@@ -1916,6 +2235,12 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     const QVariantList events=response.value("events").toList();
     const qint64 cursor=response.value("cursor").toLongLong();
     QSet<QString> acceptedIds;for (const QVariant &id:response.value("acceptedIds").toList()) acceptedIds.insert(id.toString());
+    if (!publishSnapshot()) {appliedSignal(false,false);return;}
+    const bool recovering=!m_cardLoadErrors.isEmpty()||m_hasUnreadableHistory||m_hasOrphanSchedules||std::any_of(m_collectionIssues.cbegin(),m_collectionIssues.cend(),[](const QVariant &entry) {
+        const QString code=entry.toMap().value("code").toString();
+        return code==QStringLiteral("REVIEW_RECORD")||code==QStringLiteral("SYNC_STORAGE");
+    });
+    if (recovering&&!createRecoveryBackup()) {fail("SYNC_RECOVERY_BACKUP","Could not preserve unreadable local records before applying sync. No sync changes were applied.",m_sqlDetail);appliedSignal(false,false);return;}
     bool hasPendingOutbox=false;
     bool unresolvedDependencies=false;
     QVariantMap notices;
@@ -1965,6 +2290,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
         return execute("INSERT INTO metadata(key,value) VALUES('sync_notices',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",{json(notices)});
     });
     if (!ok) {fail("SYNC_APPLY","Could not apply sync changes. Existing records and pending uploads were preserved.",m_sqlDetail);appliedSignal(false,false);return;}
+    if (recovering) clearHistoryForRecovery(QStringLiteral("Sync applied with unreadable local records present. Their original stored data is retained in a recovery copy."),m_lastRecoveryBackup);
     m_cursor=cursor;
     if (!responseCollectionId.isEmpty()) m_collectionId=responseCollectionId;
     m_queueDirty=true;
@@ -1994,11 +2320,27 @@ void DatabaseWorker::exportCollection(const QString &path)
     if (!q.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
     while (q.next()) decks.append(model::toMap(readDeck(q)));
     if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
-    while (q.next()) {const struct model::Card note=readCard(q);notes.append(note);cards.append(model::toMap(note));}
+    while (q.next()) {
+        QString storageError;
+        const struct model::Card note=readCard(q,&storageError);
+        const QVariantMap issue=model::cardReadIssue(note,cardVariants(note.id),storageError);
+        if (!issue.isEmpty()) {fail("EXPORT_DAMAGED_CARD","Portable export stopped because a saved card needs repair. No export was written. Preserve a raw SQLite recovery copy before repairing the card.",issue.value("detail").toString());return;}
+        notes.append(note);cards.append(model::toMap(note));
+    }
     if (!q.exec("SELECT id,card_id,variant_key,due,review_count,stability,difficulty,graduated FROM review_variants ORDER BY id")) {fail("EXPORT_READ","Could not read variants for export.",q.lastError().text());return;}
-    while (q.next()) variants.append(model::toMap(readVariant(q)));
+    while (q.next()) {
+        QString storageError;
+        const struct model::Variant schedule=readVariant(q,&storageError);
+        if (!storageError.isEmpty()) {fail("EXPORT_DAMAGED_SCHEDULE","Portable export stopped because a saved schedule needs repair. No export was written. Preserve a raw SQLite recovery copy before resetting schedules.",storageError);return;}
+        variants.append(model::toMap(schedule));
+    }
     if (!q.exec("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,reviewed_at,due,session_id,session_deck_name,session_started_at FROM reviews ORDER BY reviewed_at,id")) {fail("EXPORT_READ","Could not read history for export.",q.lastError().text());return;}
-    while (q.next()) history.append(model::toMap(readReview(q)));
+    while (q.next()) {
+        QString storageError;
+        const struct model::Review record=readReview(q,&storageError);
+        if (!storageError.isEmpty()) {fail("EXPORT_DAMAGED_REVIEW","Portable export stopped because a saved review entry needs repair. No export was written. Preserve a raw SQLite recovery copy before repairing history.",storageError);return;}
+        history.append(model::toMap(record));
+    }
     if (!q.exec("SELECT entity_type,entity_id FROM tombstones ORDER BY entity_type,entity_id")) {fail("EXPORT_READ","Could not read retained deletion records.",q.lastError().text());return;}
     while (q.next()) deleted.append(QVariantMap{{"type",q.value(0)},{"id",q.value(1)}});
     if (!q.exec("SELECT id,deck_id,created_at,note,summary,snapshot,changes FROM deck_checkpoints ORDER BY position")) {fail("EXPORT_READ","Could not read deck checkpoints for export.",q.lastError().text());return;}
@@ -2040,7 +2382,7 @@ void DatabaseWorker::exportCollection(const QString &path)
         mediaBytes += media.last().bytes.size();
         if (mediaBytes > model::maxMediaBytes) {fail("EXPORT_LIMIT","The collection and its checkpoints exceed the 64 MiB portable media limit.");return;}
     }
-    const QJsonObject root{{"version",6},{"media",model::mediaToJson(media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
+    const QJsonObject root{{"version",7},{"media",model::mediaToJson(media)},{"decks",QJsonArray::fromVariantList(decks)},{"cards",QJsonArray::fromVariantList(cards)},
         {"variants",QJsonArray::fromVariantList(variants)},{"history",QJsonArray::fromVariantList(history)},
         {"deleted",QJsonArray::fromVariantList(deleted)},{"checkpoints",QJsonArray::fromVariantList(checkpoints)}};
     const auto validated = model::collectionFromJson(root);
@@ -2589,7 +2931,7 @@ void DatabaseWorker::loadExample()
     add("basic","What does this C++ function return for a negative input?\n\n```cpp\nstd::expected<int, std::string> twice(const int value) {\n    if (value < 0) return std::unexpected(\"negative\");\n    return value * 2;\n}\n```","An error containing `negative`, rather than an integer.","C++, code");
     add("basic","Write Euler's identity.","$$e^{i\\pi}+1=0$$","mathematics");
     add("reverse","Derivative of $\\sin x$","$\\cos x$","mathematics, reverse");
-    add("cloze","{{c1::Atomicity::transaction property}} means a transaction commits together. {{c2::Durability::transaction property}} means it survives restart. A {{c1::rollback}} leaves no partial mutation.","Each distinct cloze group has its own review schedule.","storage, cloze");
+    add("cloze","[cloze1:Atomicity|transaction property] means a transaction commits together. [cloze2:Durability|transaction property] means it survives restart. A [cloze1:rollback] leaves no partial mutation.","Each distinct cloze group has its own review schedule.","storage, cloze");
     const bool ok=mutate([&] {
         if (!upsertDeck(example)||!enqueue("deck.upsert",{{"deck",model::toMap(example)}})) return false;
         for (const struct model::Card &note : notes) {

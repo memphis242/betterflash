@@ -49,6 +49,84 @@ private slots:
         QTRY_VERIFY(view.implicitHeight() > 0);
         QVERIFY(view.renderError().isEmpty());
     }
+    void clozePreviewIsOptInAndFormatsAnswers() {
+        MarkdownView view;
+        style(view);
+        const QString source = QStringLiteral("A [cloze1:first answer] and [cloze2:numbered answer|hint].");
+        view.setMarkdown(source);
+        QTRY_VERIFY_WITH_TIMEOUT(view.implicitHeight() > 0, 10000);
+        QVERIFY(!view.clozePreview());
+        QVERIFY(view.renderError().isEmpty());
+        const auto render = [&view] {
+            QImage image(640, qCeil(view.implicitHeight()), QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            view.paint(&painter);
+            painter.end();
+            return image;
+        };
+        const QImage ordinary = render();
+
+        view.setClozePreview(true);
+        QTRY_VERIFY_WITH_TIMEOUT(ordinary != render(), 10000);
+        QVERIFY(view.renderError().isEmpty());
+        const QImage preview = render();
+        QVERIFY(ordinary.size() == preview.size());
+        QVERIFY(ordinary != preview);
+    }
+    void clozePreviewPreservesMarkdownLinksEscapesCodeAndMath() {
+        MarkdownView view;
+        style(view);
+        view.setClozePreview(true);
+        view.setMarkdown(QStringLiteral(
+            "**[cloze1:bold answer]**\n\n"
+            "Escaped [cloze2:literal \\[and\\] brackets]\n\n"
+            "`[cloze3:inline code]`\n\n"
+            "[before link](https://example.com) [cloze4:hidden] after\n\n"
+            "$[cloze5:a]+[cloze6:b]$\n\n"
+            "$$\\frac{[cloze7:a]}{[cloze8:b]}$$\n\n"
+            "```cpp\nconst auto value = [cloze9:answer];\n```"));
+        QTRY_VERIFY_WITH_TIMEOUT(view.implicitHeight() > 100, 10000);
+        QVERIFY2(view.renderError().isEmpty(), qPrintable(view.renderError()));
+        QImage output(640, qCeil(view.implicitHeight()), QImage::Format_ARGB32_Premultiplied);
+        output.fill(Qt::transparent);
+        QPainter painter(&output);
+        view.paint(&painter);
+        painter.end();
+        bool painted = false;
+        for (int y = 0; y < output.height() && !painted; ++y)
+            for (int x = 0; x < output.width(); ++x)
+                if (qAlpha(output.pixel(x, y)) != 0) { painted = true; break; }
+        QVERIFY(painted);
+    }
+    void largeClozePreviewReportsHighlightLimitWithoutBlockingRendering() {
+        MarkdownView view;
+        style(view);
+        view.setClozePreview(true);
+        view.setMarkdown(QStringLiteral("[cloze1:answer] ").repeated(1000));
+        QTRY_VERIFY_WITH_TIMEOUT(view.implicitHeight() > 0, 10000);
+        QVERIFY(view.renderError().startsWith(QStringLiteral("CLOZE_PREVIEW_LIMIT:")));
+    }
+    void invalidClozePreviewLeavesDraftRenderableAndReportsCause() {
+        MarkdownView view;
+        style(view);
+        view.setClozePreview(true);
+        view.setMarkdown(QStringLiteral("Draft [cloze1:unfinished"));
+        QTRY_VERIFY_WITH_TIMEOUT(view.renderError().startsWith(QStringLiteral("CLOZE_PREVIEW:")), 10000);
+        QImage output(640, qCeil(view.implicitHeight()), QImage::Format_ARGB32_Premultiplied);
+        output.fill(Qt::transparent);
+        QPainter painter(&output);
+        view.paint(&painter);
+        painter.end();
+        bool painted = false;
+        for (int y = 0; y < output.height() && !painted; ++y)
+            for (int x = 0; x < output.width(); ++x)
+                if (qAlpha(output.pixel(x, y)) != 0) { painted = true; break; }
+        QVERIFY(painted);
+
+        view.setMarkdown(QStringLiteral("Draft [cloze1:finished]."));
+        QTRY_VERIFY_WITH_TIMEOUT(view.renderError().isEmpty(), 10000);
+    }
     void formulaGlyphsAreVisible() {
         QTest::failOnWarning(QRegularExpression(QStringLiteral("render glyph failed.*")));
         MarkdownView view; style(view);

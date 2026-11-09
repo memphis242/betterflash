@@ -49,6 +49,12 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     m_worker->moveToThread(m_thread);
     connect(m_thread,&QThread::started,m_worker,&DatabaseWorker::initialize);
     connect(m_worker,&DatabaseWorker::snapshotReady,this,&AppController::handleSnapshot);
+    connect(m_worker,&DatabaseWorker::collectionIssuesReady,this,[this](const QVariantList &issues) {
+        if (m_collectionIssues == issues) return;
+        m_collectionIssues = issues;
+        emit collectionIssuesChanged();
+    });
+    connect(m_worker,&DatabaseWorker::historyClearedForRecovery,this,&AppController::historyInvalidated);
     connect(m_worker,&DatabaseWorker::operationFinished,this,&AppController::handleOperation);
     connect(m_worker,&DatabaseWorker::reviewQueueReady,this,&AppController::handleQueue);
 
@@ -92,6 +98,38 @@ AppController::~AppController()
     m_thread->quit();m_thread->wait();
 }
 QString AppController::mediaPath() const { return QDir(QFileInfo(m_storagePath).absolutePath()).filePath(QStringLiteral("media")); }
+QString AppController::clozePlainText(const QString &source) const
+{
+    const auto parts = betterflash::model::parseCloze(source);
+    if (!parts) return source;
+    QString result;
+    qsizetype offset = 0;
+    for (const struct betterflash::model::ClozePart &part : *parts) {
+        result += source.mid(offset, part.start - offset);
+        result += part.answer;
+        offset = part.start + part.length;
+    }
+    return result + source.mid(offset);
+}
+bool AppController::hasClozeMarkers(const QString &source) const
+{
+    for (qsizetype offset = source.indexOf(QStringLiteral("[cloze")); offset >= 0;
+         offset = source.indexOf(QStringLiteral("[cloze"), offset + 1)) {
+        qsizetype slashes = 0;
+        for (qsizetype index = offset - 1; index >= 0 && source.at(index) == QLatin1Char('\\'); --index) ++slashes;
+        if (slashes % 2 == 0) return true;
+    }
+    return false;
+}
+bool AppController::clozeSelectionOverlaps(const QString &source, const int start, const int end) const
+{
+    if (start < 0 || end < start || end > source.size()) return true;
+    const auto parts = betterflash::model::parseCloze(source);
+    if (!parts) return hasClozeMarkers(source);
+    return std::any_of(parts->cbegin(), parts->cend(), [start, end](const struct betterflash::model::ClozePart &part) {
+        return start < part.start + part.length && end > part.start;
+    });
+}
 bool AppController::invoke(const std::function<void(DatabaseWorker *)> &call,const QVariantMap &context)
 {
     assert(thread()==QThread::currentThread());
@@ -470,6 +508,7 @@ void AppController::loadStudyAnalytics(const QStringList &deckIds, const QString
 }
 void AppController::handleSnapshot(const QVariantList &decks,const QVariantList &cards,const QVariantList &history,const QVariantList &reviewSessions)
 {
+    if (!m_collectionLoaded) { m_collectionLoaded = true; emit collectionLoadedChanged(); }
     static const QStringList deckDueFields{
         QStringLiteral("ownDueCount"),QStringLiteral("ownLaterCount"),QStringLiteral("ownNewDueCount"),
         QStringLiteral("ownReviewDueCount"),QStringLiteral("dueCount"),QStringLiteral("laterCount"),
@@ -540,6 +579,7 @@ bool AppController::dueCountsMismatch(const QDateTime &now,QDateTime *earliestFu
     bool mismatch=false;
     for (const QVariant &cardValue : m_cards) {
         const QVariantMap card=cardValue.toMap();
+        if (!card.value("loadError").toMap().isEmpty()) continue;
         int actualDueCount=0;
         for (const QVariant &variantValue : card.value("variants").toList()) {
             const QString text=variantValue.toMap().value("due").toString();

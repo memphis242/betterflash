@@ -150,11 +150,50 @@ public:
     bool run()
     {
         const QString selectedCase=qEnvironmentVariable("BETTERFLASH_GUI_CASE");
-        if (!check(selectedCase.isEmpty()||selectedCase==QStringLiteral("due-search")||selectedCase==QStringLiteral("generation"),"gui_case_supported",
+        if (!check(selectedCase.isEmpty()||selectedCase==QStringLiteral("due-search")||selectedCase==QStringLiteral("generation")||selectedCase==QStringLiteral("library")||selectedCase==QStringLiteral("startup")||selectedCase==QStringLiteral("recovery"),"gui_case_supported",
                    QStringLiteral("BETTERFLASH_GUI_CASE=%1; use an empty value for the complete sweep or due-search for the focused case.").arg(selectedCase))) return finish();
         if (!check(m_window != nullptr, "window_created")) return finish();
         assert(m_window);
         if (!check(waitUntil([this] { return !m_app.busy(); }), "collection_ready")) return finish();
+        if (selectedCase==QStringLiteral("recovery")) {
+            if (!check(m_app.cards().isEmpty(),"recovery_isolated_collection")) return finish();
+            m_app.createDeck(QStringLiteral("Recovery fixture")); check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");
+            const QString deck=m_app.decks().first().toMap().value("id").toString();
+            check(m_app.saveCard({},deck,QStringLiteral("basic"),QStringLiteral("Healthy question"),QStringLiteral("Healthy answer"),{},1),"recovery_seed_healthy");check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");
+            check(m_app.saveCard({},deck,QStringLiteral("cloze"),QStringLiteral("A [cloze1:saved answer]."),{},{},1),"recovery_seed_cloze");check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");
+            QString broken;
+            for (const QVariant &entry:m_app.cards()) if (entry.toMap().value("kind").toString()==QStringLiteral("cloze")) broken=entry.toMap().value("id").toString();
+            const QString connection=betterflash::model::uuid();
+            {
+                QSqlDatabase db=QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),connection);db.setDatabaseName(m_app.storagePath());
+                check(db.open(),"recovery_fixture_open");
+                QSqlQuery corrupt(db);check(corrupt.prepare(QStringLiteral("UPDATE notes SET front=? WHERE id=?")),"recovery_fixture_prepare");
+                corrupt.addBindValue(QStringLiteral("A [cloze1:unfinished"));corrupt.addBindValue(broken);
+                check(corrupt.exec(),"recovery_fixture_corrupt");db.close();
+            }
+            QSqlDatabase::removeDatabase(connection);
+            m_app.refresh();check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");
+            check(m_app.collectionLoaded()&&m_app.decks().size()==1&&m_app.cards().size()==2,"recovery_keeps_all_content");
+            resize(1320,860);m_window->setProperty("page",1);QTest::qWait(100);
+            check(require("collectionIssueNotice")->property("visible").toBool(),"recovery_notice_visible");
+            call("showUnreadableCards");
+            check(m_engine.newQObject(require("libraryPage")).property("visibleCards").toVariant().toList().size()==1,"recovery_affected_card_filter");
+            screenshot("recovery-library");
+            call("openCardEditor",{broken});
+            check(require("cardDialog")->property("visible").toBool(),"recovery_editor_available");
+            check(m_window->property("repairingStoredCard").toBool(),"recovery_editor_recognizes_damage");
+            screenshot("recovery-editor");close("cardDialog");
+            m_app.startReview(deck);check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");check(m_app.queueCount()==1,"recovery_healthy_review_available");
+            m_app.stopReview();check(waitUntil([this] {return !m_app.busy();}),"recovery_operation_completed");
+            return finish();
+        }
+        if (selectedCase==QStringLiteral("startup")) {
+            check(m_app.lastError().isEmpty(),"startup_without_storage_error",m_app.lastError().value("code").toString());
+            check(!m_app.cards().isEmpty(),"startup_reads_existing_collection");
+            for (const QVariant &value:m_app.cards())
+                check(betterflash::model::cardFromMap(value.toMap()).has_value(),"startup_card_content_valid");
+            return finish();
+        }
         if (!check(m_app.decks().isEmpty() && m_app.cards().isEmpty() && m_app.history().isEmpty(),
                    "isolated_empty_collection", "Use a fresh --data-dir for this sweep.")) return finish();
         if (!check(!m_voice.enabled(), "microphone_disabled")) return finish();
@@ -177,6 +216,8 @@ public:
         seedCards(image);
         check(m_app.cards().size() >= 22, "fixture_cards_created");
         if (visible("cardDetailDialog")) close("cardDetailDialog");
+        libraryScopesAndDeckPaths();
+        if (selectedCase==QStringLiteral("library")) return finish();
         generatedCardVisibility();
         generatedCardRequest();
         if (selectedCase==QStringLiteral("generation")) return finish();
@@ -325,7 +366,7 @@ private:
               QStringLiteral("main=%1 window=%2 nav=%3").arg(main.width()).arg(m_window->width()).arg(nav.width()));
         check(main.top() >= header.bottom() - 1.1 && main.bottom() <= m_window->height() + 1.1,
               "pinned_bars_reserve_space_" + suffix);
-        const auto names = {QStringLiteral("reviewHeader"),QStringLiteral("libraryDeckPane"),QStringLiteral("libraryCardPane"),QStringLiteral("settingsTopBar")};
+        const auto names = {QStringLiteral("reviewHeader"),QStringLiteral("libraryDeckPane"),QStringLiteral("libraryCardPane"),QStringLiteral("libraryCardActions"),QStringLiteral("settingsTopBar")};
         for (const QString &name : names) {
             if (!item(name)->isVisible()) continue;
             const QRectF bounds = rect(name);
@@ -428,6 +469,10 @@ private:
         key(Qt::Key_N,Qt::ControlModifier);
         if (!check(visible("cardDialog"), "new_card_keyboard_opens_modal")) throw std::runtime_error("Ctrl+N did not open the card editor.");
         QObject *const editor = require("editorSource");
+        editor->setProperty("text",QStringLiteral("\\[cloze1:Paris\\]\n\n---\n\nA literal example."));
+        check(call("currentCardDraft").property("kind").toString()==QStringLiteral("basic"),"escaped_marker_example_remains_basic");
+        editor->setProperty("text",QStringLiteral("[cloze1:unfinished\n\n---\n\nAn answer."));
+        check(call("currentCardDraft").property("kind").toString()==QStringLiteral("cloze"),"incomplete_marker_is_validated_as_cloze");
         editor->setProperty("text",QStringLiteral("A remembered phrase"));
         editor->setProperty("cursorPosition",19);
         focus("editorSource");
@@ -439,7 +484,7 @@ private:
         check(editor->property("text").toString() == split, "editor_split_moves_without_duplicate");
         check(QMetaObject::invokeMethod(editor,"select",Q_ARG(int,2),Q_ARG(int,12)), "editor_selection_available");
         key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier);
-        check(editor->property("text").toString().contains(QStringLiteral("{{c1::remembered}}")), "editor_cloze_wraps_selection");
+        check(editor->property("text").toString().contains(QStringLiteral("[cloze1:remembered]")), "editor_cloze_wraps_selection");
         QObject *const picker = require("imageDialog");
         const QUrl imageUrl = QUrl::fromLocalFile(QDir(m_directory).filePath(QStringLiteral("fixture-image.png")));
         picker->setProperty("currentFolder",QUrl::fromLocalFile(m_directory));
@@ -470,10 +515,15 @@ private:
         QMetaObject::invokeMethod(editor,"select",Q_ARG(int,0),Q_ARG(int,static_cast<int>(code.size())));
         key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier);
         const QString encoded = editor->property("text").toString();
-        check(encoded.contains(QStringLiteral("std\\::expected")) && encoded.contains(QString(3,QLatin1Char('\\'))+QStringLiteral("::literal"))
+        check(encoded.contains(QStringLiteral("[cloze1:")) && encoded.contains(QStringLiteral("std::expected"))
+              && encoded.contains(QString(2,QLatin1Char('\\'))+QStringLiteral("::literal"))
               && encoded.contains(QLatin1Char('\n')), "editor_cloze_escapes_cpp_and_preserves_multiline");
         const qsizetype delimiter = encoded.indexOf(QStringLiteral("\n\n---\n\n"));
         if (delimiter < 0) throw std::runtime_error("Editor lost the side separator.");
+        QMetaObject::invokeMethod(editor,"select",Q_ARG(int,0),Q_ARG(int,static_cast<int>(delimiter)));
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
+        check(editor->property("text").toString()==encoded&&!m_window->property("localCardError").toString().isEmpty(),
+              "cloze_hiding_rejects_overlapping_existing_group");
         editor->setProperty("text",encoded.left(delimiter) + QStringLiteral("\n\n") + image + QStringLiteral("\n\n---\n\nExtra explanation.\n\n") + image);
         const int before = m_app.cards().size();
         key(Qt::Key_S,Qt::ControlModifier);
@@ -485,7 +535,10 @@ private:
               && card.value("back").toString().contains(image), "cloze_inferred_and_images_on_both_sides");
         const QString editableId = card.value("id").toString();
         check(visible("cardPreviewDialog"),"new_card_opens_preview");
-        close("cardPreviewDialog");
+        click("previewAddAnotherCard");
+        check(visible("cardDialog") && call("currentCardDraft").property("deckId").toString()==m_deckA
+              && call("currentCardDraft").property("front").toString().isEmpty(), "new_card_preview_continues_in_same_deck");
+        close("cardDialog");
         call("openCardEditor",{editableId});
         check(visible("cardDialog"), "inversion_editor_opens_existing_card");
         require("cardKind")->setProperty("currentIndex",0);
@@ -557,6 +610,82 @@ private:
         }
         assert(!m_longCard.isEmpty());
     }
+    void libraryScopesAndDeckPaths()
+    {
+        call("setDeck",{m_deckA});
+        m_window->setProperty("page",1);
+        QObject *const library=require("libraryPage");
+        QObject *const search=m_engine.rootContext()->contextProperty("librarySearch").value<QObject *>();
+        if (!search) throw std::runtime_error("The Library search controller is missing.");
+        const bool semantic=search->property("semanticEnabled").toBool();
+        search->setProperty("semanticEnabled",false);
+        const QString originalScope=library->property("cardScope").toString();
+        const auto list=[](QObject *object,const char *property) {
+            const QVariant raw=object->property(property);
+            return raw.metaType()==QMetaType::fromType<QJSValue>()?raw.value<QJSValue>().toVariant().toList():raw.toList();
+        };
+        const auto contains=[&list](QObject *object,const char *property,const QString &id) {
+            for (const QVariant &value:list(object,property)) if (value.toMap().value("id").toString()==id) return true;
+            return false;
+        };
+        QString childCard,otherCard;
+        QSet<QString> own,descendants,all;
+        for (const QVariant &value:m_app.cards()) {
+            const QVariantMap card=value.toMap();const QString id=card.value("id").toString();all.insert(id);
+            if (card.value("deckId").toString()==m_deckA) {own.insert(id);descendants.insert(id);}
+            if (card.value("deckId").toString()==m_deckChild) {childCard=id;descendants.insert(id);}
+            if (card.value("deckId").toString()==m_deckB) otherCard=id;
+        }
+        assert(!childCard.isEmpty()&&!otherCard.isEmpty());
+        for (const QString &scope:{QStringLiteral("deck"),QStringLiteral("subdecks"),QStringLiteral("collection")}) {
+            library->setProperty("cardScope",scope);
+            const QSet<QString> expected=scope==QStringLiteral("deck")?own:scope==QStringLiteral("subdecks")?descendants:all;
+            check(waitUntil([&] {
+                QSet<QString> actual;
+                for(const QVariant &value:list(library,"visibleCards"))actual.insert(value.toMap().value("id").toString());
+                return actual==expected;
+            }),"library_scope_visible_"+scope);
+        }
+        library->setProperty("selectedCardIds",QVariantList{m_longCard,otherCard});
+        library->setProperty("cardSelectionAnchorId",otherCard);
+        library->setProperty("cardScope",QStringLiteral("deck"));
+        const QString selectionAnchor=library->property("cardSelectionAnchorId").toString();
+        check(list(library,"selectedCardIds")==QVariantList{m_longCard}
+              &&(selectionAnchor.isEmpty()||own.contains(selectionAnchor)),"library_narrow_scope_prunes_hidden_selection",
+              QStringLiteral("scope=%1; selected=%2; anchor=%3").arg(library->property("cardScope").toString(),
+                  QString::fromUtf8(QJsonDocument::fromVariant(list(library,"selectedCardIds")).toJson(QJsonDocument::Compact)),selectionAnchor));
+        library->setProperty("selectedCardIds",QVariantList{m_longCard,otherCard});
+        QJSValue libraryObject=m_engine.newQObject(library);
+        const QJSValue drag=libraryObject.property("beginDrag").callWithInstance(libraryObject,
+            {m_engine.toScriptValue(QStringLiteral("cards")),m_engine.toScriptValue(m_longCard),m_engine.toScriptValue(QPointF{})});
+        check(!drag.isError()&&drag.toBool()&&list(library,"dragCardIds")==QVariantList{m_longCard},"library_drag_excludes_hidden_selected_cards");
+        const QJSValue canceled=libraryObject.property("cancelDrag").callWithInstance(libraryObject);
+        check(!canceled.isError(),"library_drag_fixture_canceled");
+        m_window->setProperty("cardSearchText",QStringLiteral("question"));
+        library->setProperty("cardScope",QStringLiteral("subdecks"));
+        check(waitUntil([&] {return !search->property("busy").toBool()&&contains(library,"visibleCards",childCard);}),
+              "library_subdeck_search_finds_descendant");
+        check(!contains(library,"visibleCards",otherCard),"library_subdeck_search_excludes_unrelated_deck");
+        library->setProperty("cardScope",QStringLiteral("deck"));
+        check(waitUntil([&] {return !search->property("busy").toBool()&&!contains(library,"visibleCards",childCard);}),
+              "library_exact_search_excludes_descendant");
+        library->setProperty("cardScope",QStringLiteral("collection"));
+        check(waitUntil([&] {return !search->property("busy").toBool()&&contains(library,"visibleCards",otherCard);}),
+              "library_collection_search_finds_unrelated_deck");
+        m_window->setProperty("cardSearchText",QString{});
+        library->setProperty("cardScope",originalScope);
+        search->setProperty("semanticEnabled",semantic);
+        check(call("deckPath",{m_deckChild}).toString().contains(QStringLiteral("::")),"card_picker_uses_hierarchical_paths");
+        call("openCardEditor",{m_longCard});
+        m_window->setProperty("editorDestinationDeckId",m_deckChild);
+        m_app.updateDeck(m_deckChild,QStringLiteral("A reordered child"),{},m_deckA);
+        check(waitUntil([&] {return !m_app.busy()&&require("cardDeck")->property("currentValue").toString()==m_deckChild;})
+              &&call("currentCardDraft").property("deckId").toString()==m_deckChild,"card_picker_preserves_destination_id_on_reorder");
+        close("cardDialog");
+        m_app.updateDeck(m_deckChild,QStringLiteral("Fixture A child"),QStringLiteral("Nested fixture deck."),m_deckA);
+        check(waitUntil([this] {return !m_app.busy();}),"card_picker_fixture_restored");
+    }
+
     void dueSearchPreservesContext()
     {
         resize(860,600);
@@ -1056,16 +1185,16 @@ private:
         check(QMetaObject::invokeMethod(ai,"setApiKey",Q_ARG(QString,QStringLiteral("gui-fixture-only")))
               &&ai->property("hasApiKey").toBool(),"generation_uses_isolated_mock_credential");
         const int initial=m_app.cards().size();
-        check(m_app.saveCard({},m_deckA,QStringLiteral("cloze"),QStringLiteral("The capital is {{c1::Paris}}."),{}, {},1)
+        check(m_app.saveCard({},m_deckA,QStringLiteral("cloze"),QStringLiteral("The capital is [cloze1:Paris]."),{}, {},1)
               &&waitUntil([this,initial] {return !m_app.busy()&&m_app.cards().size()==initial+1;}),"generation_cloze_source_saved");
         QString sourceId;
         for (const QVariant &value:m_app.cards()) {
             const QVariantMap card=value.toMap();
-            if (card.value("front").toString()==QStringLiteral("The capital is {{c1::Paris}}."))
+            if (card.value("front").toString()==QStringLiteral("The capital is [cloze1:Paris]."))
                 sourceId=card.value("id").toString();
         }
         assert(!sourceId.isEmpty());
-        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Rome}} is in {{c2::Italy}}."},
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","[cloze1:Rome] is in [cloze2:Italy]."},
                                      {"back",""},{"pointCount",1}});
         m_app.startReview(m_deckA);
         check(waitUntil([this] {return !m_app.busy()&&m_app.reviewing();}),"generation_review_started");
@@ -1076,9 +1205,9 @@ private:
               "generation_action_opens_editable_result");
         check(provider.requests==1&&m_app.paused()&&m_app.cards().size()==initial+1&&m_app.pendingCards()==queue,
               "generation_initial_draft_preserves_collection_and_review");
-        require("editorSource")->setProperty("text",QStringLiteral("{{c1::Madrid}} is in {{c2::Spain}}."));
+        require("editorSource")->setProperty("text",QStringLiteral("[cloze1:Madrid] is in [cloze2:Spain]."));
         require("refinementInstructions")->setProperty("text",QStringLiteral("Use a coastal European capital."));
-        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Lisbon}} is in {{c2::Portugal}}."},
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","[cloze1:Lisbon] is in [cloze2:Portugal]."},
                                      {"back",""},{"pointCount",1}});
         click("refineGeneratedCard");
         check(waitUntil([this,generator] {return !generator->property("busy").toBool()
@@ -1087,7 +1216,7 @@ private:
         check(provider.lastBody.contains("Madrid")&&provider.lastBody.contains("Use a coastal European capital."),
               "generation_refinement_uses_manual_edits_and_instructions");
         check(require("refinementInstructions")->property("text").toString().isEmpty(),"generation_refinement_consumes_guidance");
-        const QString edited=QStringLiteral("{{c1::Lisbon}} is a coastal capital in {{c2::Portugal}}.");
+        const QString edited=QStringLiteral("[cloze1:Lisbon] is a coastal capital in [cloze2:Portugal].");
         require("editorSource")->setProperty("text",edited);
         require("refinementInstructions")->setProperty("text",QStringLiteral("Try a different example."));
         provider.proposal(QJsonObject{{"decision","refuse"},{"reason","No suitable variation in this fixture."}});
@@ -1100,7 +1229,7 @@ private:
               &&require("cardDialog")->property("height").toDouble()<=m_window->height(),"generation_phone_editor_fits");
         wheel("editorScroll","generation_phone_draft");
         screenshot("generate-refinement-phone");
-        provider.proposal(QJsonObject{{"decision","generate"},{"front","{{c1::Vienna}} is in {{c2::Austria}}."},
+        provider.proposal(QJsonObject{{"decision","generate"},{"front","[cloze1:Vienna] is in [cloze2:Austria]."},
                                      {"back",""},{"pointCount",1}});
         click("refineGeneratedCard");
         check(waitUntil([this,generator] {return !generator->property("busy").toBool()
@@ -1109,7 +1238,7 @@ private:
         check(provider.lastBody.contains("coastal capital"),"generation_later_refinement_uses_latest_draft");
         resize(1320,860);
         screenshot("generate-refinement-desktop");
-        const QString accepted=QStringLiteral("{{c1::Vienna}} is the capital of {{c2::Austria}}.");
+        const QString accepted=QStringLiteral("[cloze1:Vienna] is the capital of [cloze2:Austria].");
         require("editorSource")->setProperty("text",accepted);
         click("saveCard");
         check(waitUntil([this,initial] {return !m_app.busy()&&!visible("cardDialog")&&m_app.cards().size()==initial+2;}),

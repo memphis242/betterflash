@@ -70,10 +70,11 @@ QString captureKey(const struct CaptureTable &table, const QString &prefix)
 }
 }
 
-DatabaseWorker::HistoryScope::HistoryScope(DatabaseWorker *value, const QString &label) : worker(value)
+DatabaseWorker::HistoryScope::HistoryScope(DatabaseWorker *value, const QString &label, const bool capture) : worker(value)
 {
     assert(worker);
     worker->assertThread();
+    if (!capture) { worker = nullptr; return; }
     if (!worker->m_historyReady) {
         if (worker->m_db.isOpen()) {
             valid = false;
@@ -185,8 +186,9 @@ void DatabaseWorker::finishHistory()
         const QVariant before = parse(2);
         const QVariant after = parse(3);
         if ((present(before) && before.toMap().isEmpty()) || (present(after) && after.toMap().isEmpty())) {
-            m_historyReady = false;
-            emit historyError("UNDO_CAPTURE", "The action completed, but its undo record is invalid. Preserve the database and restart.", {});
+            query.finish();
+            clearHistoryForRecovery(QStringLiteral("The saved action contains an unreadable original record and cannot be recorded for Undo. Your other cards and subsequent actions remain available."));
+            emit collectionIssuesReady(m_recoveryNotices);
             return;
         }
         if (before == after) continue;

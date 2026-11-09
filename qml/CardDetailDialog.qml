@@ -178,12 +178,13 @@ Dialog {
                     text: detail.width < 900 ? "Generate" : "Generate similar card"
                     glyph: "cards"
                     hint: "Draft a varied card testing the same concept with the configured language model. Review it before saving."
-                    enabled: !app.busy
+                    enabled: !app.busy && !(detail.card.loadError && detail.card.loadError.code)
                     onClicked: detail.ui.openGenerateSimilar(detail.cardId)
                 }
                 AppButton {
                     text: detail.width < 620 ? "Narrate" : "Record narration"
                     glyph: "mic"
+                    enabled: !(detail.card.loadError && detail.card.loadError.code)
                     onClicked: detail.ui.openCardNarration(detail.cardId)
                 }
                 NarrationWarning {
@@ -231,6 +232,12 @@ Dialog {
                 width: detailBody.availableWidth
                 height: Math.max(640, implicitHeight, detailBody.availableHeight)
                 spacing: 14
+                ErrorBlock {
+                    Layout.fillWidth: true
+                    code: (detail.card.loadError || {}).code || ""
+                    message: (detail.card.loadError || {}).message || ""
+                    details: (detail.card.loadError || {}).detail || ""
+                }
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
                 ScrollView {
                     id: cardContents
@@ -265,6 +272,7 @@ Dialog {
                                 }
                                 MarkdownPane {
                                     markdown: modelData.source
+                                    clozePreview: modelData.side === "front" && detail.card.kind === "cloze"
                                     mediaRoot: media.rootPath
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: implicitHeight

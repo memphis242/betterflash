@@ -7,10 +7,10 @@ Button {
     property string hint: ""
     property string glyph: ""
     property real glyphSize: 17
-    property color foreground: primary ? Theme.onAccent : Theme.ink
-    property color fill: primary ? Theme.accent : Theme.transparent
+    property color foreground: primary ? Theme.actionInk : Theme.ink
+    property color fill: primary ? Theme.actionFill : Theme.transparent
     property color hoverFill: Theme.accentSoft
-    property color outline: primary ? Theme.accent : Theme.rule
+    property color outline: primary ? Theme.actionFill : Theme.rule
     property color focusOutline: Theme.accent
     readonly property real glyphSpan: control.glyph.length > 0 ? control.glyphSize + 8 : 0
     implicitHeight: 38

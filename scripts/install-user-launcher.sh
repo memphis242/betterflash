@@ -65,15 +65,44 @@ if [[ -e "$desktop_file" ]] && ! rg -F -x -- "$source_marker" "$desktop_file" >/
     exit 1
 fi
 
+install_root="${data_home}/betterflash/installed"
+install_id="$(sha256sum "$executable" | cut -c1-16)"
+release_dir="${install_root}/${install_id}"
+install_log="${build_dir}/install-user.log"
+mkdir -p "$install_root"
+if [[ ! -x "${release_dir}/bin/betterflash" ]]; then
+    staging_dir="$(mktemp -d "${install_root}/.install-XXXXXXXX")"
+    if ! cmake --install "$build_dir" --prefix "$staging_dir" --strip >"$install_log" 2>&1; then
+        printf 'INSTALL_FAILED: Could not install the built app into %s. Inspect %s before retrying. The existing launcher is retained.\n' "$staging_dir" "$install_log" >&2
+        exit 1
+    fi
+    if [[ ! -x "${staging_dir}/bin/betterflash" ]]; then
+        printf 'INSTALL_EXECUTABLE_MISSING: Installation did not produce %s/bin/betterflash. Inspect %s.\n' "$staging_dir" "$install_log" >&2
+        exit 1
+    fi
+    if ! QT_QPA_PLATFORM=offscreen "${staging_dir}/bin/betterflash" --help >>"$install_log" 2>&1; then
+        printf 'INSTALL_STARTUP_FAILED: The installed app could not start. Inspect %s. The existing launcher is retained.\n' "$install_log" >&2
+        exit 1
+    fi
+    mv "$staging_dir" "$release_dir"
+fi
 env_command="$(command -v env)"
-run_script="${project_dir}/scripts/run-desktop.sh"
-icon_file="${project_dir}/packaging/icons/512x512/betterflash.png"
-cat >"$desktop_file" <<EOF
+model_dir="${BETTERFLASH_MODEL_DIR:-}"
+if [[ -z "$model_dir" && -d /workspace && -w /workspace ]]; then
+    model_dir=/workspace/betterflash-models
+fi
+exec_line="$(desktop_exec_arg "${release_dir}/bin/betterflash")"
+if [[ -n "$model_dir" ]]; then
+    exec_line="$(desktop_exec_arg "$env_command") $(desktop_exec_arg "BETTERFLASH_MODEL_DIR=${model_dir}") ${exec_line}"
+fi
+icon_file="${release_dir}/share/icons/hicolor/512x512/apps/betterflash.png"
+desktop_temporary="$(mktemp "${applications_dir}/.betterflash-XXXXXXXX.desktop")"
+cat >"$desktop_temporary" <<EOF
 [Desktop Entry]
 Type=Application
 Name=BetterFlash
 Comment=Markdown flashcards with graded recall and voice review
-Exec=$(desktop_exec_arg "$env_command") $(desktop_exec_arg "BETTERFLASH_BUILD_DIR=${build_dir}") $(desktop_exec_arg "$run_script")
+Exec=${exec_line}
 Icon=$(desktop_string "$icon_file")
 Terminal=false
 Categories=Education;
@@ -81,10 +110,12 @@ Keywords=flashcards;markdown;spaced repetition;study;
 ${source_marker}
 EOF
 
-if command -v desktop-file-validate >/dev/null 2>&1 && ! desktop-file-validate "$desktop_file"; then
-    printf 'LAUNCHER_INVALID: desktop-file-validate rejected %s.\n' "$desktop_file" >&2
+if command -v desktop-file-validate >/dev/null 2>&1 && ! desktop-file-validate "$desktop_temporary"; then
+    printf 'LAUNCHER_INVALID: desktop-file-validate rejected %s. The existing launcher is retained.\n' "$desktop_temporary" >&2
     exit 1
 fi
+chmod 644 "$desktop_temporary"
+mv "$desktop_temporary" "$desktop_file"
 if command -v update-desktop-database >/dev/null 2>&1; then
     if ! update-desktop-database "$applications_dir" >/dev/null 2>&1; then
         printf 'LAUNCHER_CACHE: Could not refresh the desktop application cache. Run update-desktop-database %s.\n' "$applications_dir" >&2

@@ -14,6 +14,8 @@ Electron or a browser engine.
 
 ## Current capabilities
 
+- Keep readable collection content available when an individual saved record
+  needs repair. See [collection loading and recovery](docs/collection-recovery.md).
 - Create nested decks and cards with Markdown, images, fenced code, inline and
   display LaTeX, tags, inverted directions, and numbered cloze cards.
 - Review with Missed, Partial, Hard, Good, and Easy grades. Partial recall and
@@ -65,6 +67,11 @@ accidentally running an older executable. The optional launcher integration is:
 ```sh
 ./scripts/install-user-launcher.sh
 ```
+
+The launcher installs a snapshot of the built executable and its runtime
+dependencies. Opening it starts that installed version directly, without a
+build step. Run the installer again after building and validating an update.
+Development launches through `scripts/run-desktop.sh` still update their build.
 
 For a populated isolated example collection:
 
@@ -191,3 +198,7 @@ actually run.
 BetterFlash is an experimental personal project. Licensing and public release
 terms have not yet been finalized. The desktop beta is the current
 development target; Android, Windows, and iOS remain future platform work.
+
+Cloze notes use numbered markers such as `[cloze1:Paris]`; repeated numbers share
+one review direction, while different numbers have independent schedules.
+See [cloze marker syntax](docs/cloze-markers.md).

@@ -33,19 +33,38 @@ bool number(const QVariantMap &map, const QString &key, double low, double high,
     const double n = value.toDouble();
     return std::isfinite(n) && n >= low && n <= high && (!integral || std::floor(n) == n);
 }
-QString decodeSeparators(const QString &text)
+QString decodeBracketEscapes(const QString &text)
 {
-    static const QRegularExpression escapes(QStringLiteral(R"((\\+)::)"));
-    QString result;int offset=0;
-    auto matches=escapes.globalMatch(text);
-    while (matches.hasNext()) {
-        const auto match=matches.next();
-        result+=text.mid(offset,match.capturedStart()-offset);
-        const int slashes=match.capturedLength(1);
-        result+=QString(slashes%2==1?slashes/2:slashes,QLatin1Char('\\'))+QStringLiteral("::");
-        offset=match.capturedEnd();
+    QString result;
+    result.reserve(text.size());
+    for (qsizetype index = 0; index < text.size(); ++index) {
+        const QChar current = text.at(index);
+        if (current != QLatin1Char('\\') || index + 1 >= text.size()) {
+            result.append(current);
+            continue;
+        }
+        const QChar next = text.at(index + 1);
+        if (next == QLatin1Char('\\') || next == QLatin1Char('[') || next == QLatin1Char(']')
+            || next == QLatin1Char('|')) {
+            result.append(next);
+            ++index;
+            continue;
+        }
+        result.append(current);
     }
-    return result+text.mid(offset);
+    return result;
+}
+bool escapedCharacter(const QString &source, qsizetype index)
+{
+    qsizetype slashes = 0;
+    for (qsizetype cursor = index - 1; cursor >= 0 && source.at(cursor) == QLatin1Char('\\'); --cursor)
+        ++slashes;
+    return slashes % 2 != 0;
+}
+bool numberedOpeningAt(const QString &source, qsizetype index)
+{
+    return index >= 0 && index < source.size() && source.at(index) == QLatin1Char('[')
+        && source.mid(index + 1, 5) == QStringLiteral("cloze");
 }
 QString clozeText(const struct Card &card, const QString &key, bool hide)
 {
@@ -88,37 +107,54 @@ std::expected<QString, QString> utcInstant(const QString &value)
 std::expected<QList<struct ClozePart>, QString> parseCloze(const QString &source)
 {
     QList<struct ClozePart> parts;
-    static const QRegularExpression expression(QStringLiteral("^c([1-9][0-9]{0,2})::"));
-    int offset = 0;
+    qsizetype offset = 0;
     while (offset < source.size()) {
-        const int open = source.indexOf(QStringLiteral("{{"), offset);
-        const int strayClose = source.indexOf(QStringLiteral("}}"), offset);
-        if (strayClose >= 0 && (open < 0 || strayClose < open))
-            return std::unexpected(QStringLiteral("Cloze has an unmatched closing marker."));
-        if (open < 0) break;
-        const int close = source.indexOf(QStringLiteral("}}"), open + 2);
-        const int nested = source.indexOf(QStringLiteral("{{"), open + 2);
-        if (close < 0 || (nested >= 0 && nested < close))
-            return std::unexpected(QStringLiteral("Cloze markers must close and cannot be nested."));
-        const QString body = source.mid(open + 2, close - open - 2);
-        const auto match=expression.match(body);
-        if (!match.hasMatch()) return std::unexpected(QStringLiteral("Use {{c1::answer}} or {{c1::answer::hint}}, with groups 1 through 999."));
-        const QString contents=body.mid(match.capturedLength());
-        int separator=-1;
-        for (int candidate=contents.indexOf(QStringLiteral("::"));candidate>=0;candidate=contents.indexOf(QStringLiteral("::"),candidate+2)) {
-            int slashes=0;
-            for (int i=candidate-1;i>=0&&contents.at(i)==QLatin1Char('\\');--i) ++slashes;
-            if (slashes%2==0) {separator=candidate;break;}
+        qsizetype open = offset;
+        while (open < source.size() && !numberedOpeningAt(source, open)) ++open;
+        if (open >= source.size()) break;
+        if (escapedCharacter(source, open)) {
+            offset = open + 1;
+            continue;
         }
-        QString answer=separator<0?contents:contents.left(separator);
-        QString hint=separator<0?QString():contents.mid(separator+2);
-        if (answer.trimmed().isEmpty()||(separator>=0&&hint.trimmed().isEmpty()))
+        qsizetype digitsStart = open + 6;
+        qsizetype digitsEnd = digitsStart;
+        while (digitsEnd < source.size() && source.at(digitsEnd) >= QLatin1Char('0')
+               && source.at(digitsEnd) <= QLatin1Char('9'))
+            ++digitsEnd;
+        const qsizetype digitCount = digitsEnd - digitsStart;
+        if (digitCount < 1 || digitCount > 3 || source.at(digitsStart) == QLatin1Char('0')
+            || digitsEnd >= source.size() || source.at(digitsEnd) != QLatin1Char(':'))
+            return std::unexpected(QStringLiteral("Use [cloze1:answer] or [cloze1:answer|hint], with groups 1 through 999."));
+        const int group = source.mid(digitsStart, digitCount).toInt();
+        const qsizetype answerStart = digitsEnd + 1;
+        qsizetype close = -1;
+        qsizetype separator = -1;
+        for (qsizetype index = answerStart; index < source.size(); ++index) {
+            if (source.at(index) == QLatin1Char(']') && !escapedCharacter(source, index)) {
+                close = index;
+                break;
+            }
+            if (source.at(index) == QLatin1Char('[') && !escapedCharacter(source, index))
+                return std::unexpected(QStringLiteral("Escape literal opening brackets in a cloze answer as \\[."));
+            if (source.at(index) == QLatin1Char('|') && !escapedCharacter(source, index) && separator < 0)
+                separator = index;
+        }
+        if (close < 0)
+            return std::unexpected(QStringLiteral("Numbered cloze marker has no unescaped closing bracket. Escape a literal ] as \\]."));
+        if (separator >= close) separator = -1;
+        const qsizetype answerEnd = separator < 0 ? close : separator;
+        const qsizetype hintStart = separator < 0 ? -1 : separator + 1;
+        const QString rawAnswer = source.mid(answerStart, answerEnd - answerStart);
+        const QString rawHint = hintStart < 0 ? QString{} : source.mid(hintStart, close - hintStart);
+        if (rawAnswer.trimmed().isEmpty() || (hintStart >= 0 && rawHint.trimmed().isEmpty()))
             return std::unexpected(QStringLiteral("A cloze answer and an optional hint cannot be empty."));
-        answer=decodeSeparators(answer);hint=decodeSeparators(hint);
-        parts.append(ClozePart{open,close+2-open,match.captured(1).toInt(),answer,hint});
-        offset = close + 2;
+        const QString answer = decodeBracketEscapes(rawAnswer);
+        const QString hint = hintStart < 0 ? QString{} : decodeBracketEscapes(rawHint);
+        parts.append(ClozePart{static_cast<int>(open), static_cast<int>(close + 1 - open), group, answer, hint,
+                               static_cast<int>(answerStart), static_cast<int>(answerEnd - answerStart)});
+        offset = close + 1;
     }
-    if (parts.isEmpty()) return std::unexpected(QStringLiteral("A cloze card needs at least one {{c1::answer}} marker."));
+    if (parts.isEmpty()) return std::unexpected(QStringLiteral("A cloze card needs at least one [cloze1:answer] marker."));
     return parts;
 }
 std::expected<QStringList, QString> variantKeys(const struct Card &card)
@@ -363,11 +399,11 @@ std::expected<QVariantMap, QString> checkpointFromMap(const QVariantMap &value)
 std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &object)
 {
     const int version = object.value("version").toInt();
-    if (version < 2 || version > 6 || !object.value("decks").isArray()
+    if (version < 2 || version > 7 || !object.value("decks").isArray()
         || !object.value("cards").isArray() || !object.value("variants").isArray() || !object.value("history").isArray())
-        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2, 3, 4, 5, or 6 collection with decks, cards, variants, and history arrays."));
+        return std::unexpected(QStringLiteral("Expected a BetterFlash version 2 through 7 collection with decks, cards, variants, and history arrays."));
     if (object.contains("checkpoints") && (version < 5 || !object.value("checkpoints").isArray()))
-        return std::unexpected(QStringLiteral("Checkpoint entries require a version 5 or 6 collection and an array."));
+        return std::unexpected(QStringLiteral("Checkpoint entries require a version 5, 6, or 7 collection and an array."));
     int count = 0;
     for (const QString &key : {QStringLiteral("decks"),QStringLiteral("cards"),QStringLiteral("variants"),QStringLiteral("history")}) {
         count += object.value(key).toArray().size();
@@ -424,8 +460,8 @@ std::expected<struct Collection, QString> collectionFromJson(const QJsonObject &
         if (!value.isObject()) return std::unexpected(QStringLiteral("Variant record must be an object."));
         const auto record = variantFromMap(value.toObject().toVariantMap());
         if (!record) return std::unexpected(record.error());
-        if (version == 6 && !value.toObject().contains(QStringLiteral("graduated")))
-            return std::unexpected(QStringLiteral("Version 6 backup variant %1 is missing its graduated field. Re-export from the source collection or restore a complete backup; its learning phase cannot be inferred safely.").arg(record->id));
+        if (version >= 6 && !value.toObject().contains(QStringLiteral("graduated")))
+            return std::unexpected(QStringLiteral("Version %1 backup variant %2 is missing its graduated field. Re-export from the source collection or restore a complete backup; its learning phase cannot be inferred safely.").arg(version).arg(record->id));
         if (deletedVariants.contains(record->id)||variantIds.contains(record->id) || !cardIds.contains(record->cardId)
             || !variantKeys(cards.value(record->cardId))->contains(record->key))
             return std::unexpected(QStringLiteral("Duplicate variant identifier or invalid source note dependency."));

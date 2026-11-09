@@ -25,6 +25,8 @@ struct ClozePart {
     int group = 1;
     QString answer;
     QString hint;
+    int answerStart = 0;
+    int answerLength = 0;
 };
 struct Deck {
     QString id;

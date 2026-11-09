@@ -128,7 +128,7 @@ void SyncController::setEndpoint(const QString &endpoint) {
 QNetworkRequest SyncController::request(const QUrl &url) const {
     QNetworkRequest result(url);
     result.setRawHeader("Authorization", "Bearer " + m_credentials->key().toUtf8());
-    result.setRawHeader("X-BetterFlash-Protocol", "4");
+    result.setRawHeader("X-BetterFlash-Protocol", "5");
     if (!m_collectionId.isEmpty()) result.setRawHeader("X-BetterFlash-Collection", m_collectionId.toUtf8());
     result.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     result.setTransferTimeout(30000);
@@ -240,7 +240,7 @@ void SyncController::identifyCollection() {
         if (!success) {
             fail(QStringLiteral("SYNC_IDENTITY"), status == 401 || status == 403
                 ? QStringLiteral("Check your sync access token.")
-                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 4."));
+                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 5."));
             return;
         }
         const QJsonDocument document = QJsonDocument::fromJson(body);
@@ -255,15 +255,16 @@ void SyncController::identifyCollection() {
         QStringList missingCapabilities;
         for (const QString &required : {QStringLiteral("independent-schedules"),
                                         QStringLiteral("hierarchy-repair"),
-                                        QStringLiteral("short-interval-schedules")}) {
+                                        QStringLiteral("short-interval-schedules"),
+                                        QStringLiteral("numbered-cloze-markers")}) {
             if (!capabilities.contains(required)) missingCapabilities.append(required);
         }
-        if (advertisedProtocol.value_or(0) != 4 || !missingCapabilities.isEmpty()) {
+        if (advertisedProtocol.value_or(0) != 5 || !missingCapabilities.isEmpty()) {
             const QString protocolText = advertisedProtocol
                 ? QString::number(*advertisedProtocol) : QStringLiteral("missing or invalid");
             const QString capabilityText = missingCapabilities.isEmpty()
                 ? QStringLiteral("none") : missingCapabilities.join(QStringLiteral(", "));
-            fail(QStringLiteral("SYNC_PROTOCOL"), QStringLiteral("GET /v1/info reports protocol %1; this client requires protocol 4. Missing capabilities: %2. Upgrade the sync server and every synced client.")
+            fail(QStringLiteral("SYNC_PROTOCOL"), QStringLiteral("GET /v1/info reports protocol %1; this client requires protocol 5. Missing capabilities: %2. Upgrade the sync server and every synced client.")
                 .arg(protocolText, capabilityText));
             return;
         }

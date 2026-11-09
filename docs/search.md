@@ -1,8 +1,12 @@
 # Library card search
 
-Search is scoped to cards directly in the selected deck. It does not silently
-include descendant decks. When no deck is selected, search covers every card in
-the library and each result retains its owning deck in the card snapshot.
+The Cards pane offers three scopes: the selected deck only, the selected deck
+and all of its subdecks, or the entire collection. The default for a selected
+deck is that deck plus its subdecks. With no selected deck, the scope is the
+entire collection. The scope applies consistently to the card list, tag counts,
+filters and card search; each result retains its owning deck in the card
+snapshot. The separate **Search within decks** control always searches all
+decks so it can find and group matching deck contents.
 
 ## Search controls and filters
 
@@ -27,8 +31,8 @@ limit, so unrelated tags cannot crowd matching cards out of the results.
 Closing the filter popup preserves its selections.
 
 Due and Later filters update as time passes. A changed eligible set refreshes
-retrieval within the selected filters while preserving the current result-page
-context. Cached embeddings are reused when available. Due-count changes that
+retrieval within the selected scope and filters while preserving the current
+result-page context. Cached embeddings are reused when available. Due-count changes that
 do not alter eligibility update result metadata without restarting retrieval.
 
 ## Result layers
@@ -50,9 +54,9 @@ fields. A card appears once, in its earliest matching layer.
 
 The result groups arrive without replacing stronger text matches with semantic
 ones. Selection is retained by card ID when later layers arrive. Pending work
-and network responses have query epochs; typing a new query, changing decks or
-providers, and disabling search invalidate obsolete results. Errors leave the
-text layers available and offer retry.
+and network responses have query epochs; typing a new query, changing the
+selected deck or card scope, changing providers, and disabling search invalidate
+obsolete results. Errors leave the text layers available and offer retry.
 
 ## Local semantic retrieval
 
@@ -142,12 +146,11 @@ data and hashes, not plaintext queries, card contents or API keys. Entries are
 evicted in insertion order above 8,192 vectors or 64 MiB of vector payload;
 checks occur at open and every 128 writes, so short bounded overshoot and
 SQLite/WAL overhead are possible. Settings > Search > Rebuild search index
-clears embeddings; the next query encodes the selected deck, or the whole
-library when no deck is selected, again.
+clears embeddings; the next query encodes only the selected card scope again.
 
 This iteration uses the existing in-memory card snapshot and exhaustive cosine
-ranking within the selected deck or, when no deck is selected, across the
-library. Very large collections still need profiling and a paged card model;
+ranking within the selected card scope. Very large collections still need
+profiling and a paged card model;
 no large-collection performance claim is made here.
 
 ## Optional provider embeddings
@@ -158,9 +161,9 @@ Search settings. The protocol sends `model`, string-array `input`, and
 Requests are limited to eight passages per batch with timeouts and response
 limits. Redirects are rejected for credential-bearing embedding calls.
 
-Provider mode sends the query and uncached passages for all cards in the
-selected deck, or all cards in the library when no deck is selected, including
-both faces, tags, deck names and derived math terms.
+Provider mode sends the query and uncached passages only for cards in the
+selected card scope, including both faces, tags, deck names and derived math
+terms.
 **Search within decks** searches the entire library regardless of the selected
 deck. In provider mode, it may send uncached passages from every deck.
 The connection dialog explains this before saving. Provider charges may apply.

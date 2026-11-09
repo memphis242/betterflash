@@ -125,7 +125,7 @@ private:
         app.createDeck(QStringLiteral("Cloze generation fixture"));
         if (!settle(app) || app.decks().isEmpty()) return {};
         const QString deck = app.decks().first().toMap().value(QStringLiteral("id")).toString();
-        const QString front = QStringLiteral("{{c1::Mercury}} is closest to the Sun; {{c2::Venus}} follows it.");
+        const QString front = QStringLiteral("[cloze1:Mercury] is closest to the Sun; [cloze2:Venus] follows it.");
         if (!app.saveCard({}, deck, QStringLiteral("cloze"), front, {}, {}, 1) || !settle(app)) return {};
         return app.cards().first().toMap().value(QStringLiteral("id")).toString();
     }
@@ -181,7 +181,7 @@ private slots:
         const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
         QCOMPARE(app.cards().size(), 1);
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
-        provider.body = generationResponse(QStringLiteral("On a clear night, {{c1::Mercury}} appears near the Sun, while {{c2::Venus}} is farther away."), {}, 1);
+        provider.body = generationResponse(QStringLiteral("On a clear night, [cloze1:Mercury] appears near the Sun, while [cloze2:Venus] is farther away."), {}, 1);
         Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         CardGenerator generator(&app, &configuration);
         QSignalSpy generated(&generator, &CardGenerator::generated);
@@ -238,7 +238,7 @@ private slots:
             const QVariantMap card = entry.toMap();
             if (card.value(QStringLiteral("id")).toString() == sourceId)
                 sourceUnchanged = card.value(QStringLiteral("front")).toString()
-                    == QStringLiteral("{{c1::Mercury}} is closest to the Sun; {{c2::Venus}} follows it.");
+                    == QStringLiteral("[cloze1:Mercury] is closest to the Sun; [cloze2:Venus] follows it.");
         }
         QVERIFY(sourceUnchanged);
     }
@@ -247,7 +247,7 @@ private slots:
         AppController app(directory.path());
         const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
-        provider.body = generationResponse(QStringLiteral("{{c0::Invalid}} is not a valid cloze group."), {}, 1);
+        provider.body = generationResponse(QStringLiteral("[cloze0:Invalid] is not a valid cloze group."), {}, 1);
         Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         CardGenerator generator(&app, &configuration);
         generator.generate(sourceId);
@@ -436,9 +436,9 @@ private slots:
 
         QVariantMap edited = generator.draft();
         edited.insert(QStringLiteral("kind"), QStringLiteral("cloze"));
-        edited.insert(QStringLiteral("front"), QStringLiteral("The student crosses {{c1::the Atlantic}}."));
+        edited.insert(QStringLiteral("front"), QStringLiteral("The student crosses [cloze1:the Atlantic]."));
         edited.insert(QStringLiteral("back"), QString{});
-        provider.body = generationResponse(QStringLiteral("A new cloze note with {{c1::a numbered group}} and {{c2::another group}}."), {}, 2);
+        provider.body = generationResponse(QStringLiteral("A new cloze note with [cloze1:a numbered group] and [cloze2:another group]."), {}, 2);
         generator.refine(edited, QStringLiteral("Keep the card as cloze."));
         QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
         QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
@@ -472,23 +472,23 @@ private slots:
         AppController app(directory.path());
         const QString sourceId = addClozeSource(app); QVERIFY(!sourceId.isEmpty());
         MockChat provider; QVERIFY(provider.listen(QHostAddress::LocalHost, 0));
-        provider.body = generationResponse(QStringLiteral("{{c1::Mercury}} circles the Sun."), {}, 1);
+        provider.body = generationResponse(QStringLiteral("[cloze1:Mercury] circles the Sun."), {}, 1);
         Summarizer configuration(&app); QVERIFY(configureRemote(configuration, provider.endpoint()));
         CardGenerator generator(&app, &configuration);
         generator.generate(sourceId);
         QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
         QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
         QVariantMap edited = generator.draft();
-        edited.insert(QStringLiteral("front"), QStringLiteral("Student edit: {{c1::Mercury}} orbits."));
-        provider.body = generationResponse(QStringLiteral("A year on {{c1::Mercury}} is shorter than one on {{c2::Venus}}."), {}, 2);
+        edited.insert(QStringLiteral("front"), QStringLiteral("Student edit: [cloze1:Mercury] orbits."));
+        provider.body = generationResponse(QStringLiteral("A year on [cloze1:Mercury] is shorter than one on [cloze2:Venus]."), {}, 2);
         generator.refine(edited, QStringLiteral("Keep this as a cloze card."));
         QVERIFY(QTest::qWaitFor([&generator] { return !generator.busy(); }, 5000));
         QVERIFY2(generator.error().isEmpty(), qPrintable(generator.error()));
         QCOMPARE(generator.draft().value(QStringLiteral("kind")).toString(), QStringLiteral("cloze"));
         QCOMPARE(generator.draft().value(QStringLiteral("back")).toString(), QString{});
         QCOMPARE(generator.draft().value(QStringLiteral("pointCount")).toInt(), 2);
-        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("{{c1::")));
-        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("{{c2::")));
+        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("[cloze1:")));
+        QVERIFY(generator.draft().value(QStringLiteral("front")).toString().contains(QStringLiteral("[cloze2:")));
         QCOMPARE(app.cards().size(), 1);
     }
     void similarCardRefusalReturnsActionableErrorAndNoDraft() {

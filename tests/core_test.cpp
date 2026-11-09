@@ -131,6 +131,7 @@ private slots:
     void subtreeDeleteConvergesAcrossConcurrentChildMove();
     void clozeGroupsRenderAndScheduleIndependently();
     void clozeEscapesPreserveScopesAndMultilineText();
+    void numberedClozeMarkersPreserveEscapesAndOffsets();
     void malformedClozeIsRejected_data();
     void malformedClozeIsRejected();
     void queueRotationDoesNotChangeSchedules();
@@ -482,13 +483,13 @@ void CoreTest::subtreeDeleteConvergesAcrossConcurrentChildMove()
 void CoreTest::clozeGroupsRenderAndScheduleIndependently()
 {
     QTemporaryDir directory;AppController app(directory.path());QVERIFY(idle(app));const QString deckId=addDeck(app);
-    const QString source="{{c1::alpha::first}} and {{c2::beta::second}} repeat {{c1::gamma}}.";
+    const QString source="[cloze1:alpha|first] and [cloze2:beta|second] repeat [cloze1:gamma].";
     const QString id=addCard(app,deckId,"cloze",source,"Explanation");QVERIFY(!id.isEmpty());
     QCOMPARE(card(app,id).value("variants").toList().size(),2);
     app.startReview(deckId);QVERIFY(idle(app));QCOMPARE(app.currentCard().value("variantKey").toString(),QStringLiteral("c1"));
     const QString question=app.currentCard().value("question").toString();
     QVERIFY(question.contains("[first]"));QVERIFY(question.contains("beta"));QVERIFY(question.contains("[...]"));
-    QVERIFY(!question.contains("alpha"));QVERIFY(!question.contains("gamma"));QVERIFY(!question.contains("{{"));
+    QVERIFY(!question.contains("alpha"));QVERIFY(!question.contains("gamma"));QVERIFY(!question.contains("[cloze"));
     const QString answer=app.currentCard().value("answer").toString();QVERIFY(answer.contains("alpha"));QVERIFY(answer.contains("gamma"));QVERIFY(answer.contains("Explanation"));
     app.revealAnswer();QVERIFY(idle(app));app.grade(1,.4);QVERIFY(idle(app));
     QCOMPARE(app.currentCard().value("variantKey").toString(),QStringLiteral("c2"));
@@ -498,32 +499,56 @@ void CoreTest::clozeGroupsRenderAndScheduleIndependently()
 }
 void CoreTest::clozeEscapesPreserveScopesAndMultilineText()
 {
-    const struct model::Card note{model::uuid(),model::uuid(),"cloze","{{c1::std\\::expected}} and {{c2::first\nsecond::line one\nline two}}",{}, {},1};
+    const struct model::Card note{model::uuid(),model::uuid(),"cloze","[cloze1:std::expected|type] and [cloze2:first\nsecond|line one\nline two]",{}, {},1};
     const auto parts=model::parseCloze(note.front);QVERIFY(parts.has_value());QCOMPARE(parts->size(),2);
-    QCOMPARE(parts->at(0).answer,QStringLiteral("std::expected"));QVERIFY(parts->at(0).hint.isEmpty());
+    QCOMPARE(parts->at(0).answer,QStringLiteral("std::expected"));QCOMPARE(parts->at(0).hint,QStringLiteral("type"));
     QCOMPARE(parts->at(1).answer,QStringLiteral("first\nsecond"));QCOMPARE(parts->at(1).hint,QStringLiteral("line one\nline two"));
-    QVERIFY(model::question(note,"c2").contains("std::expected"));QVERIFY(!model::answer(note,"c2").contains("std\\::expected"));
-    const auto standard=model::parseCloze("{{c1::std::expected}}");QVERIFY(standard.has_value());
-    QCOMPARE(standard->first().answer,QStringLiteral("std"));QCOMPARE(standard->first().hint,QStringLiteral("expected"));
+    QVERIFY(model::question(note,"c2").contains("std::expected"));QVERIFY(model::answer(note,"c2").contains("std::expected"));
+    const auto standard=model::parseCloze("[cloze1:std::expected]");QVERIFY(standard.has_value());
+    QCOMPARE(standard->first().answer,QStringLiteral("std::expected"));QVERIFY(standard->first().hint.isEmpty());
     for (int original=0;original<=4;++original) {
-        const QString encoded="{{c1::literal"+QString(original*2+1,QLatin1Char('\\'))+"::scope}}";
+        const QString encoded="[cloze1:literal"+QString(original*2+1,QLatin1Char('\\'))+"|scope]";
         const auto escaped=model::parseCloze(encoded);QVERIFY(escaped.has_value());
-        QCOMPARE(escaped->first().answer,"literal"+QString(original,QLatin1Char('\\'))+"::scope");
+        QCOMPARE(escaped->first().answer,"literal"+QString(original,QLatin1Char('\\'))+"|scope");
     }
+}
+void CoreTest::numberedClozeMarkersPreserveEscapesAndOffsets()
+{
+    const QString source = QStringLiteral("[cloze1:std::expected|type] and [cloze2:\\[literal\\] \\| value] plus [cloze1:second].");
+    const auto parts = model::parseCloze(source);
+    QVERIFY(parts.has_value());
+    QCOMPARE(parts->size(), 3);
+    QCOMPARE(parts->at(0).group, 1);
+    QCOMPARE(parts->at(0).answer, QStringLiteral("std::expected"));
+    QCOMPARE(parts->at(0).hint, QStringLiteral("type"));
+    QCOMPARE(source.mid(parts->at(0).answerStart, parts->at(0).answerLength), QStringLiteral("std::expected"));
+    QCOMPARE(parts->at(1).group, 2);
+    QCOMPARE(parts->at(1).answer, QStringLiteral("[literal] | value"));
+    QCOMPARE(source.mid(parts->at(1).answerStart, parts->at(1).answerLength), QStringLiteral("\\[literal\\] \\| value"));
+    QCOMPARE(parts->at(2).group, 1);
+    QCOMPARE(model::variantKeys(model::Card{model::uuid(), model::uuid(), "cloze", source, {}, {}, 1})->size(), 2);
+    QVERIFY(model::parseCloze(QStringLiteral("An ordinary [bracket] and \\[cloze1:literal\\] [cloze999:ok]")));
+    const QString braces = QStringLiteral("[cloze1:std::array<int,2> a{{1,2}}]");
+    const auto aggregate = model::parseCloze(braces);QVERIFY(aggregate.has_value());
+    QCOMPARE(aggregate->first().answer, QStringLiteral("std::array<int,2> a{{1,2}}"));
+    const auto indexed = model::parseCloze(QStringLiteral("[cloze1:array\\[index\\]]"));QVERIFY(indexed.has_value());
+    QCOMPARE(indexed->first().answer, QStringLiteral("array[index]"));
 }
 
 void CoreTest::malformedClozeIsRejected_data()
 {
     QTest::addColumn<QString>("source");
-    QTest::newRow("zero group")<<QStringLiteral("{{c0::answer}}");
-    QTest::newRow("too large group")<<QStringLiteral("{{c1000::answer}}");
-    QTest::newRow("empty answer")<<QStringLiteral("{{c1::}}");
-    QTest::newRow("empty hint")<<QStringLiteral("{{c1::answer::}}");
-    QTest::newRow("unclosed")<<QStringLiteral("{{c1::answer");
-    QTest::newRow("unopened")<<QStringLiteral("answer}}");
-    QTest::newRow("nested")<<QStringLiteral("{{c1::{{c2::answer}}}}");
+    QTest::newRow("zero group")<<QStringLiteral("[cloze0:answer]");
+    QTest::newRow("too large group")<<QStringLiteral("[cloze1000:answer]");
+    QTest::newRow("empty answer")<<QStringLiteral("[cloze1:]");
+    QTest::newRow("empty hint")<<QStringLiteral("[cloze1:answer|]");
+    QTest::newRow("unclosed")<<QStringLiteral("[cloze1:answer");
     QTest::newRow("missing marker")<<QStringLiteral("Plain text");
-    QTest::newRow("unknown marker")<<QStringLiteral("{{c1::valid}} {{x1::bad}}");
+    QTest::newRow("unknown marker")<<QStringLiteral("[cloze1:valid] [clozeX:bad]");
+    QTest::newRow("old syntax has no numbered marker")<<QStringLiteral("{{c1::old syntax}}");
+    QTest::newRow("nested")<<QStringLiteral("[cloze1:outer [cloze2:inner]]");
+    QTest::newRow("unescaped literal bracket")<<QStringLiteral("[cloze1:array[index]]");
+    QTest::newRow("bad group before valid group")<<QStringLiteral("[cloze0:x] [cloze1:y]");
 }
 void CoreTest::malformedClozeIsRejected()
 {
@@ -715,10 +740,10 @@ void CoreTest::exportImportAndValidation()
 {
     QTemporaryDir sourceDirectory,destinationDirectory;AppController source(sourceDirectory.path()),destination(destinationDirectory.path());QVERIFY(idle(source));QVERIFY(idle(destination));
     const QString deckId=addDeck(source);QVERIFY(!addCard(source,deckId,"reverse","Original front","Original back").isEmpty());
-    QVERIFY(!addCard(source,deckId,"cloze","{{c1::One}} and {{c2::Two}}",{},2).isEmpty());
+    QVERIFY(!addCard(source,deckId,"cloze","[cloze1:One] and [cloze2:Two]",{},2).isEmpty());
     source.startReview(deckId);QVERIFY(idle(source));source.revealAnswer();QVERIFY(idle(source));source.grade(1,.5);QVERIFY(idle(source));
     const QString exportPath=sourceDirectory.filePath("collection.json");source.exportCollection(exportPath);QVERIFY(idle(source));QVERIFY(source.lastError().isEmpty());
-    const QJsonObject valid=readJson(exportPath);QCOMPARE(valid.value("version").toInt(),6);QCOMPARE(valid.value("variants").toArray().size(),4);
+    const QJsonObject valid=readJson(exportPath);QCOMPARE(valid.value("version").toInt(),7);QCOMPARE(valid.value("variants").toArray().size(),4);
     destination.importCollection(exportPath);QVERIFY(idle(destination));QVERIFY2(destination.lastError().isEmpty(),qPrintable(destination.lastError().value("detail").toString()));
     QCOMPARE(destination.cards(),source.cards());QCOMPARE(destination.history(),source.history());QCOMPARE(destination.decks(),source.decks());
     const QVariantList originalEvents=batch(destination).value("events").toList();

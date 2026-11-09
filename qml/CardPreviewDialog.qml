@@ -52,6 +52,7 @@ Dialog {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
                 markdown: preview.card.front || ""
+                clozePreview: preview.card.kind === "cloze"
                 mediaRoot: media.rootPath
                 baseFontSize: 19
             }

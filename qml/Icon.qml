@@ -88,6 +88,20 @@ Canvas {
             }
             break
         }
+        case "root-deck-add":
+            roundedRect(2, 5, 9, 10, 1.2)
+            c.moveTo(4, 2); c.lineTo(12, 2); c.quadraticCurveTo(14, 2, 14, 4)
+            c.moveTo(2, 17); c.lineTo(11, 17)
+            c.moveTo(12, 10); c.lineTo(17, 10)
+            c.moveTo(14.5, 7.5); c.lineTo(14.5, 12.5)
+            break
+        case "card-add":
+            roundedRect(1, 3, 12, 11, 1.2)
+            c.moveTo(4, 6); c.lineTo(10, 6)
+            c.moveTo(4, 9); c.lineTo(8, 9)
+            c.moveTo(11, 14); c.lineTo(17, 14)
+            c.moveTo(14, 11); c.lineTo(14, 17)
+            break
         case "subdeck-add":
             c.moveTo(2, 2); c.lineTo(2, 10); c.lineTo(6, 10)
             roundedRect(7, 6, 9, 10, 1.2)

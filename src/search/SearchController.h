@@ -83,6 +83,7 @@ public:
     void setProvider(const QString &provider);
     void setLocalProfile(const QString &profile);
     Q_INVOKABLE void setSearch(const QString &deckId, const QString &query);
+    Q_INVOKABLE void setSearchScope(const QString &deckId, const QString &query, const QString &scope);
     Q_INVOKABLE void setActive(bool active);
     Q_INVOKABLE void setCardFilter(const QVariantList &cardIds, bool enabled, bool preserveContext = false);
     Q_INVOKABLE void setDeckSearch(const QString &query);
@@ -113,6 +114,7 @@ private:
         QPointer<QNetworkReply> remoteReply;
         QByteArray remoteBody;
         QString deck;
+        QString scope = QStringLiteral("deck");
         QString query;
         QHash<QString, QVariantMap> cards;
         QVariantList literal;

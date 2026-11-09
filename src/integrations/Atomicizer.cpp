@@ -117,6 +117,10 @@ void Atomicizer::propose(const QString &cardId) {
     for (const QVariant &entry : m_app->cards()) {
         const QVariantMap note = entry.toMap();
         if (note.value(QStringLiteral("id")).toString() != cardId) continue;
+        if (!note.value(QStringLiteral("loadError")).toMap().isEmpty()) {
+            fail(QStringLiteral("ATOMICIZE_REPAIR"),QStringLiteral("Repair this card before splitting it. Its saved content and learning history are retained."));
+            return;
+        }
         const auto parsed = betterflash::model::cardFromMap(note);
         if (parsed) m_source = betterflash::model::toMap(*parsed);
         break;

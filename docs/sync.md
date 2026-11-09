@@ -94,7 +94,7 @@ reenable access. Revocation is effective after restart, including in-flight
 requests that were accepted by the old process.
 
 An authenticated `GET /v1/info` returns the account's stable `collectionId`,
-protocol version, and capabilities. Protocol 4 clients check this identity
+protocol version, and capabilities. Protocol 5 clients check this identity
 before uploading attachments or events and bind it locally in the transaction
 that applies the first successful response. Subsequent sync attempts to a
 different account or replacement server database fail before uploading. Keep
@@ -158,10 +158,10 @@ these bounds are not a substitute for public-edge connection/rate controls.
 
 ## Protocol and compatibility
 
-Upgrade the server and every synced device together to protocol 4. Clients send
+Upgrade the server and every synced device together to protocol 5. Clients send
 `X-BetterFlash-Protocol: 4`; the server rejects older clients with HTTP 426.
 New clients require `/v1/info` to advertise `independent-schedules`,
-`hierarchy-repair`, and `short-interval-schedules`. Mixing old
+`hierarchy-repair`, `short-interval-schedules`, and `numbered-cloze-markers`. Mixing old
 clients could overwrite review schedules with stale card snapshots.
 Media uploads require `X-BetterFlash-Collection` to match the identity obtained
 from `/v1/info`; the server checks it before accepting attachment bytes. Clients
@@ -207,7 +207,7 @@ Only target card states contribute media references. Large operations split at
 dependency-complete card boundaries, with parent decks before child content and
 deck deletions after it. Checkpoints themselves remain local. All clients and
 the server must support this event before using synchronized undo. It is part
-of the protocol 4 contract. See [undo and redo](undo.md) for the full policy.
+of the protocol 5 contract. See [undo and redo](undo.md) for the full policy.
 
 Imported historical reviews can use `historyOnly: true` without changing a
 schedule. Variant identifiers are UUID version 5 values derived from the source
@@ -236,7 +236,7 @@ the import or sync transaction. Reviews without session metadata remain valid.
 Upgrade every synced client to the session-history build (local schema 4) before
 using tracked review sessions. Older clients accept review events but discard
 session metadata, leaving their copies as estimated groups after an upgrade.
-Protocol 4 requires session metadata support on every device. Upgrade the server
+Protocol 5 requires session metadata support on every device. Upgrade the server
 too, so it validates session fields and their preservation during corrections.
 
 Media is uploaded to `PUT /v1/media/<sha256>.<png|jpg|jpeg|webp|gif|wav>` with a 20 MiB limit and authenticated, streamed back through `GET` or `HEAD`. The server validates the content hash and writes atomically. Images must fully
@@ -281,9 +281,9 @@ without this field preserves a stored baseline only for the same attached
 audio asset; it never marks changed text as confirmed. An explicit empty
 object clears the baselines, leaving attached recordings unverified.
 
-New collection backups use version 6 for short-interval schedules and deck
+New collection backups use version 7 for short-interval schedules and deck
 checkpoints, including historical image and narration assets. Narration text
-baselines remain included. The application still imports version 2, 3, 4, and 5
+baselines remain included. The application still imports version 2, 3, 4, 5, and 6
 backups. Provider credentials
 remain excluded from every backup version.
 
@@ -431,3 +431,13 @@ Log compaction and replaying concurrent reviews into a combined schedule remain
 future work. HTTPS terminates at the deployment proxy. The desktop stores its token
 through Secret Service when available. Tokens and provider keys are excluded
 from collection backups and sync events.
+
+## Numbered cloze format
+
+Protocol 5 requires `[cloze1:answer]` markers. Upgrade the server and every synced
+client together. Clients check the protocol and `numbered-cloze-markers`
+capability before transferring events or media; unsupported servers produce an
+actionable upgrade error. Portable exports use version 7. Older backup containers
+can still be imported when their card contents use supported syntax. Older cloze
+markers are not supported. See [cloze markers](cloze-markers.md) for syntax and
+escaping.

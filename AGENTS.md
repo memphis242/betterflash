@@ -14,6 +14,9 @@ co-author attribution, or a remote session label in project text or commits.
   outgoing sync event must be persisted in one transaction before reporting
   success or advancing review.
 - Preserve independent schedules for reverse directions and numbered clozes.
+- Isolate malformed saved records. A single unreadable card, schedule, history
+  entry, or derived view must not hide the rest of the collection. Preserve raw
+  data and a recovery copy before repairs; surface the affected record and cause.
 - Keep user credentials out of Markdown, SQLite collection tables, backups,
   sync payloads, logs, and model prompts. Only send the non-secret card content
   needed for a user-requested model operation.
