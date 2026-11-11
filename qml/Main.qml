@@ -96,6 +96,7 @@ ApplicationWindow {
     property var generatedCardDraft: null
     property bool editingGeneratedCard: false
     property bool refinementPending: false
+    property string generatedErrorOperation: "refinement"
     property string generationDifficulty: "similar"
     readonly property var generationDifficultyChoices: [
         {label: cardGenerator.deckGeneration ? "Similar to draft" : "Similar to source", key: "similar"},
@@ -145,7 +146,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || detailDialog.chatConfirmationOpen || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     onHistoryBlockingModalOpenChanged: {
@@ -853,6 +854,7 @@ ApplicationWindow {
             return
         localCardError = ""
         refinementPending = true
+        generatedErrorOperation = "refinement"
         cardGenerator.refine(draft, refinementInstructions.text, generationDifficulty)
     }
     function checkGeneratedAnswer() {
@@ -868,6 +870,7 @@ ApplicationWindow {
         if (!draft)
             return
         localCardError = ""
+        generatedErrorOperation = "verification"
         cardGenerator.verify(draft)
     }
     function addAnotherCard(deckId) {
@@ -1236,6 +1239,13 @@ ApplicationWindow {
                 glyph: "keyboard"
                 hint: "Command palette (" + shortcuts.bindings.commandPalette + ")"
                 onClicked: commandPalette.open()
+            }
+            AppButton {
+                objectName: "recoverUnsavedChat"
+                visible: cardChat.dirty
+                text: "Unsaved chat"
+                hint: "Recover an unsaved AI reply"
+                onClicked: window.openCardChat(cardChat.cardId)
             }
             GlyphButton {
                 objectName: "themeToggle"
@@ -1764,6 +1774,14 @@ ApplicationWindow {
                     onActivated: window.runAction(modelData)
                 }
             }
+            GenerationErrorNotice {
+                objectName: "generatedCardErrorNotice"
+                message: window.editingGeneratedCard ? cardGenerator.error : ""
+                operation: window.generatedErrorOperation
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(implicitHeight, cardDialog.availableHeight * 0.35)
+                Layout.maximumHeight: cardDialog.availableHeight * 0.35
+            }
             RowLayout {
                 Layout.fillWidth: true
                 AppComboBox {
@@ -2122,7 +2140,7 @@ ApplicationWindow {
             ScrollView {
                 id: editorErrors
                 readonly property var sourceIssue: window.editingCardId ? (window.editingCard().loadError || {}) : ({})
-                readonly property string message: localCardError || media.error || (editingGeneratedCard ? cardGenerator.error : "") || sourceIssue.message || ""
+                readonly property string message: localCardError || media.error || sourceIssue.message || ""
                 visible: message.length > 0
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(96, editorErrorBlock.implicitHeight)
@@ -2954,6 +2972,20 @@ ApplicationWindow {
         library.cardScope = "subdecks"
         library.clearFilters()
         library.filterTags = ["check-" + mode]
+    }
+    function openCardChat(cardId) {
+        const card = cardById(cardId)
+        const recovering = cardChat.dirty && cardChat.cardId === cardId
+        if (cardChat.dirty && !recovering) {
+            showError("CARD_CHAT_UNSAVED", "Save or discard the unsaved chat changes before opening another card's chat.", "Click Unsaved chat in the top bar, then use Retry saving or Discard unsaved changes.")
+            return
+        }
+        if (!recovering && (!card.id || (card.loadError && card.loadError.code))) return
+        if (cardPreviewDialog.visible) cardPreviewDialog.close()
+        selectedCardId = cardId
+        detailOpen = true
+        detailDialog.openFor(cardId)
+        detailDialog.showChat()
     }
     function hasCheckFollowUp(card) {
         return String(card.tags || "").split(",").some(tag => {

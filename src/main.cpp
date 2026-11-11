@@ -4,6 +4,7 @@
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
 #include "integrations/CardChecker.h"
+#include "integrations/CardChat.h"
 #include "integrations/DeckChecker.h"
 #include "integrations/WebSearch.h"
 #include "integrations/CardGenerator.h"
@@ -220,6 +221,10 @@ int main(int argc, char **argv) {
     Atomicizer atomic(&app, &ai);
     CardGenerator cardGenerator(&app, &ai);
     WebSearch webSearch(&apiKeys);
+    WebSearch chatWebSearch(&apiKeys);
+    QObject::connect(&webSearch, &WebSearch::changed, &chatWebSearch,
+                     [&webSearch, &chatWebSearch] { chatWebSearch.setEnabled(webSearch.enabled()); });
+    CardChat cardChat(&app, &ai, &chatWebSearch, dataDirectory);
     CardChecker cardChecker(&app, &ai, &webSearch);
     DeckChecker deckChecker(&app, &ai, &webSearch, &cardChecker);
     CheckpointSummary checkpointSummary(&ai);
@@ -285,6 +290,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("cardGenerator"), &cardGenerator);
     engine.rootContext()->setContextProperty(QStringLiteral("webSearch"), &webSearch);
     engine.rootContext()->setContextProperty(QStringLiteral("cardChecker"), &cardChecker);
+    engine.rootContext()->setContextProperty(QStringLiteral("cardChat"), &cardChat);
     engine.rootContext()->setContextProperty(QStringLiteral("deckChecker"), &deckChecker);
     engine.rootContext()->setContextProperty(QStringLiteral("checkpointSummary"), &checkpointSummary);
     engine.rootContext()->setContextProperty(QStringLiteral("studyAssistant"), &studyAssistant);

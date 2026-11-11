@@ -76,6 +76,11 @@ request a refinement before explicitly accepting it. Refinement difficulty is
 relative to the current draft. Generation and refinement never save a card
 without acceptance. Models can be wrong, so review the answer before saving.
 
+Generation and refinement failures appear in a prominent panel at the top of
+their dialog. A refusal is identified as the model's decision, with its reason
+and a next step visible; technical error codes are expandable. A rejected
+refinement leaves the draft and instructions available for revision.
+
 ## Generate similar card
 
 Available from card detail, card action menus and the active review card:

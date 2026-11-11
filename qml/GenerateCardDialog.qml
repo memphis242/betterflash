@@ -110,163 +110,164 @@ Dialog {
             Qt.callLater(dialog.resumeIfReady);
         }
     }
-    contentItem: ScrollView {
-        id: generationBody
-        contentWidth: availableWidth
-        clip: true
-        ColumnLayout {
-            width: generationBody.availableWidth
-            spacing: 16
-            Label {
-                Layout.fillWidth: true
-                text: dialog.deckGeneration
-                    ? "Describe the card you want to create for this deck. The result opens in the card editor for review before saving. Models can be wrong; check the generated answer."
-                    : "Create one new card that tests the same concept with a different example or question. Check the generated answer before saving."
-                wrapMode: Text.Wrap
-                color: Theme.ink
-                font.pixelSize: 16
-            }
-            Label {
-                Layout.fillWidth: true
-                textFormat: Text.PlainText
-                text: ai.provider === "local" ? "Uses " + ai.localModelLabel + " on this device." : (dialog.deckGeneration ? "Sends your instructions and the deck name to " : "Sends this card and its deck context to ") + ai.endpoint + " using " + ai.model + "."
-                wrapMode: Text.Wrap
-                color: Theme.inkMuted
-            }
-            Label {
-                visible: dialog.deckGeneration
-                Layout.fillWidth: true
-                text: "Deck: " + (dialog.ui.deckById(dialog.deckId).name || "Unavailable")
-                textFormat: Text.PlainText
-                wrapMode: Text.Wrap
-                color: Theme.ink
-                font.bold: true
-            }
-            RowLayout {
-                visible: !dialog.deckGeneration
-                Layout.fillWidth: true
-                Label { text: "Difficulty"; color: Theme.ink }
-                AppComboBox {
-                    id: generationDifficulty
-                    objectName: "generationDifficulty"
-                    model: dialog.ui.generationDifficultyChoices
-                    textRole: "label"
-                    valueRole: "key"
+    contentItem: ColumnLayout {
+        spacing: 10
+        GenerationErrorNotice {
+            objectName: "cardGenerationErrorNotice"
+            message: cardGenerator.error
+            operation: "generation"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(implicitHeight, dialog.availableHeight * 0.35)
+            Layout.maximumHeight: dialog.availableHeight * 0.35
+        }
+        ScrollView {
+            id: generationBody
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: 0
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+                width: generationBody.availableWidth
+                spacing: 16
+                Label {
                     Layout.fillWidth: true
-                    enabled: !cardGenerator.busy
-                    comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
-                }
-            }
-            Label { text: dialog.deckGeneration ? "What would you like to learn?" : "Generation instructions (optional)"; color: Theme.ink; font.bold: true }
-            ScrollView {
-                id: instructionsViewport
-                Layout.fillWidth: true
-                Layout.preferredHeight: dialog.deckGeneration ? 160 : 64
-                contentWidth: availableWidth
-                clip: true
-                TextArea {
-                    id: generationInstructions
-                    objectName: "generationInstructions"
-                    width: instructionsViewport.availableWidth
-                    height: Math.max(instructionsViewport.availableHeight, implicitHeight)
-                    readOnly: cardGenerator.busy
-                    textFormat: TextEdit.PlainText
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    padding: 10
+                    text: dialog.deckGeneration
+                        ? "Describe the card you want to create for this deck. The result opens in the card editor for review before saving. Models can be wrong; check the generated answer."
+                        : "Create one new card that tests the same concept with a different example or question. Check the generated answer before saving."
+                    wrapMode: Text.Wrap
                     color: Theme.ink
-                    placeholderText: dialog.deckGeneration
-                        ? "For example: A beginner card explaining transaction durability, with a short SQL example. Include any desired question, scope, or difficulty (up to 2000 characters)."
-                        : "Choose a topic, example, or constraint (up to 2000 characters)."
-                    Accessible.name: "Generation instructions"
-                    background: Rectangle {
-                        radius: 8
-                        color: Theme.editorField
-                        border.color: generationInstructions.activeFocus ? Theme.accent : Theme.rule
-                        border.width: generationInstructions.activeFocus ? 2 : 1
+                    font.pixelSize: 16
+                }
+                Label {
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    text: ai.provider === "local" ? "Uses " + ai.localModelLabel + " on this device." : (dialog.deckGeneration ? "Sends your instructions and the deck name to " : "Sends this card and its deck context to ") + ai.endpoint + " using " + ai.model + "."
+                    wrapMode: Text.Wrap
+                    color: Theme.inkMuted
+                }
+                Label {
+                    visible: dialog.deckGeneration
+                    Layout.fillWidth: true
+                    text: "Deck: " + (dialog.ui.deckById(dialog.deckId).name || "Unavailable")
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    color: Theme.ink
+                    font.bold: true
+                }
+                RowLayout {
+                    visible: !dialog.deckGeneration
+                    Layout.fillWidth: true
+                    Label { text: "Difficulty"; color: Theme.ink }
+                    AppComboBox {
+                        id: generationDifficulty
+                        objectName: "generationDifficulty"
+                        model: dialog.ui.generationDifficultyChoices
+                        textRole: "label"
+                        valueRole: "key"
+                        Layout.fillWidth: true
+                        enabled: !cardGenerator.busy
+                        comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
                     }
                 }
-            }
-            Label {
-                visible: generationInstructions.text.length > 1800
-                text: generationInstructions.text.length + " / 2000 characters" + (generationInstructions.text.length > 2000 ? ". Shorten the instructions to generate a card." : "")
-                color: generationInstructions.text.length > 2000 ? Theme.error : Theme.inkMuted
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-            }
-            ScrollView {
-                id: generationErrors
-                visible: !!cardGenerator.error
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(80, generationError.implicitHeight)
-                contentWidth: availableWidth
-                clip: true
-                ErrorBlock {
-                    id: generationError
-                    width: generationErrors.availableWidth
-                    message: cardGenerator.error
+                Label { text: dialog.deckGeneration ? "What would you like to learn?" : "Generation instructions (optional)"; color: Theme.ink; font.bold: true }
+                ScrollView {
+                    id: instructionsViewport
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: dialog.deckGeneration ? 160 : 64
+                    contentWidth: availableWidth
+                    clip: true
+                    TextArea {
+                        id: generationInstructions
+                        objectName: "generationInstructions"
+                        width: instructionsViewport.availableWidth
+                        height: Math.max(instructionsViewport.availableHeight, implicitHeight)
+                        readOnly: cardGenerator.busy
+                        textFormat: TextEdit.PlainText
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        padding: 10
+                        color: Theme.ink
+                        placeholderText: dialog.deckGeneration
+                            ? "For example: A beginner card explaining transaction durability, with a short SQL example. Include any desired question, scope, or difficulty (up to 2000 characters)."
+                            : "Choose a topic, example, or constraint (up to 2000 characters)."
+                        Accessible.name: "Generation instructions"
+                        background: Rectangle {
+                            radius: 8
+                            color: Theme.editorField
+                            border.color: generationInstructions.activeFocus ? Theme.accent : Theme.rule
+                            border.width: generationInstructions.activeFocus ? 2 : 1
+                        }
+                    }
                 }
-            }
-            Label {
-                visible: cardGenerator.busy
-                text: dialog.deckGeneration ? "Generating your card..." : "Generating a variation..."
-                color: Theme.ink
-                font.pixelSize: 18
-                font.bold: true
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-            }
-            ProgressBar {
-                visible: cardGenerator.busy
-                indeterminate: true
-                Layout.fillWidth: true
-            }
-            ScrollView {
-                visible: !dialog.deckGeneration
-                objectName: "generationSourcePreview"
-                id: preview
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.max(120, Math.min(260, dialog.availableHeight * 0.4))
-                contentWidth: availableWidth
-                clip: true
-                ColumnLayout {
-                    width: preview.availableWidth
-                    spacing: 16
-                    readonly property var shownCard: dialog.ui.cardById(dialog.sourceId)
-                    Label {
-                        text: "Source card"
-                        color: Theme.accent
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    Label {
-                        text: "Question"
-                        color: Theme.inkMuted
-                        font.pixelSize: 16
-                    }
-                    MarkdownPane {
-                        markdown: parent.shownCard.front || ""
-                        mediaRoot: media.rootPath
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: implicitHeight
-                        baseFontSize: 19
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: Theme.rule
-                    }
-                    Label {
-                        text: "Answer"
-                        color: Theme.inkMuted
-                        font.pixelSize: 16
-                    }
-                    MarkdownPane {
-                        markdown: parent.shownCard.back || ""
-                        mediaRoot: media.rootPath
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: implicitHeight
-                        baseFontSize: 19
+                Label {
+                    visible: generationInstructions.text.length > 1800
+                    text: generationInstructions.text.length + " / 2000 characters" + (generationInstructions.text.length > 2000 ? ". Shorten the instructions to generate a card." : "")
+                    color: generationInstructions.text.length > 2000 ? Theme.error : Theme.inkMuted
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    visible: cardGenerator.busy
+                    text: dialog.deckGeneration ? "Generating your card..." : "Generating a variation..."
+                    color: Theme.ink
+                    font.pixelSize: 18
+                    font.bold: true
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                }
+                ProgressBar {
+                    visible: cardGenerator.busy
+                    indeterminate: true
+                    Layout.fillWidth: true
+                }
+                ScrollView {
+                    visible: !dialog.deckGeneration
+                    objectName: "generationSourcePreview"
+                    id: preview
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.max(120, Math.min(260, dialog.availableHeight * 0.4))
+                    contentWidth: availableWidth
+                    clip: true
+                    ColumnLayout {
+                        width: preview.availableWidth
+                        spacing: 16
+                        readonly property var shownCard: dialog.ui.cardById(dialog.sourceId)
+                        Label {
+                            text: "Source card"
+                            color: Theme.accent
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+                        Label {
+                            text: "Question"
+                            color: Theme.inkMuted
+                            font.pixelSize: 16
+                        }
+                        MarkdownPane {
+                            markdown: parent.shownCard.front || ""
+                            mediaRoot: media.rootPath
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: implicitHeight
+                            baseFontSize: 19
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Theme.rule
+                        }
+                        Label {
+                            text: "Answer"
+                            color: Theme.inkMuted
+                            font.pixelSize: 16
+                        }
+                        MarkdownPane {
+                            markdown: parent.shownCard.back || ""
+                            mediaRoot: media.rootPath
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: implicitHeight
+                            baseFontSize: 19
+                        }
                     }
                 }
             }

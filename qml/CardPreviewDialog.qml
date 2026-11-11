@@ -47,6 +47,12 @@ Dialog {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
+            AppButton {
+                text: "Ask AI"
+                enabled: !!preview.card.id && !(preview.card.loadError && preview.card.loadError.code)
+                hint: "Open a chat pane alongside this card."
+                onClicked: preview.ui.openCardChat(preview.cardId)
+            }
             GlyphButton {
                 glyph: "check"
                 visible: preview.ui.hasCheckFollowUp(preview.card)

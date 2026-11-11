@@ -57,6 +57,13 @@ AppMenu {
             menu.ui.openGenerateSimilar(menu.cardId)
         }
     }
+    AppMenuItem { glyph: "book"
+        text: "Ask AI"
+        enabled: menu.cardReadable
+        ToolTip.visible: hovered
+        ToolTip.text: "Open chats about this card with read-only information retrieval tools."
+        onTriggered: menu.ui.openCardChat(menu.cardId)
+    }
     AppMenuItem { glyph: "check"
         objectName: "menuCheckCorrectness"
         text: "Check correctness"
