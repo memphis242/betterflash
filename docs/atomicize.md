@@ -35,6 +35,10 @@ real examples and user review will guide further prompt refinement.
 Generate Proposal spans the top of the dialog. While the model is running, a
 prominent status message and an indeterminate progress bar show that work is
 in progress. The bar does not imply a completion percentage from the provider.
+The completed recommendation and its explanation share a distinct panel directly
+below the generation button, with a bold heading and bounded explanation. The
+provider disclosure is available in the generation button's hover tooltip and
+accessible description instead of repeating in the dialog body.
 
 Valid cloze markers are normalized in application code, independently of the
 model's numbering. Each replacement starts at group 1, with consecutive group

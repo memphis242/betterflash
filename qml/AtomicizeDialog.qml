@@ -215,6 +215,9 @@ Dialog {
         AppButton {
             id: generateProposal
             objectName: "atomicGenerate"
+            hint: ai.provider === "local" ? "Generate proposal processes the front and back on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
+                : "Generate proposal sends the front and back to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
+            Accessible.description: hint
             readonly property bool retry: atomic.error.length > 0 && !atomic.busy
             foreground: retry ? Theme.ink : Theme.actionInk
             background: Rectangle {
@@ -235,8 +238,68 @@ Dialog {
             enabled: !atomic.busy && !app.busy && dialog.prepared && !!atomic.sourceCard.id
             onClicked: dialog.generate()
         }
+        Rectangle {
+            id: resultPanel
+            visible: !atomic.busy && !dialog.hasFailure && atomic.decision.length > 0
+            color: Theme.surfaceRaised
+            border.color: atomic.decision === "keep" ? Theme.warning : Theme.rule
+            radius: 8
+            Layout.fillWidth: true
+            Layout.preferredHeight: resultContents.implicitHeight + 28
+            ColumnLayout {
+                id: resultContents
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 14
+                spacing: 10
+                Label {
+                    text: atomic.decision === "keep" ? "Recommendation: keep this card together"
+                        : "Recommendation: split into " + dialog.drafts.length + " cards"
+                    textFormat: Text.PlainText
+                    color: atomic.decision === "keep" ? Theme.warning : Theme.ink
+                    font.family: Theme.contentFont
+                    font.pixelSize: 18
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    visible: atomic.decision === "keep" && atomic.hasProposal
+                    text: "The model also offered optional atomic replacement candidates for you to consider."
+                    textFormat: Text.PlainText
+                    color: Theme.ink
+                    font.family: Theme.contentFont
+                    font.pixelSize: 16
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                ScrollView {
+                    id: reasonScroll
+                    objectName: "atomicReasonScroll"
+                    visible: atomic.reason.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(reasonLabel.contentHeight, dialog.ui.width < 600 ? 88 : 112)
+                    contentWidth: availableWidth
+                    clip: true
+                    TextEdit {
+                        id: reasonLabel
+                        width: reasonScroll.availableWidth
+                        text: atomic.reason
+                        textFormat: TextEdit.PlainText
+                        readOnly: true
+                        selectByMouse: true
+                        cursorVisible: false
+                        color: Theme.ink
+                        font.family: Theme.contentFont
+                        font.pixelSize: 16
+                        wrapMode: TextEdit.Wrap
+                    }
+                }
+            }
+        }
         ColumnLayout {
-            visible: atomic.busy || (!dialog.hasFailure && atomic.status.length > 0)
+            visible: atomic.busy || (!dialog.hasFailure && atomic.decision.length === 0 && atomic.status.length > 0)
             Layout.fillWidth: true
             spacing: 8
             Label {
@@ -258,24 +321,15 @@ Dialog {
             }
         }
         RowLayout {
+            visible: !dialog.splitReady
             Layout.fillWidth: true
             AppButton {
                 objectName: "atomicEditInstructions"
-                visible: !dialog.splitReady
                 text: dialog.generationInstructions.length > 0 ? "Edit instructions (custom)" : "Edit instructions"
                 enabled: !atomic.busy && !app.busy
                 onClicked: instructionsDialog.openEditor()
             }
             Item { Layout.fillWidth: true }
-        }
-        Label {
-            textFormat: Text.PlainText
-            text: ai.provider === "local" ? "Generate proposal processes the front and back on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
-                : "Generate proposal sends the front and back to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
-            color: Theme.inkMuted
-            font.pixelSize: 11
-            wrapMode: Text.Wrap
-            Layout.fillWidth: true
         }
         RowLayout {
             visible: ai.provider === "remote" && !ai.hasApiKey
@@ -294,34 +348,6 @@ Dialog {
                     dialog.close()
                     dialog.ui.openLanguageModelSettings()
                 }
-            }
-        }
-        Label {
-            visible: atomic.decision === "keep" && atomic.hasProposal
-            text: "The model recommends keeping the original card, but also offered atomic replacement candidates."
-            textFormat: Text.PlainText
-            color: Theme.warning
-            font.family: Theme.contentFont
-            font.pixelSize: 17
-            font.bold: true
-            wrapMode: Text.Wrap
-            Layout.fillWidth: true
-        }
-        ScrollView {
-            id: reasonScroll
-            objectName: "atomicReasonScroll"
-            visible: atomic.decision.length > 0 && atomic.reason.length > 0
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(reasonLabel.implicitHeight, dialog.ui.width < 600 ? 80 : 64)
-            clip: true
-            contentWidth: availableWidth
-            Label {
-                textFormat: Text.PlainText
-                id: reasonLabel
-                width: reasonScroll.availableWidth
-                text: (atomic.decision === "keep" && !atomic.hasProposal ? "Keep this card together. " : "") + atomic.reason
-                color: Theme.ink
-                wrapMode: Text.Wrap
             }
         }
         Rectangle {
