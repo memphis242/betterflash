@@ -81,7 +81,9 @@ search** separately enables Tavily search, off by default. Save an existing
 Tavily API key there using the app's credential controls, then enable the
 switch. **Test connection** sends one fixed, non-card query to Tavily and uses
 one basic search credit, even when web search is disabled. The test reports
-connection errors with details and can be canceled. The key is scoped to
+connection errors with details and can be canceled. After starting a test, the
+fixed input and returned search title, URL, and snippet appear in a selectable,
+scrollable panel. The key is scoped to
 Tavily's HTTPS origin and stored through the existing secret store; it is not
 placed in cards, sync data, or model prompts.
 

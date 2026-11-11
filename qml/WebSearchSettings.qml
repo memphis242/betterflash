@@ -113,6 +113,66 @@ ColumnLayout {
         }
     }
 
+    Rectangle {
+        Layout.fillWidth: true
+        visible: settings.service.testInput.length > 0
+        implicitHeight: Math.min(testTranscript.implicitHeight, 260) + 24
+        color: Theme.surfaceRaised
+        border.color: Theme.rule
+        radius: 6
+
+        ScrollView {
+            id: transcriptScroll
+            anchors.fill: parent
+            anchors.margins: 12
+            clip: true
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            ColumnLayout {
+                id: testTranscript
+                width: transcriptScroll.availableWidth
+                spacing: 8
+                Label {
+                    text: "Test input"
+                    color: Theme.ink
+                    font.bold: true
+                    font.pixelSize: 16
+                }
+                TextEdit {
+                    text: settings.service.testInput
+                    textFormat: TextEdit.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.Wrap
+                    color: Theme.ink
+                    font.family: Theme.uiFont
+                    font.pixelSize: 16
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                }
+                Label {
+                    text: "Test result"
+                    color: Theme.ink
+                    font.bold: true
+                    font.pixelSize: 16
+                }
+                TextEdit {
+                    text: settings.service.testBusy ? "Waiting for Tavily..." : settings.service.testResult
+                    textFormat: TextEdit.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.Wrap
+                    color: Theme.ink
+                    font.family: Theme.uiFont
+                    font.pixelSize: 16
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                }
+            }
+        }
+    }
+
     Label {
         textFormat: Text.PlainText
         text: "Search results can be incomplete, misleading, or out of date. The language model can also make mistakes when interpreting them. Check important facts against the linked sources."

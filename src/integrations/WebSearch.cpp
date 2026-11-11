@@ -57,6 +57,8 @@ void WebSearch::cancel() {
 }
 void WebSearch::clearTestResult() {
     m_testStatus.clear();
+    m_testInput.clear();
+    m_testResult.clear();
     m_testErrorCode.clear();
     m_testErrorDetail.clear();
 }
@@ -66,7 +68,7 @@ void WebSearch::cancelTest() {
     Q_ASSERT(m_testSearch);
     m_testSearch->cancel();
     m_testBusy = false;
-    clearTestResult();
+    m_testResult = QStringLiteral("Request canceled; no result was received.");
     m_testStatus = QStringLiteral("Connection test canceled.");
     emit changed();
 }
@@ -81,15 +83,28 @@ void WebSearch::testConnection() {
         return;
     }
     if (!m_testSearch) m_testSearch = new WebSearch(m_registry, this);
+    m_testInput = QStringLiteral("What is the capital of France?");
     m_testBusy = true;
     m_testStatus = QStringLiteral("Testing Tavily connection...");
     emit changed();
-    m_testSearch->startSearch(QStringLiteral("What is the capital of France?"), this,
+    m_testSearch->startSearch(m_testInput, this,
         [this](std::expected<QVariantList, struct ProviderError> result) {
             m_testBusy = false;
             if (result) {
                 m_testStatus = QStringLiteral("Tavily connection succeeded. The API key can perform searches.");
+                QStringList excerpts;
+                for (const QVariant &item : *result) {
+                    const QVariantMap entry = item.toMap();
+                    excerpts.append(entry.value(QStringLiteral("title")).toString()
+                        + QLatin1Char('\n') + entry.value(QStringLiteral("url")).toString()
+                        + QLatin1Char('\n') + entry.value(QStringLiteral("content")).toString());
+                }
+                m_testResult = excerpts.isEmpty() ? QStringLiteral("Tavily returned no search results.")
+                                                : excerpts.join(QStringLiteral("\n\n"));
+                const QString credential = m_credentials->key();
+                if (!credential.isEmpty()) m_testResult.replace(credential, QStringLiteral("[redacted]"));
             } else {
+                m_testResult = QStringLiteral("No search results were received. See the connection error above.");
                 const struct ProviderError &error = result.error();
                 m_testErrorCode = error.code;
                 m_testErrorDetail = error.message;

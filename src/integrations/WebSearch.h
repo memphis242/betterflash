@@ -19,6 +19,8 @@ class WebSearch final : public QObject {
     Q_PROPERTY(QObject *apiKey READ apiKey CONSTANT)
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY changed)
     Q_PROPERTY(QString testStatus READ testStatus NOTIFY changed)
+    Q_PROPERTY(QString testInput READ testInput NOTIFY changed)
+    Q_PROPERTY(QString testResult READ testResult NOTIFY changed)
     Q_PROPERTY(QString testErrorCode READ testErrorCode NOTIFY changed)
     Q_PROPERTY(QString testErrorDetail READ testErrorDetail NOTIFY changed)
 public:
@@ -30,6 +32,8 @@ public:
     QObject *apiKey() const;
     bool testBusy() const { return m_testBusy; }
     QString testStatus() const { return m_testStatus; }
+    QString testInput() const { return m_testInput; }
+    QString testResult() const { return m_testResult; }
     QString testErrorCode() const { return m_testErrorCode; }
     QString testErrorDetail() const { return m_testErrorDetail; }
     Q_INVOKABLE void testConnection();
@@ -47,6 +51,8 @@ private:
     WebSearch *m_testSearch = nullptr;
     bool m_testBusy = false;
     QString m_testStatus{};
+    QString m_testInput{};
+    QString m_testResult{};
     QString m_testErrorCode{};
     QString m_testErrorDetail{};
     QNetworkAccessManager m_network;
