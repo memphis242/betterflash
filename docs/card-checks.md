@@ -20,6 +20,13 @@ misleading. The app reports whether the model actually searched, rather than
 implying that allowing search means it consulted evidence. Checks inspect text;
 attached images are not sent to the model for visual inspection.
 
+Read-only card detail and saved-card previews expose both checks in the card's
+**Card actions** (`...`) menu. The shared library card menu offers them too.
+These actions check a snapshot of that card's saved content and keep the preview
+open underneath the result. Returning from the check preserves the preview's
+side and scroll position. Cards requiring repair cannot be checked from the
+menu until they are readable.
+
 ## Optional web search
 
 Both checks work using the model's intrinsic knowledge. **Settings > Web

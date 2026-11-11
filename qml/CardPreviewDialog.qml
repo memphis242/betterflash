@@ -30,6 +30,44 @@ Dialog {
         open()
     }
 
+    header: Item {
+        implicitHeight: 64
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: preview.padding
+            anchors.rightMargin: preview.padding
+            spacing: 12
+            Label {
+                text: preview.title
+                textFormat: Text.PlainText
+                font.family: Theme.uiFont
+                font.pixelSize: 24
+                font.bold: true
+                color: Theme.ink
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            GlyphButton {
+                glyph: "more"
+                hint: "Card actions"
+                enabled: !!preview.card.id
+                onClicked: previewCardMenu.open()
+                CardActionsMenu {
+                    id: previewCardMenu
+                    y: parent.height
+                    ui: preview.ui
+                    cardId: preview.cardId
+                    onBeforeAction: preview.close()
+                }
+            }
+            GlyphButton {
+                glyph: "close"
+                hint: "Close card preview"
+                onClicked: preview.close()
+            }
+        }
+    }
+
     contentItem: ColumnLayout {
         spacing: 12
         ScrollView {

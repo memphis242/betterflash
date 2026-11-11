@@ -57,6 +57,22 @@ AppMenu {
             menu.ui.openGenerateSimilar(menu.cardId)
         }
     }
+    AppMenuItem { glyph: "check"
+        objectName: "menuCheckCorrectness"
+        text: "Check correctness"
+        enabled: menu.cardReadable && !app.busy && !cardChecker.busy
+        ToolTip.visible: hovered
+        ToolTip.text: "Check this saved card's facts and logic with the configured model."
+        onTriggered: menu.ui.openCardCheck("correctness", menu.card.front, menu.card.back, menu.card.kind, true)
+    }
+    AppMenuItem { glyph: "check"
+        objectName: "menuCheckCompleteness"
+        text: "Check completeness"
+        enabled: menu.cardReadable && !app.busy && !cardChecker.busy
+        ToolTip.visible: hovered
+        ToolTip.text: "Look for missing parts or qualifications within this saved card's scope."
+        onTriggered: menu.ui.openCardCheck("completeness", menu.card.front, menu.card.back, menu.card.kind, true)
+    }
     AppMenuItem { glyph: "atom"
         text: "Atomicize card"
         enabled: menu.cardReadable

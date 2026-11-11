@@ -12,6 +12,7 @@ Dialog {
     property string checkedKind: "basic"
     property string modelLabel: ""
     property bool searchAllowed: false
+    property bool savedCard: false
     readonly property var report: cardChecker.result
     readonly property var failure: cardChecker.errorInfo
     readonly property bool hasResult: !!report.verdict
@@ -32,12 +33,13 @@ Dialog {
         border.color: Theme.rule
     }
     Overlay.modal: Rectangle { color: Theme.scrim }
-    function openFor(mode, front, back, kind) {
+    function openFor(mode, front, back, kind, saved = false) {
         cardChecker.clear()
         checkMode = mode
         checkedFront = front
         checkedBack = back
         checkedKind = kind
+        savedCard = saved
         open()
         runCheck()
     }
@@ -83,8 +85,8 @@ Dialog {
         }
         Label {
             text: dialog.checkMode === "correctness"
-                ? "Checks the current draft's factual and logical accuracy. Attached images are not inspected."
-                : "Looks for missing parts and qualifications needed to answer this card's question fully, within its scope. Attached images are not inspected."
+                ? (dialog.savedCard ? "Checks this saved card's factual and logical accuracy." : "Checks the current draft's factual and logical accuracy.") + " Attached images are not inspected."
+                : (dialog.savedCard ? "Looks for missing parts and qualifications in this saved card's answer, within its question's scope." : "Looks for missing parts and qualifications needed to answer this card's question fully, within its scope.") + " Attached images are not inspected."
             textFormat: Text.PlainText
             color: Theme.ink
             font.pixelSize: 15
@@ -140,7 +142,7 @@ Dialog {
         AppButton {
             visible: !cardChecker.busy && !!dialog.failure.message && dialog.searchAllowed
             text: "Retry without web search"
-            hint: "Check this draft using the model's intrinsic knowledge. Keeps your global web search setting."
+            hint: "Check this card snapshot using the model's intrinsic knowledge. Keeps your global web search setting."
             Layout.fillWidth: true
             onClicked: dialog.runCheck(false)
         }
@@ -290,7 +292,7 @@ Dialog {
         AppButton {
             text: "Run again"
             visible: !cardChecker.busy
-            hint: "Run the same check on this draft again"
+            hint: "Run the same check on this card snapshot again"
             onClicked: dialog.runCheck(dialog.searchAllowed)
         }
         Item { Layout.fillWidth: true }

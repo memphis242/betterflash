@@ -2926,8 +2926,8 @@ ApplicationWindow {
         id: cardCheckDialog
         ui: window
     }
-    function openCardCheck(mode, front, back, kind) {
-        cardCheckDialog.openFor(mode, front, back, kind)
+    function openCardCheck(mode, front, back, kind, saved = false) {
+        cardCheckDialog.openFor(mode, front, back, kind, saved)
     }
     Sheet {
         id: resetDialog
