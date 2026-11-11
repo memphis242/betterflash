@@ -87,6 +87,8 @@ public:
     Q_INVOKABLE void setSelectedDeckId(const QString &id);
     Q_INVOKABLE void createDeck(const QString &name, const QString &description = {}, const QString &parentId = {});
     Q_INVOKABLE void updateDeck(const QString &id, const QString &name, const QString &description = {}, const QString &parentId = {});
+    Q_INVOKABLE bool setDeckTagVocabulary(const QString &deckId, const QStringList &tags, const QString &requestId, const QStringList &expectedVocabulary);
+    Q_INVOKABLE bool applySuggestedTags(const QVariantList &proposals, const QString &requestId, const QString &deckId, const QStringList &expectedVocabulary);
     Q_INVOKABLE bool moveDeck(const QString &id, const QString &parentId = {});
     Q_INVOKABLE void deleteDeck(const QString &id);
     Q_INVOKABLE bool loadDeckCheckpoints(const QString &deckId, const QString &requestId);
@@ -167,6 +169,8 @@ signals:
     void syncApplied(bool success, bool hasMore);
     void cardTimelineReady(const QString &cardId, const QVariantMap &result);
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
+    void deckTagVocabularySaved(const QString &deckId, const QString &requestId, bool success);
+    void suggestedTagsApplied(const QString &requestId, bool success);
     void checkReviewMarked(const QString &requestId, bool success);
     void checkFollowUpDismissed(const QString &cardId, const QString &requestId, bool success);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);

@@ -36,6 +36,8 @@ struct Deck {
     QString description;
     QString createdAt;
     QString parentId = {};
+    QStringList tagVocabulary{};
+    QString tagVocabularyError{};
 };
 struct Card {
     QString id;
@@ -109,6 +111,7 @@ QVariantMap toMap(const struct Deck &record);
 QVariantMap toMap(const struct Card &record);
 QVariantMap toMap(const struct Variant &record);
 QVariantMap toMap(const struct Review &record);
+std::expected<QStringList, QString> tagVocabularyFromVariant(const QVariant &value);
 std::expected<struct Deck, QString> deckFromMap(const QVariantMap &value);
 std::expected<struct Card, QString> cardFromMap(const QVariantMap &value);
 std::expected<QVariantMap, QString> normalizeAtomicProposal(const QVariantMap &proposal);

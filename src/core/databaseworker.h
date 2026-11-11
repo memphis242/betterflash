@@ -21,6 +21,8 @@ public:
     void snapshot();
     void createDeck(const QString &name, const QString &description, const QString &parentId);
     void updateDeck(const QString &id, const QString &name, const QString &description, const QString &parentId);
+    void setDeckTagVocabulary(const QString &deckId, const QStringList &tags, const QString &requestId, const QStringList &expectedVocabulary);
+    void applySuggestedTags(const QVariantList &proposals, const QString &requestId, const QString &deckId, const QStringList &expectedVocabulary);
     void moveDeck(const QString &id, const QString &parentId);
     void deleteDeck(const QString &id);
     void loadDeckCheckpoints(const QString &deckId, const QString &requestId);
@@ -74,6 +76,8 @@ signals:
     void historyApplied(const QString &id, bool redo, bool success);
     void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
+    void deckTagVocabularySaved(const QString &deckId, const QString &requestId, bool success);
+    void suggestedTagsApplied(const QString &requestId, bool success);
     void checkReviewMarked(const QString &requestId, bool success);
     void checkFollowUpDismissed(const QString &cardId, const QString &requestId, bool success);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);

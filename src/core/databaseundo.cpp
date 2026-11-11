@@ -54,7 +54,7 @@ struct CaptureTable {
     const char *fields;
 };
 constexpr std::array captureTables{
-    CaptureTable{"decks", "deck", "id", "1", "'id',%1.id,'name',%1.name,'description',%1.description,'createdAt',%1.created_at,'parentId',%1.parent_id"},
+    CaptureTable{"decks", "deck", "id", "1", "'id',%1.id,'name',%1.name,'description',%1.description,'createdAt',%1.created_at,'parentId',%1.parent_id,'tagVocabulary',json(%1.tag_vocabulary)"},
     CaptureTable{"notes", "card", "id", "1", "'id',%1.id,'deckId',%1.deck_id,'kind',%1.kind,'front',%1.front,'back',%1.back,'tags',%1.tags,'pointCount',%1.point_count,'narrations',json(%1.narrations),'narrationFingerprints',json(%1.narration_fingerprints)"},
     // Explicit full-precision JSON numbers preserve stored REAL values for exact
     // history conflict checks and restoration of schedules and response times.
@@ -405,8 +405,13 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
         const QString entity = change.value("entity").toString();
         const QVariantMap after = change.value("after").toMap();
         if (entity != QStringLiteral("deck") || after.isEmpty()) continue;
-        const auto record = model::deckFromMap(after);
+        auto record = model::deckFromMap(after);
         if (!record) { m_sqlDetail = record.error(); return false; }
+        if (remote && !after.contains("tagVocabulary")) {
+            const auto current=deck(record->id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (current) { record->tagVocabulary=current->tagVocabulary; record->tagVocabularyError=current->tagVocabularyError; }
+        }
         if (!upsertDeck(*record) || !execute("DELETE FROM tombstones WHERE entity_type='deck' AND entity_id=?", {record->id})) return false;
     }
     for (const QString &entity : {QStringLiteral("card"), QStringLiteral("variant"), QStringLiteral("review"), QStringLiteral("owner"), QStringLiteral("checkpoint")}) {

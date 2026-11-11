@@ -6,6 +6,7 @@
 #include "integrations/CardChecker.h"
 #include "integrations/CardChat.h"
 #include "integrations/DeckChecker.h"
+#include "integrations/TagAssistant.h"
 #include "integrations/WebSearch.h"
 #include "integrations/CardGenerator.h"
 #include "integrations/ApiKeyRegistry.h"
@@ -227,6 +228,7 @@ int main(int argc, char **argv) {
     CardChat cardChat(&app, &ai, &chatWebSearch, dataDirectory);
     CardChecker cardChecker(&app, &ai, &webSearch);
     DeckChecker deckChecker(&app, &ai, &webSearch, &cardChecker);
+    TagAssistant tagAssistant(&app, &ai);
     CheckpointSummary checkpointSummary(&ai);
     StudyAssistant studyAssistant(&ai, &app);
     SyncController sync(&app, media.rootPath());
@@ -289,6 +291,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
     engine.rootContext()->setContextProperty(QStringLiteral("cardGenerator"), &cardGenerator);
     engine.rootContext()->setContextProperty(QStringLiteral("webSearch"), &webSearch);
+    engine.rootContext()->setContextProperty(QStringLiteral("tagAssistant"), &tagAssistant);
     engine.rootContext()->setContextProperty(QStringLiteral("cardChecker"), &cardChecker);
     engine.rootContext()->setContextProperty(QStringLiteral("cardChat"), &cardChat);
     engine.rootContext()->setContextProperty(QStringLiteral("deckChecker"), &deckChecker);

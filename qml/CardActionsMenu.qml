@@ -89,6 +89,13 @@ AppMenu {
         ToolTip.text: "Remove correctness and completeness follow-up marks. Keeps other tags and review schedules."
         onTriggered: menu.ui.dismissCheckFollowUp(menu.cardId)
     }
+    AppMenuItem { glyph: "edit"
+        text: "Suggest tags"
+        enabled: menu.cardReadable && !app.busy && !tagAssistant.busy
+        ToolTip.visible: hovered
+        ToolTip.text: "Choose tags for this card from its deck's saved vocabulary, using the configured model."
+        onTriggered: { menu.beforeAction(); menu.ui.openCardTags(menu.cardId) }
+    }
     AppMenuItem { glyph: "atom"
         text: "Atomicize card"
         enabled: menu.cardReadable

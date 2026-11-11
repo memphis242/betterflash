@@ -18,6 +18,7 @@ import socket
 import stat
 import tempfile
 import threading
+import unicodedata
 import warnings
 
 try:
@@ -337,6 +338,28 @@ def validate_deck(record):
     parent_id = record.get("parentId", "")
     if not isinstance(parent_id, str) or (parent_id and not valid_uuid(parent_id)) or parent_id == record["id"]:
         raise ProtocolError("INVALID_EVENT", "A deck parent identifier is invalid.")
+    if "tagVocabulary" in record:
+        tags = record["tagVocabulary"]
+        if not isinstance(tags, list) or len(tags) > 100:
+            raise ProtocolError("INVALID_EVENT", "A deck tag vocabulary must be an array of at most 100 tags.")
+        seen = set()
+        for entry in tags:
+            if not isinstance(entry, str):
+                raise ProtocolError("INVALID_EVENT", "Every deck tag must be text.")
+            tag = entry.strip()
+            try:
+                length = len(tag.encode("utf-16-le")) // 2
+            except UnicodeError:
+                raise ProtocolError("INVALID_EVENT", "A deck tag contains invalid Unicode.") from None
+            if (not tag or length > 80 or "," in tag
+                    or any(unicodedata.category(char) in ("Cc", "Zl", "Zp") for char in entry)):
+                raise ProtocolError("INVALID_EVENT", "Deck tags need 1 to 80 characters and cannot contain commas, line breaks, or control characters.")
+            key = tag.casefold()
+            if key in ("check-correctness", "check-completeness"):
+                raise ProtocolError("INVALID_EVENT", "Check follow-up tags are reserved for check results.")
+            if key in seen:
+                raise ProtocolError("INVALID_EVENT", "Deck tags cannot be repeated, even with different capitalization.")
+            seen.add(key)
 
 
 def validate_history_record(entity, identifier, record):

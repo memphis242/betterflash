@@ -2,6 +2,7 @@
 
 #include "cardmodel.h"
 
+#include <QSet>
 #include <expected>
 
 namespace betterflash::checkpoints {
@@ -14,6 +15,7 @@ struct Snapshot {
     QString rootId{};
     QList<struct model::Deck> decks{};
     QList<struct model::Card> cards{};
+    QSet<QString> decksWithoutVocabulary{};
 };
 
 std::expected<struct Snapshot, QString> validateSnapshot(const QVariantMap &value);

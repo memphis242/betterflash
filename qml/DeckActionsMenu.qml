@@ -46,6 +46,11 @@ AppMenu {
         enabled: menu.deckAvailable && !app.busy && !cardChecker.busy && !deckChecker.busy
         onTriggered: { menu.beforeAction(); menu.ui.openDeckCheck(menu.deckId, "completeness") }
     }
+    AppMenuItem { glyph: "edit"
+        text: "Manage tags / Suggest card tags"
+        enabled: menu.deckAvailable && !app.busy && !tagAssistant.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckTags(menu.deckId) }
+    }
     AppMenuItem { glyph: "folder"
         text: "Add subdeck"
         enabled: menu.deckAvailable && !app.busy

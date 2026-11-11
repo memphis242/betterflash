@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonParseError>
 #include <QMap>
 #include <QSqlError>
@@ -52,7 +53,7 @@ bool onlyKeys(const QVariantMap &value, const QSet<QString> &allowed)
 
 bool contentKeys(const QVariantMap &value, bool card)
 {
-    static const QSet<QString> deckKeys{"id", "name", "description", "createdAt", "parentId"};
+    static const QSet<QString> deckKeys{"id", "name", "description", "createdAt", "parentId", "tagVocabulary"};
     static const QSet<QString> cardKeys{"id", "deckId", "kind", "front", "back", "tags", "pointCount", "narrations", "narrationFingerprints"};
     return onlyKeys(value, card ? cardKeys : deckKeys);
 }
@@ -105,7 +106,7 @@ std::expected<struct checkpoints::Snapshot, QString> readCurrentSnapshot(QSqlDat
     if (!model::validUuid(rootId))
         return std::unexpected(QStringLiteral("Choose an existing deck before opening checkpoints."));
     QSqlQuery decks(database);
-    decks.prepare(QStringLiteral("WITH RECURSIVE subtree(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN subtree ON d.parent_id=subtree.id) SELECT d.id,d.name,d.description,d.created_at,d.parent_id FROM decks d JOIN subtree s ON s.id=d.id ORDER BY d.id"));
+    decks.prepare(QStringLiteral("WITH RECURSIVE subtree(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN subtree ON d.parent_id=subtree.id) SELECT d.id,d.name,d.description,d.created_at,d.parent_id,d.tag_vocabulary FROM decks d JOIN subtree s ON s.id=d.id ORDER BY d.id"));
     decks.addBindValue(rootId);
     if (!decks.exec()) return std::unexpected(decks.lastError().text());
     QVariantList deckMaps;
@@ -113,9 +114,13 @@ std::expected<struct checkpoints::Snapshot, QString> readCurrentSnapshot(QSqlDat
     while (decks.next()) {
         if (deckMaps.size() >= model::maxCollectionRecords)
             return std::unexpected(QStringLiteral("This deck subtree exceeds the checkpoint record limit."));
+        struct QJsonParseError tagError{};
+        const QJsonDocument tags=QJsonDocument::fromJson(decks.value(5).toString().toUtf8(), &tagError);
+        if (tagError.error!=QJsonParseError::NoError || !tags.isArray())
+            return std::unexpected(QStringLiteral("Deck %1 has an unreadable tag vocabulary; preserve a recovery copy before repairing it.").arg(decks.value(0).toString()));
         const QVariantMap value{{"id", decks.value(0)}, {"name", decks.value(1)},
                                    {"description", decks.value(2)}, {"createdAt", decks.value(3)},
-                                   {"parentId", decks.value(4)}};
+                                   {"parentId", decks.value(4)}, {"tagVocabulary",tags.array().toVariantList()}};
         byteCount += encoded(value).size() + 1;
         if (byteCount > checkpoints::maxSnapshotBytes)
             return std::unexpected(QStringLiteral("This deck hierarchy exceeds the 64 MiB checkpoint limit. Create checkpoints for smaller subdecks."));
@@ -212,8 +217,15 @@ struct checkpoints::Snapshot restoredAtCurrentParent(const struct checkpoints::S
     const auto root = std::find_if(current.decks.cbegin(), current.decks.cend(), [&](const struct model::Deck &entry) { return entry.id == current.rootId; });
     assert(root != current.decks.cend());
     struct checkpoints::Snapshot result = target;
-    for (struct model::Deck &record : result.decks)
+    for (struct model::Deck &record : result.decks) {
         if (record.id == result.rootId) record.parentId = root->parentId;
+        if (result.decksWithoutVocabulary.contains(record.id)) {
+            const auto existing=std::find_if(current.decks.cbegin(),current.decks.cend(),
+                [&](const struct model::Deck &entry) { return entry.id == record.id; });
+            if (existing!=current.decks.cend()) record.tagVocabulary=existing->tagVocabulary;
+        }
+    }
+    result.decksWithoutVocabulary.clear();
     return result;
 }
 
@@ -250,13 +262,17 @@ std::expected<QList<struct model::Deck>, QString> readAncestors(QSqlDatabase &da
             return std::unexpected(QStringLiteral("The deck's ancestor chain is cyclic or exceeds its record limit. Repair the hierarchy before restoring."));
         seen.insert(parent);
         QSqlQuery query(database);
-        query.prepare("SELECT id,name,description,created_at,parent_id FROM decks WHERE id=?");
+        query.prepare("SELECT id,name,description,created_at,parent_id,tag_vocabulary FROM decks WHERE id=?");
         query.addBindValue(parent);
         if (!query.exec()) return std::unexpected(query.lastError().text());
         if (!query.next()) return std::unexpected(QStringLiteral("A parent deck is missing. Move this deck to an existing parent before restoring."));
+        struct QJsonParseError tagError{};
+        const QJsonDocument tags=QJsonDocument::fromJson(query.value(5).toString().toUtf8(), &tagError);
+        if (tagError.error!=QJsonParseError::NoError || !tags.isArray())
+            return std::unexpected(QStringLiteral("Deck %1 has an unreadable tag vocabulary; preserve a recovery copy before repairing it.").arg(parent));
         const QVariantMap value{{"id", query.value(0)}, {"name", query.value(1)},
                                 {"description", query.value(2)}, {"createdAt", query.value(3)},
-                                {"parentId", query.value(4)}};
+                                {"parentId", query.value(4)}, {"tagVocabulary",tags.array().toVariantList()}};
         const auto record = model::deckFromMap(value);
         if (!record) return std::unexpected(record.error());
         byteCount += encoded(value).size();
@@ -341,6 +357,7 @@ std::expected<struct Snapshot, QString> validateSnapshot(const QVariantMap &valu
         if (!deck) return std::unexpected(deck.error());
         if (parents.contains(deck->id)) return std::unexpected(QStringLiteral("Checkpoint deck identifiers are duplicated."));
         parents.insert(deck->id, deck->parentId);
+        if (!entry.toMap().contains("tagVocabulary")) result.decksWithoutVocabulary.insert(deck->id);
         result.decks.append(*deck);
     }
     if (!parents.contains(result.rootId) || parents.contains(parents.value(result.rootId)))
@@ -376,7 +393,11 @@ QVariantMap snapshotMap(const struct Snapshot &snapshot)
 {
     QVariantList decks;
     QVariantList cards;
-    for (const struct model::Deck &deck : snapshot.decks) decks.append(model::toMap(deck));
+    for (const struct model::Deck &deck : snapshot.decks) {
+        QVariantMap value=model::toMap(deck);
+        if (snapshot.decksWithoutVocabulary.contains(deck.id)) value.remove("tagVocabulary");
+        decks.append(value);
+    }
     for (const struct model::Card &card : snapshot.cards) cards.append(model::toMap(card));
     return {{"version", 1}, {"rootId", snapshot.rootId}, {"decks", decks}, {"cards", cards}};
 }
@@ -447,7 +468,9 @@ std::expected<void, QString> validateChanges(const QVariantMap &value)
                     if (!contentKeys(record, false)) return std::unexpected(QStringLiteral("Checkpoint deck changes contain fields outside deck content."));
                     const auto valid = model::deckFromMap(record);
                     if (!valid) return std::unexpected(valid.error());
-                    if (model::toMap(*valid) != record)
+                    QVariantMap normalized=model::toMap(*valid);
+                    if (!record.contains("tagVocabulary")) normalized.remove("tagVocabulary");
+                    if (normalized != record)
                         return std::unexpected(QStringLiteral("Checkpoint deck changes must contain complete normalized content fields."));
                 }
             }

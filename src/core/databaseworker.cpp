@@ -40,7 +40,21 @@ namespace {
 QVariantMap object(const QVariantMap &map, const QString &key) { return map.value(key).toMap(); }
 QString json(const QVariantMap &map) { return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(QJsonDocument::Compact)); }
 struct model::Deck readDeck(const QSqlQuery &q)
-{ return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString()}; }
+{
+    struct model::Deck result{q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString()};
+    struct QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(q.value(5).toString().toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isArray())
+        result.tagVocabularyError = QStringLiteral("Deck %1 tag vocabulary is not a valid JSON array: %2.").arg(result.id, error.errorString());
+    else {
+        const auto vocabulary = model::tagVocabularyFromVariant(document.array().toVariantList());
+        if (!vocabulary) result.tagVocabularyError = QStringLiteral("Deck %1 tag vocabulary is invalid: %2").arg(result.id, vocabulary.error());
+        else if (QJsonArray::fromStringList(*vocabulary).toVariantList()!=document.array().toVariantList())
+            result.tagVocabularyError = QStringLiteral("Deck %1 tag vocabulary contains non-normalized text. Preserve a recovery copy before repairing it.").arg(result.id);
+        else result.tagVocabulary = *vocabulary;
+    }
+    return result;
+}
 QVariantMap readMetadata(const QString &source, const QString &field, QString *error)
 {
     QJsonParseError parseError{};
@@ -244,11 +258,11 @@ bool DatabaseWorker::migrate()
     const int version = versionQuery.value(0).toInt();
     versionQuery.finish();
     assert(!versionQuery.isActive());
-    if (version > 8) {
-        m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 8. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
+    if (version > 9) {
+        m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 9. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
         return false;
     }
-    const bool migrating=version<8;
+    const bool migrating=version<9;
     if (migrating&&(m_db.tables().contains(QStringLiteral("notes"))||m_db.tables().contains(QStringLiteral("cards")))
         &&!createRecoveryBackup()) return false;
     if (migrating&&(!execute("PRAGMA foreign_keys=OFF")||!execute("PRAGMA ignore_check_constraints=ON"))) return false;
@@ -259,7 +273,7 @@ bool DatabaseWorker::migrate()
                 .arg(ifNotExists ? QStringLiteral(" IF NOT EXISTS") : QString(), name);
         };
         const QStringList schema{
-            "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '')",
+            "CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL,created_at TEXT NOT NULL,parent_id TEXT NOT NULL DEFAULT '',tag_vocabulary TEXT NOT NULL DEFAULT '[]')",
             "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,kind TEXT NOT NULL,front TEXT NOT NULL,back TEXT NOT NULL,tags TEXT NOT NULL,point_count INTEGER NOT NULL CHECK(point_count BETWEEN 1 AND 1000),narrations TEXT NOT NULL DEFAULT '{}',narration_fingerprints TEXT NOT NULL DEFAULT '{}')",
             variantsSchema(QStringLiteral("review_variants"), true),
             "CREATE INDEX IF NOT EXISTS variants_due ON review_variants(due)",
@@ -297,6 +311,13 @@ bool DatabaseWorker::migrate()
             if (!columns.exec("PRAGMA table_info(decks)")) {m_sqlDetail=columns.lastError().text();return false;}
             bool hasParent=false;while (columns.next()) hasParent|=columns.value(1).toString()==QStringLiteral("parent_id");
             if (!hasParent&&!execute("ALTER TABLE decks ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")) return false;
+        }
+        if (version < 9) {
+            QSqlQuery columns(m_db);
+            if (!columns.exec("PRAGMA table_info(decks)")) { m_sqlDetail=columns.lastError().text(); return false; }
+            bool hasVocabulary=false;
+            while (columns.next()) hasVocabulary |= columns.value(1).toString()==QStringLiteral("tag_vocabulary");
+            if (!hasVocabulary && !execute("ALTER TABLE decks ADD COLUMN tag_vocabulary TEXT NOT NULL DEFAULT '[]'")) return false;
         }
         if (!execute("CREATE INDEX IF NOT EXISTS decks_parent ON decks(parent_id)")) return false;
         if (version < 4) {
@@ -343,7 +364,7 @@ bool DatabaseWorker::migrate()
                 migrated.append(note);
             }
             QSqlQuery allDecks(m_db);
-            if (!allDecks.exec("SELECT id,name,description,created_at,parent_id FROM decks")) {m_sqlDetail=allDecks.lastError().text();return false;}
+            if (!allDecks.exec("SELECT id,name,description,created_at,parent_id,tag_vocabulary FROM decks")) {m_sqlDetail=allDecks.lastError().text();return false;}
             while (allDecks.next()) if (!enqueue("deck.upsert",{{"deck",model::toMap(readDeck(allDecks))}})) return false;
             for (const struct model::Card &note : migrated) {
                 if (!model::cardReadIssue(note,cardVariants(note.id)).isEmpty()) continue;
@@ -372,7 +393,7 @@ bool DatabaseWorker::migrate()
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
-        return execute("PRAGMA user_version=8");
+        return execute("PRAGMA user_version=9");
     });
     const QString migrationError=m_sqlDetail;
     if (migrating&&(!execute("PRAGMA ignore_check_constraints=OFF")||!execute("PRAGMA foreign_keys=ON"))) return false;
@@ -381,7 +402,7 @@ bool DatabaseWorker::migrate()
 }
 std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id,name,description,created_at,parent_id FROM decks WHERE id=?");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,name,description,created_at,parent_id,tag_vocabulary FROM decks WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
     return q.next() ? std::optional<struct model::Deck>(readDeck(q)) : std::nullopt;
 }
@@ -422,7 +443,14 @@ QList<struct model::Variant> DatabaseWorker::cardVariants(const QString &id)
     return result;
 }
 bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
-{ return execute("INSERT INTO decks(id,name,description,created_at,parent_id) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id",{r.id,r.name,r.description,r.createdAt,r.parentId}); }
+{
+    if (!r.tagVocabularyError.isEmpty()) { m_sqlDetail = r.tagVocabularyError; return false; }
+    const auto existing=deck(r.id);
+    if (!m_sqlDetail.isEmpty()) return false;
+    if (existing && !existing->tagVocabularyError.isEmpty()) { m_sqlDetail=existing->tagVocabularyError; return false; }
+    const QString vocabulary = QString::fromUtf8(QJsonDocument(QJsonArray::fromStringList(r.tagVocabulary)).toJson(QJsonDocument::Compact));
+    return execute("INSERT INTO decks(id,name,description,created_at,parent_id,tag_vocabulary) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id,tag_vocabulary=excluded.tag_vocabulary",{r.id,r.name,r.description,r.createdAt,r.parentId,vocabulary});
+}
 bool DatabaseWorker::upsertCard(const struct model::Card &r)
 { return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count,narrations=excluded.narrations,narration_fingerprints=excluded.narration_fingerprints",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount,json(r.narrations),json(r.narrationFingerprints)}); }
 bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString &reviewId)
@@ -660,11 +688,16 @@ bool DatabaseWorker::publishSnapshot()
         m_collectionIssues.append(QVariantMap{{"code",code},{"message",message},{"detail",detail.left(4096)}});
     };
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY name,id")) {
+    if (!query.exec("SELECT id,name,description,created_at,parent_id,tag_vocabulary FROM decks ORDER BY name,id")) {
         fail("STORAGE_READ","Could not read saved decks. No cards have been removed by this failed load. Check storage and retry.",query.lastError().text());return false;
     }
     while (query.next()) {
-        QVariantMap map=model::toMap(readDeck(query));
+        const struct model::Deck savedDeck=readDeck(query);
+        QVariantMap map=model::toMap(savedDeck);
+        if (!savedDeck.tagVocabularyError.isEmpty()) {
+            map.insert("tagVocabularyError",savedDeck.tagVocabularyError);
+            warning(QStringLiteral("DECK_TAG_VOCABULARY"),QStringLiteral("A deck's tag vocabulary needs repair. Its cards remain available."),savedDeck.tagVocabularyError);
+        }
         const QString id=map.value("id").toString();deckIndexes.insert(id,decks.size());deckParents.insert(id,map.value("parentId").toString());
         for (const QString &field:countFields) {map.insert(field,0);map.insert(QStringLiteral("own")+field.left(1).toUpper()+field.mid(1),0);}
         decks.append(map);
@@ -1080,13 +1113,181 @@ void DatabaseWorker::updateDeck(const QString &id, const QString &name, const QS
     if (!ready()) return;
     const auto existing=deck(id);
     if (!existing) {fail("DECK_NOT_FOUND","This deck no longer exists. Refresh the collection.",m_sqlDetail);return;}
-    const struct model::Deck record{id,name.trimmed(),description,existing->createdAt,parentId};
+    const struct model::Deck record{id,name.trimmed(),description,existing->createdAt,parentId,existing->tagVocabulary,existing->tagVocabularyError};
     const auto valid=model::deckFromMap(model::toMap(record));
     if (!valid) {fail("INVALID_DECK","Enter a valid deck name and description.",valid.error());return;}
     if (!validDeckParent(record.id,record.parentId)) {fail("INVALID_DECK_PARENT","Choose an existing parent deck that is not this deck or one of its descendants.");return;}
     if (!mutate([&]{return upsertDeck(record)&&enqueue("deck.upsert",{{"deck",model::toMap(record)}});})) {fail("DECK_SAVE","Could not save the deck. Check storage and try again.",m_sqlDetail);return;}
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Deck updated");
+}
+void DatabaseWorker::setDeckTagVocabulary(const QString &deckId, const QStringList &tags, const QString &requestId,
+                                              const QStringList &expectedVocabulary)
+{
+    if (!ready()) { emit deckTagVocabularySaved(deckId,requestId,false); return; }
+    const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code,message,detail); emit deckTagVocabularySaved(deckId,requestId,false);
+    };
+    const auto valid=model::tagVocabularyFromVariant(QVariant(tags));
+    const auto expected=model::tagVocabularyFromVariant(QVariant(expectedVocabulary));
+    if (!model::validUuid(deckId) || !valid || !expected) {
+        reject("DECK_TAGS_INVALID","Could not save the deck tags. Correct the tag list and try again.",
+               !valid ? valid.error() : !expected ? expected.error() : QStringLiteral("The deck identifier is invalid.")); return;
+    }
+    const struct HistoryScope history(this,QStringLiteral("Edit deck tags"));
+    if (!history) { emit deckTagVocabularySaved(deckId,requestId,false); return; }
+    QString failureCode, failureMessage, failureDetail;
+    bool changed=false;
+    const bool committed=mutate([&] {
+        const auto current=deck(deckId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!current || isDeleted("deck",deckId)) {
+            failureCode=QStringLiteral("DECK_TAGS_MISSING");
+            failureMessage=QStringLiteral("This deck no longer exists. Refresh the library and try again."); return false;
+        }
+        if (!current->tagVocabularyError.isEmpty()) {
+            failureCode=QStringLiteral("DECK_TAGS_DAMAGED");
+            failureMessage=QStringLiteral("The saved deck tag list needs repair. Preserve a recovery copy before changing it.");
+            failureDetail=current->tagVocabularyError; return false;
+        }
+        if (current->tagVocabulary!=*expected) {
+            failureCode=QStringLiteral("DECK_TAGS_CHANGED");
+            failureMessage=QStringLiteral("The deck tag list changed while you were editing it. Reload it and review your changes."); return false;
+        }
+        if (current->tagVocabulary==*valid) return true;
+        struct model::Deck updated=*current;
+        updated.tagVocabulary=*valid;
+        if (!upsertDeck(updated) || !enqueue("deck.upsert",{{"deck",model::toMap(updated)}})) return false;
+        changed=true; return true;
+    });
+    if (!committed) {
+        if (failureCode.isEmpty()) reject("DECK_TAGS_SAVE","Could not save the deck tags. No changes were saved. Check storage and try again.",m_sqlDetail);
+        else reject(failureCode,failureMessage,failureDetail);
+        return;
+    }
+    if (changed) {
+        m_queueDirty=true;
+        if (publishSnapshot() && publishQueue(false)) done(QStringLiteral("Deck tags saved"));
+    } else done(QStringLiteral("Deck tags are unchanged"));
+    emit deckTagVocabularySaved(deckId,requestId,true);
+}
+
+void DatabaseWorker::applySuggestedTags(const QVariantList &proposals, const QString &requestId, const QString &deckId, const QStringList &expectedVocabulary)
+{
+    if (!ready()) { emit suggestedTagsApplied(requestId,false); return; }
+    const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code,message,detail); emit suggestedTagsApplied(requestId,false);
+    };
+    if (proposals.isEmpty() || proposals.size()>5000) {
+        reject("SUGGESTED_TAGS_LIMIT","Choose between 1 and 5,000 cards to tag."); return;
+    }
+    const auto expectedTags=model::tagVocabularyFromVariant(QVariant(expectedVocabulary));
+    if (!model::validUuid(deckId) || !expectedTags || expectedTags->isEmpty()) {
+        reject("SUGGESTED_TAGS_VOCABULARY","The deck tag list is missing or invalid. Refresh the deck and generate suggestions again.",
+               !expectedTags ? expectedTags.error() : QStringLiteral("A valid deck and nonempty tag list are required.")); return;
+    }
+    const QSet<QString> allowedTags(expectedTags->cbegin(),expectedTags->cend());
+    struct ProposedTags { struct model::Card snapshot; QStringList tags; };
+    QList<struct ProposedTags> checked;
+    QSet<QString> seen;
+    for (const QVariant &item : proposals) {
+        if (item.metaType().id()!=QMetaType::QVariantMap) {
+            reject("SUGGESTED_TAGS_INVALID","A selected tag suggestion is invalid. Generate the suggestions again."); return;
+        }
+        const QVariantMap proposal=item.toMap();
+        const auto snapshot=model::cardFromMap(proposal.value("snapshot").toMap());
+        const auto tags=model::tagVocabularyFromVariant(proposal.value("tags"));
+        if (!snapshot || !tags || tags->isEmpty() || seen.contains(snapshot->id)) {
+            reject("SUGGESTED_TAGS_INVALID","A selected card or tag suggestion is invalid or repeated. Generate the suggestions again.",
+                   !snapshot ? snapshot.error() : !tags ? tags.error() : QStringLiteral("Card %1 has no tags or is repeated.").arg(snapshot->id)); return;
+        }
+        for (const QString &tag : *tags) {
+            if (!allowedTags.contains(tag)) {
+                reject("SUGGESTED_TAGS_INVALID","A suggested tag is no longer in this deck's tag list. Generate suggestions again.",tag.left(80)); return;
+            }
+        }
+        seen.insert(snapshot->id); checked.append({*snapshot,*tags});
+    }
+    const struct HistoryScope history(this,QStringLiteral("Apply suggested tags"));
+    if (!history) { emit suggestedTagsApplied(requestId,false); return; }
+    QString failureCode, failureMessage, failureDetail;
+    qsizetype changed=0;
+    const bool committed=mutate([&] {
+        const auto scope=deck(deckId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        const bool scopeDeleted=scope && isDeleted("deck",deckId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!scope || scopeDeleted || !scope->tagVocabularyError.isEmpty() || scope->tagVocabulary!=*expectedTags) {
+            failureCode=QStringLiteral("SUGGESTED_TAGS_VOCABULARY_CHANGED");
+            failureMessage=QStringLiteral("The deck or its tag list changed after suggestions were generated. No tags were applied. Refresh and generate suggestions again.");
+            failureDetail=scope ? scope->tagVocabularyError : QStringLiteral("The deck no longer exists."); return false;
+        }
+        QSqlQuery descendants(m_db);
+        descendants.prepare("WITH RECURSIVE scope(id) AS (SELECT ? UNION SELECT d.id FROM decks d JOIN scope s ON d.parent_id=s.id) SELECT id FROM scope");
+        descendants.addBindValue(deckId);
+        if (!descendants.exec()) { m_sqlDetail=descendants.lastError().text(); return false; }
+        QSet<QString> scopedDecks;
+        while (descendants.next()) scopedDecks.insert(descendants.value(0).toString());
+        if (descendants.lastError().isValid()) { m_sqlDetail=descendants.lastError().text(); return false; }
+        QList<struct model::Card> updates;
+        for (const struct ProposedTags &proposal : checked) {
+            const QString &id=proposal.snapshot.id;
+            if (!scopedDecks.contains(proposal.snapshot.deckId)) {
+                failureCode=QStringLiteral("SUGGESTED_TAGS_SCOPE_CHANGED");
+                failureMessage=QStringLiteral("A selected card is no longer in this deck or its subdecks. No tags were applied. Generate suggestions again.");
+                failureDetail=QStringLiteral("Card %1 is outside deck %2.").arg(id,deckId); return false;
+            }
+            const auto current=card(id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            const bool deleted=current && isDeleted("card",id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (!current || deleted) {
+                failureCode=QStringLiteral("SUGGESTED_TAGS_CARD_MISSING");
+                failureMessage=QStringLiteral("A selected card no longer exists. No tags were applied. Refresh and generate suggestions again.");
+                failureDetail=QStringLiteral("Card %1 no longer exists.").arg(id); return false;
+            }
+            if (m_cardLoadErrors.contains(id)) {
+                failureCode=QStringLiteral("SUGGESTED_TAGS_CARD_UNREADABLE");
+                failureMessage=QStringLiteral("A selected card needs repair. No tags were applied. Repair it and try again.");
+                failureDetail=QStringLiteral("Card %1: %2").arg(id,m_cardLoadErrors.value(id).value("detail").toString()); return false;
+            }
+            if (model::toMap(*current)!=model::toMap(proposal.snapshot)) {
+                failureCode=QStringLiteral("SUGGESTED_TAGS_CARD_CHANGED");
+                failureMessage=QStringLiteral("A selected card changed after suggestions were generated. No tags were applied. Generate suggestions again.");
+                failureDetail=QStringLiteral("Card %1 no longer matches the reviewed snapshot.").arg(id); return false;
+            }
+            struct model::Card updated=*current;
+            QSet<QString> existing;
+            for (const QString &tag : current->tags.split(QLatin1Char(','),Qt::SkipEmptyParts)) existing.insert(tag.trimmed().toCaseFolded());
+            for (const QString &tag : proposal.tags) {
+                if (existing.contains(tag.toCaseFolded())) continue;
+                updated.tags += updated.tags.trimmed().isEmpty() ? tag : QStringLiteral(", ")+tag;
+                existing.insert(tag.toCaseFolded());
+            }
+            if (updated.tags.size()>4096) {
+                failureCode=QStringLiteral("SUGGESTED_TAGS_CARD_LIMIT");
+                failureMessage=QStringLiteral("A selected card has too many tags. No tags were applied. Remove some tags and try again.");
+                failureDetail=QStringLiteral("Card %1 would exceed the 4,096 character tag limit.").arg(id); return false;
+            }
+            if (updated.tags!=current->tags) updates.append(updated);
+        }
+        for (const struct model::Card &record : updates) {
+            if (!execute("UPDATE notes SET tags=? WHERE id=?",{record.tags,record.id})) return false;
+            const QVariantMap payload=cardPayload(record);
+            if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert",payload)) return false;
+        }
+        changed=updates.size(); return true;
+    });
+    if (!committed) {
+        if (failureCode.isEmpty()) reject("SUGGESTED_TAGS_SAVE","Could not apply the suggested tags. No changes were saved. Check storage and try again.",m_sqlDetail);
+        else reject(failureCode,failureMessage,failureDetail);
+        return;
+    }
+    if (changed) {
+        m_queueDirty=true;
+        if (publishSnapshot() && publishQueue(false)) done(QStringLiteral("Tagged %1 card(s)").arg(changed));
+    } else done(QStringLiteral("Selected cards already have these tags"));
+    emit suggestedTagsApplied(requestId,true);
 }
 void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
 {
@@ -1097,7 +1298,8 @@ void DatabaseWorker::moveDeck(const QString &id, const QString &parentId)
     if (!existing) { fail("DECK_NOT_FOUND", "This deck no longer exists. Refresh the collection.", m_sqlDetail); emit moveDeckFinished(false, id, parentId); return; }
     if (!validDeckParent(id, parentId)) { fail("INVALID_DECK_PARENT", "Choose an existing destination that is not this deck or one of its descendants."); emit moveDeckFinished(false, id, parentId); return; }
     if (existing->parentId == parentId) { done("Deck is already in that location"); emit moveDeckFinished(true, id, parentId); return; }
-    const struct model::Deck record{id, existing->name, existing->description, existing->createdAt, parentId};
+    struct model::Deck record=*existing;
+    record.parentId=parentId;
     if (!mutate([&] { return upsertDeck(record) && enqueue("deck.upsert", {{"deck", model::toMap(record)}}); })) {
         fail("DECK_MOVE", "Could not move the deck. Check storage and try again.", m_sqlDetail); emit moveDeckFinished(false, id, parentId); return;
     }
@@ -2376,7 +2578,13 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         return (!executeEffects||eraseCard(id,seq))&&recordSequence("card",id,seq);
     }
     if (type==QStringLiteral("deck.upsert")) {
-        const struct model::Deck record=*model::deckFromMap(object(payload,"deck"));
+        const QVariantMap incomingDeck=object(payload,"deck");
+        struct model::Deck record=*model::deckFromMap(incomingDeck);
+        if (!incomingDeck.contains("tagVocabulary")) {
+            const auto current=deck(record.id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (current) { record.tagVocabulary=current->tagVocabulary; record.tagVocabularyError=current->tagVocabularyError; }
+        }
         const bool restore = payload.value("restore").toBool();
         const bool dependency = payload.value("restoreDependency").toBool();
         const bool containerOnly = dependency || payload.value("restoreContainerOnly").toBool();
@@ -2853,8 +3061,12 @@ void DatabaseWorker::exportCollection(const QString &path)
     QVariantList decks,cards,variants,history,deleted,checkpoints;
     QList<struct model::Card> notes;
     QSqlQuery q(m_db);
-    if (!q.exec("SELECT id,name,description,created_at,parent_id FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
-    while (q.next()) decks.append(model::toMap(readDeck(q)));
+    if (!q.exec("SELECT id,name,description,created_at,parent_id,tag_vocabulary FROM decks ORDER BY id")) {fail("EXPORT_READ","Could not read decks for export.",q.lastError().text());return;}
+    while (q.next()) {
+        const struct model::Deck savedDeck=readDeck(q);
+        if (!savedDeck.tagVocabularyError.isEmpty()) { fail("EXPORT_DAMAGED_DECK_TAGS","Portable export stopped because a deck's tag vocabulary needs repair. Preserve a raw SQLite recovery copy before repairing it.",savedDeck.tagVocabularyError); return; }
+        decks.append(model::toMap(savedDeck));
+    }
     if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
     while (q.next()) {
         QString storageError;

@@ -74,6 +74,8 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::syncApplied,this,&AppController::syncApplied);
     connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
+    connect(m_worker,&DatabaseWorker::deckTagVocabularySaved,this,&AppController::deckTagVocabularySaved);
+    connect(m_worker,&DatabaseWorker::suggestedTagsApplied,this,&AppController::suggestedTagsApplied);
     connect(m_worker,&DatabaseWorker::checkReviewMarked,this,&AppController::checkReviewMarked);
     connect(m_worker,&DatabaseWorker::checkFollowUpDismissed,this,&AppController::checkFollowUpDismissed);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
@@ -176,6 +178,26 @@ void AppController::createDeck(const QString &name,const QString &description,co
 { invoke([=](DatabaseWorker *worker){worker->createDeck(name,description,parentId);}); }
 void AppController::updateDeck(const QString &id,const QString &name,const QString &description,const QString &parentId)
 { invoke([=](DatabaseWorker *worker){worker->updateDeck(id,name,description,parentId);}); }
+bool AppController::setDeckTagVocabulary(const QString &deckId, const QStringList &tags, const QString &requestId, const QStringList &expectedVocabulary)
+{
+    if (m_busy) {
+        setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before saving deck tags."},{"detail",QString()}});
+        emit deckTagVocabularySaved(deckId,requestId,false); return false;
+    }
+    const bool queued=invoke([=](DatabaseWorker *worker) { worker->setDeckTagVocabulary(deckId,tags,requestId,expectedVocabulary); });
+    if (!queued) emit deckTagVocabularySaved(deckId,requestId,false);
+    return queued;
+}
+bool AppController::applySuggestedTags(const QVariantList &proposals, const QString &requestId, const QString &deckId, const QStringList &expectedVocabulary)
+{
+    if (m_busy) {
+        setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before applying suggested tags."},{"detail",QString()}});
+        emit suggestedTagsApplied(requestId,false); return false;
+    }
+    const bool queued=invoke([=](DatabaseWorker *worker) { worker->applySuggestedTags(proposals,requestId,deckId,expectedVocabulary); });
+    if (!queued) emit suggestedTagsApplied(requestId,false);
+    return queued;
+}
 bool AppController::moveDeck(const QString &id, const QString &parentId)
 {
     if (m_busy) {

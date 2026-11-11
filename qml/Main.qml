@@ -147,7 +147,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || detailDialog.chatConfirmationOpen || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || tagAssistantDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || detailDialog.chatConfirmationOpen || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     onHistoryBlockingModalOpenChanged: {
@@ -990,7 +990,7 @@ ApplicationWindow {
             return historyActionAllowed(action)
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
             return cardDialog.visible && !editorSavePending && !editorModelBusy && !narrationDialog.visible
-                    && !imageDialog.visible && !errorDialog.visible && !cardCheckDialog.visible && !deckCheckDialog.visible
+                    && !imageDialog.visible && !errorDialog.visible && !cardCheckDialog.visible && !deckCheckDialog.visible && !tagAssistantDialog.visible
                     && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
             const tests = voice.customSttTests
@@ -1811,7 +1811,7 @@ ApplicationWindow {
                 sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
                 context: Qt.WindowShortcut
                 autoRepeat: false
-                enabled: cardDialog.visible && cardDialog.activeFocus && !cardCheckDialog.visible && !deckCheckDialog.visible
+                enabled: cardDialog.visible && cardDialog.activeFocus && !cardCheckDialog.visible && !deckCheckDialog.visible && !tagAssistantDialog.visible
                     && !window.editorSavePending && !window.editorModelBusy
                 onActivated: window.navigateEditorSide()
             }
@@ -3031,6 +3031,17 @@ ApplicationWindow {
         id: deckCheckDialog
         ui: window
     }
+    TagAssistantDialog {
+        id: tagAssistantDialog
+        ui: window
+    }
+    function openDeckTags(deckId) {
+        if (!tagAssistant.busy) tagAssistantDialog.openFor(deckId, "")
+    }
+    function openCardTags(cardId) {
+        const card = cardById(cardId)
+        if (card.id && !tagAssistant.busy) tagAssistantDialog.openFor(card.deckId, cardId)
+    }
     function openDeckCheck(deckId, mode) {
         if (!cardChecker.busy && !deckChecker.busy) deckCheckDialog.openFor(deckId, mode)
     }
@@ -3066,7 +3077,7 @@ ApplicationWindow {
         if (!app.busy) app.dismissCheckFollowUp(cardId)
     }
     function openCardCheck(mode, front, back, kind, saved = false, cardId = "") {
-        if (deckChecker.busy || deckCheckDialog.visible) return
+        if (deckChecker.busy || deckCheckDialog.visible || tagAssistantDialog.visible) return
         cardCheckDialog.openFor(mode, front, back, kind, saved, cardId)
     }
     Sheet {

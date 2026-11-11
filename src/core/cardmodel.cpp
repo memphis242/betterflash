@@ -229,7 +229,7 @@ QString gradeLabel(int grade)
     return QStringList{QStringLiteral("Missed"), QStringLiteral("Partial"), QStringLiteral("Hard"), QStringLiteral("Good"), QStringLiteral("Easy")}.at(grade);
 }
 QVariantMap toMap(const struct Deck &r)
-{ return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId}}; }
+{ return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId},{"tagVocabulary",QJsonArray::fromStringList(r.tagVocabulary).toVariantList()}}; }
 QVariantMap toMap(const struct Card &r)
 { return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations},{"narrationFingerprints",r.narrationFingerprints}}; }
 QVariantMap toMap(const struct Variant &r)
@@ -237,6 +237,34 @@ QVariantMap toMap(const struct Variant &r)
 QVariantMap toMap(const struct Review &r)
 { QVariantMap result{{"id",r.id},{"cardId",r.cardId},{"variantId",r.variantId},{"deckName",r.deckName},{"grade",r.grade},{"recallFraction",r.recallFraction},{"responseSeconds",r.responseSeconds},{"reviewedAt",r.reviewedAt},{"due",r.due}}; if (!r.sessionId.isEmpty()) { result.insert("sessionId",r.sessionId);result.insert("sessionDeckName",r.sessionDeckName);result.insert("sessionStartedAt",r.sessionStartedAt); } return result; }
 
+std::expected<QStringList, QString> tagVocabularyFromVariant(const QVariant &value)
+{
+    if (value.metaType().id() != QMetaType::QVariantList && value.metaType().id() != QMetaType::QStringList)
+        return std::unexpected(QStringLiteral("The deck tag list must be an array of strings."));
+    const QVariantList values = value.toList();
+    if (values.size() > 100) return std::unexpected(QStringLiteral("A deck can have at most 100 tags."));
+    QStringList tags;
+    QSet<QString> seen;
+    for (const QVariant &entry : values) {
+        if (entry.metaType().id() != QMetaType::QString)
+            return std::unexpected(QStringLiteral("Every deck tag must be text."));
+        const QString rawTag = entry.toString();
+        const QString tag = rawTag.trimmed();
+        if (tag.isEmpty() || tag.size() > 80 || tag.contains(QLatin1Char(',')))
+            return std::unexpected(QStringLiteral("Tags must have 1 to 80 characters and cannot contain commas."));
+        for (const QChar character : rawTag) {
+            if (character.category() == QChar::Other_Control || character.category() == QChar::Separator_Line || character.category() == QChar::Separator_Paragraph)
+                return std::unexpected(QStringLiteral("Tags cannot contain line breaks or control characters."));
+        }
+        const QString key = tag.toCaseFolded();
+        if (key == QStringLiteral("check-correctness") || key == QStringLiteral("check-completeness"))
+            return std::unexpected(QStringLiteral("Check follow-up tags are reserved for check results."));
+        if (seen.contains(key)) return std::unexpected(QStringLiteral("Tags cannot be repeated, even with different capitalization."));
+        seen.insert(key);
+        tags.append(tag);
+    }
+    return tags;
+}
 std::expected<struct Deck, QString> deckFromMap(const QVariantMap &m)
 {
     if (!validUuid(m.value("id").toString()) || !text(m,"name",256,true) || !text(m,"description",65536)
@@ -248,7 +276,10 @@ std::expected<struct Deck, QString> deckFromMap(const QVariantMap &m)
         return std::unexpected(QStringLiteral("Deck parentId must reference another deck."));
     const auto time = utcInstant(m.value("createdAt").toString());
     if (!time) return std::unexpected(time.error());
-    return Deck{m.value("id").toString(),m.value("name").toString(),m.value("description").toString(),*time,parentId};
+    const auto vocabulary = m.contains("tagVocabulary") ? tagVocabularyFromVariant(m.value("tagVocabulary"))
+                                                          : std::expected<QStringList, QString>{QStringList{}};
+    if (!vocabulary) return std::unexpected(vocabulary.error());
+    return Deck{m.value("id").toString(),m.value("name").toString(),m.value("description").toString(),*time,parentId,*vocabulary};
 }
 std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
 {
