@@ -64,6 +64,10 @@ viewing the entire collection. The dialog identifies the destination deck and
 asks what to generate, with up to 2,000 characters for the topic, scope,
 examples, and desired difficulty. Opening it does not start a model request.
 
+The new-card editor also offers **Generate card** beside **Create inverted
+form**. It replaces the unsaved editor with the generation prompt for the
+currently selected destination deck.
+
 **Generate card** sends the instructions and deck name to the configured model;
 it does not send other cards in the deck. Progress, cancellation, and retry are
 available. The resulting basic card opens in the generated-card editor with

@@ -1807,7 +1807,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                visible: cardKind.currentValue !== "cloze"
+                visible: cardKind.currentValue !== "cloze" || (!editingCardId && !editingGeneratedCard)
                 CheckBox {
                     id: createInverted
                     enabled: !window.editorModelBusy
@@ -1818,6 +1818,18 @@ ApplicationWindow {
                     onToggled: cardInverted = checked
                     ToolTip.visible: hovered
                     ToolTip.text: "Schedule the card in both directions"
+                }
+                AppButton {
+                    objectName: "generateFromNewCard"
+                    text: "Generate card"
+                    visible: !editingCardId && !editingGeneratedCard
+                    enabled: !app.busy && !media.busy && !cardGenerator.busy && !!window.deckById(window.editorDestinationDeckId).id
+                    hint: "Replace this unsaved draft with the generation prompt for the selected deck."
+                    onClicked: {
+                        const deckId = window.editorDestinationDeckId
+                        cardDialog.close()
+                        window.openGenerateNewCard(deckId)
+                    }
                 }
                 Item { Layout.fillWidth: true }
             }
