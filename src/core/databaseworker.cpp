@@ -1937,10 +1937,6 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     const struct HistoryScope history(this, QStringLiteral("Grade card"));
     if (!history) return;
     if (!ready()) return;
-    if (m_startupSession) {
-        m_historyBeforeSession={};
-        m_historySuppressSession=true;
-    }
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
     if (!m_sessionActive||!m_sessionOrder.contains(expectedVariant)||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
     const auto old=variant(expectedVariant,true);

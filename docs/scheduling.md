@@ -101,37 +101,50 @@ The original pre-review phase also determines whether a correction uses a
 learning step or a proportional daily adjustment. A corrected short interval
 may already be due if enough time has passed since the original review.
 
-## Optional startup review
+## Review Pit Stop
 
-After the collection loads, the application offers one quick review in a
-dismissible popup, once per application launch. No popup appears when there
-are no due cards, another modal or editor is in use, or a regular review has
-already started. Navigation before the offer is ready cancels it for that
-launch. The offer does not change the selected deck or current page.
+After the collection loads, **Review Pit Stop** opens directly on one due card,
+once per application launch. There is no confirmation step. No popup appears
+when the feature is disabled, there are no due cards, another modal or editor
+is in use, or a regular review has already started. Navigation or typing before
+the offer is ready cancels it for that launch. The selected deck and current
+page stay in place beneath the popup.
 
-Selection covers due review variants across the collection. When valid positive
-review times are available, choose randomly from the fastest quarter of variants
-ranked by their own average recorded response time. Reverse directions and cloze
-groups keep separate timing histories. If no usable history exists, choose
-randomly from the shortest estimated reading-time quarter of due variants.
-Unreadable cards and schedules are excluded.
+Selection covers due review variants across the collection. With valid positive
+review times, choose randomly from the fastest quarter by their own average
+recorded response time, including ties. Reverse directions and cloze groups keep
+separate timing histories. If no usable history exists, use the shortest estimated
+reading-time quarter. Unreadable cards and schedules are excluded. Discovery
+yields between bounded database batches and is canceled when the user engages
+in other work.
 
-The popup initially offers **Review card** or **Not now**, with the selected
-deck and historical timing when available. **Review card** starts a temporary
-session containing only that variant; the question and response timer begin
-then, so an unattended invitation never counts as a slow review. Timing pauses
-while the application window is inactive. Reveal the answer and use the normal
-ratings, including the usual Partial recall control. A successful grade uses
-the normal schedule, history, undo and outgoing-sync transaction, then ends the
-one-card session. The next card is never opened automatically. Opening,
-revealing, or dismissing this temporary session does not consume undo history;
-Undo after grading reverses the grade.
+The popup shares the normal review card panel: the question remains visible,
+the large **Reveal answer** control reveals the answer below it, and the timer,
+rating buttons, and partial-recall adjustment use the normal presentation.
+The header shows the deck and tags, a Pause/Resume button, **Generate similar
+card**, and **Recall & study help**. The title's question-mark tooltip explains
+the feature and points to **Settings > Review** to disable it. The setting is
+remembered on this device and defaults to enabled.
 
-**Not now**, **Leave for later**, X, Escape, or clicking outside dismisses the
-popup without grading an unreviewed card. Closing waits for an active database
-operation; a failed save leaves the review available for recovery. A card that
-changed or is no longer due is revalidated before starting. Startup review does
-not start narration, capture microphone audio, or call a model.
+The response timer starts when the question is ready. Timing pauses while the
+window is inactive or a nested generation/help workflow is open. A manual pause
+stays paused until the user resumes. Models are called only from explicit model
+actions; opening the Pit Stop does not start narration, microphone capture, or
+model inference.
+
+Grading uses the normal schedule, history, undo, and outgoing-sync transaction.
+The modal's thicker result rim and subtle outer halo take the same
+Missed/Partial/Hard/Good/Easy color as the normal review progress bar. The result stays visible until the user closes it; there is
+no queue strip or progress bar and no automatic next card. Rating corrections
+preserve the original response duration and review timestamp. Temporary review
+state does not consume undo history, and Undo/Redo of grades or nested saved
+actions does not reopen the temporary session.
+
+X, **Leave for later**, Escape, or clicking outside dismisses an ungraded card
+without changing its schedule. After grading, **Close** dismisses the saved
+result. Closing waits for an active database operation; failures remain available
+for recovery. A card that changed or is no longer due is revalidated before
+starting.
 
 ## Storage and compatibility
 

@@ -91,7 +91,8 @@ DatabaseWorker::HistoryScope::HistoryScope(DatabaseWorker *value, const QString 
     worker->m_historyLabel = label;
     worker->m_historyCommitted = false;
     worker->m_historyRuntimeChanged = false;
-    worker->m_historyBeforeSession = worker->historySession();
+    // Quick-review sessions are ephemeral and are not restored by Undo or Redo.
+    worker->m_historyBeforeSession = worker->m_startupSession ? HistorySession{} : worker->historySession();
     if (!worker->execute("DELETE FROM temp.history_capture")
         || !worker->execute("INSERT INTO temp.history_capture_active(value) VALUES(1)")) {
         valid = false;
@@ -100,6 +101,7 @@ DatabaseWorker::HistoryScope::HistoryScope(DatabaseWorker *value, const QString 
         return;
     }
     worker->m_historyCapturing = true;
+    worker->m_historySuppressSession = worker->m_startupSession;
 }
 DatabaseWorker::HistoryScope::~HistoryScope()
 {

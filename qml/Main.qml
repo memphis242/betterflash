@@ -10,16 +10,25 @@ ApplicationWindow {
     id: window
     Component.onCompleted: {
         actionHistory.watchProperties(Theme.preferences, "Change appearance", ["reducedMotion", "savedDark", "hasThemeChoice", "showUndoRedo"])
+        actionHistory.watchProperties(reviewPreferences, "Change review settings", ["pitStopEnabled"])
         Qt.callLater(window.requestStartupReviewWhenReady)
     }
+    property alias reviewPitStopEnabled: reviewPreferences.pitStopEnabled
+    readonly property bool pitStopToolOpen: generateCardDialog.visible || studyGuidanceDialog.visible
+        || cardDialog.visible || cardPreviewDialog.visible || partialDialog.visible
+        || imageDialog.visible || errorDialog.visible || review.correctionDialogVisible
     property bool startupReviewRequested: false
+    onReviewPitStopEnabledChanged: {
+        if (!reviewPitStopEnabled && !app.startupReviewActive)
+            window.abandonStartupReviewOffer()
+    }
     property bool startupReviewOffered: false
 
     function requestStartupReviewWhenReady() {
         if (startupReviewRequested || !app.collectionLoaded || app.busy)
             return
         startupReviewRequested = true
-        if (!app.reviewing && !modalOpen && !typing)
+        if (reviewPitStopEnabled && !app.reviewing && !modalOpen && !typing)
             app.requestStartupReview()
     }
     function abandonStartupReviewOffer() {
@@ -33,7 +42,7 @@ ApplicationWindow {
             || !app.startupReviewCard.variantId || app.busy)
             return
         startupReviewOffered = true
-        if (modalOpen || app.reviewing || typing) {
+        if (!reviewPitStopEnabled || modalOpen || app.reviewing || typing) {
             app.dismissStartupReview()
             return
         }
@@ -323,6 +332,11 @@ ApplicationWindow {
             label: "Open Settings"
         }
     ]
+    Settings {
+        id: reviewPreferences
+        category: "review"
+        property bool pitStopEnabled: true
+    }
     Settings {
         id: preferences
         category: "layout"

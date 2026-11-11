@@ -15,10 +15,10 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Completed desktop follow-ups
 
-- **Quick startup review:** an optional popup offers one randomly selected due
-  variant, preferring short historical review times. It records one normal review
-  on acceptance and grading, and can be dismissed without changing schedules.
-  See [startup review](scheduling.md#optional-startup-review).
+- **Review Pit Stop:** a dismissible startup popup opens directly on one
+  randomly selected due variant, preferring short historical review times. It
+  shares the normal review controls, keeps the result visible with a colored rim,
+  and can be disabled in Settings > Review. See [Review Pit Stop](scheduling.md#review-pit-stop).
 
 - **Collection recovery:** unreadable cards remain visible with a repair action;
   healthy cards remain available for review. Derived-view failures produce

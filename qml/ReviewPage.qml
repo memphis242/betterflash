@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml
 import QtCore
+import "ReviewPresentation.js" as ReviewPresentation
 
 Item {
     id: page
@@ -21,18 +22,8 @@ Item {
     readonly property var reviewCards: app.reviewCards
     readonly property var weakness: app.currentCard.weakness || ({})
     readonly property bool weakCard: !!weakness.assessed && Number(weakness.score) >= 25
-    function cardTags(card) {
-        const raw = card && (card.tags || card.labels || []);
-        if (Array.isArray(raw))
-            return raw.filter(tag => String(tag).trim().length > 0).map(tag => String(tag).trim());
-        return String(raw || "").split(",").map(tag => tag.trim()).filter(tag => tag.length > 0);
-    }
-    function cardGrade(card) {
-        if (!card)
-            return -1;
-        const grade = Number(card.sessionGrade);
-        return Number.isFinite(grade) ? grade : -1;
-    }
+    function cardTags(card) { return ReviewPresentation.cardTags(card); }
+    function cardGrade(card) { return ReviewPresentation.cardGrade(card); }
     function reviewSnippet(variant) {
         const prefix = "Ask the question that this answers based on deck context: \n\n";
         let question = variant.question || (variant.kind === "cloze" ? "" : variant.front || "");
@@ -40,22 +31,7 @@ Item {
             question = question.slice(prefix.length);
         return ui.compactText(question) || "Image question";
     }
-    function gradeColor(grade) {
-        switch (grade) {
-        case 0:
-            return Theme.recallMissed;
-        case 1:
-            return Theme.recallPartial;
-        case 2:
-            return Theme.recallHard;
-        case 3:
-            return Theme.recallGood;
-        case 4:
-            return Theme.recallEasy;
-        default:
-            return Theme.rule;
-        }
-    }
+    function gradeColor(grade) { return ReviewPresentation.gradeColor(grade, Theme); }
     function gradeHoverColor(grade) {
         return Theme.recallHoverFill(grade)
     }
@@ -91,12 +67,7 @@ Item {
             return "";
         }
     }
-    function formatElapsed(seconds) {
-        const total = Math.max(0, Math.floor(Number(seconds) || 0));
-        const minutes = Math.floor(total / 60);
-        const remaining = total % 60;
-        return (minutes < 10 ? "0" : "") + minutes + ":" + (remaining < 10 ? "0" : "") + remaining;
-    }
+    function formatElapsed(seconds) { return ReviewPresentation.formatElapsed(seconds); }
     function reviewTimelineItem(index) {
         const cards = page.reviewCards || [];
         const card = cards[index];
@@ -116,12 +87,7 @@ Item {
             index: index
         };
     }
-    function recallLabel(fraction, points) {
-        const count = Math.max(1, Number(points) || 1);
-        const recalled = Math.max(0, Math.min(1, Number(fraction)));
-        const amount = recalled * count;
-        return count > 1 ? Number(amount.toFixed(2)) + " of " + count + " points" : Math.round(recalled * 100) + " of 100 parts";
-    }
+    function recallLabel(fraction, points) { return ReviewPresentation.recallLabel(fraction, points); }
     function ratingDescription(grade, fraction) {
         return gradeName(Number(grade)) + (Number(grade) === 1 ? " (" + recallLabel(fraction, app.currentCard.pointCount) + ")" : "");
     }
@@ -136,7 +102,7 @@ Item {
             const id = app.currentCard.variantId || "";
             if (page.scrollVariantId !== id) {
                 page.scrollVariantId = id;
-                reviewContentScroll.contentItem.contentY = 0;
+                reviewCardPanel.resetScroll();
             }
         }
     }
@@ -752,7 +718,7 @@ Item {
                 Layout.fillHeight: true
                 color: Theme.surface
                 radius: 16
-                border.color: page.weakCard ? currentWeakness.tierColor : Theme.rule
+                border.color: page.weakCard ? reviewCardPanel.weaknessColor : Theme.rule
                 border.width: 1
                 RowLayout {
                     anchors.fill: parent
@@ -772,296 +738,69 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         spacing: 10
-                        ScrollView {
-                            id: reviewContentScroll
-                            objectName: "reviewScroll"
+                        ReviewCardPanel {
+                            id: reviewCardPanel
+                            ui: page.ui
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            contentWidth: availableWidth
-                            clip: true
-                            ColumnLayout {
-                                width: reviewContentScroll.availableWidth
-                                spacing: 18
-                                ScrollView {
-                                    id: questionTags
-                                    visible: page.cardTags(app.currentCard).length > 0
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: Math.min(54, questionTagFlow.implicitHeight)
-                                    contentWidth: availableWidth
-                                    clip: true
-                                    Flow {
-                                        id: questionTagFlow
-                                        width: questionTags.availableWidth
-                                        spacing: 6
-                                        Repeater {
-                                            model: page.cardTags(app.currentCard)
-                                            delegate: ReviewTag {
-                                                required property string modelData
-                                                label: modelData
-                                                maximumWidth: Math.min(240, questionTags.availableWidth)
-                                            }
-                                        }
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 12
-                                    Flow {
-                                        Layout.fillWidth: true
-                                        Layout.minimumWidth: 0
-                                        Layout.alignment: Qt.AlignVCenter
-                                        spacing: 12
-                                        Label {
-                                            textFormat: Text.PlainText
-                                            text: "Question"
-                                            color: Theme.inkMuted
-                                            font.family: Theme.monoFont
-                                            font.pixelSize: 15
-                                            height: currentWeakness.visible ? currentWeakness.implicitHeight : implicitHeight
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
-                                        WeaknessBadge {
-                                            id: currentWeakness
-                                            assessment: page.weakness
-                                            visible: !!page.weakness.assessed
-                                        }
-                                    }
-                                    AppButton {
-                                        text: page.ui.width < 700 ? "Generate" : "Generate similar card"
-                                        glyph: "cards"
-                                        hint: "Draft a varied card testing the same concept. Review it before saving."
-                                        enabled: !app.busy && page.hasCard
-                                        onClicked: ui.openGenerateSimilar(app.currentCard.cardId || app.currentCard.id)
-                                    }
-                                    AppButton {
-                                        text: page.ui.width < 700 ? "Recall & help" : "Recall & study help"
-                                        glyph: "book"
-                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                        hint: "See this card's recall evidence, recall strength and suggested study steps. Ask the language model for help only if you choose."
-                                        enabled: !app.busy && page.hasCard
-                                        onClicked: ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
-                                    }
-                                }
-                                MarkdownPane {
-                                    objectName: "reviewQuestion"
-                                    markdown: app.currentCard.question || app.currentCard.front || ""
-                                    mediaRoot: media.rootPath
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: implicitHeight
-                                    baseFontSize: page.ui.width < 600 ? 20 : 24
-                                }
-                                AppButton {
-                                    id: revealAnswer
-                                    objectName: "revealAnswer"
-                                    visible: !app.answerRevealed
-                                    text: "Reveal answer"
-                                    hint: shortcuts.bindings.review
-                                    primary: false
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: page.ui.width < 600 ? 148 : 188
-                                    font.pixelSize: page.ui.width < 600 ? 19 : 22
-                                    enabled: !app.paused && !app.busy
-                                    property real radius: 14
-                                    Accessible.name: "Reveal answer"
-                                    background: Rectangle {
-                                        radius: revealAnswer.radius
-                                        color: revealAnswer.enabled ? (revealAnswer.hovered ? Theme.accentSoft : Theme.surfaceRaised) : Theme.canvas
-                                        border.width: revealAnswer.activeFocus ? 2 : 1
-                                        border.color: revealAnswer.activeFocus ? Theme.accent : Theme.rule
-                                        opacity: revealAnswer.enabled ? 1 : 0.7
-                                    }
-                                    onClicked: app.revealAnswer()
-                                }
-                                Rectangle {
-                                    visible: app.answerRevealed
-                                    Layout.fillWidth: true
-                                    height: 1
-                                    color: Theme.rule
-                                }
-                                Label {
-                                    visible: app.answerRevealed
-                                    textFormat: Text.PlainText
-                                    text: "Answer"
-                                    color: Theme.inkMuted
-                                    font.family: Theme.monoFont
-                                    font.pixelSize: 15
-                                }
-                                MarkdownPane {
-                                    objectName: "reviewAnswer"
-                                    visible: app.answerRevealed
-                                    markdown: app.currentCard.answer || app.currentCard.back || ""
-                                    mediaRoot: media.rootPath
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: implicitHeight
-                                    baseFontSize: page.ui.width < 600 ? 19 : 22
-                                }
-                                Label {
-                                    visible: app.spokenAnswer.length > 0
-                                    textFormat: Text.PlainText
-                                    text: "Your answer: " + app.spokenAnswer
-                                    color: Theme.inkMuted
-                                    wrapMode: Text.Wrap
-                                    Layout.fillWidth: true
-                                }
-                            }
+                            Layout.minimumHeight: 0
+                            onGenerateRequested: page.ui.openGenerateSimilar(app.currentCard.cardId || app.currentCard.id)
+                            onStudyHelpRequested: page.ui.openStudyGuidance(app.currentCard.cardId || app.currentCard.id, app.currentCard.variantId)
+                            onPartialRequested: page.ui.openPartial()
                         }
-                        ColumnLayout {
-                            objectName: "reviewToolbar"
+                        Item {
+                            objectName: "reviewUtilityFooter"
                             Layout.fillWidth: true
-                            spacing: 10
-                            Label {
-                                objectName: "reviewTimer"
-                                readonly property bool running: !app.paused && app.reviewing && !app.answerRevealed
-                                readonly property real elapsedSeconds: app.responseSeconds
-                                textFormat: Text.PlainText
-                                text: page.formatElapsed(app.responseSeconds)
-                                color: app.paused ? Theme.warning : Theme.inkMuted
-                                font.family: Theme.monoFont
-                                font.pixelSize: 18
-                                horizontalAlignment: Text.AlignHCenter
-                                Layout.fillWidth: true
-                            }
-                            RowLayout {
-                                visible: app.answerRevealed
-                                Layout.fillWidth: true
-                                spacing: page.ui.width < 600 ? 5 : 10
-                                Repeater {
-                                    model: [
-                                        {
-                                            grade: 0,
-                                            label: "Missed",
-                                            action: "gradeMissed"
-                                        },
-                                        {
-                                            grade: 1,
-                                            label: "Partial",
-                                            action: "gradePartial"
-                                        },
-                                        {
-                                            grade: 2,
-                                            label: "Hard",
-                                            action: "gradeHard"
-                                        },
-                                        {
-                                            grade: 3,
-                                            label: "Good",
-                                            action: "gradeGood"
-                                        },
-                                        {
-                                            grade: 4,
-                                            label: "Easy",
-                                            action: "gradeEasy"
-                                        }
-                                    ]
-                                    delegate: AppButton {
-                                        id: gradeButton
-                                        required property var modelData
-                                        readonly property bool selectedGrade: page.cardGrade(app.currentCard) === modelData.grade
-                                        Accessible.checkable: true
-                                        Accessible.checked: selectedGrade
-                                        Accessible.name: modelData.label + (selectedGrade ? ", selected" : "")
-                                        objectName: "grade" + modelData.grade
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: page.ui.width < 600 ? 60 : 68
-                                        padding: 5
-                                        enabled: !app.paused && !app.busy
-                                        hint: modelData.label + " recall (" + shortcuts.bindings[modelData.action] + ")"
-                                        contentItem: Column {
-                                            spacing: 2
-                                            Label {
-                                                textFormat: Text.PlainText
-                                                width: parent.width
-                                                text: shortcuts.bindings[modelData.action]
-                                                horizontalAlignment: Text.AlignHCenter
-                                                elide: Text.ElideRight
-                                                font.family: Theme.monoFont
-                                                font.pixelSize: 12
-                                                color: Theme.inkMuted
-                                            }
-                                            Label {
-                                                textFormat: Text.PlainText
-                                                width: parent.width
-                                                text: modelData.label
-                                                horizontalAlignment: Text.AlignHCenter
-                                                font.pixelSize: page.ui.width < 600 ? 15 : 17
-                                                fontSizeMode: Text.Fit
-                                                minimumPixelSize: 12
-                                                color: Theme.ink
-                                            }
-                                        }
-                                        background: Rectangle {
-                                            radius: 8
-                                            color: gradeButton.hovered || gradeButton.down ? page.gradeHoverColor(modelData.grade) : Theme.transparent
-                                            border.width: gradeButton.selectedGrade ? 3 : gradeButton.activeFocus ? 2 : 1
-                                            border.color: gradeButton.selectedGrade ? page.gradeColor(modelData.grade) : gradeButton.activeFocus ? Theme.accent : Theme.rule
-                                        }
-                                        onClicked: modelData.grade === 1 ? ui.openPartial() : app.grade(modelData.grade)
-                                    }
-                                }
-                            }
-                            AppButton {
-                                objectName: "partialRecallAmount"
-                                visible: app.answerRevealed && page.cardGrade(app.currentCard) === 1
-                                text: page.recallLabel(app.currentCard.sessionRecall, app.currentCard.pointCount)
-                                hint: "Adjust the amount recalled"
-                                enabled: !app.paused && !app.busy
-                                Layout.alignment: Qt.AlignHCenter
-                                onClicked: ui.openPartial()
-                            }
-                            Item {
-                                objectName: "reviewUtilityFooter"
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 48
-                                Layout.minimumHeight: 48
-                                Layout.maximumHeight: 48
-                                Row {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    x: Math.max(0, Math.min((parent.width - width) / 2, parent.width - width - voiceUtility.width - 12))
-                                    spacing: 12
-                                    ReviewUtilityButton {
-                                        id: deferUtility
-                                        objectName: "deferCard"
-                                        glyph: "queue-tail"
-                                        hint: "Defer this card to the end of the review queue" + (shortcuts.bindings.defer ? " (" + shortcuts.bindings.defer + ")" : "")
-                                        enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
-                                        onClicked: app.deferCard()
-                                    }
-                                    ReviewUtilityButton {
-                                        id: postponeUtility
-                                        objectName: "postponeCard"
-                                        glyph: "calendar-day"
-                                        hint: "Review this card on a later date" + (shortcuts.bindings.postpone ? " (" + shortcuts.bindings.postpone + ")" : "")
-                                        enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
-                                        onClicked: ui.openPostpone()
-                                    }
+                            Layout.preferredHeight: 48
+                            Layout.minimumHeight: 48
+                            Layout.maximumHeight: 48
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: Math.max(0, Math.min((parent.width - width) / 2, parent.width - width - voiceUtility.width - 12))
+                                spacing: 12
+                                ReviewUtilityButton {
+                                    id: deferUtility
+                                    objectName: "deferCard"
+                                    glyph: "queue-tail"
+                                    hint: "Defer this card to the end of the review queue" + (shortcuts.bindings.defer ? " (" + shortcuts.bindings.defer + ")" : "")
+                                    enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
+                                    onClicked: app.deferCard()
                                 }
                                 ReviewUtilityButton {
-                                    id: voiceUtility
-                                    objectName: "voiceToggle"
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    glyph: "mic"
-                                    selected: voice.microphoneArmed || voice.listening
-                                    enabled: !app.busy && !voice.modelTestBusy && !voice.sttTestBusy && !voice.ttsTestBusy
-                                        && (!voice.customSttTests || (!voice.customSttTests.busy && !voice.customSttTests.recording))
-                                    hint: voice.reviewMode === "always-on"
-                                        ? (voice.microphoneArmed || voice.listening ? "Stop listening" : "Start listening")
-                                            + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
-                                        : (voice.microphoneArmed || voice.listening ? "Cancel microphone" : "Speak once")
-                                            + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
-                                    onClicked: voice.triggerMicrophone()
+                                    id: postponeUtility
+                                    objectName: "postponeCard"
+                                    glyph: "calendar-day"
+                                    hint: "Review this card on a later date" + (shortcuts.bindings.postpone ? " (" + shortcuts.bindings.postpone + ")" : "")
+                                    enabled: !app.busy && page.hasCard && page.cardGrade(app.currentCard) < 0
+                                    onClicked: ui.openPostpone()
                                 }
                             }
-                            Label {
-                                textFormat: Text.PlainText
-                                visible: voice.enabled
-                                text: voice.status
-                                color: Theme.inkMuted
-                                font.family: Theme.monoFont
-                                font.pixelSize: 11
-                                wrapMode: Text.Wrap
-                                Layout.fillWidth: true
+                            ReviewUtilityButton {
+                                id: voiceUtility
+                                objectName: "voiceToggle"
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                glyph: "mic"
+                                selected: voice.microphoneArmed || voice.listening
+                                enabled: !app.busy && !voice.modelTestBusy && !voice.sttTestBusy && !voice.ttsTestBusy
+                                    && (!voice.customSttTests || (!voice.customSttTests.busy && !voice.customSttTests.recording))
+                                hint: voice.reviewMode === "always-on"
+                                    ? (voice.microphoneArmed || voice.listening ? "Stop listening" : "Start listening")
+                                        + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
+                                    : (voice.microphoneArmed || voice.listening ? "Cancel microphone" : "Speak once")
+                                        + (shortcuts.bindings.microphone ? " (" + shortcuts.bindings.microphone + ")" : "")
+                                onClicked: voice.triggerMicrophone()
                             }
+                        }
+                        Label {
+                            textFormat: Text.PlainText
+                            visible: voice.enabled
+                            text: voice.status
+                            color: Theme.inkMuted
+                            font.family: Theme.monoFont
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
                         }
                     }
                     ReviewNavigationBar {

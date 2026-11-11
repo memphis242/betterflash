@@ -25,8 +25,8 @@ Item {
         }
         if (section !== 4) syncTokenDraft = ""
     }
-    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering"]
-    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering", "Review"]
+    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering", "Review"]
     property var sectionScrollPositions: ({})
     property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
@@ -685,6 +685,28 @@ Item {
                         visible: settingsPage.section === 6
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
+                    }
+                    ColumnLayout {
+                        visible: settingsPage.section === 8
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 16
+                        SettingsSwitch {
+                            objectName: "reviewPitStopEnabled"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            text: "Show Review Pit Stop at startup"
+                            checked: settingsPage.ui.reviewPitStopEnabled
+                            onToggled: settingsPage.ui.reviewPitStopEnabled = checked
+                        }
+                        Label {
+                            text: "Review Pit Stop offers one short due card when BetterFlash opens. You can dismiss it without grading. Turn this off to skip future pit stops."
+                            textFormat: Text.PlainText
+                            color: Theme.inkMuted
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            font.pixelSize: 16
+                        }
                     }
                     CodeRenderingSettings {
                         visible: settingsPage.section === 7
