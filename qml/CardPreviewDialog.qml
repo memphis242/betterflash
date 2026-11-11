@@ -49,6 +49,7 @@ Dialog {
             }
             AppButton {
                 text: "Ask AI"
+                glyph: "robot"
                 enabled: !!preview.card.id && !(preview.card.loadError && preview.card.loadError.code)
                 hint: "Open a chat pane alongside this card."
                 onClicked: preview.ui.openCardChat(preview.cardId)

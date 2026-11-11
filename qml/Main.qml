@@ -121,6 +121,7 @@ ApplicationWindow {
     property var editorSaveFields: ({})
     property string editorSaveDestination: ""
     property bool editorReturnToPreview: false
+    property var editorDetailDrafts: ({})
     property string editorSaveRequestId: ""
     property int editorSaveSerial: 0
     readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
@@ -565,6 +566,29 @@ ApplicationWindow {
         editingCardId = id || ""
         editorReturnToPreview = !!returnToPreview && !!editingCardId
         cardDialog.open()
+    }
+    function editorCardVersion(card) {
+        return JSON.stringify([card.deckId, card.kind, card.front, card.back, card.tags || "", Number(card.pointCount || 1)])
+    }
+    function returnEditorToDetail() {
+        const id = editingCardId
+        const saved = cardById(id)
+        if (!id || !saved.id || editorSavePending || editorModelBusy || app.busy || media.busy) return
+        const drafts = Object.assign({}, editorDetailDrafts)
+        drafts[id] = {
+            source: editorSource.text, deckId: editorDestinationDeckId,
+            kindIndex: cardKind.currentIndex, inverted: cardInverted,
+            tags: cardTags.text, points: cardPoints.value,
+            tab: editorTabs.currentIndex, cursor: editorSource.cursorPosition,
+            sourceY: editorScroll.contentItem.contentY || 0,
+            previewY: editorPreviewScroll.contentItem.contentY || 0,
+            savedVersion: editorCardVersion(saved)
+        }
+        editorDetailDrafts = drafts
+        editorReturnToPreview = false
+        cardDialog.close()
+        selectedCardId = id
+        openSelectedDetail()
     }
     function openCardNarration(id) {
         const target = String(id || selectedCardId || "")
@@ -1674,7 +1698,7 @@ ApplicationWindow {
         focus: true
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
         closePolicy: Popup.NoAutoClose
-        width: Math.min(1120, window.width - 2 * window.gutter)
+        width: Math.min(1440, window.width - 2 * window.gutter)
         height: Math.min(editingGeneratedCard ? 1120 : 800, window.height - 2 * window.gutter)
         padding: cardDialog.width < 650 ? 14 : 24
         background: Rectangle {
@@ -1739,6 +1763,33 @@ ApplicationWindow {
             generatedCardDraft = null
             editorTabs.currentIndex = 0
             editorSource.cursorPosition = 0
+            const retained = !editingGeneratedCard && editingCardId ? editorDetailDrafts[editingCardId] : null
+            if (retained) {
+                const drafts = Object.assign({}, editorDetailDrafts)
+                delete drafts[editingCardId]
+                editorDetailDrafts = drafts
+                editorDestinationDeckId = retained.deckId
+                cardDeck.currentIndex = cardDeck.indexOfValue(retained.deckId)
+                cardKind.currentIndex = retained.kindIndex
+                cardInverted = retained.inverted
+                editorSource.text = retained.source
+                cardTags.text = retained.tags
+                cardPoints.value = retained.points
+                editorTabs.currentIndex = retained.tab
+                editorSource.cursorPosition = Math.min(retained.cursor, editorSource.length)
+                const session = editorSession
+                Qt.callLater(function () {
+                    if (!cardDialog.visible || editorSession !== session) return
+                    const restore = (view, y) => {
+                        const area = view.contentItem
+                        area.contentY = Math.max(0, Math.min(y, area.contentHeight - area.height))
+                    }
+                    restore(editorScroll, retained.sourceY)
+                    restore(editorPreviewScroll, retained.previewY)
+                })
+                if (retained.savedVersion !== editorCardVersion(c))
+                    window.showError("CARD_DRAFT_CHANGED", "The saved card changed while this draft was retained. Your draft has been restored. Compare it with the saved detail view before saving.", "Card: " + editingCardId)
+            }
             window.focusEditorSource()
         }
         onClosed: {
@@ -2315,22 +2366,40 @@ ApplicationWindow {
                     window.openCardCheck(mode, draft.front, draft.back, draft.kind, false, window.editingCardId)
                 }
             }
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                spacing: 10
-                Item { Layout.fillWidth: true }
+                columns: cardDialog.width < 600 ? 1 : 3
+                columnSpacing: 10
+                rowSpacing: 10
                 AppButton {
-                    text: "Cancel"
-                    enabled: !editorSavePending
-                    onClicked: cardDialog.close()
+                    objectName: "returnEditorToDetail"
+                    text: "Return to detail view"
+                    glyph: "chevron-left-bold"
+                    visible: !!editingCardId && !editingGeneratedCard
+                    Layout.alignment: Qt.AlignLeft
+                    enabled: !editorSavePending && !editorModelBusy && !app.busy && !media.busy && !!window.cardById(editingCardId).id
+                    hint: "View the saved card without saving. Your draft is retained until you reopen this editor during this session."
+                    onClicked: window.returnEditorToDetail()
                 }
-                AppButton {
-                    objectName: "saveCard"
-                    text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
-                    primary: true
-                    hint: shortcuts.bindings.saveCard
-                    enabled: !media.busy && !editorSavePending && !editorModelBusy && !app.busy
-                    onClicked: submitCard()
+                Item { visible: cardDialog.width >= 600; Layout.fillWidth: true }
+                RowLayout {
+                    Layout.fillWidth: cardDialog.width < 600
+                    Layout.alignment: Qt.AlignRight
+                    spacing: 10
+                    Item { visible: cardDialog.width < 600; Layout.fillWidth: true }
+                    AppButton {
+                        text: "Cancel"
+                        enabled: !editorSavePending
+                        onClicked: cardDialog.close()
+                    }
+                    AppButton {
+                        objectName: "saveCard"
+                        text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
+                        primary: true
+                        hint: shortcuts.bindings.saveCard
+                        enabled: !media.busy && !editorSavePending && !editorModelBusy && !app.busy
+                        onClicked: submitCard()
+                    }
                 }
             }
         }

@@ -6,6 +6,12 @@ can be dragged, or focused and adjusted with the left and right arrow keys.
 Its width is remembered. Narrow windows use **Card** and **Ask AI** tabs so
 neither view is squeezed into an unusable column.
 
+Card detail and edit dialogs expand with the window to accommodate their
+actions. **Return to detail view** at the editor's bottom left returns to the
+saved card without saving. Its unsaved draft, active tab, and scroll positions
+are retained in memory for reopening during the same session. Closing or
+canceling the reopened editor discards that draft normally.
+
 Opening the pane does not contact a model. Write a question and choose
 **Send**, or press Ctrl+Enter. Enter inserts a newline. The configured language
 model receives the question, conversation history, and a snapshot of the

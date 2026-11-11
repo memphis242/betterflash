@@ -57,7 +57,7 @@ AppMenu {
             menu.ui.openGenerateSimilar(menu.cardId)
         }
     }
-    AppMenuItem { glyph: "book"
+    AppMenuItem { glyph: "robot"
         text: "Ask AI"
         enabled: menu.cardReadable
         ToolTip.visible: hovered

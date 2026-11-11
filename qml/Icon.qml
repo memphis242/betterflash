@@ -298,6 +298,18 @@ Canvas {
             c.lineTo(12, 9)
             c.lineTo(7, 14)
             break
+        case "robot":
+            roundedRect(3, 5, 12, 10, 2)
+            c.moveTo(10, 2); c.arc(9, 2, 1, 0, Math.PI * 2)
+            c.moveTo(9, 3); c.lineTo(9, 5)
+            c.moveTo(1, 8); c.lineTo(1, 11)
+            c.moveTo(1, 9.5); c.lineTo(3, 9.5)
+            c.moveTo(17, 8); c.lineTo(17, 11)
+            c.moveTo(15, 9.5); c.lineTo(17, 9.5)
+            c.rect(5.5, 7.5, 1, 1.5)
+            c.rect(11.5, 7.5, 1, 1.5)
+            c.moveTo(6, 12); c.lineTo(12, 12)
+            break
         case "book":
             c.moveTo(9, 4)
             c.bezierCurveTo(6, 2, 3, 3, 2, 3)

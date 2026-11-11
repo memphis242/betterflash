@@ -107,7 +107,7 @@ Dialog {
         ? Math.max(0, Math.floor((now - new Date(summary.firstRecordedAt).getTime()) / 86400000)) : 0
     parent: Overlay.overlay
     anchors.centerIn: parent
-    width: Math.min(chatOpen ? 1680 : 1240, ui.width - 2 * ui.gutter)
+    width: Math.min(chatOpen ? 2000 : 1560, ui.width - 2 * ui.gutter)
     height: Math.min(900, ui.height - 2 * ui.gutter)
     padding: width < 650 ? 14 : 24
     modal: true
@@ -285,6 +285,7 @@ Dialog {
                         }
                         AppButton {
                             text: "Ask AI"
+                            glyph: "robot"
                             hint: detail.chatOpen ? "Hide this card's chat pane" : "Open separate chats with this card as context. Only information retrieval tools are available."
                             enabled: !(detail.card.loadError && detail.card.loadError.code)
                             onClicked: detail.chatOpen ? detail.hideChat() : detail.showChat()
