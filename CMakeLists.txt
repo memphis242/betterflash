@@ -105,6 +105,12 @@ foreach(target betterflash_core betterflash_voice betterflash_render betterflash
 endforeach()
 
 if(ANDROID)
+    file(GLOB BETTERFLASH_ANDROID_OPENMP_RUNTIMES
+        "${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/*/lib/clang/*/lib/linux/aarch64/libomp.so")
+    list(LENGTH BETTERFLASH_ANDROID_OPENMP_RUNTIMES BETTERFLASH_ANDROID_OPENMP_COUNT)
+    if(NOT BETTERFLASH_ANDROID_OPENMP_COUNT EQUAL 1)
+        message(FATAL_ERROR "Expected one arm64 OpenMP runtime in NDK ${CMAKE_ANDROID_NDK}, found ${BETTERFLASH_ANDROID_OPENMP_COUNT}. Install NDK 27.2.12479018 for Android CPU inference.")
+    endif()
     set(BETTERFLASH_ANDROID_OPENSSL_LIB_DIR "" CACHE PATH "Directory containing Android arm64 OpenSSL 3 libraries")
     foreach(library libcrypto_3.so libssl_3.so)
         if(NOT EXISTS "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/${library}")
@@ -114,16 +120,21 @@ if(ANDROID)
     set_property(TARGET betterflash APPEND PROPERTY QT_ANDROID_EXTRA_LIBS
         "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/libcrypto_3.so"
         "${BETTERFLASH_ANDROID_OPENSSL_LIB_DIR}/libssl_3.so"
+        ${BETTERFLASH_ANDROID_OPENMP_RUNTIMES}
         "${BETTERFLASH_ONNXRUNTIME_LIBRARY}")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_PACKAGE_NAME "org.betterflash.app")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_NAME "${BETTERFLASH_VERSION}")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_VERSION_CODE 1)
     set_property(TARGET betterflash PROPERTY QT_ANDROID_MIN_SDK_VERSION 28)
+    set_property(TARGET betterflash PROPERTY QT_ANDROID_COMPILE_SDK_VERSION 36)
+    set_property(TARGET betterflash PROPERTY QT_ANDROID_SDK_BUILD_TOOLS_REVISION "36.0.0")
     set_property(TARGET betterflash PROPERTY QT_ANDROID_TARGET_SDK_VERSION 36)
 endif()
 
-install(TARGETS betterflash RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS betterflash
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 if(NOT ANDROID AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
     install(PROGRAMS "${BETTERFLASH_WHISPER_RUNTIME}" DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

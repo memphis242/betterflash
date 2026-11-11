@@ -32,7 +32,7 @@
 #include <utility>
 #include <algorithm>
 #ifdef Q_OS_ANDROID
-#include <QMicrophonePermission>
+#include <QPermissions>
 #endif
 
 namespace {

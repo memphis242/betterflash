@@ -26,9 +26,11 @@ Item {
     readonly property var availableTags: collectTags()
     property bool leftOpen: librarySettings.leftOpen
     property bool rightOpen: librarySettings.rightOpen
-    readonly property bool cardsVisible: rightOpen
+    readonly property bool compactLayout: ui.compactLayout
+    property bool phoneCardsOpen: false
+    readonly property bool cardsVisible: compactLayout ? phoneCardsOpen : rightOpen
     property bool restoringTree: true
-    readonly property bool effectiveLeftOpen: leftOpen && (!cardsVisible || width >= 720)
+    readonly property bool effectiveLeftOpen: compactLayout ? !cardsVisible : leftOpen && (!cardsVisible || width >= 720)
     property real splitRatio: librarySettings.splitRatio
     property var expandedDecks: ({})
     property bool expansionInitialized: false
@@ -110,10 +112,8 @@ Item {
         }
     }
     onLeftOpenChanged: librarySettings.leftOpen = leftOpen
-    onRightOpenChanged: {
-        librarySettings.rightOpen = rightOpen
-        if (!rightOpen && cardFilters && cardFilters.visible) cardFilters.close()
-    }
+    onRightOpenChanged: librarySettings.rightOpen = rightOpen
+    onCardsVisibleChanged: if (!cardsVisible && cardFilters && cardFilters.visible) cardFilters.close()
     onSplitRatioChanged: librarySettings.splitRatio = splitRatio
     onDeckSearchVisibleChanged: librarySettings.deckSearchVisible = deckSearchVisible
     onDeckContentSearchVisibleChanged: librarySettings.deckContentSearchVisible = deckContentSearchVisible
@@ -381,7 +381,7 @@ Item {
         selectedCardIds = []
         cardSelectionAnchorId = ""
         treeList.currentIndex = -1
-        rightOpen = true
+        setCardsVisible(true)
         resetPage()
         updateCardSearch()
     }
@@ -475,7 +475,7 @@ Item {
     function showDeck(id, focusCardsAfter) {
         ui.setDeck(id || "", true)
         if (id) revealDeck(id)
-        rightOpen = true
+        setCardsVisible(true)
         if (focusCardsAfter)
             Qt.callLater(function () { if (cardList.count > 0) cardList.forceActiveFocus() })
     }
@@ -548,18 +548,38 @@ Item {
         else syncCurrentCard()
     }
     function focusCards() {
-        if (!rightOpen)
+        if (!cardsVisible)
             return
         cardList.forceActiveFocus()
         if (cardList.currentIndex < 0 && cardList.count > 0)
             cardList.currentIndex = Math.max(0, pageCards.findIndex(card => card.id === ui.selectedCardId))
     }
     function focusDeckSearch() {
-        leftOpen = true
-        if (width < 720) rightOpen = false
+        showDecks()
         deckSearchVisible = true
         deckSearch.forceActiveFocus()
         deckSearch.selectAll()
+    }
+
+    function setCardsVisible(open) {
+        if (compactLayout)
+            phoneCardsOpen = open
+        else
+            rightOpen = open
+    }
+    function showDecks() {
+        if (compactLayout) {
+            phoneCardsOpen = false
+        } else {
+            leftOpen = true
+            if (width < 720) rightOpen = false
+        }
+    }
+    function goBack() {
+        if (!compactLayout || !cardsVisible)
+            return false
+        showDecks()
+        return true
     }
 
     function toggleDeckSearch() {
@@ -805,16 +825,17 @@ Item {
         Rectangle {
             id: deckPane
             objectName: "libraryDeckPane"
+            visible: !library.compactLayout || library.effectiveLeftOpen
             Layout.fillHeight: true
             Layout.fillWidth: library.effectiveLeftOpen && !library.cardsVisible
-            Layout.preferredWidth: library.effectiveLeftOpen ? (library.cardsVisible ? (libraryRow.width - 12) * library.splitRatio : libraryRow.width - reopenCards.width) : 56
+            Layout.preferredWidth: library.effectiveLeftOpen ? (library.cardsVisible ? (libraryRow.width - 12) * library.splitRatio : libraryRow.width - (reopenCards.visible ? reopenCards.width : 0)) : 56
             Layout.minimumWidth: !library.effectiveLeftOpen ? 56 : library.cardsVisible ? 280 : 0
             Layout.maximumWidth: !library.effectiveLeftOpen ? 56 : library.cardsVisible ? Math.max(280, libraryRow.width - 312) : Infinity
             color: Theme.surface
             border.color: Theme.rule
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: library.effectiveLeftOpen ? 16 : 4
+                anchors.margins: library.effectiveLeftOpen ? (library.compactLayout ? 12 : 16) : 4
                 spacing: 10
                 visible: library.effectiveLeftOpen
                 RowLayout {
@@ -825,7 +846,8 @@ Item {
                     GlyphButton { glyph: "expand-tree"; hint: "Expand all decks"; enabled: app.decks.length > 0; onClicked: library.expandAllDecks(true) }
                     GlyphButton { glyph: "collapse-tree"; hint: "Collapse all decks"; enabled: app.decks.length > 0; onClicked: library.expandAllDecks(false) }
                     Item { Layout.fillWidth: true }
-                    PaneToggleButton { hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
+                    GlyphButton { visible: library.compactLayout; glyph: "cards"; hint: "Show cards in the selected deck or collection"; onClicked: library.setCardsVisible(true) }
+                    PaneToggleButton { visible: !library.compactLayout; hint: "Collapse deck pane"; onClicked: library.leftOpen = false }
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -1083,7 +1105,7 @@ Item {
                     }
                 }
             }
-            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 2; collapsed: true; hint: "Expand deck pane"; onClicked: { library.leftOpen = true; if (library.width < 720) library.rightOpen = false } }
+            PaneToggleButton { visible: !library.effectiveLeftOpen; anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 2; collapsed: true; hint: "Expand deck pane"; onClicked: library.showDecks() }
         }
         Item {
             id: splitHandle; visible: library.effectiveLeftOpen && library.cardsVisible; Layout.preferredWidth: visible ? 12 : 0; Layout.fillHeight: true; activeFocusOnTab: true
@@ -1109,15 +1131,16 @@ Item {
         Rectangle {
             id: cardPane; objectName: "libraryCardPane"; visible: library.cardsVisible; Layout.fillWidth: true; Layout.fillHeight: true; color: Theme.surface; border.color: Theme.rule
             ColumnLayout {
-                anchors.fill: parent; anchors.margins: 16; spacing: 12
+                anchors.fill: parent; anchors.margins: library.compactLayout ? 12 : 16; spacing: 12
                 RowLayout {
                     Layout.fillWidth: true; Layout.preferredHeight: 42
+                    AppButton { visible: library.compactLayout; text: "Decks"; glyph: "chevron-left-bold"; hint: "Return to the deck list"; onClicked: library.showDecks() }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 2
                         Label { Layout.minimumWidth: 0; elide: Text.ElideRight; text: "Cards"; color: Theme.ink; font.family: Theme.uiFont; font.pixelSize: 24; font.weight: Font.DemiBold }
                         Label { Layout.minimumWidth: 0; textFormat: Text.PlainText; text: (ui.selectedDeck.id ? ui.selectedDeck.name + " / " + library.scopeDescription() : "Entire collection") + " / " + library.visibleCards.length + " cards"; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true }
                     }
-                    PaneToggleButton { rightSide: true; hint: "Close card pane"; onClicked: library.rightOpen = false }
+                    PaneToggleButton { visible: !library.compactLayout; rightSide: true; hint: "Close card pane"; onClicked: library.setCardsVisible(false) }
                 }
                 Flow {
                     objectName: "libraryCardActions"
@@ -1481,7 +1504,7 @@ Item {
         }
         Item {
             id: reopenCards
-            visible: !library.cardsVisible
+            visible: !library.cardsVisible && !library.compactLayout
             Layout.preferredWidth: 56
             Layout.minimumWidth: 56
             Layout.maximumWidth: 56
@@ -1494,7 +1517,7 @@ Item {
                 collapsed: true
                 rightSide: true
                 hint: "Open card pane"
-                onClicked: library.rightOpen = true
+                onClicked: library.setCardsVisible(true)
             }
         }
     }

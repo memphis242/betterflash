@@ -1,0 +1,22 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Match Qt 6.12.0's template and make the plugin visible to the applied script.
+        classpath 'com.android.tools.build:gradle:9.2.1'
+    }
+}
+
+// Keep the Android source sets and packaging configuration matched to the Qt kit.
+apply from: new File(qtAndroidDir, '../templates/build.gradle')
+
+android {
+    packagingOptions {
+        jniLibs {
+            // NDK r27 llvm-strip moves this prebuilt's NOTE without preserving LOAD alignment.
+            keepDebugSymbols += ['**/libavformat.so']
+        }
+    }
+}

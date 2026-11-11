@@ -37,6 +37,58 @@ FetchContent_Declare(betterflash_llama
     URL_HASH SHA256=1b1a5bd079840425683ff6caebf3543e08d2dbcab7563782fabdf145030521a2
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(betterflash_llama)
+if(ANDROID)
+    set(BETTERFLASH_LLAMA_HYBRID_INDEX_SOURCE
+        "${betterflash_llama_SOURCE_DIR}/src/llama-memory-hybrid-idx.cpp")
+    set(BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/llama-memory-hybrid-idx-incomplete-pool.patch")
+    if(NOT EXISTS "${BETTERFLASH_LLAMA_HYBRID_INDEX_SOURCE}")
+        message(FATAL_ERROR
+            "Android llama.cpp compatibility patch cannot find ${BETTERFLASH_LLAMA_HYBRID_INDEX_SOURCE}.")
+    endif()
+    file(READ "${BETTERFLASH_LLAMA_HYBRID_INDEX_SOURCE}" BETTERFLASH_LLAMA_HYBRID_INDEX_CONTENT)
+    string(FIND "${BETTERFLASH_LLAMA_HYBRID_INDEX_CONTENT}"
+        "struct llama_memory_hybrid_idx::kpool_layout {" BETTERFLASH_LLAMA_POOL_LAYOUT_POSITION)
+    string(FIND "${BETTERFLASH_LLAMA_HYBRID_INDEX_CONTENT}"
+        "llama_memory_hybrid_idx::llama_memory_hybrid_idx(" BETTERFLASH_LLAMA_CONSTRUCTOR_POSITION)
+    string(FIND "${BETTERFLASH_LLAMA_HYBRID_INDEX_CONTENT}"
+        "llama_memory_hybrid_idx::~llama_memory_hybrid_idx()" BETTERFLASH_LLAMA_DESTRUCTOR_POSITION)
+    if(BETTERFLASH_LLAMA_POOL_LAYOUT_POSITION LESS 0
+       OR BETTERFLASH_LLAMA_CONSTRUCTOR_POSITION LESS 0
+       OR BETTERFLASH_LLAMA_DESTRUCTOR_POSITION LESS 0)
+        message(FATAL_ERROR
+            "Android llama.cpp compatibility patch did not recognize the pinned llama-memory-hybrid-idx.cpp structure. Inspect the pinned llama.cpp revision and update ${BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH}.")
+    elseif(BETTERFLASH_LLAMA_CONSTRUCTOR_POSITION LESS BETTERFLASH_LLAMA_POOL_LAYOUT_POSITION)
+        find_program(BETTERFLASH_GIT_EXECUTABLE NAMES git)
+        if(NOT BETTERFLASH_GIT_EXECUTABLE)
+            message(FATAL_ERROR "Android llama.cpp compatibility patch requires git to apply the pinned patch.")
+        endif()
+        execute_process(
+            COMMAND "${BETTERFLASH_GIT_EXECUTABLE}" apply --check "${BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH}"
+            WORKING_DIRECTORY "${betterflash_llama_SOURCE_DIR}"
+            RESULT_VARIABLE BETTERFLASH_LLAMA_PATCH_CHECK_RESULT
+            ERROR_VARIABLE BETTERFLASH_LLAMA_PATCH_CHECK_ERROR)
+        if(NOT BETTERFLASH_LLAMA_PATCH_CHECK_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                "Android llama.cpp compatibility patch no longer applies to the pinned source. Check ${BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH}. Cause: ${BETTERFLASH_LLAMA_PATCH_CHECK_ERROR}")
+        endif()
+        execute_process(
+            COMMAND "${BETTERFLASH_GIT_EXECUTABLE}" apply "${BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH}"
+            WORKING_DIRECTORY "${betterflash_llama_SOURCE_DIR}"
+            RESULT_VARIABLE BETTERFLASH_LLAMA_PATCH_RESULT
+            ERROR_VARIABLE BETTERFLASH_LLAMA_PATCH_ERROR)
+        if(NOT BETTERFLASH_LLAMA_PATCH_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                "Could not apply Android llama.cpp compatibility patch ${BETTERFLASH_LLAMA_HYBRID_INDEX_PATCH}. Cause: ${BETTERFLASH_LLAMA_PATCH_ERROR}")
+        endif()
+    elseif(BETTERFLASH_LLAMA_CONSTRUCTOR_POSITION GREATER BETTERFLASH_LLAMA_POOL_LAYOUT_POSITION
+       AND BETTERFLASH_LLAMA_CONSTRUCTOR_POSITION LESS BETTERFLASH_LLAMA_DESTRUCTOR_POSITION)
+        message(STATUS "Android llama.cpp incomplete-type compatibility patch is already applied")
+    else()
+        message(FATAL_ERROR
+            "Android llama.cpp constructor position is unexpected in ${BETTERFLASH_LLAMA_HYBRID_INDEX_SOURCE}.")
+    endif()
+endif()
 set(BETTERFLASH_CLEF_SOURCE "${betterflash_llama_SOURCE_DIR}/src/models/clef.cpp")
 file(READ "${BETTERFLASH_CLEF_SOURCE}" BETTERFLASH_CLEF_CONTENT)
 if(NOT BETTERFLASH_CLEF_CONTENT MATCHES "#include <algorithm>")

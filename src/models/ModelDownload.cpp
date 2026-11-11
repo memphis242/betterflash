@@ -76,7 +76,9 @@ struct InstallResult installAsset(const QString &directory, const struct ModelDo
         });
         if (archive_read_support_filter_none(archive) != ARCHIVE_OK
             || archive_read_support_filter_gzip(archive) != ARCHIVE_OK
+#ifndef Q_OS_ANDROID
             || archive_read_support_filter_bzip2(archive) != ARCHIVE_OK
+#endif
             || archive_read_support_format_zip(archive) != ARCHIVE_OK
             || archive_read_support_format_tar(archive) != ARCHIVE_OK)
             return {QStringLiteral("MODEL_ARCHIVE: Cannot enable archive format support.")};

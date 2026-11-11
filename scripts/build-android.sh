@@ -5,7 +5,7 @@ usage() {
     cat <<'HELP'
 Usage: scripts/build-android.sh [--check] [--debug|--release]
 
-Set QT_ANDROID_ROOT (Qt 6.11 arm64-v8a kit), QT_HOST_ROOT (matching host Qt),
+Set QT_ANDROID_ROOT (Qt 6.12 arm64-v8a kit), QT_HOST_ROOT (matching host Qt),
 ANDROID_SDK_ROOT (API 36 with Build Tools 36.0.0), ANDROID_NDK_ROOT (r27c),
 JAVA_HOME (full JDK 21 or later), and ANDROID_OPENSSL_LIB_DIR (arm64 libraries
 libcrypto_3.so and libssl_3.so). --check only reports missing prerequisites.
@@ -42,7 +42,7 @@ missing() {
     android_missing=$((android_missing + 1))
 }
 
-for android_tool in cmake ninja; do
+for android_tool in cmake ninja python3; do
     if ! command -v "$android_tool" >/dev/null 2>&1; then
         missing "ANDROID_BUILD_TOOL_MISSING: Install ${android_tool}."
     fi
@@ -56,7 +56,7 @@ if [[ -f "${android_build_dir}/CMakeCache.txt" ]]; then
 fi
 
 if [[ -z "${QT_ANDROID_ROOT:-}" || ! -f "${QT_ANDROID_ROOT}/lib/cmake/Qt6/qt.toolchain.cmake" ]]; then
-    missing 'ANDROID_QT_KIT_MISSING: Install the Qt 6.11 arm64-v8a Android kit and set QT_ANDROID_ROOT to its root.'
+    missing 'ANDROID_QT_KIT_MISSING: Install the Qt 6.12 arm64-v8a Android kit and set QT_ANDROID_ROOT to its root.'
 else
     for android_module in Core Concurrent Gui Quick QuickControls2 Sql Network Multimedia TextToSpeech; do
         if [[ ! -f "${QT_ANDROID_ROOT}/lib/cmake/Qt6${android_module}/Qt6${android_module}Config.cmake" ]]; then
@@ -110,6 +110,9 @@ else
     if [[ ! -x "${ANDROID_SDK_ROOT}/build-tools/36.0.0/aapt2" ]]; then
         missing 'ANDROID_BUILD_TOOLS_MISSING: Install build-tools;36.0.0 with sdkmanager.'
     fi
+    if [[ ! -x "${ANDROID_SDK_ROOT}/build-tools/36.0.0/zipalign" ]]; then
+        missing 'ANDROID_ZIPALIGN_MISSING: Install build-tools;36.0.0 to inspect APK page alignment.'
+    fi
     if [[ ! -x "${ANDROID_SDK_ROOT}/platform-tools/adb" ]]; then
         missing 'ANDROID_PLATFORM_TOOLS_MISSING: Install platform-tools with sdkmanager.'
     fi
@@ -120,7 +123,7 @@ if [[ -z "${ANDROID_NDK_ROOT:-}" || ! -f "${ANDROID_NDK_ROOT}/source.properties"
 else
     android_ndk_version="$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "${ANDROID_NDK_ROOT}/source.properties")"
     if [[ "$android_ndk_version" != '27.2.12479018' ]]; then
-        missing "ANDROID_NDK_VERSION_MISMATCH: Qt 6.11 requires NDK 27.2.12479018; selected ${android_ndk_version:-unknown}."
+        missing "ANDROID_NDK_VERSION_MISMATCH: This build uses NDK 27.2.12479018; selected ${android_ndk_version:-unknown}."
     fi
     if [[ ! -x "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" ]]; then
         missing 'ANDROID_NDK_COMPILER_MISSING: Reinstall the NDK Linux toolchain.'
@@ -150,8 +153,22 @@ cmake -S "$android_project_dir" -B "$android_build_dir" -G Ninja \
     -DQT_HOST_PATH="${QT_HOST_ROOT}" \
     -DANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}" -DANDROID_NDK="${ANDROID_NDK_ROOT}" \
     -DANDROID_PLATFORM=android-28 -DANDROID_ABI=arm64-v8a \
+    -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON \
+    -DBETTERFLASH_LOCAL_VULKAN=OFF \
     -DBETTERFLASH_ANDROID_OPENSSL_LIB_DIR="${ANDROID_OPENSSL_LIB_DIR}" \
     -DKATEHIGHLIGHTINGINDEXER_EXECUTABLE="$android_highlighting_indexer" \
     -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE="$android_build_type"
 cmake --build "$android_build_dir" --target apk --parallel "$(getconf _NPROCESSORS_ONLN)"
+android_apk_variant="${android_build_type,,}"
+shopt -s nullglob
+android_apks=("${android_build_dir}/android-build/build/outputs/apk/${android_apk_variant}/"*.apk)
+if (( ${#android_apks[@]} == 0 )); then
+    printf 'ANDROID_APK_MISSING: Build completed without an APK under %s/android-build/build/outputs/apk/%s. Inspect the androiddeployqt output.\n' "$android_build_dir" "$android_apk_variant" >&2
+    exit 1
+fi
+for android_apk in "${android_apks[@]}"; do
+    python3 "$android_project_dir/scripts/inspect-android-apk.py" "$android_apk" \
+        --system-libs-dir "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28"
+    "${ANDROID_SDK_ROOT}/build-tools/36.0.0/zipalign" -c -P 16 4 "$android_apk"
+done
 printf 'Android package build finished. APK output directory: %s/android-build/build/outputs/apk\n' "$android_build_dir"

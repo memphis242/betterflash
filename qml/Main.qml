@@ -35,7 +35,9 @@ ApplicationWindow {
     palette.toolTipBase: Theme.surfaceRaised
     palette.toolTipText: Theme.ink
 
-    readonly property int gutter: width < 600 ? 12 : 24
+    readonly property bool compactLayout: width <= 600
+    readonly property bool androidPlatform: Qt.platform.os === "android"
+    readonly property int gutter: compactLayout ? 12 : 24
     readonly property int collapsedNavigationWidth: 96
     readonly property var voiceController: voice
     readonly property var cardNarrationController: narration
@@ -307,6 +309,44 @@ ApplicationWindow {
     onDetailOpenChanged: preferences.detailOpen = detailOpen
     onSelectedCardIdChanged: preferences.selectedCardId = selectedCardId
     onLibraryScrollYChanged: preferences.libraryY = libraryScrollY
+
+    readonly property bool canNavigateBack: Qt.inputMethod.visible
+        || (page === 1 && library.compactLayout && library.cardsVisible)
+        || page !== 0 || (app.reviewing && !app.paused)
+
+    function navigateBack() {
+        if (Qt.inputMethod.visible) {
+            Qt.inputMethod.hide()
+            return true
+        }
+        if (modalOpen)
+            return false
+        if (page === 1 && library.goBack())
+            return true
+        if (page !== 0) {
+            page = 0
+            return true
+        }
+        if (app.reviewing && !app.paused) {
+            app.pauseReview()
+            voice.enabled = false
+            return true
+        }
+        return false
+    }
+
+    onClosing: function(close) {
+        if (androidPlatform && (modalOpen || navigateBack()))
+            close.accepted = false
+    }
+
+    Shortcut {
+        sequence: "Back"
+        context: Qt.ApplicationShortcut
+        autoRepeat: false
+        enabled: window.androidPlatform && !window.modalOpen && window.canNavigateBack
+        onActivated: window.navigateBack()
+    }
 
     function deckById(id) {
         for (const d of app.decks)
@@ -1026,7 +1066,7 @@ ApplicationWindow {
 
     header: ToolBar {
         objectName: "globalHeader"
-        height: 76
+        implicitHeight: (window.compactLayout ? 60 : 76) + topPadding + bottomPadding
         background: Rectangle {
             color: Theme.canvas
             Rectangle {
@@ -1038,10 +1078,12 @@ ApplicationWindow {
         }
         RowLayout {
             anchors.fill: parent
+            anchors.leftMargin: window.compactLayout ? window.gutter : 0
             anchors.rightMargin: window.gutter
-            spacing: 10
+            spacing: window.compactLayout ? 8 : 10
             Item {
                 objectName: "appMark"
+                visible: !window.compactLayout
                 Layout.preferredWidth: window.collapsedNavigationWidth
                 Layout.minimumWidth: Layout.preferredWidth
                 Layout.maximumWidth: Layout.preferredWidth
@@ -1063,12 +1105,12 @@ ApplicationWindow {
                 objectName: "pageTitle"
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Layout.leftMargin: 14
+                Layout.leftMargin: window.compactLayout ? 0 : 14
                 text: ["Review", "Library", "History", "Settings"][window.page] || ""
                 textFormat: Text.PlainText
                 color: Theme.ink
                 font.family: Theme.uiFont
-                font.pixelSize: 24
+                font.pixelSize: window.compactLayout ? 21 : 24
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
@@ -1104,14 +1146,42 @@ ApplicationWindow {
             HistoryActionButton {
                 objectName: "undoButton"
                 ui: window
-                visible: Theme.preferences.showUndoRedo
+                visible: Theme.preferences.showUndoRedo && !window.compactLayout
                 action: "undo"
             }
             HistoryActionButton {
                 objectName: "redoButton"
                 ui: window
-                visible: Theme.preferences.showUndoRedo
+                visible: Theme.preferences.showUndoRedo && !window.compactLayout
                 action: "redo"
+            }
+        }
+    }
+    footer: ToolBar {
+        objectName: "phoneNavigation"
+        visible: window.compactLayout
+        implicitHeight: visible ? 60 + topPadding + bottomPadding : 0
+        background: Rectangle { color: Theme.surface; border.color: Theme.rule }
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 6
+            Repeater {
+                model: ["Review", "Library", "History", "Settings"]
+                delegate: AppTabButton {
+                    required property string modelData
+                    required property int index
+                    objectName: "phoneNav" + modelData
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: 0
+                    text: modelData
+                    checked: window.page === index
+                    autoExclusive: false
+                    font.pixelSize: 12
+                    Accessible.name: "Open " + modelData
+                    onClicked: window.page = index
+                }
             }
         }
     }
@@ -1123,6 +1193,7 @@ ApplicationWindow {
         SidebarNavigation {
             id: navigation
             objectName: "sideNavigation"
+            visible: !window.compactLayout
             Layout.fillHeight: true
             Layout.preferredWidth: window.effectiveNavCollapsed ? window.collapsedNavigationWidth : 218
             Layout.minimumWidth: Layout.preferredWidth
@@ -1402,6 +1473,7 @@ ApplicationWindow {
         id: deckDialog
         objectName: "deckDialog"
         title: editingDeckId ? "Edit deck" : "New deck"
+        closePolicy: window.androidPlatform ? Popup.NoAutoClose : Popup.CloseOnEscape
         onOpened: {
             const d = deckById(editingDeckId)
             localDeckError = ""
@@ -1490,7 +1562,7 @@ ApplicationWindow {
         id: cardDialog
         objectName: "cardDialog"
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
-        closePolicy: editorSavePending ? Popup.NoAutoClose : Popup.CloseOnEscape
+        closePolicy: editorSavePending || window.androidPlatform ? Popup.NoAutoClose : Popup.CloseOnEscape
         width: Math.min(1120, window.width - 2 * window.gutter)
         height: Math.min(800, window.height - 2 * window.gutter)
         padding: cardDialog.width < 650 ? 14 : 24

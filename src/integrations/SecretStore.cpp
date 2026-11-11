@@ -109,6 +109,11 @@ void SecretStore::runNext() {
 }
 void SecretStore::load() {
     if (m_revision != 0) return;
+#ifdef Q_OS_ANDROID
+    m_status = QStringLiteral("Enter a key to enable this service. Android keys are kept only until the app process exits.");
+    m_storageState = QStringLiteral("missing");
+    emit changed();
+#else
     const quint64 revision = m_revision;
     run({QStringLiteral("lookup"), QStringLiteral("application"), QStringLiteral("betterflash"),
          QStringLiteral("service"), m_service}, {}, [this, revision](int code, const QByteArray &output) {
@@ -124,6 +129,7 @@ void SecretStore::load() {
         }
         emit changed();
     });
+#endif
 }
 void SecretStore::setKey(const QString &key) {
     if (m_environment) {
@@ -140,6 +146,12 @@ void SecretStore::setKey(const QString &key) {
         return;
     }
     m_key = cleaned;
+#ifdef Q_OS_ANDROID
+    ++m_revision;
+    m_status = QStringLiteral("Kept for this session only. Re-enter the key after restarting the app; secure Android credential storage is not available yet.");
+    m_storageState = QStringLiteral("session-only");
+    emit changed();
+#else
     const quint64 revision = ++m_revision;
     m_status = QStringLiteral("Saving to the desktop keyring.");
     m_storageState = QStringLiteral("saving");
@@ -157,6 +169,7 @@ void SecretStore::setKey(const QString &key) {
         }
         emit changed();
     });
+#endif
 }
 void SecretStore::clear() {
     if (m_environment) {
@@ -165,6 +178,12 @@ void SecretStore::clear() {
         return;
     }
     m_key.clear();
+#ifdef Q_OS_ANDROID
+    ++m_revision;
+    m_status = QStringLiteral("Session key removed. No key is saved on this device.");
+    m_storageState = QStringLiteral("removed");
+    emit changed();
+#else
     const quint64 revision = ++m_revision;
     m_status = QStringLiteral("Removing the stored key.");
     m_storageState = QStringLiteral("removing");
@@ -181,4 +200,5 @@ void SecretStore::clear() {
         }
         emit changed();
     });
+#endif
 }

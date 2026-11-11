@@ -1,6 +1,10 @@
 # Android implementation plan and session handoff
 
-Status: planning only. Research recorded **2026-10-19**.
+Status: implementation in progress, authorized **2026-11-10**. Initial research recorded **2026-10-19**.
+
+The installed Qt 6.12.0/JDK 25/NDK r27c environment passes preflight.
+See [Android build and device workflow](android.md) for current build commands,
+phone layout behavior and remaining device-validation work.
 
 ## Start here
 
@@ -8,17 +12,15 @@ Status: planning only. Research recorded **2026-10-19**.
 - The first Android device is the user's **Samsung Galaxy S26 Ultra**, running
   **One UI 9.0 / Android 17**. Confirm its actual build, API, ABI and page size
   through ADB once connected; do not infer RAM or available memory from its name.
-- The user requested research and a plan, **not Android implementation yet**.
-  Follow their next instruction before starting the phases below.
-- Automated tests remain paused until explicitly requested. Reading files,
-  checking installed tools and the environment-only build preflight were the
-  extent of local investigation. No Android build or device validation occurred.
+- The user authorized Android implementation on 2026-11-10.
+- Automated tests remain paused until explicitly requested. Compilation, package
+  inspection and manual UI/device validation are allowed.
 - The user authorized consolidating completed branches into `main` and removing
   redundant branches/worktrees. Start future work from the primary checkout at
   `/home/aalmo/projects/betterflash`, inspect Git state, and read `AGENTS.md`.
   Do not rely on former feature-worktree paths or old launch commands.
-- Use a fresh isolated worktree for Android/backend work with its own build
-  directory. Do not point a new worktree at the primary checkout's CMake cache.
+- Follow the current `AGENTS.md` authorization to work on primary `main`.
+  Keep the Android build directory separate from the desktop CMake cache.
 - Recheck online toolchain requirements at implementation time. Versions below
   are researched choices, not proof that the current build script accepts them.
 
@@ -59,7 +61,7 @@ Android Qt kit, matching host Qt, full JDK, SDK, NDK and arm64 OpenSSL. A missin
 configured path is not proof that a package exists nowhere on the filesystem.
 Do not install duplicate toolchains without checking user-provided locations.
 
-### Recommended toolchain
+### Toolchain selection
 
 Install **Qt 6.12.0** side by side with the existing desktop setup. It was
 released on 2026-09-30. Select matching Linux `gcc_64` host tools and Android
@@ -74,7 +76,7 @@ not an established support claim. A newer Qt release alone does not resolve it.
 | Component | Planned starting configuration |
 | --- | --- |
 | Qt | 6.12.0 host + Android arm64 kits, exactly matching versions |
-| JDK | Full JDK 21, selected explicitly for Android builds |
+| JDK | Full JDK 25, selected explicitly for Android builds |
 | NDK | r27c, `27.2.12479018`, matching Qt's published configuration |
 | SDK platforms | API 36 for initial Qt configuration; API 37 for Android 17 |
 | Build Tools | 36.0.0 initially; revisit with the API 37 transition |
@@ -93,7 +95,7 @@ because the first device uses Android 17.
 1. Install Fedora development/device tools:
 
    ```bash
-   sudo dnf install java-21-openjdk-devel android-tools
+   sudo dnf install java-25-openjdk-devel
    ```
 
 2. Use the Qt installer to select the matching Qt host/Android kits and Qt
@@ -114,7 +116,8 @@ because the first device uses Android 17.
    accept terms on the user's behalf.
 5. Provide the installed paths. The build environment needs:
 
-   - `JAVA_HOME`: full JDK 21, containing both `java` and `javac`.
+   - `JAVA_HOME`: full JDK 21 or later, containing both `java` and `javac`.
+     This machine uses `/usr/lib/jvm/java-25-openjdk`.
    - `QT_HOST_ROOT`: matching Qt Linux host installation.
    - `QT_ANDROID_ROOT`: Qt Android arm64 installation.
    - `ANDROID_HOME` and the script's `ANDROID_SDK_ROOT`: the same SDK directory.
@@ -157,8 +160,8 @@ Read `docs/android.md` for the draft and the following source boundaries:
 
 | Area | Existing work | Gap / first investigation |
 | --- | --- | --- |
-| Packaging | `android/AndroidManifest.xml`, `scripts/build-android.sh`, Android CMake target | No APK built; script hardcodes Qt 6.11, API 36 and NDK r27c |
-| Shared core | `src/core/`, SQLite worker thread, transactions, outbox | Cross-compile C++23/libc++, especially `std::expected`; verify POSIX media code |
+| Packaging | Qt 6.12 arm64 debug APK builds; all 103 libraries pass 16 KiB ELF/native dependency inspection and ZIP alignment | Physical Android 17 launch pending; API 36 target retained |
+| Shared core | C++23/libc++ core cross-compiles, including `std::expected`, SQLite worker, transactions and outbox | Verify storage and offline review on the phone |
 | Rendering | `src/render/`, native TeX and bundled syntax data | Host `katehighlightingindexer` required; external language servers disabled on Android |
 | Credentials | `src/integrations/SecretStore.cpp` | Desktop Secret Service relies on `secret-tool`; Android persistence is session-only |
 | Images | `src/integrations/MediaStore.cpp` | Rejects document-provider `content:` URIs |
@@ -175,6 +178,9 @@ Do not weaken secure media validation to make file pickers work. Read authorized
 ### Phase 1: Installable native shell
 
 Deliver an arm64 debug APK that launches on the S26 Ultra.
+
+Build/packaging portion completed 2026-11-10. Physical-device launch remains
+pending; the build alone does not meet this phase's exit condition.
 
 - Update build/preflight configuration for the selected Qt kit, without
   reconfiguring unrelated desktop build trees.

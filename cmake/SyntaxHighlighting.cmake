@@ -36,6 +36,18 @@ function(betterflash_add_syntax_highlighting)
     set(QRC_SYNTAX ON)
     set(NO_STANDARD_PATHS ON)
     set(KDE_SKIP_UNINSTALL_TARGET ON)
+    if(ANDROID)
+        # The host rcc supports zstd, while Android Qt Core requires zlib resources.
+        set(syntax_data_cmake "${betterflash_syntax_SOURCE_DIR}/data/CMakeLists.txt")
+        file(READ "${syntax_data_cmake}" syntax_data_content)
+        string(REPLACE "COMMAND Qt6::rcc --name syntax_data"
+            "COMMAND Qt6::rcc --compress-algo zlib --name syntax_data"
+            syntax_data_content "${syntax_data_content}")
+        if(NOT syntax_data_content MATCHES "COMMAND Qt6::rcc --compress-algo zlib --name syntax_data")
+            message(FATAL_ERROR "Cannot configure Android syntax resources in ${syntax_data_cmake}. Check the pinned syntax-highlighting revision and its rcc command.")
+        endif()
+        file(WRITE "${syntax_data_cmake}" "${syntax_data_content}")
+    endif()
     if(CMAKE_CROSSCOMPILING AND NOT KATEHIGHLIGHTINGINDEXER_EXECUTABLE)
         message(FATAL_ERROR "Cross-compiling code highlighting requires a host katehighlightingindexer. Build the desktop target first and set KATEHIGHLIGHTINGINDEXER_EXECUTABLE to that build's bin/katehighlightingindexer; see docs/code-rendering.md.")
     endif()
