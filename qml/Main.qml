@@ -145,7 +145,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     onHistoryBlockingModalOpenChanged: {
@@ -963,7 +963,7 @@ ApplicationWindow {
             return historyActionAllowed(action)
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
             return cardDialog.visible && !editorSavePending && !editorModelBusy && !narrationDialog.visible
-                    && !imageDialog.visible && !errorDialog.visible
+                    && !imageDialog.visible && !errorDialog.visible && !cardCheckDialog.visible
                     && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
             const tests = voice.customSttTests
@@ -1750,7 +1750,7 @@ ApplicationWindow {
                 sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
                 context: Qt.WindowShortcut
                 autoRepeat: false
-                enabled: cardDialog.visible && cardDialog.activeFocus
+                enabled: cardDialog.visible && cardDialog.activeFocus && !cardCheckDialog.visible
                     && !window.editorSavePending && !window.editorModelBusy
                 onActivated: window.navigateEditorSide()
             }
@@ -2273,23 +2273,33 @@ ApplicationWindow {
                 }
             }
         }
-        footer: RowLayout {
+        footer: ColumnLayout {
             spacing: 10
-            Item {
+            CardCheckActions {
                 Layout.fillWidth: true
+                enabled: !window.editorSavePending && !window.editorModelBusy && !media.busy && !app.busy
+                onCheckRequested: mode => {
+                    const draft = window.currentCardDraft()
+                    window.openCardCheck(mode, draft.front, draft.back, draft.kind)
+                }
             }
-            AppButton {
-                text: "Cancel"
-                enabled: !editorSavePending
-                onClicked: cardDialog.close()
-            }
-            AppButton {
-                objectName: "saveCard"
-                text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
-                primary: true
-                hint: shortcuts.bindings.saveCard
-                enabled: !media.busy && !editorSavePending && !editorModelBusy && !app.busy
-                onClicked: submitCard()
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    text: "Cancel"
+                    enabled: !editorSavePending
+                    onClicked: cardDialog.close()
+                }
+                AppButton {
+                    objectName: "saveCard"
+                    text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
+                    primary: true
+                    hint: shortcuts.bindings.saveCard
+                    enabled: !media.busy && !editorSavePending && !editorModelBusy && !app.busy
+                    onClicked: submitCard()
+                }
             }
         }
     }
@@ -2911,6 +2921,13 @@ ApplicationWindow {
     AtomicizeDialog {
         id: atomicDialog
         ui: window
+    }
+    CardCheckDialog {
+        id: cardCheckDialog
+        ui: window
+    }
+    function openCardCheck(mode, front, back, kind) {
+        cardCheckDialog.openFor(mode, front, back, kind)
     }
     Sheet {
         id: resetDialog

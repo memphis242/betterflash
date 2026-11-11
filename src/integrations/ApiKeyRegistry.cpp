@@ -26,6 +26,7 @@ QString sourcePageName(const QString &source) {
     if (source == QStringLiteral("speech-recognition")) return QStringLiteral("Speech recognition");
     if (source == QStringLiteral("speech-output")) return QStringLiteral("Speech output");
     if (source == QStringLiteral("language-model")) return QStringLiteral("Language model");
+    if (source == QStringLiteral("web-search")) return QStringLiteral("Web search");
     return QStringLiteral("Search");
 }
 
@@ -230,7 +231,8 @@ QString ApiKeyRegistry::canonicalOrigin(const QString &endpoint) {
 
 bool ApiKeyRegistry::validSource(const QString &source) {
     return source == QStringLiteral("speech-recognition") || source == QStringLiteral("speech-output")
-        || source == QStringLiteral("language-model") || source == QStringLiteral("embedding");
+        || source == QStringLiteral("language-model") || source == QStringLiteral("embedding")
+        || source == QStringLiteral("web-search");
 }
 
 ApiKeyRegistry::Entry *ApiKeyRegistry::ensureEntry(const QString &source, const QString &origin, const bool legacy) {

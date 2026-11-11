@@ -133,3 +133,7 @@ examples and key.
 
 Automated GUI coverage is currently paused. When resumed, update the Atomicize
 sweep to invoke Generate proposal explicitly before waiting for a response.
+
+Each candidate also offers **Check correctness** and **Check completeness**
+before replacement. These inspect the current unsaved candidate using the
+configured model, with optional Tavily evidence. See [Card checks](card-checks.md).

@@ -23,6 +23,7 @@ QString ApiKeyBinding::sourcePage() const {
     if (source == QStringLiteral("speech-recognition")) return QStringLiteral("Speech recognition");
     if (source == QStringLiteral("speech-output")) return QStringLiteral("Speech output");
     if (source == QStringLiteral("language-model")) return QStringLiteral("Language model");
+    if (source == QStringLiteral("web-search")) return QStringLiteral("Web search");
     return source == QStringLiteral("embedding") ? QStringLiteral("Search") : QStringLiteral("Unavailable source");
 }
 QString ApiKeyBinding::keyName() const {

@@ -684,25 +684,37 @@ Dialog {
             }
         }
     }
-    footer: RowLayout {
+    footer: ColumnLayout {
         spacing: 10
-        Item {
+        CardCheckActions {
+            visible: dialog.draftIndex >= 0
             Layout.fillWidth: true
+            enabled: !atomic.busy && !app.busy
+            onCheckRequested: mode => {
+                dialog.updateDraft()
+                const card = dialog.currentDraft
+                dialog.ui.openCardCheck(mode, card.front || "", card.back || "", app.hasClozeMarkers(card.front || "") ? "cloze" : "basic")
+            }
         }
-        AppButton {
-            objectName: "atomicCancel"
-            text: "Close"
-            enabled: !atomic.busy
-            opacity: atomic.busy ? 0.45 : 1
-            onClicked: dialog.close()
-        }
-        AppButton {
-            objectName: "atomicApply"
-            visible: dialog.editingSet
-            text: dialog.applying ? "Replacing" : "Replace with " + dialog.drafts.length + " cards"
-            primary: true
-            enabled: dialog.splitReady && !atomic.busy && !app.busy
-            onClicked: dialog.submit()
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            Item { Layout.fillWidth: true }
+            AppButton {
+                objectName: "atomicCancel"
+                text: "Close"
+                enabled: !atomic.busy
+                opacity: atomic.busy ? 0.45 : 1
+                onClicked: dialog.close()
+            }
+            AppButton {
+                objectName: "atomicApply"
+                visible: dialog.editingSet
+                text: dialog.applying ? "Replacing" : "Replace with " + dialog.drafts.length + " cards"
+                primary: true
+                enabled: dialog.splitReady && !atomic.busy && !app.busy
+                onClicked: dialog.submit()
+            }
         }
     }
 }

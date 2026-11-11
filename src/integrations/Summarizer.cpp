@@ -86,6 +86,19 @@ void Summarizer::setAcceleration(const QString &acceleration) {
 }
 quint64 Summarizer::complete(const QJsonObject &payload, QObject *context, Completion callback) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
+    return completeMessage(payload, context, [callback = std::move(callback)](std::expected<QJsonObject, struct ProviderError> result) {
+        if (!result) { callback(std::unexpected(result.error())); return; }
+        const QString content = result->value(QStringLiteral("content")).toString().trimmed();
+        if (content.isEmpty()) {
+            callback(std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"),
+                QStringLiteral("The provider returned no usable text. Check chat-completion model compatibility.")}));
+            return;
+        }
+        callback(content);
+    });
+}
+quint64 Summarizer::completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback) {
+    Q_ASSERT(context && callback && QThread::currentThread() == thread());
     const quint64 id = ++m_jobSequence;
     auto job = std::make_shared<struct CompletionJob>();
     job->payload = payload; job->context = context; job->callback = std::move(callback);
@@ -117,7 +130,8 @@ void Summarizer::startCompletion(quint64 id) {
                 finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_LOCAL"), result.error()})); return;
             }
             m_acceleratorStatus = result->accelerator; emit localChanged();
-            finishCompletion(id, result->text);
+            finishCompletion(id, QJsonObject{{QStringLiteral("role"), QStringLiteral("assistant")},
+                {QStringLiteral("content"), result->text}});
         });
         watcher->setFuture(QtConcurrent::run(&m_inferencePool, [path, acceleration, profile, payload, canceled] {
             return LocalLanguageModel::generate(path, acceleration, profile, payload, canceled);
@@ -128,7 +142,13 @@ void Summarizer::startCompletion(quint64 id) {
     if (!request) { finishCompletion(id, std::unexpected(request.error())); return; }
     QNetworkReply *const reply = m_network.post(*request, QJsonDocument(job->payload).toJson(QJsonDocument::Compact));
     job->reply = reply; reply->setReadBufferSize(128 * 1024);
-    QTimer::singleShot(45000, reply, [reply] { if (!reply->isFinished()) reply->abort(); });
+    QTimer::singleShot(45000, reply, [this, id, reply] {
+        const auto current = m_jobs.value(id);
+        if (current && current->reply == reply && !reply->isFinished()) {
+            current->timedOut = true;
+            reply->abort();
+        }
+    });
     connect(reply, &QIODevice::readyRead, this, [this, id, reply] {
         const auto current = m_jobs.value(id);
         if (!current || current->reply != reply) return;
@@ -141,29 +161,63 @@ void Summarizer::startCompletion(quint64 id) {
         current->body.append(reply->readAll());
         const QByteArray body = current->body;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const bool okay = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
+        const auto networkError = reply->error();
+        const bool okay = networkError == QNetworkReply::NoError && status >= 200 && status < 300;
+        const bool timedOut = current->timedOut;
+        QString networkDetail = reply->errorString();
+        const QString credential = m_credentials->key();
+        if (!credential.isEmpty()) networkDetail.replace(credential, QStringLiteral("[redacted]"));
+        networkDetail = networkDetail.left(256);
         current->reply = nullptr; reply->deleteLater();
         if (body.size() > 512 * 1024) {
             finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE_LIMIT"), QStringLiteral("The provider response exceeded its size limit. Choose a smaller response or another model.")})); return;
         }
         if (!okay) {
+            if (timedOut || networkError == QNetworkReply::TimeoutError) {
+                const QString reason = timedOut ? QStringLiteral("The language model request exceeded its 45 second limit.")
+                    : QStringLiteral("The connection to the language model endpoint timed out.");
+                finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_TIMEOUT"),
+                    reason + QStringLiteral(" Check the connection or try another model, then retry.")})); return;
+            }
+            if (status == 0 || (status >= 200 && status < 300)) {
+                const QString response = status == 0 ? QStringLiteral("before receiving an HTTP response")
+                    : QStringLiteral("after HTTP %1").arg(status);
+                finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_NETWORK_%1").arg(static_cast<int>(networkError)),
+                    QStringLiteral("The language model request failed %1: %2 (network error %3). Check the endpoint and connection, then retry.")
+                        .arg(response, networkDetail).arg(static_cast<int>(networkError))})); return;
+            }
             const QString fix = status == 401 || status == 403 ? QStringLiteral("Check the provider key and model access.")
                 : status == 429 ? QStringLiteral("Provider rate limit reached. Wait and try again.")
-                : QStringLiteral("Check the endpoint and connection, then try again.");
-            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_HTTP_%1").arg(status), fix})); return;
+                : status >= 500 ? QStringLiteral("The provider reported a server error. Try again or check its service status.")
+                : QStringLiteral("Check the endpoint, model, and request compatibility, then try again.");
+            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_HTTP_%1").arg(status),
+                QStringLiteral("The language model endpoint returned HTTP %1. %2").arg(status).arg(fix)})); return;
         }
         QJsonParseError parseError{};
         const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);
         const QJsonArray choices = document.object().value(QStringLiteral("choices")).toArray();
-        const QString content = choices.isEmpty() ? QString() : choices.first().toObject()
-            .value(QStringLiteral("message")).toObject().value(QStringLiteral("content")).toString().trimmed();
-        if (parseError.error != QJsonParseError::NoError || content.isEmpty() || content.size() > 110000) {
-            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"), QStringLiteral("The provider returned no usable text. Check chat-completion model compatibility.")})); return;
+        QJsonObject message = choices.isEmpty() ? QJsonObject() : choices.first().toObject()
+            .value(QStringLiteral("message")).toObject();
+        const QJsonValue content = message.value(QStringLiteral("content"));
+        const QJsonValue calls = message.value(QStringLiteral("tool_calls"));
+        const bool hasText = content.isString() && !content.toString().trimmed().isEmpty();
+        const bool hasCalls = calls.isArray() && !calls.toArray().isEmpty();
+        const bool invalidContent = !content.isUndefined() && !content.isNull() && !content.isString();
+        const bool invalidCalls = !calls.isUndefined() && !calls.isNull() && !calls.isArray();
+        const QJsonValue roleValue = message.value(QStringLiteral("role"));
+        const QString role = roleValue.toString();
+        const bool invalidRole = !roleValue.isUndefined() && !roleValue.isString();
+        if (parseError.error != QJsonParseError::NoError || !document.isObject() || invalidContent || invalidCalls || invalidRole
+            || (!hasText && !hasCalls) || (!role.isEmpty() && role != QStringLiteral("assistant"))
+            || (hasText && content.toString().trimmed().size() > 110000)) {
+            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"), QStringLiteral("The provider returned no usable assistant message. Check chat-completion model and tool-call compatibility.")})); return;
         }
-        finishCompletion(id, content);
+        if (role.isEmpty()) message.insert(QStringLiteral("role"), QStringLiteral("assistant"));
+        if (hasText) message.insert(QStringLiteral("content"), content.toString().trimmed());
+        finishCompletion(id, message);
     });
 }
-void Summarizer::finishCompletion(quint64 id, std::expected<QString, struct ProviderError> result) {
+void Summarizer::finishCompletion(quint64 id, std::expected<QJsonObject, struct ProviderError> result) {
     const auto job = m_jobs.take(id);
     if (!job) return;
     disconnect(job->contextConnection);

@@ -7,7 +7,7 @@ Item {
     id: settingsPage
     required property var ui
     readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen || aiModelPicker.dialogOpen
-        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen || syncNoticeDialog.visible
+        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen || webSearchSettings.dialogOpen || syncNoticeDialog.visible
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
@@ -25,8 +25,8 @@ Item {
         }
         if (section !== 4) syncTokenDraft = ""
     }
-    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering", "Review"]
-    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering", "Review"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering", "Review", "Web search"]
+    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering", "Review", "Web search"]
     property var sectionScrollPositions: ({})
     property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
@@ -710,6 +710,13 @@ Item {
                     }
                     CodeRenderingSettings {
                         visible: settingsPage.section === 7
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    WebSearchSettings {
+                        id: webSearchSettings
+                        service: webSearch
+                        visible: settingsPage.section === 9
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                     }

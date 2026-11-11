@@ -175,6 +175,7 @@ scope for the initial client work.
 - [Sync protocol](docs/sync.md): collection and media synchronization.
 - [Code rendering](docs/code-rendering.md): Markdown code themes and limits.
 - [Atomicize](docs/atomicize.md): proposed focused-card workflow.
+- [Card checks](docs/card-checks.md): correctness, completeness, and optional web search.
 - [Roadmap](docs/roadmap.md): deferred desktop and platform work.
 
 ## Validation policy

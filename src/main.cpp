@@ -3,6 +3,8 @@
 #include "core/cardmodel.h"
 #include "integrations/MediaStore.h"
 #include "integrations/Atomicizer.h"
+#include "integrations/CardChecker.h"
+#include "integrations/WebSearch.h"
 #include "integrations/CardGenerator.h"
 #include "integrations/ApiKeyRegistry.h"
 #include "integrations/RemoteModelCatalog.h"
@@ -216,6 +218,8 @@ int main(int argc, char **argv) {
     SearchController librarySearch(&app, &ai, dataDirectory, nullptr, &apiKeys);
     Atomicizer atomic(&app, &ai);
     CardGenerator cardGenerator(&app, &ai);
+    WebSearch webSearch(&apiKeys);
+    CardChecker cardChecker(&app, &ai, &webSearch);
     CheckpointSummary checkpointSummary(&ai);
     StudyAssistant studyAssistant(&ai, &app);
     SyncController sync(&app, media.rootPath());
@@ -277,6 +281,8 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
     engine.rootContext()->setContextProperty(QStringLiteral("cardGenerator"), &cardGenerator);
+    engine.rootContext()->setContextProperty(QStringLiteral("webSearch"), &webSearch);
+    engine.rootContext()->setContextProperty(QStringLiteral("cardChecker"), &cardChecker);
     engine.rootContext()->setContextProperty(QStringLiteral("checkpointSummary"), &checkpointSummary);
     engine.rootContext()->setContextProperty(QStringLiteral("studyAssistant"), &studyAssistant);
     engine.rootContext()->setContextProperty(QStringLiteral("sync"), &sync);

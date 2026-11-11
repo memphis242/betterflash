@@ -92,7 +92,9 @@ public:
     Q_INVOKABLE void testModel();
     Q_INVOKABLE void cancelTest();
     using Completion = std::function<void(std::expected<QString, struct ProviderError>)>;
+    using MessageCompletion = std::function<void(std::expected<QJsonObject, struct ProviderError>)>;
     [[nodiscard]] quint64 complete(const QJsonObject &payload, QObject *context, Completion callback);
+    [[nodiscard]] quint64 completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback);
     void cancelCompletion(quint64 id);
     std::expected<QNetworkRequest, struct ProviderError> configuredRequest() const;
     Q_INVOKABLE void setApiKey(const QString &key);
@@ -112,18 +114,19 @@ private:
     void summarizePending(const QVariantList &pending, const QString &scopeDeckId, const QString &scopeName);
     void configureCredentials();
     void startCompletion(quint64 id);
-    void finishCompletion(quint64 id, std::expected<QString, struct ProviderError> result);
+    void finishCompletion(quint64 id, std::expected<QJsonObject, struct ProviderError> result);
     void cancelAllCompletions();
     void resetTestReport();
     struct CompletionJob {
         QJsonObject payload{};
         QPointer<QObject> context{};
-        Completion callback{};
+        MessageCompletion callback{};
         QPointer<QNetworkReply> reply{};
         QByteArray body{};
         QMetaObject::Connection contextConnection{};
         const std::shared_ptr<std::atomic_bool> canceled = std::make_shared<std::atomic_bool>(false);
         bool waitingForDownload = false;
+        bool timedOut = false;
     };
     AppController *const m_app;
     ApiKeyBinding *m_credentials = nullptr;
