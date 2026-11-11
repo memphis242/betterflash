@@ -7,8 +7,11 @@ of missing foundational knowledge. No model is needed to calculate it.
 
 ## Using it
 
-- Library shows outlined Moderate, Low and Very low recall-strength badges on weaker cards.
-  Enable **Weakest first** to rank a deck or the whole library. Search result
+- Library shows a left rail for each card's lowest assessed recall strength.
+  The rail uses the review palette: Very low, Low, Moderate and Strong use
+  the Missed, Partial, Hard and Good colors respectively. Unassessed cards use
+  a neutral rail. Hover the rail for the score and estimate details. Enable
+  **Weakest first** to rank a deck or the whole library. Search result
   groups retain their relevance order; weakness sorts only inside each group.
 - Open a card's detail and choose **Recall & study help** for the reasons and a
   suggested independent study step.

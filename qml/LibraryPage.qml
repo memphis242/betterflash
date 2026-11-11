@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtCore
 import "DeckSearch.js" as DeckSearch
+import "ReviewPresentation.js" as ReviewPresentation
 
 Item {
     id: library
@@ -1371,6 +1372,26 @@ Item {
                             width: cardRow.width
                             height: 82
                             highlighted: library.selectedCardIds.indexOf(cardRow.modelData.id) >= 0
+                            readonly property var recallAssessment: library.cardAssessment(cardRow.modelData)
+                            readonly property string recallDescription: {
+                                if (!recallAssessment.assessed)
+                                    return "Recall strength: Not assessed. Review this card to establish its recall strength."
+                                const count = Number(recallAssessment.sampleCount || 0)
+                                const early = recallAssessment.provisional ? " Early estimate based on " + count + (count === 1 ? " review." : " reviews.") : ""
+                                return "Recall strength: " + recallAssessment.label + ", " + Math.round(Number(recallAssessment.recallStrength)) + "/100; higher is stronger." + early
+                            }
+                            readonly property color recallColor: {
+                                switch (recallAssessment.assessed ? recallAssessment.tier : "unassessed") {
+                                case "needs-study": return ReviewPresentation.gradeColor(0, Theme)
+                                case "fragile": return ReviewPresentation.gradeColor(1, Theme)
+                                case "watch": return ReviewPresentation.gradeColor(2, Theme)
+                                case "steady": return ReviewPresentation.gradeColor(3, Theme)
+                                default: return Theme.rule
+                                }
+                            }
+                            Accessible.description: recallDescription
+                            ToolTip.visible: cardMouse.containsMouse && cardMouse.mouseX <= 12
+                            ToolTip.text: recallDescription
                             CardActionsMenu {
                                 id: cardActionsMenu
                                 ui: library.ui
@@ -1438,7 +1459,6 @@ Item {
                                         ToolTip.text: "Marked for " + followUpTags.map(tag => tag.substring(6)).join(" and ") + " follow-up. Filter by these tags. Dismiss from Card actions or card detail; saving edits or starting another check clears the marks."
                                         HoverHandler { id: followUpHover }
                                     }
-                                    WeaknessBadge { assessment: library.cardAssessment(cardRow.modelData); compact: true; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -1474,6 +1494,17 @@ Item {
                                 color: cardButton.highlighted || cardMouse.containsMouse ? Theme.accentSoft : Theme.transparent
                                 border.width: cardButton.highlighted ? 2 : (cardList.activeFocus && cardList.currentIndex === cardRow.index ? 1 : 0)
                                 border.color: cardButton.highlighted ? Theme.accent : Theme.rule
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 3
+                                    anchors.topMargin: 5
+                                    anchors.bottomMargin: 5
+                                    width: 5
+                                    radius: 2
+                                    color: cardButton.recallColor
+                                }
                                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.rule }
                             }
                         }
