@@ -1665,7 +1665,7 @@ ApplicationWindow {
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
         closePolicy: Popup.NoAutoClose
         width: Math.min(1120, window.width - 2 * window.gutter)
-        height: Math.min(800, window.height - 2 * window.gutter)
+        height: Math.min(editingGeneratedCard ? 1120 : 800, window.height - 2 * window.gutter)
         padding: cardDialog.width < 650 ? 14 : 24
         background: Rectangle {
             color: Theme.surface
