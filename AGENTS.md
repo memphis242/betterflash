@@ -54,6 +54,12 @@ pinned, actions visible, and lists bounded.
   directory. Do not share a CMake cache between worktrees.
 - Running `scripts/build-desktop.sh` in the primary checkout or any project
   worktree is preauthorized. Do not ask for permission before running it.
+- After every merge into `main`, and after completed direct updates to `main`,
+  build the accepted changes and run `scripts/install-user-launcher.sh` from
+  the primary checkout with its own build directory. Installation and launcher
+  updates are preauthorized. Verify the installed executable and launcher;
+  report installation failures instead of claiming the update is installed.
+  Keep unfinished changes out of the installed snapshot.
 - Development builds include reset controls and exclude test targets by default.
 - The user has paused automated testing during visual refinement. Do not add or
   run tests until explicitly requested. Compile, inspect, format, and launch
