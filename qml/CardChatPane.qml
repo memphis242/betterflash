@@ -142,29 +142,32 @@ Item {
             Accessible.name: text
         }
         ProgressBar { visible: cardChat.busy; indeterminate: true; Layout.fillWidth: true }
-        ScrollView {
-            id: alerts
-            visible: cardChat.stale || !!pane.failure.message
-            clip: true
-            contentWidth: availableWidth
+        Label {
+            visible: cardChat.stale
+            text: "This card changed since this chat began. Start a new chat to use its current content."
+            color: Theme.warning
+            font.bold: true
+            wrapMode: Text.Wrap
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(130, Math.max(36, pane.height * 0.18), Math.max(1, alertContents.implicitHeight))
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: alertContents
-                width: alerts.availableWidth
-                spacing: 8
-                Label {
-                    visible: cardChat.stale
-                    text: "This card changed since this chat began. Start a new chat to use its current content."
-                    color: Theme.warning
-                    font.bold: true
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
+        }
+        Rectangle {
+            visible: !!pane.failure.message
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(160, Math.max(60, pane.height * 0.22), chatError.implicitHeight + 24)
+            color: Theme.errorSurface
+            border.color: Theme.error
+            border.width: 1
+            radius: 6
+            ScrollView {
+                id: alerts
+                anchors.fill: parent
+                anchors.margins: 12
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ErrorBlock {
-                    Layout.fillWidth: true
-                    visible: !!pane.failure.message
+                    id: chatError
+                    width: alerts.availableWidth
                     code: pane.failure.code || ""
                     message: (pane.failure.message || "") + (pane.failure.action ? "\n" + pane.failure.action : "")
                     details: pane.failure.detail || ""

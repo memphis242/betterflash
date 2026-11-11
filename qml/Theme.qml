@@ -54,6 +54,7 @@ QtObject {
     readonly property color modelLocationLocalInk: dark ? canvas : ink
     readonly property color modelLocationLocalMutedInk: dark ? "#d6c7a5" : "#765821"
     readonly property color error: dark ? "#ee9a9a" : "#a13939"
+    readonly property color errorSurface: dark ? "#432c33" : "#f9e8e8"
     readonly property color recallMissed: dark ? "#ee9a9a" : "#a13939"
     readonly property color recallPartial: dark ? "#e6c17a" : "#815714"
     readonly property color recallHard: dark ? "#e7a17d" : "#a34b34"
