@@ -20,6 +20,7 @@ class ApiKeyRegistry;
 struct ProviderError {
     QString code;
     QString message;
+    QString detail{};
 };
 
 class Summarizer final : public QObject {

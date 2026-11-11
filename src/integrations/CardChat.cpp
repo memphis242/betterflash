@@ -401,7 +401,8 @@ void CardChat::requestTurn() {
         m_job = 0;
         if (!result) {
             fail(result.error().code, QStringLiteral("The chat request could not be completed."), result.error().message,
-                 QStringLiteral("Provider error: %1").arg(result.error().code)); return;
+                 QStringLiteral("Provider error: %1").arg(result.error().code)
+                    + (result.error().detail.isEmpty() ? QString() : QLatin1Char('\n') + result.error().detail)); return;
         }
         receiveTurn(*result);
     });

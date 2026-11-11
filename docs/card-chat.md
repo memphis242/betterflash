@@ -24,6 +24,10 @@ cancels an ongoing reply and retains the conversation. Failed or canceled
 questions can be retried or discarded without deleting earlier messages.
 Deleting a chat requires an explicit confirmation.
 
+Provider HTTP failures retain their structured message, error code, and type in
+**Show details**, with the active API key redacted. Raw response bodies and
+provider-generated failed tool-call content are not displayed.
+
 Each conversation retains its original card context. When the saved card's
 front, back, or kind changes, that conversation is marked out of date. Start
 a new chat to discuss the current content. Changing a tag does not invalidate

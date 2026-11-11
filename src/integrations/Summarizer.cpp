@@ -190,8 +190,24 @@ void Summarizer::startCompletion(quint64 id) {
                 : status == 429 ? QStringLiteral("Provider rate limit reached. Wait and try again.")
                 : status >= 500 ? QStringLiteral("The provider reported a server error. Try again or check its service status.")
                 : QStringLiteral("Check the endpoint, model, and request compatibility, then try again.");
+            const QJsonObject failure = QJsonDocument::fromJson(body).object();
+            const QJsonObject error = failure.value(QStringLiteral("error")).toObject();
+            QStringList details;
+            const auto appendDetail = [&details, &credential](const QString &label, QString value) {
+                if (!credential.isEmpty()) value.replace(credential, QStringLiteral("[redacted]"));
+                value = value.simplified().left(1500);
+                if (!value.isEmpty()) details.append(label + QStringLiteral(": ") + value);
+            };
+            appendDetail(QStringLiteral("Provider message"), error.value(QStringLiteral("message")).toString());
+            if (details.isEmpty())
+                appendDetail(QStringLiteral("Provider message"), failure.value(QStringLiteral("message")).toString());
+            appendDetail(QStringLiteral("Provider code"), error.value(QStringLiteral("code")).toString());
+            appendDetail(QStringLiteral("Provider type"), error.value(QStringLiteral("type")).toString());
+            if (details.isEmpty())
+                details.append(QStringLiteral("The provider did not return a structured error message."));
             finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_HTTP_%1").arg(status),
-                QStringLiteral("The language model endpoint returned HTTP %1. %2").arg(status).arg(fix)})); return;
+                QStringLiteral("The language model endpoint returned HTTP %1. %2").arg(status).arg(fix),
+                details.join(QLatin1Char('\n'))})); return;
         }
         QJsonParseError parseError{};
         const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);
