@@ -5,7 +5,9 @@ Language model settings by default, or an explicitly configured remote
 endpoint, model, and key. Opening the dialog previews the saved source without
 calling the model. Choose Generate proposal to send the selected saved card's
 front, back, kind, and answer-point count to that provider. It sends no other
-cards, review history, credentials in content, or image pixels.
+cards, review history, credentials in content, or image pixels. For a cloze
+source, the same front is also supplied with its cloze answers filled in so the
+model can read the complete prose alongside the original recall markup.
 
 The provider first decides whether the card should stay together. Ordered
 steps, procedures, comparisons, and closely related bullet lists are
@@ -17,6 +19,10 @@ an explicit subject and scope in each front, concrete nouns in place of dangling
 pronouns, and an isolation check of questions, answers, cloze text, and hints.
 Repeating the source-grounded noun is preferred to ambiguous references. Literal
 code is preserved, and missing context must not be filled with invented facts.
+The prompt distinguishes a hidden recall term or hint from a sentence's subject
+and requires checking each cloze question with its answers hidden. For example,
+"[cloze1:Durability] means it survives restart" needs the source-grounded noun
+"a transaction" in place of "it"; numbering or hints do not repair that context.
 
 If a split is useful, the proposal contains two through five basic or cloze
 cards. There are no recursive requests and no automatic follow-up splits. A

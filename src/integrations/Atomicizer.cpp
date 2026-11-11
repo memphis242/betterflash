@@ -229,6 +229,18 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
         "and other cards. For each pronoun or vague reference, locate its explicit antecedent within that candidate. "
         "If none exists or more than one noun could fit, replace the reference with its source-grounded noun. "
         "Check cloze text and hints as well as ordinary prose. Do not return candidates with dangling references. "
+        "CLOZE CONTEXT: [clozeN:answer|hint] marks text to recall; it does not automatically establish "
+        "antecedents for surrounding pronouns or replace needed context. N only identifies markers hidden "
+        "together within one card. "
+        "A hint such as 'transaction property' does not establish that 'it' means 'a transaction'. "
+        "For a source about transactions, '[cloze1:Durability|transaction property] means it survives restart.' "
+        "is NOT self-contained. Rewrite it as '[cloze1:Durability|transaction property] means a transaction "
+        "survives a restart.' Preserve the tested term while restoring the source-grounded noun outside the marker. "
+        "Read both the answer-filled statement and the review question with each cloze group hidden. "
+        "The visible review question must still identify what the statement is about without relying on a "
+        "hidden answer or hint to supply missing context. Do not fix this merely by changing group numbers "
+        "or adding hints. For cloze sources, frontWithAnswers is the same source with marker answers filled in; "
+        "use it to understand the full prose, and use front to preserve the intended recall targets. "
         "Preserve exact code, Markdown, LaTeX, and every existing media: image "
         "reference on at least one relevant card. Image pixels are not provided; do not infer their contents. "
         "Never invent media references or external image URLs. A proposed card may be basic or cloze. "
@@ -246,9 +258,11 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
         "To recommend keeping the source while offering optional candidates, use the replacement shape "
         "with decision set to keep instead of split. "
         "The example text describes the format, not facts about the source card.");
-    const QJsonObject source{{QStringLiteral("kind"), m_source.value(QStringLiteral("kind")).toString()},
+    QJsonObject source{{QStringLiteral("kind"), m_source.value(QStringLiteral("kind")).toString()},
         {QStringLiteral("front"), front}, {QStringLiteral("back"), back},
         {QStringLiteral("pointCount"), m_source.value(QStringLiteral("pointCount")).toInt()}};
+    if (m_source.value(QStringLiteral("kind")).toString() == QStringLiteral("cloze"))
+        source.insert(QStringLiteral("frontWithAnswers"), m_app->clozePlainText(front));
     QJsonArray messages{
         QJsonObject{{QStringLiteral("role"), QStringLiteral("system")}, {QStringLiteral("content"), instructions}},
         QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
