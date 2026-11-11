@@ -52,6 +52,8 @@ pinned, actions visible, and lists bounded.
 
 - Build with `scripts/build-desktop.sh` using this checkout's own build
   directory. Do not share a CMake cache between worktrees.
+- Running `scripts/build-desktop.sh` in the primary checkout or any project
+  worktree is preauthorized. Do not ask for permission before running it.
 - Development builds include reset controls and exclude test targets by default.
 - The user has paused automated testing during visual refinement. Do not add or
   run tests until explicitly requested. Compile, inspect, format, and launch
@@ -73,7 +75,12 @@ pinned, actions visible, and lists bounded.
   not use `git add .` or `git add -A` in a shared checkout.
 - The root agent owns Git writes in coordinated work. Commit and push completed
   work regularly, including direct work on `main` under the standing authorization.
-  Merging a separate feature branch still requires explicit user approval.
+- Git commands in this project's primary checkout and worktrees are preauthorized,
+  including branch management, commits, pushes, and merges. Use judgment and do
+  not ask for per-command permission. This does not authorize discarding foreign
+  edits or overwriting another session's work. If the execution sandbox still
+  requires approval, explain that constraint and request a reusable command
+  approval where supported.
 - Do not reset, stash, clean, or switch branches in a shared checkout while
   another session may be active.
 
