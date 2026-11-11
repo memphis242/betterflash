@@ -48,6 +48,13 @@ Dialog {
                 Layout.fillWidth: true
             }
             GlyphButton {
+                glyph: "check"
+                visible: preview.ui.hasCheckFollowUp(preview.card)
+                enabled: !app.busy && !(preview.card.loadError && preview.card.loadError.code)
+                hint: "Dismiss check follow-up. Keeps other tags and review schedules."
+                onClicked: preview.ui.dismissCheckFollowUp(preview.cardId)
+            }
+            GlyphButton {
                 glyph: "more"
                 hint: "Card actions"
                 enabled: !!preview.card.id

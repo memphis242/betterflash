@@ -1,3 +1,4 @@
+#include "checkfollowuptags.h"
 #include "appcontroller.h"
 #include "databaseworker.h"
 
@@ -74,6 +75,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
     connect(m_worker,&DatabaseWorker::checkReviewMarked,this,&AppController::checkReviewMarked);
+    connect(m_worker,&DatabaseWorker::checkFollowUpDismissed,this,&AppController::checkFollowUpDismissed);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
     connect(m_worker,&DatabaseWorker::deckCheckpointsReady,this,&AppController::deckCheckpointsReady);
@@ -234,14 +236,15 @@ bool AppController::restoreDeckCheckpoint(const QString &deckId, const QString &
 }
 bool AppController::saveCard(const QString &id,const QString &deckId,const QString &kind,const QString &front,const QString &back,const QString &tags,int points,const QString &requestId)
 {
-    const struct betterflash::model::Card candidate{id.isEmpty()?betterflash::model::uuid():id,deckId,kind,front,back,tags,points};
+    const QString savedTags=id.isEmpty()?tags:betterflash::checkfollowup::withoutTags(tags);
+    const struct betterflash::model::Card candidate{id.isEmpty()?betterflash::model::uuid():id,deckId,kind,front,back,savedTags,points};
     const auto valid=betterflash::model::cardFromMap(betterflash::model::toMap(candidate));
     if (!valid) {
         setError({{"code",kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD"},{"message","Could not save the card. Correct the card fields."},{"detail",valid.error()}});
         emit cardSaved(id,requestId,false);
         return false;
     }
-    const bool queued = invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,tags,points,requestId);});
+    const bool queued = invoke([=](DatabaseWorker *worker){worker->saveCard(id,deckId,kind,front,back,savedTags,points,requestId);});
     if (!queued) emit cardSaved(id,requestId,false);
     return queued;
 }
@@ -298,6 +301,17 @@ bool AppController::markCardsForCheckReview(const QVariantList &expectedCards, c
     }
     const bool queued=invoke([=](DatabaseWorker *worker) { worker->markCardsForCheckReview(expectedCards,mode,requestId); });
     if (!queued) emit checkReviewMarked(requestId,false);
+    return queued;
+}
+QString AppController::withoutCheckFollowUpTags(const QString &tags) const
+{
+    return betterflash::checkfollowup::withoutTags(tags);
+}
+bool AppController::dismissCheckFollowUp(const QString &cardId, const QString &requestId,
+                                         const QVariantMap &expectedSavedCard)
+{
+    const bool queued=invoke([=](DatabaseWorker *worker) { worker->dismissCheckFollowUp(cardId,requestId,expectedSavedCard); });
+    if (!queued) emit checkFollowUpDismissed(cardId,requestId,false);
     return queued;
 }
 void AppController::deleteCard(const QString &id)

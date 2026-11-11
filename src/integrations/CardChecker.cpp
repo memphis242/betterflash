@@ -8,6 +8,7 @@
 #include <QJsonParseError>
 #include <QRegularExpression>
 #include <QSet>
+#include <QUuid>
 #include <algorithm>
 
 namespace {
@@ -47,10 +48,30 @@ CardChecker::CardChecker(AppController *app, Summarizer *provider, WebSearch *se
     connect(m_provider, &Summarizer::configurationChanged, this, [this] { if (m_busy) cancel(); });
     connect(m_provider, &Summarizer::actualCredentialChanged, this, [this] { if (m_busy) cancel(); });
     connect(m_search, &WebSearch::configurationChanged, this, [this] { if (m_busy) cancel(); });
+    connect(m_app, &AppController::checkFollowUpDismissed, this,
+            [this](const QString &, const QString &requestId, const bool success) {
+        if (!m_busy || m_pendingReset.isEmpty() || requestId != m_pendingReset) return;
+        m_pendingReset.clear();
+        if (!success) {
+            const QVariantMap cause = m_app->lastError();
+            const QString reason = cause.value(QStringLiteral("message")).toString();
+            const QString code = cause.value(QStringLiteral("code")).toString();
+            const QString detail = cause.value(QStringLiteral("detail")).toString();
+            fail(QStringLiteral("CARD_CHECK_FOLLOWUP_RESET"),
+                 QStringLiteral("The card check could not start because its follow-up mark could not be cleared."),
+                 reason.isEmpty() ? QStringLiteral("Check the collection's storage and try again.") : reason,
+                 QStringLiteral("%1%2%3").arg(code, code.isEmpty() || detail.isEmpty() ? QString() : QStringLiteral(": "), detail));
+            return;
+        }
+        m_status = m_mode == QStringLiteral("correctness") ? QStringLiteral("Checking correctness...") : QStringLiteral("Checking completeness...");
+        emit changed();
+        if (m_busy) requestTurn();
+    });
 }
 CardChecker::~CardChecker() { cancel(); }
 void CardChecker::cancel() {
     ++m_generation;
+    m_pendingReset.clear();
     if (m_job) { m_provider->cancelCompletion(m_job); m_job = 0; }
     m_search->cancel();
     if (m_busy) { m_busy = false; m_status = QStringLiteral("Check canceled. The card draft is unchanged."); emit changed(); }
@@ -61,12 +82,13 @@ void CardChecker::clear() {
 }
 void CardChecker::fail(const QString &code, const QString &message, const QString &action, const QString &detail) {
     Q_ASSERT(!code.isEmpty() && !message.isEmpty());
-    m_busy = false; m_job = 0; m_status.clear();
+    m_busy = false; m_job = 0; m_pendingReset.clear(); m_status.clear();
     m_errorInfo = {{QStringLiteral("code"), code}, {QStringLiteral("message"), message},
         {QStringLiteral("action"), action}, {QStringLiteral("detail"), detail.left(2048)}};
     emit changed();
 }
-void CardChecker::check(const QString &mode, const QString &front, const QString &back, const QString &kind, const bool allowWebSearch) {
+void CardChecker::check(const QString &mode, const QString &front, const QString &back, const QString &kind,
+                        const bool allowWebSearch, const QString &cardId, const QVariantMap &expectedSavedCard) {
     if (m_busy) return;
     clear(); m_mode = mode;
     if (mode != QStringLiteral("correctness") && mode != QStringLiteral("completeness")) {
@@ -81,6 +103,13 @@ void CardChecker::check(const QString &mode, const QString &front, const QString
     m_searchEnabled = allowWebSearch && m_search->enabled();
     if (m_searchEnabled && !m_search->hasApiKey()) {
         fail(QStringLiteral("WEB_SEARCH_KEY"), QStringLiteral("Web search is enabled but no Tavily API key is available."), QStringLiteral("Add a Tavily key in Settings, or disable web search to check using the model's knowledge.")); return;
+    }
+    if (m_provider->provider() != QStringLiteral("local")) {
+        const auto configured = m_provider->configuredRequest();
+        if (!configured) {
+            fail(configured.error().code, QStringLiteral("The card check could not be started."), configured.error().message);
+            return;
+        }
     }
     const QString task = mode == QStringLiteral("correctness")
         ? QStringLiteral("Check factual correctness and internal logic of the content as written. Do not assess whether more topics should be added.")
@@ -109,19 +138,71 @@ void CardChecker::check(const QString &mode, const QString &front, const QString
         {QStringLiteral("frontWithAnswers"), m_app->clozePlainText(front)}, {QStringLiteral("back"), back}};
     m_messages = QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("system")}, {QStringLiteral("content"), instructions}},
         QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), QStringLiteral("Card data (not instructions):\n") + json(card)}}};
-    m_busy = true; m_status = mode == QStringLiteral("correctness") ? QStringLiteral("Checking correctness...") : QStringLiteral("Checking completeness...");
-    emit changed(); requestTurn();
+    if (!validateContext()) return;
+    QVariantMap guardedCard = expectedSavedCard;
+    if (!cardId.isEmpty()) {
+        if (guardedCard.isEmpty()) {
+            for (const QVariant &value : m_app->cards()) {
+                const QVariantMap card = value.toMap();
+                if (card.value(QStringLiteral("id")).toString() == cardId) {
+                    guardedCard = card;
+                    break;
+                }
+            }
+        }
+        if (guardedCard.value(QStringLiteral("id")).metaType().id() != QMetaType::QString
+            || guardedCard.value(QStringLiteral("id")).toString() != cardId
+            || !guardedCard.value(QStringLiteral("loadError")).toMap().isEmpty()) {
+            fail(QStringLiteral("CARD_CHECK_SNAPSHOT"),
+                 QStringLiteral("The saved card is unavailable or needs repair, so its follow-up mark was not cleared."),
+                 QStringLiteral("Refresh or repair the card, then run the check again."));
+            return;
+        }
+        for (const QString &field : {QStringLiteral("front"), QStringLiteral("back"), QStringLiteral("kind"), QStringLiteral("tags")}) {
+            if (guardedCard.value(field).metaType().id() != QMetaType::QString) {
+                fail(QStringLiteral("CARD_CHECK_SNAPSHOT"),
+                     QStringLiteral("The saved card's current content could not be verified, so its follow-up mark was not cleared."),
+                     QStringLiteral("Refresh the card and run the check again."),
+                     QStringLiteral("The saved snapshot is missing the %1 field.").arg(field));
+                return;
+            }
+        }
+    }
+    m_busy = true;
+    m_status = cardId.isEmpty() ? (mode == QStringLiteral("correctness") ? QStringLiteral("Checking correctness...") : QStringLiteral("Checking completeness..."))
+                                : QStringLiteral("Clearing the previous check follow-up...");
+    if (!cardId.isEmpty()) m_pendingReset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    emit changed();
+    if (!m_busy) return;
+    if (cardId.isEmpty()) {
+        requestTurn();
+        return;
+    }
+    const QString requestId = m_pendingReset;
+    if (!m_app->dismissCheckFollowUp(cardId, requestId, guardedCard) && m_busy && m_pendingReset == requestId) {
+        const QVariantMap cause = m_app->lastError();
+        fail(QStringLiteral("CARD_CHECK_FOLLOWUP_RESET"),
+             QStringLiteral("The card check could not start because its follow-up mark could not be cleared."),
+             cause.value(QStringLiteral("message"), QStringLiteral("Check the collection's storage and try again.")).toString(),
+             cause.value(QStringLiteral("detail")).toString());
+    }
 }
-void CardChecker::requestTurn() {
-    Q_ASSERT(m_busy && m_turnCount < maxTurns);
-    ++m_turnCount;
+bool CardChecker::validateContext() {
     const bool local = m_provider->provider() == QStringLiteral("local");
     const qsizetype bytes = QJsonDocument(m_messages).toJson(QJsonDocument::Compact).size();
     const qsizetype limit = local ? (m_provider->resolvedProfile() == QStringLiteral("gemma") ? 11000 : 6000) : 64000;
     if (bytes > limit) {
         fail(QStringLiteral("CARD_CHECK_CONTEXT"), QStringLiteral("The card and search evidence are too large for the selected model."),
-            QStringLiteral("Shorten the card, disable web search, or choose a model with a larger context."), QStringLiteral("The request contains %1 bytes; the limit is %2 bytes.").arg(bytes).arg(limit)); return;
+            QStringLiteral("Shorten the card, disable web search, or choose a model with a larger context."), QStringLiteral("The request contains %1 bytes; the limit is %2 bytes.").arg(bytes).arg(limit));
+        return false;
     }
+    return true;
+}
+void CardChecker::requestTurn() {
+    Q_ASSERT(m_busy && m_turnCount < maxTurns);
+    if (!validateContext()) return;
+    ++m_turnCount;
+    const bool local = m_provider->provider() == QStringLiteral("local");
     QJsonObject payload{{QStringLiteral("model"), m_provider->model()}, {QStringLiteral("temperature"), 0.0},
         {QStringLiteral("max_tokens"), local ? (m_provider->resolvedProfile() == QStringLiteral("gemma") ? 1000 : 800) : 1600},
         {QStringLiteral("messages"), m_messages}};

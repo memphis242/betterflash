@@ -158,7 +158,8 @@ void DeckChecker::advance() {
     m_waiting = true;
     m_starting = true;
     m_checker->check(m_mode, card.value(QStringLiteral("front")).toString(),
-                     card.value(QStringLiteral("back")).toString(), card.value(QStringLiteral("kind")).toString());
+                     card.value(QStringLiteral("back")).toString(), card.value(QStringLiteral("kind")).toString(),
+                     true, card.value(QStringLiteral("id")).toString(), card);
     m_starting = false;
     checkerChanged();
 }

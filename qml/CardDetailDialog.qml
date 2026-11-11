@@ -225,6 +225,14 @@ Dialog {
                     enabled: !(detail.card.loadError && detail.card.loadError.code)
                     onClicked: detail.ui.openCardNarration(detail.cardId)
                 }
+                AppButton {
+                    text: "Dismiss check follow-up"
+                    glyph: "check"
+                    visible: detail.ui.hasCheckFollowUp(detail.card)
+                    enabled: !app.busy && !(detail.card.loadError && detail.card.loadError.code)
+                    hint: "Remove correctness and completeness follow-up marks. Keeps other tags and review schedules."
+                    onClicked: detail.ui.dismissCheckFollowUp(detail.cardId)
+                }
                 NarrationWarning {
                     shown: detail.narrationWarnings.hasStale
                     reason: "A narration may no longer match the card text. Open Record narration and confirm each affected side."

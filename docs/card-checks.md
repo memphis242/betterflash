@@ -56,9 +56,23 @@ has changed, none are marked. Schedules and existing tags remain intact.
 
 The cards pane shows a **Check follow-up** badge. **Show marked cards** opens
 that pane with the appropriate tag filter for the deck and subdecks. The
-standard tag filter also finds these cards later. Remove a follow-up tag in
-the card editor after resolving it. Tags persist and sync; model reports are
-only retained for the open results dialog. Closing it cancels pending checks.
+standard tag filter also finds these cards later. **Dismiss check follow-up**
+is available from a marked card's context menu and at the top right of its
+card detail or preview. It removes both check tags, preserving other tags and
+review schedules. Dismissal is undoable and syncs with the collection.
+
+Saving an existing card clears both follow-up tags as part of the same save.
+Opening an editor or canceling edits does not dismiss them. Starting a new
+correctness or completeness check for a saved card clears its previous marks
+before the model request begins. This also applies to each card reached by a
+deck re-run, including checks started from an unsaved edit of an existing
+card. New unsaved cards and Atomicize candidates have no saved marks to clear.
+Input and configuration errors detected before starting leave marks intact.
+Once the reset has been queued, canceling or a later model error does not
+restore the old marks. Cards not yet reached by a canceled deck run keep theirs.
+
+Tags persist and sync; model reports are only retained for the open results
+dialog. Closing it cancels pending checks.
 
 ## Optional web search
 

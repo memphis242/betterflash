@@ -684,7 +684,7 @@ ApplicationWindow {
         const fields = Object.freeze({
             deckId: submission.deckId, kind: submission.kind,
             front: submission.front, back: submission.back,
-            tags: submission.tags, points: submission.points
+            tags: target ? app.withoutCheckFollowUpTags(submission.tags) : submission.tags, points: submission.points
         })
         localCardError = ""
         editorSaveCardId = target
@@ -2294,7 +2294,7 @@ ApplicationWindow {
                 enabled: !window.editorSavePending && !window.editorModelBusy && !media.busy && !app.busy
                 onCheckRequested: mode => {
                     const draft = window.currentCardDraft()
-                    window.openCardCheck(mode, draft.front, draft.back, draft.kind)
+                    window.openCardCheck(mode, draft.front, draft.back, draft.kind, false, window.editingCardId)
                 }
             }
             RowLayout {
@@ -2955,9 +2955,18 @@ ApplicationWindow {
         library.clearFilters()
         library.filterTags = ["check-" + mode]
     }
-    function openCardCheck(mode, front, back, kind, saved = false) {
+    function hasCheckFollowUp(card) {
+        return String(card.tags || "").split(",").some(tag => {
+            const value = tag.trim()
+            return value === "check-correctness" || value === "check-completeness"
+        })
+    }
+    function dismissCheckFollowUp(cardId) {
+        if (!app.busy) app.dismissCheckFollowUp(cardId)
+    }
+    function openCardCheck(mode, front, back, kind, saved = false, cardId = "") {
         if (deckChecker.busy || deckCheckDialog.visible) return
-        cardCheckDialog.openFor(mode, front, back, kind, saved)
+        cardCheckDialog.openFor(mode, front, back, kind, saved, cardId)
     }
     Sheet {
         id: resetDialog

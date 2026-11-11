@@ -124,7 +124,7 @@ Dialog {
             if (requestId !== dialog.markRequest) return
             dialog.marking = false
             dialog.markMessage = success
-                ? "Follow-up tags saved. Use the cards pane's tag filter to find check-" + dialog.checkMode + ". Remove the tag in the card editor when resolved."
+                ? "Follow-up tags saved. Use the cards pane's tag filter to find check-" + dialog.checkMode + ". Dismiss follow-up from Card actions or card detail when resolved."
                 : (app.lastError.message || "Follow-up tags were not saved. Check the collection error and try again.")
             if (success) { dialog.selectedIds = []; dialog.hasMarked = true }
         }

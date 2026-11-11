@@ -4,6 +4,7 @@
 #include "syncprotocol.h"
 #include "studyguidance.h"
 #include "cardreadability.h"
+#include "checkfollowuptags.h"
 
 #include <QCryptographicHash>
 #include <QDate>
@@ -1197,7 +1198,8 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
                 if (model::cardFromMap(model::toMap(candidate))) fingerprints.insert(it.key(),draft.narrationFingerprints.value(it.key()));
             }
     }
-    const struct model::Card record{recordId,deckId,kind,front,back,tags,points,narrations,fingerprints};
+    const QString savedTags=id.isEmpty()?tags:betterflash::checkfollowup::withoutTags(tags);
+    const struct model::Card record{recordId,deckId,kind,front,back,savedTags,points,narrations,fingerprints};
     const auto valid=model::cardFromMap(model::toMap(record));
     if (!valid) {failRequest(kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD","Could not save the card. Correct the card fields.",valid.error());return;}
     if (!validateMedia(record)) {failRequest("CARD_MEDIA","Could not save the card images. Restore missing images, insert them again, or split cards containing more than 64 MiB of images.",m_sqlDetail);return;}
@@ -1385,6 +1387,98 @@ void DatabaseWorker::deleteCard(const QString &id)
     if (recovering) clearHistoryForRecovery(QStringLiteral("The unreadable card was deleted by request. Its original content and learning records remain in the recovery copy."),m_lastRecoveryBackup);
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
+}
+void DatabaseWorker::dismissCheckFollowUp(const QString &cardId, const QString &requestId,
+                                          const QVariantMap &expectedSavedCard)
+{
+    if (!ready()) { emit checkFollowUpDismissed(cardId,requestId,false); return; }
+    const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code,message,detail);
+        emit checkFollowUpDismissed(cardId,requestId,false);
+    };
+    if (!model::validUuid(cardId)) {
+        reject(QStringLiteral("CHECK_FOLLOW_UP_ID"),
+            QStringLiteral("Could not dismiss the follow-up because the card identifier is invalid. Refresh the collection and try again."),
+            QStringLiteral("Card identifier: %1").arg(cardId.left(128)));
+        return;
+    }
+    if (!expectedSavedCard.isEmpty()) {
+        for (const QString &field : {QStringLiteral("id"),QStringLiteral("front"),QStringLiteral("back"),
+                                     QStringLiteral("kind"),QStringLiteral("tags")}) {
+            if (expectedSavedCard.value(field).metaType().id()!=QMetaType::QString) {
+                reject(QStringLiteral("CHECK_FOLLOW_UP_SNAPSHOT"),
+                    QStringLiteral("Could not reset the follow-up because the saved card snapshot is incomplete. Refresh the collection and try again."),
+                    QStringLiteral("Card %1 snapshot is missing text field %2.").arg(cardId,field));
+                return;
+            }
+        }
+        if (expectedSavedCard.value(QStringLiteral("id")).toString()!=cardId) {
+            reject(QStringLiteral("CHECK_FOLLOW_UP_SNAPSHOT"),
+                QStringLiteral("Could not reset the follow-up because the saved card snapshot does not match the selected card. Refresh the collection and try again."),
+                QStringLiteral("Selected card %1 does not match snapshot card %2.")
+                    .arg(cardId,expectedSavedCard.value(QStringLiteral("id")).toString().left(128)));
+            return;
+        }
+    }
+    const struct HistoryScope history(this,QStringLiteral("Dismiss check follow-up"));
+    if (!history) { emit checkFollowUpDismissed(cardId,requestId,false); return; }
+    QString failureCode;
+    QString failureMessage;
+    QString failureDetail;
+    bool changed=false;
+    const bool committed=mutate([&] {
+        const auto current=card(cardId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        const bool deleted=current && isDeleted(QStringLiteral("card"),cardId);
+        if (!m_sqlDetail.isEmpty()) return false;
+        if (!current || deleted) {
+            failureCode=QStringLiteral("CHECK_FOLLOW_UP_MISSING");
+            failureMessage=QStringLiteral("Could not dismiss the follow-up because the card no longer exists. Refresh the collection.");
+            failureDetail=QStringLiteral("Card %1 is unavailable.").arg(cardId);
+            return false;
+        }
+        if (m_cardLoadErrors.contains(cardId)) {
+            failureCode=QStringLiteral("CHECK_FOLLOW_UP_UNREADABLE");
+            failureMessage=QStringLiteral("Could not dismiss the follow-up because this card needs repair. Repair the card and try again.");
+            failureDetail=m_cardLoadErrors.value(cardId).value(QStringLiteral("detail")).toString();
+            return false;
+        }
+        if (!expectedSavedCard.isEmpty()
+            && (current->front!=expectedSavedCard.value(QStringLiteral("front")).toString()
+                || current->back!=expectedSavedCard.value(QStringLiteral("back")).toString()
+                || current->kind!=expectedSavedCard.value(QStringLiteral("kind")).toString()
+                || current->tags!=expectedSavedCard.value(QStringLiteral("tags")).toString())) {
+            failureCode=QStringLiteral("CHECK_FOLLOW_UP_CHANGED");
+            failureMessage=QStringLiteral("Could not reset the follow-up because the card or its tags changed. Refresh the card and run the check again.");
+            failureDetail=QStringLiteral("Card %1 no longer matches the saved card snapshot.").arg(cardId);
+            return false;
+        }
+        const QString retained=betterflash::checkfollowup::withoutTags(current->tags);
+        if (retained==current->tags) return true;
+        struct model::Card updated=*current;
+        updated.tags=retained;
+        if (!execute(QStringLiteral("UPDATE notes SET tags=? WHERE id=?"),{updated.tags,cardId})) return false;
+        const QVariantMap payload=cardPayload(updated);
+        if (!m_sqlDetail.isEmpty() || !enqueue(QStringLiteral("card.upsert"),payload)) return false;
+        changed=true;
+        return true;
+    });
+    if (!committed) {
+        if (failureCode.isEmpty())
+            reject(QStringLiteral("CHECK_FOLLOW_UP_SAVE"),
+                QStringLiteral("Could not dismiss the follow-up. No changes were saved. Check storage and try again."),m_sqlDetail);
+        else
+            reject(failureCode,failureMessage,failureDetail);
+        return;
+    }
+    if (!changed) {
+        done(QStringLiteral("Card has no check follow-up"));
+        emit checkFollowUpDismissed(cardId,requestId,true);
+        return;
+    }
+    m_queueDirty=true;
+    if (publishSnapshot() && publishQueue(false)) done(QStringLiteral("Check follow-up dismissed"));
+    emit checkFollowUpDismissed(cardId,requestId,true);
 }
 void DatabaseWorker::markCardsForCheckReview(const QVariantList &expectedCards, const QString &mode, const QString &requestId)
 {

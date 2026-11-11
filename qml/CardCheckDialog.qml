@@ -13,8 +13,10 @@ Dialog {
     property string modelLabel: ""
     property bool searchAllowed: false
     property bool savedCard: false
+    property string checkedCardId: ""
     readonly property var report: cardChecker.result
-    readonly property var failure: cardChecker.errorInfo
+    property var contextFailure: ({})
+    readonly property var failure: contextFailure.message ? contextFailure : cardChecker.errorInfo
     readonly property bool hasResult: !!report.verdict
     readonly property color resultColor: report.verdict === "no_issues" ? Theme.success : Theme.warning
     title: checkMode === "correctness" ? "Correctness check" : "Completeness check"
@@ -33,21 +35,29 @@ Dialog {
         border.color: Theme.rule
     }
     Overlay.modal: Rectangle { color: Theme.scrim }
-    function openFor(mode, front, back, kind, saved = false) {
+    function openFor(mode, front, back, kind, saved = false, cardId = "") {
         cardChecker.clear()
         checkMode = mode
         checkedFront = front
         checkedBack = back
         checkedKind = kind
         savedCard = saved
+        checkedCardId = cardId
         open()
         runCheck()
     }
     function runCheck(allowSearch = true) {
+        contextFailure = ({})
+        const saved = checkedCardId ? ui.cardById(checkedCardId) : ({})
+        if (savedCard && checkedCardId && (!saved.id || saved.front !== checkedFront || saved.back !== checkedBack || saved.kind !== checkedKind)) {
+            cardChecker.clear()
+            contextFailure = ({code: "CARD_CHECK_STALE", message: "This saved card changed or was deleted after the check was opened.", action: "Return to the card and start a new check of its current content. Previous follow-up marks were kept."})
+            return
+        }
         modelLabel = ai.provider === "local" ? ai.localModelLabel : ai.model
         searchAllowed = allowSearch && webSearch.enabled
         resultScroll.contentItem.contentY = 0
-        cardChecker.check(checkMode, checkedFront, checkedBack, checkedKind, allowSearch)
+        cardChecker.check(checkMode, checkedFront, checkedBack, checkedKind, allowSearch, checkedCardId, saved)
     }
     onClosed: cardChecker.clear()
     header: Item {

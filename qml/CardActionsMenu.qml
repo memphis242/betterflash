@@ -63,7 +63,7 @@ AppMenu {
         enabled: menu.cardReadable && !app.busy && !cardChecker.busy
         ToolTip.visible: hovered
         ToolTip.text: "Check this saved card's facts and logic with the configured model."
-        onTriggered: menu.ui.openCardCheck("correctness", menu.card.front, menu.card.back, menu.card.kind, true)
+        onTriggered: menu.ui.openCardCheck("correctness", menu.card.front, menu.card.back, menu.card.kind, true, menu.cardId)
     }
     AppMenuItem { glyph: "check"
         objectName: "menuCheckCompleteness"
@@ -71,7 +71,16 @@ AppMenu {
         enabled: menu.cardReadable && !app.busy && !cardChecker.busy
         ToolTip.visible: hovered
         ToolTip.text: "Look for missing parts or qualifications within this saved card's scope."
-        onTriggered: menu.ui.openCardCheck("completeness", menu.card.front, menu.card.back, menu.card.kind, true)
+        onTriggered: menu.ui.openCardCheck("completeness", menu.card.front, menu.card.back, menu.card.kind, true, menu.cardId)
+    }
+    AppMenuItem { glyph: "check"
+        text: "Dismiss check follow-up"
+        visible: menu.cardAvailable && menu.ui.hasCheckFollowUp(menu.card)
+        height: visible ? implicitHeight : 0
+        enabled: menu.cardReadable && !app.busy
+        ToolTip.visible: hovered
+        ToolTip.text: "Remove correctness and completeness follow-up marks. Keeps other tags and review schedules."
+        onTriggered: menu.ui.dismissCheckFollowUp(menu.cardId)
     }
     AppMenuItem { glyph: "atom"
         text: "Atomicize card"

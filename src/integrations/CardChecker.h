@@ -24,12 +24,15 @@ public:
     QString mode() const { return m_mode; }
     QVariantMap errorInfo() const { return m_errorInfo; }
     QVariantMap result() const { return m_result; }
-    Q_INVOKABLE void check(const QString &mode, const QString &front, const QString &back, const QString &kind, bool allowWebSearch = true);
+    Q_INVOKABLE void check(const QString &mode, const QString &front, const QString &back, const QString &kind,
+                           bool allowWebSearch = true, const QString &cardId = {},
+                           const QVariantMap &expectedSavedCard = {});
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clear();
 signals:
     void changed();
 private:
+    bool validateContext();
     void requestTurn();
     void receiveTurn(const QJsonObject &message);
     void search(const QString &query, const QJsonObject &assistant, const QString &toolId);
@@ -45,6 +48,7 @@ private:
     bool m_evidenceTruncated = false;
     int m_searchCount = 0;
     int m_turnCount = 0;
+    QString m_pendingReset{};
     QString m_mode{};
     QString m_status{};
     QVariantMap m_errorInfo{};

@@ -1435,7 +1435,7 @@ Item {
                                         border.color: Theme.warning
                                         Label { id: followUpLabel; anchors.centerIn: parent; text: "Check follow-up"; color: Theme.warning; font.pixelSize: 11 }
                                         ToolTip.visible: followUpHover.hovered
-                                        ToolTip.text: "Marked for " + followUpTags.map(tag => tag.substring(6)).join(" and ") + " follow-up. Filter by these tags; remove them in the card editor when resolved."
+                                        ToolTip.text: "Marked for " + followUpTags.map(tag => tag.substring(6)).join(" and ") + " follow-up. Filter by these tags. Dismiss from Card actions or card detail; saving edits or starting another check clears the marks."
                                         HoverHandler { id: followUpHover }
                                     }
                                     WeaknessBadge { assessment: library.cardAssessment(cardRow.modelData); compact: true; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
