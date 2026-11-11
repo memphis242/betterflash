@@ -5,6 +5,8 @@ inner padding and no rules or gaps between source lines. Consecutive fences rema
 separate, even when they name the same language. Backtick and tilde fences are
 supported, including empty and unclosed fences. Inline code has a contrasting
 background and heavier type. Code is excluded from the formula pass.
+Fenced blocks use the same compact separation from surrounding paragraphs, while
+preserving line spacing and blank lines within the code itself.
 
 A language identifier after the opening fence selects a KDE Syntax Highlighting
 language definition. Common aliases include `cpp`, `c++`, `cc`, `py`, `js`, `ts`,

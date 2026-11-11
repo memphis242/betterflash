@@ -615,9 +615,7 @@ void MarkdownView::rebuild() {
         QTextFrameFormat frameFormat;
         frameFormat.setProperty(codeFrameProperty, true);
         frameFormat.setWidth(QTextLength(QTextLength::PercentageLength, 100));
-        frameFormat.setPadding(14);
-        frameFormat.setTopMargin(8);
-        frameFormat.setBottomMargin(12);
+        frameFormat.setPadding(0);
         frameFormat.setBorder(0);
         frameFormat.setBackground(codeSurface);
         QTextFrame *const frame = marker.insertFrame(frameFormat);
@@ -660,6 +658,11 @@ void MarkdownView::rebuild() {
         }
     }
     qreal listIndentWidth = 40.0;
+    const auto isCodeFrameBlock = [codeFrameProperty](const QTextBlock &candidate) {
+        if (!candidate.isValid()) return false;
+        const QTextFrame *const frame = QTextCursor(candidate).currentFrame();
+        return frame && frame->frameFormat().boolProperty(codeFrameProperty);
+    };
     for (QTextBlock block = m_document.begin(); block.isValid(); block = block.next()) {
         QTextCursor cursor(block);
         QTextBlockFormat format = block.blockFormat();
@@ -680,9 +683,24 @@ void MarkdownView::rebuild() {
             // List markers are painted before their text, including a space between them.
             listIndentWidth = std::max(listIndentWidth, markerWidth + metrics.horizontalAdvance(u' ') + 1);
         }
+        if (cursor.currentFrame() == m_document.rootFrame() && block.text().isEmpty()
+            && (isCodeFrameBlock(block.previous()) || isCodeFrameBlock(block.next()))) {
+            format.setTopMargin(0);
+            format.setBottomMargin(0);
+            format.setLineHeight(100, QTextBlockFormat::ProportionalHeight);
+            cursor.setBlockFormat(format);
+            QFont boundaryFont = font;
+            boundaryFont.setPixelSize(1);
+            QTextCharFormat boundaryFormat;
+            boundaryFormat.setFont(boundaryFont);
+            cursor.setBlockCharFormat(boundaryFormat);
+            continue;
+        }
         if (cursor.currentFrame()->frameFormat().boolProperty(codeFrameProperty)) {
             format.setTopMargin(0);
             format.setBottomMargin(0);
+            format.setLeftMargin(14);
+            format.setRightMargin(14);
             format.setLineHeight(118, QTextBlockFormat::ProportionalHeight);
             format.clearBackground();
             cursor.setBlockFormat(format);
