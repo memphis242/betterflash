@@ -62,7 +62,10 @@ review items for every direction or cloze group of the new cards and deletes
 the original source note in one SQLite transaction with its outgoing sync
 events. Historical reviews of the original remain in history. The preview
 stays open until storage confirms the transaction. Canceling a provider
-request leaves the original unchanged and keeps the dialog open. A failed
+request uses the Cancel request button directly below Generate Proposal; it
+leaves the original unchanged and keeps the dialog open. Close and the header
+close control are faded and disabled while generation or saving is in progress.
+Saving replacements cannot be canceled. A failed
 request exposes Try again; a keep decision can be regenerated with Generate
 again. Closing the dialog discards unsaved proposals. Writable proposals
 require an explicit close or named action.

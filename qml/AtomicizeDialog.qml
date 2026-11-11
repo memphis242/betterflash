@@ -59,7 +59,8 @@ Dialog {
             GlyphButton {
                 glyph: "close"
                 hint: "Close Atomicize"
-                enabled: !dialog.applying
+                enabled: !atomic.busy
+                opacity: atomic.busy ? 0.45 : 1
                 onClicked: dialog.close()
             }
         }
@@ -237,6 +238,14 @@ Dialog {
             font.pixelSize: 17
             enabled: !atomic.busy && !app.busy && dialog.prepared && !!atomic.sourceCard.id
             onClicked: dialog.generate()
+        }
+        AppButton {
+            objectName: "atomicCancelRequest"
+            text: "Cancel request"
+            hint: "Stop generating and keep the original card unchanged"
+            visible: atomic.busy && !dialog.applying
+            Layout.fillWidth: true
+            onClicked: atomic.cancel()
         }
         Rectangle {
             id: resultPanel
@@ -594,14 +603,10 @@ Dialog {
         }
         AppButton {
             objectName: "atomicCancel"
-            text: atomic.busy && !dialog.applying ? "Cancel request" : dialog.splitReady ? "Cancel" : "Close"
-            enabled: !dialog.applying
-            onClicked: {
-                if (atomic.busy && !dialog.applying)
-                    atomic.cancel()
-                else
-                    dialog.close()
-            }
+            text: "Close"
+            enabled: !atomic.busy
+            opacity: atomic.busy ? 0.45 : 1
+            onClicked: dialog.close()
         }
         AppButton {
             objectName: "atomicApply"
