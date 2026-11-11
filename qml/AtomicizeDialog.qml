@@ -113,11 +113,16 @@ Dialog {
         loadDraft()
         Qt.callLater(function() { draftSource.forceActiveFocus() })
     }
-    function addDraft() {
+    function addDraft(copySource) {
         if (!editingSet || atomic.busy || app.busy || drafts.length >= atomic.maxCards)
             return
         updateDraft()
-        drafts = drafts.concat([{ front: "", back: "", pointCount: 1 }])
+        const card = copySource ? {
+            front: atomic.sourceCard.front || "",
+            back: atomic.sourceCard.back || "",
+            pointCount: atomic.sourceCard.pointCount || 1
+        } : { front: "", back: "", pointCount: 1 }
+        drafts = drafts.concat([card])
         preview = false
         atomicTabs.currentIndex = drafts.length
         loadDraft()
@@ -429,7 +434,7 @@ Dialog {
                 text: "Add card"
                 hint: "Add a manually written card to this replacement set (up to " + atomic.maxCards + " cards)"
                 enabled: !atomic.busy && !app.busy && dialog.drafts.length < atomic.maxCards
-                onClicked: dialog.addDraft()
+                onClicked: dialog.addDraft(false)
             }
             AppButton {
                 objectName: "atomicRemoveCard"
@@ -477,6 +482,24 @@ Dialog {
                     padding: 5
                     width: Math.max(88, atomicTabs.width / (dialog.drafts.length + 1))
                 }
+            }
+        }
+        RowLayout {
+            visible: dialog.editingSet && dialog.draftIndex < 0
+            Layout.fillWidth: true
+            Label {
+                text: "The source will be replaced. Select text to copy, or add an editable copy to the replacement set."
+                textFormat: Text.PlainText
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            AppButton {
+                objectName: "atomicCopySource"
+                text: "Add editable copy"
+                hint: "Add the original source as a new replacement draft that you can edit"
+                enabled: !atomic.busy && !app.busy && dialog.drafts.length < atomic.maxCards
+                onClicked: dialog.addDraft(true)
             }
         }
         RowLayout {
@@ -540,6 +563,7 @@ Dialog {
                         font.pixelSize: 11
                     }
                     MarkdownPane {
+                        selectable: true
                         markdown: dialog.draftIndex < 0 ? (atomic.sourceCard.front || "") : (dialog.currentDraft.front || "")
                         clozePreview: app.hasClozeMarkers(markdown)
                         mediaRoot: media.rootPath
@@ -560,6 +584,7 @@ Dialog {
                         font.pixelSize: 11
                     }
                     MarkdownPane {
+                        selectable: true
                         markdown: dialog.draftIndex < 0 ? (atomic.sourceCard.back || "") : (dialog.currentDraft.back || "")
                         clozePreview: app.hasClozeMarkers(markdown)
                         mediaRoot: media.rootPath

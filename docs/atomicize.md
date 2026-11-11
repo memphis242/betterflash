@@ -34,9 +34,13 @@ real examples and user review will guide further prompt refinement.
 
 Create split manually opens two blank replacement drafts using the saved source
 as a reference, without requiring a model, API key, or generation request. The
-source remains accessible in its own tab. Add card also appends a blank draft to
-an existing model proposal, so the user can include concepts the model omitted.
-Remove card removes only an unsaved draft; it never deletes a saved card.
+source remains accessible and selectable in its own tab. Add card also appends a
+blank draft to an existing model proposal, so the user can include concepts the
+model omitted. **Add editable copy** on the Source tab adds a replacement draft
+with the original front, back, and partial answer points, ready to trim or edit.
+The source snapshot remains unchanged and the named Replace action removes the
+original along with creating the reviewed replacements. Remove card removes
+only an unsaved draft; it never deletes a saved card.
 
 Model output stays limited to two through five candidates. A user-edited or
 entirely manual replacement set may contain two through twenty cards. The card
