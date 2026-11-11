@@ -36,6 +36,16 @@ AppMenu {
         enabled: menu.deckAvailable && !app.busy && !cardGenerator.busy
         onTriggered: { menu.beforeAction(); menu.ui.openGenerateNewCard(menu.deckId) }
     }
+    AppMenuItem { glyph: "check"
+        text: "Check correctness"
+        enabled: menu.deckAvailable && !app.busy && !cardChecker.busy && !deckChecker.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckCheck(menu.deckId, "correctness") }
+    }
+    AppMenuItem { glyph: "check"
+        text: "Check completeness"
+        enabled: menu.deckAvailable && !app.busy && !cardChecker.busy && !deckChecker.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openDeckCheck(menu.deckId, "completeness") }
+    }
     AppMenuItem { glyph: "folder"
         text: "Add subdeck"
         enabled: menu.deckAvailable && !app.busy

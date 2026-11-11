@@ -106,6 +106,7 @@ public:
                                       const QString &mediaName, const QString &requestId = {}, const QString &fingerprint = {});
     Q_INVOKABLE bool confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
                                          const QString &mediaName, const QString &expectedFingerprint, const QString &requestId = {});
+    Q_INVOKABLE bool markCardsForCheckReview(const QVariantList &expectedCards, const QString &mode, const QString &requestId = {});
     Q_INVOKABLE void deleteCard(const QString &id);
     Q_INVOKABLE bool moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     Q_INVOKABLE void resetDeck(const QString &id);
@@ -163,6 +164,7 @@ signals:
     void syncApplied(bool success, bool hasMore);
     void cardTimelineReady(const QString &cardId, const QVariantMap &result);
     void studyAnalyticsReady(const QStringList &deckIds, const QVariantMap &result);
+    void checkReviewMarked(const QString &requestId, bool success);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
     void deckCheckpointsReady(const QString &deckId, const QVariantMap &result, const QString &requestId);

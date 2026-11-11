@@ -37,6 +37,7 @@ public:
                           const QString &mediaName, const QString &requestId, const QString &fingerprint = {});
     void confirmCardNarration(const QString &cardId, const QString &variantKey, const QString &side,
                               const QString &mediaName, const QString &expectedFingerprint, const QString &requestId);
+    void markCardsForCheckReview(const QVariantList &expectedCards, const QString &mode, const QString &requestId);
     void deleteCard(const QString &id);
     void moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     void resetReviewState(const QString &id, bool deckScope);
@@ -71,6 +72,7 @@ signals:
     void historyApplied(const QString &id, bool redo, bool success);
     void snapshotReady(const QVariantList &decks, const QVariantList &cards, const QVariantList &history, const QVariantList &reviewSessions);
     void operationFinished(bool ok, const QString &message, const QVariantMap &error);
+    void checkReviewMarked(const QString &requestId, bool success);
     void moveCardsFinished(bool success, const QString &destinationDeckId, const QString &requestId);
     void moveDeckFinished(bool success, const QString &deckId, const QString &parentId);
     void deckCheckpointsReady(const QString &deckId, const QVariantMap &result, const QString &requestId);

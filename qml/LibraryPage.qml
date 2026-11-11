@@ -1425,6 +1425,19 @@ Item {
                                         ToolTip.text: (cardRow.modelData.loadError || {}).message || ""
                                         HoverHandler { id: issueHover }
                                     }
+                                    Rectangle {
+                                        readonly property var followUpTags: library.cardTags(cardRow.modelData).filter(tag => tag === "check-correctness" || tag === "check-completeness")
+                                        visible: followUpTags.length > 0
+                                        implicitWidth: followUpLabel.implicitWidth + 12
+                                        implicitHeight: followUpLabel.implicitHeight + 8
+                                        radius: 4
+                                        color: Theme.transparent
+                                        border.color: Theme.warning
+                                        Label { id: followUpLabel; anchors.centerIn: parent; text: "Check follow-up"; color: Theme.warning; font.pixelSize: 11 }
+                                        ToolTip.visible: followUpHover.hovered
+                                        ToolTip.text: "Marked for " + followUpTags.map(tag => tag.substring(6)).join(" and ") + " follow-up. Filter by these tags; remove them in the card editor when resolved."
+                                        HoverHandler { id: followUpHover }
+                                    }
                                     WeaknessBadge { assessment: library.cardAssessment(cardRow.modelData); compact: true; visible: !!assessment.assessed && (assessment.tier === "watch" || assessment.tier === "fragile" || assessment.tier === "needs-study") }
                                 }
                                 RowLayout {

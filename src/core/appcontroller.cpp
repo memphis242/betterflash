@@ -73,6 +73,7 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::syncApplied,this,&AppController::syncApplied);
     connect(m_worker,&DatabaseWorker::cardTimelineReady,this,&AppController::cardTimelineReady);
     connect(m_worker,&DatabaseWorker::studyAnalyticsReady,this,&AppController::studyAnalyticsReady);
+    connect(m_worker,&DatabaseWorker::checkReviewMarked,this,&AppController::checkReviewMarked);
     connect(m_worker,&DatabaseWorker::moveCardsFinished,this,&AppController::moveCardsFinished);
     connect(m_worker,&DatabaseWorker::moveDeckFinished,this,&AppController::moveDeckFinished);
     connect(m_worker,&DatabaseWorker::deckCheckpointsReady,this,&AppController::deckCheckpointsReady);
@@ -280,6 +281,23 @@ bool AppController::confirmCardNarration(const QString &cardId,const QString &va
         worker->confirmCardNarration(cardId,variantKey,side,mediaName,expectedFingerprint,requestId);
     });
     if (!queued) emit cardNarrationSaved(cardId,variantKey,side,requestId,false);
+    return queued;
+}
+bool AppController::markCardsForCheckReview(const QVariantList &expectedCards, const QString &mode, const QString &requestId)
+{
+    if (m_busy) {
+        setError({{"code","OPERATION_BUSY"},{"message","Finish the current operation before marking cards for review."},{"detail",QString()}});
+        emit checkReviewMarked(requestId,false);
+        return false;
+    }
+    if (expectedCards.isEmpty() || expectedCards.size() > betterflash::model::maxCollectionRecords
+        || (mode != QStringLiteral("correctness") && mode != QStringLiteral("completeness"))) {
+        setError({{"code","CHECK_REVIEW_REQUEST"},{"message","Choose at least one card from a correctness or completeness check."},{"detail",QString()}});
+        emit checkReviewMarked(requestId,false);
+        return false;
+    }
+    const bool queued=invoke([=](DatabaseWorker *worker) { worker->markCardsForCheckReview(expectedCards,mode,requestId); });
+    if (!queued) emit checkReviewMarked(requestId,false);
     return queued;
 }
 void AppController::deleteCard(const QString &id)

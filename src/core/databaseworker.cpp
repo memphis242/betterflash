@@ -1386,6 +1386,106 @@ void DatabaseWorker::deleteCard(const QString &id)
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
 }
+void DatabaseWorker::markCardsForCheckReview(const QVariantList &expectedCards, const QString &mode, const QString &requestId)
+{
+    if (!ready()) { emit checkReviewMarked(requestId,false); return; }
+    const auto reject = [&](const QString &code, const QString &message, const QString &detail = QString()) {
+        fail(code,message,detail);
+        emit checkReviewMarked(requestId,false);
+    };
+    if (expectedCards.isEmpty() || expectedCards.size() > model::maxCollectionRecords
+        || (mode != QStringLiteral("correctness") && mode != QStringLiteral("completeness"))) {
+        reject("CHECK_REVIEW_REQUEST","Choose at least one card from a correctness or completeness check."); return;
+    }
+    QSet<QString> seen;
+    QList<QVariantMap> snapshots;
+    for (const QVariant &value : expectedCards) {
+        if (value.metaType().id()!=QMetaType::QVariantMap) {
+            reject("CHECK_REVIEW_REQUEST","A selected card has an invalid check result. Run the deck check again."); return;
+        }
+        const QVariantMap snapshot=value.toMap();
+        const QString id=snapshot.value("id").toString();
+        if (!model::validUuid(id) || seen.contains(id)) {
+            reject("CHECK_REVIEW_REQUEST","A selected card has an invalid or duplicate identifier. Run the deck check again.",id.left(128)); return;
+        }
+        for (const QString &field : {QStringLiteral("front"),QStringLiteral("back"),QStringLiteral("kind")}) {
+            if (snapshot.value(field).metaType().id()!=QMetaType::QString) {
+                reject("CHECK_REVIEW_REQUEST","A selected card's checked content is missing. Run the deck check again.",QStringLiteral("Card %1 is missing %2.").arg(id,field)); return;
+            }
+        }
+        seen.insert(id);
+        snapshots.append(snapshot);
+    }
+    const struct HistoryScope history(this,QStringLiteral("Mark checked cards for review"));
+    if (!history) { emit checkReviewMarked(requestId,false); return; }
+    const QString tag=mode==QStringLiteral("correctness")?QStringLiteral("check-correctness"):QStringLiteral("check-completeness");
+    QString failureCode;
+    QString failureMessage;
+    QString failureDetail;
+    qsizetype changed=0;
+    const bool committed=mutate([&] {
+        QList<struct model::Card> updates;
+        for (const QVariantMap &snapshot : snapshots) {
+            const QString id=snapshot.value("id").toString();
+            const auto current=card(id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            const bool deleted=current && isDeleted("card",id);
+            if (!m_sqlDetail.isEmpty()) return false;
+            if (!current || deleted) {
+                failureCode=QStringLiteral("CHECK_REVIEW_CARD_MISSING");
+                failureMessage=QStringLiteral("A selected card no longer exists. No cards were marked. Run the deck check again.");
+                failureDetail=QStringLiteral("Card %1 is no longer available.").arg(id);
+                return false;
+            }
+            if (m_cardLoadErrors.contains(id)) {
+                failureCode=QStringLiteral("CHECK_REVIEW_CARD_UNREADABLE");
+                failureMessage=QStringLiteral("A selected card needs repair. No cards were marked. Repair it and run the check again.");
+                failureDetail=QStringLiteral("Card %1: %2").arg(id,m_cardLoadErrors.value(id).value("detail").toString());
+                return false;
+            }
+            if (current->front!=snapshot.value("front").toString() || current->back!=snapshot.value("back").toString()
+                || current->kind!=snapshot.value("kind").toString()) {
+                failureCode=QStringLiteral("CHECK_REVIEW_CARD_CHANGED");
+                failureMessage=QStringLiteral("A selected card changed after the check. No cards were marked. Run the deck check again.");
+                failureDetail=QStringLiteral("Card %1 has different checked content.").arg(id);
+                return false;
+            }
+            bool alreadyMarked=false;
+            for (const QString &existing : current->tags.split(QLatin1Char(',')))
+                if (existing.trimmed()==tag) { alreadyMarked=true; break; }
+            if (alreadyMarked) continue;
+            struct model::Card updated=*current;
+            updated.tags += updated.tags.trimmed().isEmpty()?tag:QStringLiteral(", ")+tag;
+            if (updated.tags.size()>4096) {
+                failureCode=QStringLiteral("CHECK_REVIEW_TAG_LIMIT");
+                failureMessage=QStringLiteral("A selected card has too many tags. No cards were marked. Remove a tag and try again.");
+                failureDetail=QStringLiteral("Card %1 would exceed the 4096 character tag limit.").arg(id);
+                return false;
+            }
+            updates.append(updated);
+        }
+        for (const struct model::Card &record : updates) {
+            if (!execute("UPDATE notes SET tags=? WHERE id=?",{record.tags,record.id})) return false;
+            const QVariantMap payload=cardPayload(record);
+            if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert",payload)) return false;
+        }
+        changed=updates.size();
+        return true;
+    });
+    if (!committed) {
+        if (failureCode.isEmpty()) reject("CHECK_REVIEW_SAVE","Could not mark the selected cards. No changes were saved. Check storage and try again.",m_sqlDetail);
+        else reject(failureCode,failureMessage,failureDetail);
+        return;
+    }
+    if (!changed) {
+        done("Selected cards are already marked for review");
+        emit checkReviewMarked(requestId,true);
+        return;
+    }
+    m_queueDirty=true;
+    if (publishSnapshot() && publishQueue(false)) done(QStringLiteral("Marked %1 card(s) for review").arg(changed));
+    emit checkReviewMarked(requestId,true);
+}
 void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId)
 {
     const struct HistoryScope history(this, QStringLiteral("Move cards"));
