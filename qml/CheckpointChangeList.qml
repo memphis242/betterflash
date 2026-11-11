@@ -33,7 +33,7 @@ ScrollView {
             + "\nParent: " + (record.parentId || "Root deck")
         return "Front\n" + record.front + "\n\nBack\n" + record.back
             + "\n\nTags: " + (record.tags || "(none)") + "\nType: " + record.kind
-            + "\nPoints: " + record.pointCount + "\nDeck: " + record.deckId
+            + "\nPartial answer points: " + record.pointCount + "\nDeck: " + record.deckId
             + "\nNarration: " + Object.keys(record.narrations || {}).length + " recorded sides"
     }
     Column {
@@ -104,6 +104,14 @@ ScrollView {
                                 TextEdit {
                                     Layout.fillWidth: true
                                     text: view.details(side.modelData.record) || "Not present"
+                                    ToolTip.visible: !view.deckChanges && !!side.modelData.record && checkpointPointsHover.containsMouse
+                                    ToolTip.text: (side.modelData.record || {}).pointCount + " partial answer points: the number of points within this answer that can receive credit for partial grading."
+                                    MouseArea {
+                                        id: checkpointPointsHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
+                                    }
                                     textFormat: TextEdit.PlainText
                                     color: Theme.ink
                                     font.family: Theme.monoFont

@@ -2072,13 +2072,19 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     selectByMouse: true
                 }
+            }
+            RowLayout {
+                Layout.fillWidth: true
                 Label {
+                    id: partialPointsLabel
+                    readonly property string hint: cardPoints.value + " partial answer points: the number of points within this answer that can receive credit for partial grading."
                     textFormat: Text.PlainText
-                    text: "Points"
-                    color: Theme.inkMuted
-                    font.pixelSize: 12
+                    text: "Partial answer points"
+                    color: Theme.ink
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
                     ToolTip.visible: pointsTip.containsMouse
-                    ToolTip.text: "Number of answer points used to grade partial recall"
+                    ToolTip.text: hint
                     MouseArea {
                         id: pointsTip
                         anchors.fill: parent
@@ -2096,7 +2102,9 @@ ApplicationWindow {
                     editable: true
                     Layout.preferredWidth: 105
                     ToolTip.visible: hovered
-                    ToolTip.text: "Number of distinct points in this answer"
+                    Accessible.name: "Partial answer points"
+                    Accessible.description: partialPointsLabel.hint
+                    ToolTip.text: partialPointsLabel.hint
                 }
             }
             ScrollView {
@@ -2298,7 +2306,7 @@ ApplicationWindow {
             spacing: 12
             Label {
                 textFormat: Text.PlainText
-                text: (app.currentCard.pointCount || 1) > 1 ? "How many answer points did you recall?" : "How much of the answer did you recall?"
+                text: (app.currentCard.pointCount || 1) > 1 ? "How many partial answer points did you recall?" : "How much of the answer did you recall?"
                 color: Theme.ink
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -2308,6 +2316,9 @@ ApplicationWindow {
                 SpinBox {
                     id: recalled
                     objectName: "recalledPoints"
+                    Accessible.name: "Partial answer points recalled"
+                    ToolTip.visible: hovered
+                    ToolTip.text: (app.currentCard.pointCount || 1) + " partial answer points: the number of points within this answer that can receive credit for partial grading."
                     from: 0
                     to: Math.max(1, app.currentCard.pointCount || 1)
                     editable: true
@@ -2315,6 +2326,14 @@ ApplicationWindow {
                 Label {
                     textFormat: Text.PlainText
                     text: "of " + (app.currentCard.pointCount || 1)
+                    ToolTip.visible: recalledTotalHover.containsMouse
+                    ToolTip.text: recalled.ToolTip.text
+                    MouseArea {
+                        id: recalledTotalHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
                     color: Theme.inkMuted
                     font.family: Theme.monoFont
                 }

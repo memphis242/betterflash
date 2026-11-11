@@ -493,10 +493,12 @@ Dialog {
             }
             Label {
                 textFormat: Text.PlainText
-                text: "Answer points"
+                id: atomicPointsLabel
+                readonly property string hint: points.value + " partial answer points: the number of points within this answer that can receive credit for partial grading."
+                text: "Partial answer points"
                 color: Theme.inkMuted
                 ToolTip.visible: pointsHover.containsMouse
-                ToolTip.text: "Answer points used to grade partial recall"
+                ToolTip.text: hint
                 MouseArea {
                     id: pointsHover
                     anchors.fill: parent
@@ -507,6 +509,10 @@ Dialog {
             SpinBox {
                 id: points
                 objectName: "atomicPoints"
+                Accessible.name: "Partial answer points"
+                Accessible.description: atomicPointsLabel.hint
+                ToolTip.visible: hovered
+                ToolTip.text: atomicPointsLabel.hint
                 from: 1
                 to: 1000
                 editable: true

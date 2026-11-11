@@ -261,7 +261,7 @@ ColumnLayout {
             objectName: "partialRecallAmount"
             visible: app.answerRevealed && panel.cardGrade(app.currentCard) === 1
             text: panel.recallLabel(app.currentCard.sessionRecall, app.currentCard.pointCount)
-            hint: "Adjust the amount recalled"
+            hint: "Adjust the amount recalled. " + (app.currentCard.pointCount || 1) + " partial answer points: the number of points within this answer that can receive credit for partial grading."
             enabled: !app.paused && !app.busy
             Layout.alignment: Qt.AlignHCenter
             onClicked: panel.partialRequested()

@@ -68,7 +68,7 @@ challenge relative to its source; it does not change review scheduling.
 The dialog offers cancellation and retry when generation fails.
 
 The result opens as an editable draft with the source deck and tags preselected.
-Edit its content, kind, deck, tags or answer points. Add optional **Refinement
+Edit its content, kind, deck, tags or partial answer points. Add optional **Refinement
 instructions**, choose the desired difficulty, then press **Generate refinement**.
 Each request uses the latest edited draft, the original source card, the chosen
 difficulty and these instructions, rather than an accumulating conversation.
@@ -132,3 +132,8 @@ draft. Review the content and use **Accept generated card** to save explicitly.
 Automated and live-model behavioral verification remain paused until requested.
 
 Remaining follow-up: quantity controls.
+
+The new and edit card modals expose **Partial answer points** below the tags.
+Set this to the number of points within the answer that can receive credit
+when grading partial recall (1-1,000, default 1). Atomicize drafts use the same
+setting. Hover the label or count for its meaning and the current point total.
