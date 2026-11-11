@@ -4,6 +4,7 @@
 #include <QNetworkAccessManager>
 #include <QPointer>
 #include <QStringList>
+#include <QSet>
 
 class ApiKeyBinding;
 class QNetworkReply;
@@ -15,6 +16,8 @@ class RemoteModelCatalog : public QObject {
     Q_PROPERTY(QObject *apiKey READ apiKey WRITE setApiKey NOTIFY configurationChanged)
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY configurationChanged)
     Q_PROPERTY(QString category READ category WRITE setCategory NOTIFY configurationChanged)
+    Q_PROPERTY(QString remoteApi READ remoteApi WRITE setRemoteApi NOTIFY configurationChanged)
+    Q_PROPERTY(QString workspaceId READ workspaceId WRITE setWorkspaceId NOTIFY configurationChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY configurationChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QStringList models READ models NOTIFY changed)
@@ -29,6 +32,8 @@ public:
     QObject *apiKey() const;
     QString endpoint() const;
     QString category() const;
+    QString remoteApi() const;
+    QString workspaceId() const;
     bool active() const;
     bool busy() const;
     QStringList models() const;
@@ -39,6 +44,8 @@ public:
     void setApiKey(QObject *binding);
     void setEndpoint(const QString &endpoint);
     void setCategory(const QString &category);
+    void setRemoteApi(const QString &remoteApi);
+    void setWorkspaceId(const QString &workspaceId);
     void setActive(bool active);
 
     Q_INVOKABLE void fetch();
@@ -54,12 +61,18 @@ private:
     void fail(const QString &code, const QString &message);
     bool prepareRequest(QUrl *modelsUrl, QByteArray *authorization);
     void finishReply(QNetworkReply *reply, quint64 generation);
+    void fetchPage(const QString &afterId);
 
     QPointer<ApiKeyBinding> m_binding;
     QMetaObject::Connection m_bindingChangedConnection;
     QMetaObject::Connection m_bindingDestroyedConnection;
     QString m_endpoint;
     QString m_category;
+    QString m_remoteApi = QStringLiteral("openai");
+    QString m_workspaceId{};
+    QStringList m_pendingModels{};
+    QSet<QString> m_seenCursors{};
+    int m_pageCount = 0;
     bool m_active = false;
     bool m_busy = false;
     QStringList m_models;

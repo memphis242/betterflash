@@ -20,13 +20,145 @@
 #include <QSet>
 #include <QUrl>
 
+#include <algorithm>
+
+namespace {
+std::expected<QJsonObject, struct ProviderError> anthropicRequest(const QJsonObject &payload) {
+    const auto fail = [](const QString &detail) -> std::expected<QJsonObject, struct ProviderError> {
+        return std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_REQUEST"),
+            QStringLiteral("The request could not be converted for Claude. Try again or choose another model."), detail});
+    };
+    const QJsonValue inputMessages = payload.value(QStringLiteral("messages"));
+    if (!inputMessages.isArray()) return fail(QStringLiteral("The request has no messages array."));
+    QStringList system;
+    QJsonArray messages;
+    for (const QJsonValue &value : inputMessages.toArray()) {
+        if (!value.isObject()) return fail(QStringLiteral("A request message is not an object."));
+        const QJsonObject entry = value.toObject();
+        const QString role = entry.value(QStringLiteral("role")).toString();
+        const QJsonValue content = entry.value(QStringLiteral("content"));
+        if (role == QStringLiteral("system")) {
+            if (!content.isString()) return fail(QStringLiteral("A system message is not text."));
+            system.append(content.toString());
+        } else if (role == QStringLiteral("tool")) {
+            const QString callId = entry.value(QStringLiteral("tool_call_id")).toString();
+            if (callId.isEmpty() || !content.isString()) return fail(QStringLiteral("A retrieval result is missing its tool ID or text."));
+            const QJsonObject block{{QStringLiteral("type"), QStringLiteral("tool_result")},
+                {QStringLiteral("tool_use_id"), callId}, {QStringLiteral("content"), content}};
+            messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), QJsonArray{block}}});
+        } else if (role == QStringLiteral("user") || role == QStringLiteral("assistant")) {
+            const QJsonValue original = entry.value(QStringLiteral("_anthropic_content"));
+            if (role == QStringLiteral("assistant") && original.isArray()) {
+                messages.append(QJsonObject{{QStringLiteral("role"), role}, {QStringLiteral("content"), original}});
+            } else if (content.isString()) {
+                messages.append(QJsonObject{{QStringLiteral("role"), role}, {QStringLiteral("content"), content}});
+            } else return fail(QStringLiteral("A conversation message is not text."));
+        } else return fail(QStringLiteral("The conversation contains an unsupported role."));
+    }
+    if (messages.isEmpty()) return fail(QStringLiteral("The request contains no conversation messages."));
+    const QJsonObject format = payload.value(QStringLiteral("response_format")).toObject();
+    if (format.value(QStringLiteral("type")).toString() == QStringLiteral("json_object"))
+        system.append(QStringLiteral("Return only a valid JSON object, without Markdown fences or other text."));
+    QJsonObject result{{QStringLiteral("model"), payload.value(QStringLiteral("model"))},
+        {QStringLiteral("max_tokens"), std::max(8192, payload.value(QStringLiteral("max_tokens")).toInt())},
+        {QStringLiteral("messages"), messages}};
+    if (!system.isEmpty()) result.insert(QStringLiteral("system"), system.join(QLatin1Char('\n')));
+    const QJsonArray inputTools = payload.value(QStringLiteral("tools")).toArray();
+    if (!inputTools.isEmpty()) {
+        QJsonArray tools;
+        for (const QJsonValue &value : inputTools) {
+            const QJsonObject item = value.toObject();
+            const QJsonObject function = item.value(QStringLiteral("function")).toObject();
+            if (item.value(QStringLiteral("type")).toString() != QStringLiteral("function")
+                || function.value(QStringLiteral("name")).toString().isEmpty()
+                || !function.value(QStringLiteral("parameters")).isObject())
+                return fail(QStringLiteral("A retrieval tool definition is invalid."));
+            QJsonObject tool{{QStringLiteral("name"), function.value(QStringLiteral("name"))},
+                {QStringLiteral("input_schema"), function.value(QStringLiteral("parameters"))}};
+            if (function.value(QStringLiteral("description")).isString())
+                tool.insert(QStringLiteral("description"), function.value(QStringLiteral("description")));
+            tools.append(tool);
+        }
+        result.insert(QStringLiteral("tools"), tools);
+        const bool disabled = payload.value(QStringLiteral("tool_choice")).toString() == QStringLiteral("none");
+        QJsonObject choice{{QStringLiteral("type"), disabled ? QStringLiteral("none") : QStringLiteral("auto")}};
+        if (!disabled) choice.insert(QStringLiteral("disable_parallel_tool_use"), true);
+        result.insert(QStringLiteral("tool_choice"), choice);
+    }
+    return result;
+}
+
+std::expected<QJsonObject, struct ProviderError> anthropicResponse(const QJsonObject &response) {
+    const auto invalid = [](const QString &detail) -> std::expected<QJsonObject, struct ProviderError> {
+        return std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_RESPONSE"),
+            QStringLiteral("Claude returned an incomplete or unsupported response. Try again or choose another model."), detail});
+    };
+    const QString stop = response.value(QStringLiteral("stop_reason")).toString();
+    const QJsonObject stopDetails = response.value(QStringLiteral("stop_details")).toObject();
+    if (stop == QStringLiteral("refusal") || stopDetails.value(QStringLiteral("type")).toString() == QStringLiteral("refusal")) {
+        const QString explanation = stopDetails.value(QStringLiteral("explanation")).toString().simplified().left(1000);
+        return std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_REFUSAL"),
+            QStringLiteral("Claude declined this request. Revise the request or choose another model."), explanation});
+    }
+    if (stop != QStringLiteral("end_turn") && stop != QStringLiteral("tool_use"))
+        return invalid(QStringLiteral("Claude stopped with reason: %1. %2").arg(stop.isEmpty() ? QStringLiteral("missing") : stop.left(100),
+            stop == QStringLiteral("max_tokens") ? QStringLiteral("The response reached its output limit; try a shorter request.")
+                                                 : QStringLiteral("Retry the request or use a supported model.")));
+    if (response.value(QStringLiteral("role")).toString() != QStringLiteral("assistant")
+        || !response.value(QStringLiteral("content")).isArray())
+        return invalid(QStringLiteral("The provider returned no assistant content array."));
+    const QJsonArray blocks = response.value(QStringLiteral("content")).toArray();
+    QStringList text;
+    QJsonArray calls;
+    for (const QJsonValue &value : blocks) {
+        if (!value.isObject()) return invalid(QStringLiteral("A Claude content block is invalid."));
+        const QJsonObject block = value.toObject();
+        const QString type = block.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("text")) {
+            if (!block.value(QStringLiteral("text")).isString()) return invalid(QStringLiteral("A text block has no text."));
+            text.append(block.value(QStringLiteral("text")).toString());
+        } else if (type == QStringLiteral("tool_use")) {
+            const QString id = block.value(QStringLiteral("id")).toString();
+            const QString name = block.value(QStringLiteral("name")).toString();
+            const QJsonValue input = block.value(QStringLiteral("input"));
+            if (id.isEmpty() || name.isEmpty() || !input.isObject()) return invalid(QStringLiteral("A retrieval tool call is malformed."));
+            const QString args = QString::fromUtf8(QJsonDocument(input.toObject()).toJson(QJsonDocument::Compact));
+            calls.append(QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("type"), QStringLiteral("function")},
+                {QStringLiteral("function"), QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("arguments"), args}}}});
+        } else if (type != QStringLiteral("thinking") && type != QStringLiteral("redacted_thinking")) {
+            return invalid(QStringLiteral("Unsupported Claude content block type: %1.").arg(type.left(100)));
+        }
+    }
+    if ((stop == QStringLiteral("tool_use") && calls.size() != 1)
+        || (stop == QStringLiteral("end_turn") && !calls.isEmpty()))
+        return invalid(QStringLiteral("Claude returned an unexpected number of retrieval calls."));
+    const QString answer = text.join(QLatin1Char('\n')).trimmed();
+    if (calls.isEmpty() && answer.isEmpty()) return invalid(QStringLiteral("Claude returned no answer text."));
+    QJsonObject result{{QStringLiteral("role"), QStringLiteral("assistant")}};
+    if (!answer.isEmpty()) result.insert(QStringLiteral("content"), answer);
+    if (!calls.isEmpty()) {
+        result.insert(QStringLiteral("tool_calls"), calls);
+        result.insert(QStringLiteral("_anthropic_content"), blocks);
+    }
+    return result;
+}
+}
+
 Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *registry)
     : QObject(parent), m_app(app), m_registry(registry ? registry : new ApiKeyRegistry(this)), m_localDownload(qEnvironmentVariable("BETTERFLASH_MODEL_DIR",
         QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/BetterFlash/models")), this) {
     Q_ASSERT(m_app);
-    m_endpoint = m_settings.value(QStringLiteral("llm/endpoint"),
-        QStringLiteral("https://api.groq.com/openai/v1/chat/completions")).toString();
-    m_model = m_settings.value(QStringLiteral("llm/model"), QStringLiteral("llama-3.3-70b-versatile")).toString();
+    m_remoteApi = m_settings.value(QStringLiteral("llm/remoteApi"), QStringLiteral("openai")).toString();
+    if (m_remoteApi != QStringLiteral("anthropic")) m_remoteApi = QStringLiteral("openai");
+    if (m_remoteApi == QStringLiteral("anthropic")) {
+        m_endpoint = m_settings.value(QStringLiteral("llm/anthropic/endpoint"), QStringLiteral("https://api.anthropic.com/v1/messages")).toString();
+        m_model = m_settings.value(QStringLiteral("llm/anthropic/model")).toString();
+    } else {
+        m_endpoint = m_settings.value(QStringLiteral("llm/endpoint"),
+            QStringLiteral("https://api.groq.com/openai/v1/chat/completions")).toString();
+        m_model = m_settings.value(QStringLiteral("llm/model"), QStringLiteral("llama-3.3-70b-versatile")).toString();
+    }
+    m_workspaceId = m_settings.value(QStringLiteral("llm/anthropic/workspaceId")).toString();
     m_provider = m_settings.value(QStringLiteral("llm/provider"), QStringLiteral("local")).toString();
     if (m_provider != QStringLiteral("remote")) m_provider = QStringLiteral("local");
     m_profile = m_settings.value(QStringLiteral("llm/localProfile"), QStringLiteral("automatic")).toString();
@@ -67,6 +199,29 @@ void Summarizer::setProvider(const QString &provider) {
     m_settings.setValue(QStringLiteral("llm/provider"), provider);
     emit configurationChanged();
 }
+void Summarizer::setRemoteApi(const QString &remoteApi) {
+    if ((remoteApi != QStringLiteral("openai") && remoteApi != QStringLiteral("anthropic")) || remoteApi == m_remoteApi) return;
+    cancelAllCompletions(); resetTestReport();
+    m_remoteApi = remoteApi;
+    m_settings.setValue(QStringLiteral("llm/remoteApi"), remoteApi);
+    if (remoteApi == QStringLiteral("anthropic")) {
+        m_endpoint = m_settings.value(QStringLiteral("llm/anthropic/endpoint"), QStringLiteral("https://api.anthropic.com/v1/messages")).toString();
+        m_model = m_settings.value(QStringLiteral("llm/anthropic/model")).toString();
+    } else {
+        m_endpoint = m_settings.value(QStringLiteral("llm/endpoint"), QStringLiteral("https://api.groq.com/openai/v1/chat/completions")).toString();
+        m_model = m_settings.value(QStringLiteral("llm/model"), QStringLiteral("llama-3.3-70b-versatile")).toString();
+    }
+    configureCredentials();
+    emit configurationChanged();
+}
+void Summarizer::setWorkspaceId(const QString &workspaceId) {
+    const QString value = workspaceId.trimmed();
+    if (value == m_workspaceId) return;
+    cancelAllCompletions(); resetTestReport();
+    m_workspaceId = value;
+    m_settings.setValue(QStringLiteral("llm/anthropic/workspaceId"), value);
+    emit configurationChanged();
+}
 void Summarizer::setLocalProfile(const QString &profile) {
     if (profile != QStringLiteral("automatic") && profile != QStringLiteral("gemma") && profile != QStringLiteral("lfm")) return;
     if (profile == m_profile) return;
@@ -87,7 +242,11 @@ void Summarizer::setAcceleration(const QString &acceleration) {
 quint64 Summarizer::complete(const QJsonObject &payload, QObject *context, Completion callback) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
     return completeMessage(payload, context, [callback = std::move(callback)](std::expected<QJsonObject, struct ProviderError> result) {
-        if (!result) { callback(std::unexpected(result.error())); return; }
+        if (!result) {
+            struct ProviderError error = result.error();
+            if (!error.detail.isEmpty()) error.message += QStringLiteral(" Details: ") + error.detail;
+            callback(std::unexpected(error)); return;
+        }
         const QString content = result->value(QStringLiteral("content")).toString().trimmed();
         if (content.isEmpty()) {
             callback(std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"),
@@ -140,9 +299,17 @@ void Summarizer::startCompletion(quint64 id) {
     }
     const auto request = configuredRequest();
     if (!request) { finishCompletion(id, std::unexpected(request.error())); return; }
-    QNetworkReply *const reply = m_network.post(*request, QJsonDocument(job->payload).toJson(QJsonDocument::Compact));
+    job->anthropic = m_remoteApi == QStringLiteral("anthropic");
+    QJsonObject requestPayload = job->payload;
+    if (job->anthropic) {
+        const auto converted = anthropicRequest(requestPayload);
+        if (!converted) { finishCompletion(id, std::unexpected(converted.error())); return; }
+        requestPayload = *converted;
+    }
+    QNetworkReply *const reply = m_network.post(*request, QJsonDocument(requestPayload).toJson(QJsonDocument::Compact));
     job->reply = reply; reply->setReadBufferSize(128 * 1024);
-    QTimer::singleShot(45000, reply, [this, id, reply] {
+    const int timeoutMs = job->anthropic ? 120000 : 45000;
+    QTimer::singleShot(timeoutMs, reply, [this, id, reply] {
         const auto current = m_jobs.value(id);
         if (current && current->reply == reply && !reply->isFinished()) {
             current->timedOut = true;
@@ -174,7 +341,7 @@ void Summarizer::startCompletion(quint64 id) {
         }
         if (!okay) {
             if (timedOut || networkError == QNetworkReply::TimeoutError) {
-                const QString reason = timedOut ? QStringLiteral("The language model request exceeded its 45 second limit.")
+                const QString reason = timedOut ? QStringLiteral("The language model request exceeded its %1 second limit.").arg(current->anthropic ? 120 : 45)
                     : QStringLiteral("The connection to the language model endpoint timed out.");
                 finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_TIMEOUT"),
                     reason + QStringLiteral(" Check the connection or try another model, then retry.")})); return;
@@ -211,6 +378,13 @@ void Summarizer::startCompletion(quint64 id) {
         }
         QJsonParseError parseError{};
         const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);
+        if (current->anthropic) {
+            if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+                finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_RESPONSE"),
+                    QStringLiteral("Claude returned an unreadable response. Retry or check the configured endpoint."), parseError.errorString()})); return;
+            }
+            finishCompletion(id, anthropicResponse(document.object())); return;
+        }
         const QJsonArray choices = document.object().value(QStringLiteral("choices")).toArray();
         QJsonObject message = choices.isEmpty() ? QJsonObject() : choices.first().toObject()
             .value(QStringLiteral("message")).toObject();
@@ -350,7 +524,7 @@ void Summarizer::setEndpoint(const QString &endpoint) {
     if (value == m_endpoint) return;
     cancelAllCompletions(); resetTestReport();
     m_endpoint = value;
-    m_settings.setValue(QStringLiteral("llm/endpoint"), value);
+    m_settings.setValue(m_remoteApi == QStringLiteral("anthropic") ? QStringLiteral("llm/anthropic/endpoint") : QStringLiteral("llm/endpoint"), value);
     configureCredentials();
     emit configurationChanged();
 }
@@ -359,7 +533,7 @@ void Summarizer::setModel(const QString &model) {
     if (value == m_model) return;
     cancelAllCompletions(); resetTestReport();
     m_model = value;
-    m_settings.setValue(QStringLiteral("llm/model"), value);
+    m_settings.setValue(m_remoteApi == QStringLiteral("anthropic") ? QStringLiteral("llm/anthropic/model") : QStringLiteral("llm/model"), value);
     emit configurationChanged();
 }
 std::expected<QNetworkRequest, struct ProviderError> Summarizer::configuredRequest() const {
@@ -378,8 +552,15 @@ std::expected<QNetworkRequest, struct ProviderError> Summarizer::configuredReque
     QNetworkRequest request(endpoint);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     request.setRawHeader("Authorization", "Bearer " + m_credentials->key().toUtf8());
+    if (m_remoteApi == QStringLiteral("anthropic")) {
+        static const QRegularExpression workspacePattern(QStringLiteral("^[A-Za-z0-9_-]{1,256}$"));
+        if (!m_workspaceId.isEmpty() && !workspacePattern.match(m_workspaceId).hasMatch())
+            return std::unexpected(ProviderError{QStringLiteral("LLM_WORKSPACE"), QStringLiteral("The Anthropic workspace ID is invalid. Enter the workspace ID from Claude Console or leave it blank for a workspace-scoped key.")});
+        request.setRawHeader("anthropic-version", "2026-10-21");
+        if (!m_workspaceId.isEmpty()) request.setRawHeader("anthropic-workspace-id", m_workspaceId.toUtf8());
+    }
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    request.setTransferTimeout(45000);
+    request.setTransferTimeout(m_remoteApi == QStringLiteral("anthropic") ? 120000 : 45000);
     return request;
 }
 void Summarizer::fail(const QString &code, const QString &message) {

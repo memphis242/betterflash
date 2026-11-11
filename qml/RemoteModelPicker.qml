@@ -11,6 +11,8 @@ ColumnLayout {
     required property string category
     required property string modelName
     property string categoryLabel: "remote model"
+    property string remoteApi: "openai"
+    property string workspaceId: ""
     property string draftModelName: modelName
     property bool restoringEditor: false
     property string lastCommittedModel: modelName
@@ -59,6 +61,8 @@ ColumnLayout {
         apiKey: picker.binding
         endpoint: picker.endpoint
         category: picker.category
+        remoteApi: picker.remoteApi
+        workspaceId: picker.workspaceId
         active: picker.visible && picker.enabled
     }
 

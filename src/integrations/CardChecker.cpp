@@ -226,7 +226,8 @@ void CardChecker::requestTurn() {
         if (!result) {
             fail(result.error().code, QStringLiteral("The card check could not be completed."),
                 result.error().message + (m_searchEnabled ? QStringLiteral(" You can retry without web search if this model does not support tool calls.") : QString()),
-                QStringLiteral("Provider error: %1").arg(result.error().code)); return;
+                QStringLiteral("Provider error: %1").arg(result.error().code)
+                    + (result.error().detail.isEmpty() ? QString() : QLatin1Char('\n') + result.error().detail)); return;
         }
         receiveTurn(*result);
     });

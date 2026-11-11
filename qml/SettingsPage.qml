@@ -31,6 +31,7 @@ Item {
     property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
     property string aiModelDraft: ai.model
+    property string aiWorkspaceDraft: ai.workspaceId
     property string voiceKeyDraft: ""
     Settings { id: voicePreferences; category: "voiceSettings"; property int selectedTab: 0 }
     property int voiceTabIndex: voicePreferences.selectedTab
@@ -50,6 +51,7 @@ Item {
         function onConfigurationChanged() {
             if (!aiEndpointField.activeFocus) settingsPage.aiEndpointDraft = ai.endpoint;
             if (!aiModelPicker.editorActiveFocus) settingsPage.aiModelDraft = ai.model;
+            if (!aiWorkspaceField.activeFocus) settingsPage.aiWorkspaceDraft = ai.workspaceId;
         }
     }
 
@@ -477,6 +479,15 @@ Item {
                             message: ai.localError
                             Layout.fillWidth: true
                         }
+                        Label { visible: aiProvider.currentIndex === 1; text: "Remote API"; color: Theme.inkMuted; font.pixelSize: 15 }
+                        SettingsCombo {
+                            visible: aiProvider.currentIndex === 1
+                            Layout.fillWidth: true
+                            model: ["OpenAI-compatible", "Anthropic Messages"]
+                            currentIndex: ai.remoteApi === "anthropic" ? 1 : 0
+                            onActivated: index => ai.remoteApi = index === 1 ? "anthropic" : "openai"
+                            comboHint: "Choose the API protocol used by the remote endpoint"
+                        }
                         Label { visible: aiProvider.currentIndex === 1; text: "Remote endpoint"; color: Theme.inkMuted; font.pixelSize: 15 }
                         TextField {
                             id: aiEndpointField
@@ -486,7 +497,32 @@ Item {
                             onTextChanged: if (activeFocus) settingsPage.aiEndpointDraft = text
                             onEditingFinished: ai.endpoint = settingsPage.aiEndpointDraft.trim()
                             font.pixelSize: 17
-                            placeholderText: "https://api.groq.com/openai/v1/chat/completions"
+                            placeholderText: ai.remoteApi === "anthropic" ? "https://api.anthropic.com/v1/messages"
+                                : "https://api.groq.com/openai/v1/chat/completions"
+                        }
+                        Label {
+                            visible: aiProvider.currentIndex === 1 && ai.remoteApi === "anthropic"
+                            text: "Anthropic workspace ID (optional)"
+                            color: Theme.inkMuted
+                            font.pixelSize: 15
+                        }
+                        TextField {
+                            id: aiWorkspaceField
+                            visible: aiProvider.currentIndex === 1 && ai.remoteApi === "anthropic"
+                            Layout.fillWidth: true
+                            text: settingsPage.aiWorkspaceDraft
+                            onTextChanged: if (activeFocus) settingsPage.aiWorkspaceDraft = text
+                            onEditingFinished: ai.workspaceId = settingsPage.aiWorkspaceDraft.trim()
+                            font.pixelSize: 17
+                            placeholderText: "Required for API keys that can access multiple workspaces"
+                        }
+                        Label {
+                            visible: aiWorkspaceField.visible
+                            text: "Leave empty for a workspace-scoped API key."
+                            color: Theme.inkMuted
+                            font.pixelSize: 14
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
                         }
                         RemoteModelPicker {
                             id: aiModelPicker
@@ -494,6 +530,8 @@ Item {
                             binding: ai.apiKey
                             endpoint: settingsPage.aiEndpointDraft
                             category: "chat"
+                            remoteApi: ai.remoteApi
+                            workspaceId: ai.workspaceId
                             modelName: settingsPage.aiModelDraft
                             onModelEdited: model => {
                                 settingsPage.aiModelDraft = model

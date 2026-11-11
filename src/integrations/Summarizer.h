@@ -28,6 +28,8 @@ class Summarizer final : public QObject {
     Q_PROPERTY(QString endpoint READ endpoint WRITE setEndpoint NOTIFY configurationChanged)
     Q_PROPERTY(QString model READ model WRITE setModel NOTIFY configurationChanged)
     Q_PROPERTY(QString provider READ provider WRITE setProvider NOTIFY configurationChanged)
+    Q_PROPERTY(QString remoteApi READ remoteApi WRITE setRemoteApi NOTIFY configurationChanged)
+    Q_PROPERTY(QString workspaceId READ workspaceId WRITE setWorkspaceId NOTIFY configurationChanged)
     Q_PROPERTY(QString localProfile READ localProfile WRITE setLocalProfile NOTIFY configurationChanged)
     Q_PROPERTY(QString resolvedProfile READ resolvedProfile NOTIFY configurationChanged)
     Q_PROPERTY(QString localModelLabel READ localModelLabel NOTIFY configurationChanged)
@@ -58,6 +60,8 @@ public:
     QString endpoint() const { return m_endpoint; }
     QString model() const { return m_model; }
     QString provider() const { return m_provider; }
+    QString remoteApi() const { return m_remoteApi; }
+    QString workspaceId() const { return m_workspaceId; }
     QString localProfile() const { return m_profile; }
     QString resolvedProfile() const;
     QString localModelLabel() const;
@@ -86,6 +90,8 @@ public:
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
     void setProvider(const QString &provider);
+    void setRemoteApi(const QString &remoteApi);
+    void setWorkspaceId(const QString &workspaceId);
     void setLocalProfile(const QString &profile);
     void setAcceleration(const QString &acceleration);
     Q_INVOKABLE void prepareLocalModel() { m_localDownload.start(); }
@@ -128,6 +134,7 @@ private:
         const std::shared_ptr<std::atomic_bool> canceled = std::make_shared<std::atomic_bool>(false);
         bool waitingForDownload = false;
         bool timedOut = false;
+        bool anthropic = false;
     };
     AppController *const m_app;
     ApiKeyBinding *m_credentials = nullptr;
@@ -141,6 +148,8 @@ private:
     quint64 m_summaryJob = 0;
     quint64 m_testJob = 0;
     QString m_provider = QStringLiteral("local");
+    QString m_remoteApi = QStringLiteral("openai");
+    QString m_workspaceId{};
     QString m_profile = QStringLiteral("automatic");
     QString m_acceleration = QStringLiteral("automatic");
     QString m_acceleratorStatus = QStringLiteral("Device is checked when the model runs");

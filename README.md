@@ -102,7 +102,7 @@ microphone. Press `M` again to cancel. Always-on microphone review remains futur
 question and answer narration takes precedence over generated speech, and code
 blocks are skipped by automatic narration.
 
-See [local model support](docs/local-models.md), [voice setup](docs/voice.md),
+See [language model setup](docs/language-models.md), [local model support](docs/local-models.md), [voice setup](docs/voice.md),
 [API-key reuse](docs/api-keys.md), and [transcript flow](docs/transcript-flow-studies.md).
 
 ## Desktop development

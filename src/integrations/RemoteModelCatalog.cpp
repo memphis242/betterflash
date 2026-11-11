@@ -9,8 +9,10 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +22,7 @@ namespace {
 constexpr qsizetype kMaximumResponseBytes = 1024 * 1024;
 constexpr qsizetype kMaximumModels = 4096;
 constexpr int kTimeoutMs = 15 * 1000;
+constexpr int kMaximumPages = 5;
 
 bool isValidCategory(const QString &category) {
     return category == QStringLiteral("speech-recognition") || category == QStringLiteral("speech-output")
@@ -71,10 +74,14 @@ bool isAllowedModelId(const QString &model) {
     return true;
 }
 
-QString modelsPathFor(const QUrl &endpoint) {
+QString modelsPathFor(const QUrl &endpoint, const bool anthropic) {
     QString path = endpoint.path();
     while (path.size() > 1 && path.endsWith(QLatin1Char('/'))) path.chop(1);
     if (path.endsWith(QStringLiteral("/models"))) return path;
+    if (anthropic) {
+        const QString suffix = QStringLiteral("/messages");
+        return path.endsWith(suffix) ? path.left(path.size() - suffix.size()) + QStringLiteral("/models") : QString();
+    }
     const std::array suffixes{
         QStringLiteral("/audio/transcriptions"), QStringLiteral("/audio/translations"),
         QStringLiteral("/audio/speech"), QStringLiteral("/chat/completions"),
@@ -119,6 +126,8 @@ RemoteModelCatalog::~RemoteModelCatalog() {
 QObject *RemoteModelCatalog::apiKey() const { return m_binding; }
 QString RemoteModelCatalog::endpoint() const { return m_endpoint; }
 QString RemoteModelCatalog::category() const { return m_category; }
+QString RemoteModelCatalog::remoteApi() const { return m_remoteApi; }
+QString RemoteModelCatalog::workspaceId() const { return m_workspaceId; }
 bool RemoteModelCatalog::active() const { return m_active; }
 bool RemoteModelCatalog::busy() const { return m_busy; }
 QStringList RemoteModelCatalog::models() const { return m_models; }
@@ -193,6 +202,21 @@ void RemoteModelCatalog::setCategory(const QString &category) {
     emit changed();
 }
 
+void RemoteModelCatalog::setRemoteApi(const QString &remoteApi) {
+    if (remoteApi != QStringLiteral("openai") && remoteApi != QStringLiteral("anthropic")) return;
+    if (m_remoteApi == remoteApi) return;
+    m_remoteApi = remoteApi;
+    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear();
+    emit configurationChanged(); emit changed();
+}
+
+void RemoteModelCatalog::setWorkspaceId(const QString &workspaceId) {
+    if (m_workspaceId == workspaceId) return;
+    m_workspaceId = workspaceId;
+    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear();
+    emit configurationChanged(); emit changed();
+}
+
 void RemoteModelCatalog::setActive(const bool active) {
     if (m_active == active) return;
     m_active = active;
@@ -214,6 +238,9 @@ void RemoteModelCatalog::cancelRequest() {
     if (m_reply) m_reply->abort();
     m_reply = nullptr;
     m_body.clear();
+    m_pendingModels.clear();
+    m_seenCursors.clear();
+    m_pageCount = 0;
     if (m_busy) {
         m_busy = false;
         emit changed();
@@ -242,9 +269,20 @@ bool RemoteModelCatalog::prepareRequest(QUrl *const modelsUrl, QByteArray *const
         fail(QStringLiteral("MODELS_ENDPOINT"), QStringLiteral("Configure a supported remote model endpoint before fetching models."));
         return false;
     }
-    const QString path = modelsPathFor(endpoint);
+    const bool anthropic = m_remoteApi == QStringLiteral("anthropic");
+    if (anthropic && m_category != QStringLiteral("chat")) {
+        fail(QStringLiteral("MODELS_CATEGORY"), QStringLiteral("Anthropic model discovery is available for language models only."));
+        return false;
+    }
+    static const QRegularExpression workspacePattern(QStringLiteral("^[A-Za-z0-9_-]{1,256}$"));
+    if (anthropic && !m_workspaceId.isEmpty() && !workspacePattern.match(m_workspaceId).hasMatch()) {
+        fail(QStringLiteral("MODELS_WORKSPACE"), QStringLiteral("The Anthropic workspace ID is invalid. Use only letters, digits, underscores or hyphens, up to 256 characters."));
+        return false;
+    }
+    const QString path = modelsPathFor(endpoint, anthropic);
     if (path.isEmpty()) {
-        fail(QStringLiteral("MODELS_ENDPOINT"), QStringLiteral("The endpoint path is not a supported OpenAI-compatible model endpoint."));
+        fail(QStringLiteral("MODELS_ENDPOINT"), anthropic ? QStringLiteral("Use an Anthropic Messages endpoint ending in /messages to fetch its model list.")
+                              : QStringLiteral("The endpoint path is not a supported OpenAI-compatible model endpoint."));
         return false;
     }
     QUrl derived = endpoint;
@@ -276,18 +314,34 @@ bool RemoteModelCatalog::prepareRequest(QUrl *const modelsUrl, QByteArray *const
 void RemoteModelCatalog::fetch() {
     if (!m_active) { fail(QStringLiteral("MODELS_INACTIVE"), QStringLiteral("Model discovery is available only for a remote model configuration.")); return; }
     cancelRequest();
-    QUrl modelsUrl;
-    QByteArray authorization;
-    if (!prepareRequest(&modelsUrl, &authorization)) return;
     m_error.clear();
     m_status = QStringLiteral("Fetching available models...");
     m_busy = true;
+    fetchPage({});
+}
+
+void RemoteModelCatalog::fetchPage(const QString &afterId) {
+    Q_ASSERT(m_busy);
+    QUrl modelsUrl;
+    QByteArray authorization;
+    if (!prepareRequest(&modelsUrl, &authorization)) return;
+    if (m_remoteApi == QStringLiteral("anthropic")) {
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("limit"), QStringLiteral("100"));
+        if (!afterId.isEmpty()) query.addQueryItem(QStringLiteral("after_id"), afterId);
+        modelsUrl.setQuery(query);
+    }
+    ++m_pageCount;
     const quint64 generation = m_generation;
     QNetworkRequest request(modelsUrl);
     request.setRawHeader("Accept", "application/json");
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setTransferTimeout(kTimeoutMs);
     if (!authorization.isEmpty()) request.setRawHeader("Authorization", authorization);
+    if (m_remoteApi == QStringLiteral("anthropic")) {
+        request.setRawHeader("anthropic-version", "2026-10-21");
+        if (!m_workspaceId.isEmpty()) request.setRawHeader("anthropic-workspace-id", m_workspaceId.toUtf8());
+    }
     m_body.clear();
     m_responseTooLarge = false;
     m_reply = m_network.get(request);
@@ -308,7 +362,7 @@ void RemoteModelCatalog::fetch() {
         }
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply, generation] { finishReply(reply, generation); });
-    QTimer::singleShot(kTimeoutMs, this, [this, reply, generation] {
+    QTimer::singleShot(kTimeoutMs, reply, [this, reply, generation] {
         if (m_reply != reply || generation != m_generation || reply->isFinished()) return;
         ++m_generation;
         m_reply = nullptr;
@@ -355,13 +409,38 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         return;
     }
     if (!okay) {
+        QString networkDetail = reply->errorString();
         reply->deleteLater();
-        if (httpStatus == 401 || httpStatus == 403) {
-            fail(QStringLiteral("MODELS_AUTH"), QStringLiteral("The provider rejected the selected API key. Choose or save a key for this provider."));
+        const QString credential = m_binding ? m_binding->key() : QString();
+        const QJsonObject root = QJsonDocument::fromJson(body).object();
+        const QJsonObject providerError = root.value(QStringLiteral("error")).toObject();
+        QString providerMessage = providerError.value(QStringLiteral("message")).toString();
+        QString providerType = providerError.value(QStringLiteral("type")).toString();
+        QString providerCode = providerError.value(QStringLiteral("code")).toString();
+        if (providerMessage.isEmpty()) providerMessage = root.value(QStringLiteral("message")).toString();
+        if (!credential.isEmpty()) {
+            providerMessage.replace(credential, QStringLiteral("[redacted]"));
+            providerType.replace(credential, QStringLiteral("[redacted]"));
+            providerCode.replace(credential, QStringLiteral("[redacted]"));
+            networkDetail.replace(credential, QStringLiteral("[redacted]"));
+        }
+        networkDetail = networkDetail.simplified().left(256);
+        providerMessage = providerMessage.simplified().left(700);
+        providerType = providerType.simplified().left(100);
+        providerCode = providerCode.simplified().left(100);
+        const QString detail = (providerMessage.isEmpty() ? QString() : QStringLiteral(" Provider: ") + providerMessage)
+            + (providerType.isEmpty() ? QString() : QStringLiteral(" Type: ") + providerType)
+            + (providerCode.isEmpty() ? QString() : QStringLiteral(" Code: ") + providerCode);
+        if (httpStatus == 401) {
+            fail(QStringLiteral("MODELS_HTTP_401"), QStringLiteral("The provider rejected the API key (HTTP 401). Select or save a valid key for this provider.") + detail);
+        } else if (httpStatus == 403) {
+            fail(QStringLiteral("MODELS_HTTP_403"), QStringLiteral("The provider denied model-list access (HTTP 403). Check the key's permissions and workspace.") + detail);
+        } else if (httpStatus == 429) {
+            fail(QStringLiteral("MODELS_HTTP_429"), QStringLiteral("The provider declined the model-list request (HTTP 429). Check its rate or credit limits, then retry.") + detail);
         } else if (httpStatus <= 0) {
-            fail(QStringLiteral("MODELS_NETWORK"), QStringLiteral("The model list could not be reached. Check the endpoint and connection, then retry."));
+            fail(QStringLiteral("MODELS_NETWORK"), QStringLiteral("The model list could not be reached: %1. Check the endpoint and connection, then retry.").arg(networkDetail));
         } else {
-            fail(QStringLiteral("MODELS_HTTP_%1").arg(httpStatus), QStringLiteral("The provider did not return its model list. Check the endpoint and model service."));
+            fail(QStringLiteral("MODELS_HTTP_%1").arg(httpStatus), QStringLiteral("The provider did not return its model list (HTTP %1). Check the endpoint and provider response, then retry.").arg(httpStatus) + detail);
         }
         return;
     }
@@ -374,13 +453,14 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The provider returned an invalid or empty model list."));
         return;
     }
-    if (data.isEmpty()) {
+    if (data.isEmpty() && m_pendingModels.isEmpty()) {
         reply->deleteLater();
         fail(QStringLiteral("MODELS_EMPTY"), QStringLiteral("The provider returned no models. You can still enter a model identifier manually."));
         return;
     }
     const QUrl endpoint(m_endpoint.trimmed());
-    QStringList discovered;
+    QStringList discovered = m_pendingModels;
+    bool modelLimitReached = false;
     for (const QJsonValue &value : data) {
         if (!value.isObject()) continue;
         const QJsonObject model = value.toObject();
@@ -389,8 +469,32 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         const QString name = id.toString();
         if (model.value(QStringLiteral("active")).isBool() && !model.value(QStringLiteral("active")).toBool()) continue;
         const QString credential = m_binding ? m_binding->key() : QString();
-        const bool echoesCredential = !credential.isEmpty() && name == credential;
-        if (isAllowedModelId(name) && !echoesCredential && includeForCategory(name, m_category, isGroq(endpoint)) && !discovered.contains(name)) discovered.append(name);
+        const bool echoesCredential = !credential.isEmpty() && name.contains(credential);
+        if (isAllowedModelId(name) && !echoesCredential && includeForCategory(name, m_category, isGroq(endpoint)) && !discovered.contains(name)) {
+            if (discovered.size() >= kMaximumModels) { modelLimitReached = true; break; }
+            discovered.append(name);
+        }
+    }
+    const QJsonObject root = document.object();
+    const QJsonValue more = root.value(QStringLiteral("has_more"));
+    if (m_remoteApi == QStringLiteral("anthropic") && !more.isBool()) {
+        reply->deleteLater();
+        fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The Anthropic model response did not contain a valid pagination state. Try again or enter a model identifier manually."));
+        return;
+    }
+    const bool hasMore = m_remoteApi == QStringLiteral("anthropic") && more.toBool();
+    const QString cursor = root.value(QStringLiteral("last_id")).toString();
+    if (hasMore && (data.isEmpty() || !isAllowedModelId(cursor) || m_seenCursors.contains(cursor))) {
+        reply->deleteLater();
+        fail(QStringLiteral("MODELS_PAGINATION"), QStringLiteral("The Anthropic model list returned an invalid or repeated page cursor. Try again or enter a model identifier manually."));
+        return;
+    }
+    if (hasMore && m_pageCount < kMaximumPages && !modelLimitReached && discovered.size() < kMaximumModels) {
+        m_seenCursors.insert(cursor);
+        m_pendingModels = std::move(discovered);
+        reply->deleteLater();
+        fetchPage(cursor);
+        return;
     }
     std::sort(discovered.begin(), discovered.end(), [](const QString &a, const QString &b) {
         const int comparison = QString::compare(a, b, Qt::CaseInsensitive);
@@ -403,10 +507,16 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         emit changed();
         return;
     }
+    const qsizetype discoveredCount = discovered.size();
     m_models = std::move(discovered);
-    m_categoryHint = modelHint(endpoint, m_category);
+    m_categoryHint = m_remoteApi == QStringLiteral("anthropic")
+        ? QStringLiteral("Choose an available Claude model or enter its identifier manually.") : modelHint(endpoint, m_category);
+    m_pendingModels.clear(); m_seenCursors.clear(); m_pageCount = 0;
     m_busy = false;
-    m_status = QStringLiteral("Available models updated.");
+    m_status = modelLimitReached || (hasMore && discoveredCount >= kMaximumModels)
+        ? QStringLiteral("The model list reached its %1-model limit. Enter a model identifier manually if it is missing.").arg(kMaximumModels)
+        : hasMore ? QStringLiteral("Only the first %1 pages of models are shown. Enter a model identifier manually if it is missing.").arg(kMaximumPages)
+                  : QStringLiteral("Available models updated.");
     m_error.clear();
     emit changed();
 }
