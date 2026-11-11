@@ -30,6 +30,12 @@ AppMenu {
         enabled: menu.deckAvailable && !app.busy
         onTriggered: { menu.beforeAction(); menu.selectDeck(true); menu.ui.openCardEditor("") }
     }
+    AppMenuItem { glyph: "card-add"
+        objectName: "deckGenerateNewCard"
+        text: "Generate New Card"
+        enabled: menu.deckAvailable && !app.busy && !cardGenerator.busy
+        onTriggered: { menu.beforeAction(); menu.ui.openGenerateNewCard(menu.deckId) }
+    }
     AppMenuItem { glyph: "folder"
         text: "Add subdeck"
         enabled: menu.deckAvailable && !app.busy

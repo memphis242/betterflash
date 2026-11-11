@@ -1229,6 +1229,14 @@ Item {
                         hint: library.weakestFirst ? "Return cards to their normal order" : "Sort cards by weakness within each search group"
                         onClicked: library.weakestFirst = !library.weakestFirst
                     }
+                    AppButton {
+                        objectName: "libraryGenerateNewCard"
+                        text: "Generate New Card"
+                        glyph: "card-add"
+                        enabled: !!library.ui.selectedDeck.id && !app.busy && !cardGenerator.busy
+                        hint: library.ui.selectedDeck.id ? "Describe a new card to generate for the selected deck" : "Select a deck to generate a new card"
+                        onClicked: library.ui.openGenerateNewCard(library.ui.selectedDeck.id)
+                    }
                 }
                 RowLayout {
                     Layout.fillWidth: true

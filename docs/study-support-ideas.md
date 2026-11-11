@@ -56,6 +56,22 @@ The Library's best-time statistic is the fastest recorded review graded Hard,
 Good or Easy. It can provide a personal time to beat, but its introduction does
 not decide a weakness formula or change the spaced-repetition algorithm.
 
+## Generate a new card for a deck
+
+Choose **Generate New Card** from a deck's context menu or the Library cards
+pane toolbar, immediately after **Weakest first**. Select a deck first when
+viewing the entire collection. The dialog identifies the destination deck and
+asks what to generate, with up to 2,000 characters for the topic, scope,
+examples, and desired difficulty. Opening it does not start a model request.
+
+**Generate card** sends the instructions and deck name to the configured model;
+it does not send other cards in the deck. Progress, cancellation, and retry are
+available. The resulting basic card opens in the generated-card editor with
+its destination preselected. Edit it, check correctness or completeness, or
+request a refinement before explicitly accepting it. Refinement difficulty is
+relative to the current draft. Generation and refinement never save a card
+without acceptance. Models can be wrong, so review the answer before saving.
+
 ## Generate similar card
 
 Available from card detail, card action menus and the active review card:

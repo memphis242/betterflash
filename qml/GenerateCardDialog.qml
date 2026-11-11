@@ -7,17 +7,19 @@ Dialog {
     objectName: "generateCardDialog"
     required property var ui
     property string sourceId: ""
+    property string deckId: ""
+    readonly property bool deckGeneration: deckId.length > 0
     property bool requestStarted: false
     property bool resumePending: false
     property string pausedVariantId: ""
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(900, ui.width - 2 * ui.gutter)
-    height: Math.min(740, ui.height - 2 * ui.gutter)
+    height: Math.min(deckGeneration ? 620 : 740, ui.height - 2 * ui.gutter)
     padding: 24
     modal: true
     focus: true
-    title: "Generate similar card"
+    title: deckGeneration ? "Generate New Card" : "Generate similar card"
     closePolicy: Popup.NoAutoClose
     header: Item {
         implicitHeight: 64
@@ -48,6 +50,7 @@ Dialog {
     }
 
     function openFor(cardId) {
+        deckId = "";
         sourceId = cardId;
         cardGenerator.clear();
         requestStarted = false;
@@ -60,12 +63,20 @@ Dialog {
             app.pauseReview();
         open();
     }
+    function openForDeck(id) {
+        openFor("");
+        deckId = id;
+        generationInstructions.forceActiveFocus();
+    }
     function submitGeneration() {
         if (cardGenerator.busy || app.busy)
             return;
         ui.generationDifficulty = generationDifficulty.currentValue || "similar";
         requestStarted = true;
-        cardGenerator.generate(sourceId, generationInstructions.text, ui.generationDifficulty);
+        if (deckGeneration)
+            cardGenerator.generateForDeck(deckId, generationInstructions.text);
+        else
+            cardGenerator.generate(sourceId, generationInstructions.text, ui.generationDifficulty);
     }
     function resumeIfReady() {
         if (!resumePending || visible || ui.generationContextOpen || app.busy)
@@ -108,7 +119,9 @@ Dialog {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Create one new card that tests the same concept with a different example or question. Check the generated answer before saving."
+                text: dialog.deckGeneration
+                    ? "Describe the card you want to create for this deck. The result opens in the card editor for review before saving. Models can be wrong; check the generated answer."
+                    : "Create one new card that tests the same concept with a different example or question. Check the generated answer before saving."
                 wrapMode: Text.Wrap
                 color: Theme.ink
                 font.pixelSize: 16
@@ -116,11 +129,21 @@ Dialog {
             Label {
                 Layout.fillWidth: true
                 textFormat: Text.PlainText
-                text: ai.provider === "local" ? "Uses " + ai.localModelLabel + " on this device." : "Sends this card and its deck context to " + ai.endpoint + " using " + ai.model + "."
+                text: ai.provider === "local" ? "Uses " + ai.localModelLabel + " on this device." : (dialog.deckGeneration ? "Sends your instructions and the deck name to " : "Sends this card and its deck context to ") + ai.endpoint + " using " + ai.model + "."
                 wrapMode: Text.Wrap
                 color: Theme.inkMuted
             }
+            Label {
+                visible: dialog.deckGeneration
+                Layout.fillWidth: true
+                text: "Deck: " + (dialog.ui.deckById(dialog.deckId).name || "Unavailable")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: Theme.ink
+                font.bold: true
+            }
             RowLayout {
+                visible: !dialog.deckGeneration
                 Layout.fillWidth: true
                 Label { text: "Difficulty"; color: Theme.ink }
                 AppComboBox {
@@ -134,11 +157,11 @@ Dialog {
                     comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
                 }
             }
-            Label { text: "Generation instructions (optional)"; color: Theme.ink }
+            Label { text: dialog.deckGeneration ? "What would you like to learn?" : "Generation instructions (optional)"; color: Theme.ink; font.bold: true }
             ScrollView {
                 id: instructionsViewport
                 Layout.fillWidth: true
-                Layout.preferredHeight: 64
+                Layout.preferredHeight: dialog.deckGeneration ? 160 : 64
                 contentWidth: availableWidth
                 clip: true
                 TextArea {
@@ -152,7 +175,9 @@ Dialog {
                     selectByMouse: true
                     padding: 10
                     color: Theme.ink
-                    placeholderText: "Choose a topic, example, or constraint (up to 2000 characters)."
+                    placeholderText: dialog.deckGeneration
+                        ? "For example: A beginner card explaining transaction durability, with a short SQL example. Include any desired question, scope, or difficulty (up to 2000 characters)."
+                        : "Choose a topic, example, or constraint (up to 2000 characters)."
                     Accessible.name: "Generation instructions"
                     background: Rectangle {
                         radius: 8
@@ -161,6 +186,13 @@ Dialog {
                         border.width: generationInstructions.activeFocus ? 2 : 1
                     }
                 }
+            }
+            Label {
+                visible: generationInstructions.text.length > 1800
+                text: generationInstructions.text.length + " / 2000 characters" + (generationInstructions.text.length > 2000 ? ". Shorten the instructions to generate a card." : "")
+                color: generationInstructions.text.length > 2000 ? Theme.error : Theme.inkMuted
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
             }
             ScrollView {
                 id: generationErrors
@@ -177,10 +209,20 @@ Dialog {
             }
             Label {
                 visible: cardGenerator.busy
-                text: "Generating a variation..."
-                color: Theme.inkMuted
+                text: dialog.deckGeneration ? "Generating your card..." : "Generating a variation..."
+                color: Theme.ink
+                font.pixelSize: 18
+                font.bold: true
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+            }
+            ProgressBar {
+                visible: cardGenerator.busy
+                indeterminate: true
+                Layout.fillWidth: true
             }
             ScrollView {
+                visible: !dialog.deckGeneration
                 objectName: "generationSourcePreview"
                 id: preview
                 Layout.fillWidth: true
@@ -244,7 +286,10 @@ Dialog {
             text: dialog.requestStarted && cardGenerator.error ? "Retry generation" : "Generate card"
             primary: true
             enabled: !app.busy && !cardGenerator.busy
-                && !!dialog.ui.cardById(dialog.sourceId).id
+                && (dialog.deckGeneration
+                    ? !!dialog.ui.deckById(dialog.deckId).id && generationInstructions.text.trim().length > 0
+                    : !!dialog.ui.cardById(dialog.sourceId).id)
+                && generationInstructions.text.length <= 2000
             onClicked: dialog.submitGeneration()
         }
     }

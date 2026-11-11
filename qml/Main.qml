@@ -98,9 +98,9 @@ ApplicationWindow {
     property bool refinementPending: false
     property string generationDifficulty: "similar"
     readonly property var generationDifficultyChoices: [
-        {label: "Similar to source", key: "similar"},
-        {label: "Easier than source", key: "easier"},
-        {label: "Harder than source", key: "harder"}
+        {label: cardGenerator.deckGeneration ? "Similar to draft" : "Similar to source", key: "similar"},
+        {label: cardGenerator.deckGeneration ? "Easier than draft" : "Easier than source", key: "easier"},
+        {label: cardGenerator.deckGeneration ? "Harder than draft" : "Harder than source", key: "harder"}
     ]
     readonly property bool repairingStoredCard: !!editingCardId && !!((editingCard().loadError || {}).code)
     readonly property int unreadableCardCount: app.cards.filter(card => !!(card.loadError && card.loadError.code)).length
@@ -2149,7 +2149,9 @@ ApplicationWindow {
                             onActivated: window.generationDifficulty = currentValue
                             enabled: !window.editorModelBusy && !window.editorSavePending
                             Layout.fillWidth: true
-                            comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
+                            comboHint: cardGenerator.deckGeneration
+                                ? "Requested challenge relative to the current draft. Review scheduling is unchanged."
+                                : "Requested challenge relative to the source card. Review scheduling is unchanged."
                         }
                     }
                     Label {
@@ -3230,6 +3232,10 @@ ApplicationWindow {
     function openGenerateSimilar(cardId) {
         if (!app.busy && cardId)
             generateCardDialog.openFor(cardId)
+    }
+    function openGenerateNewCard(deckId) {
+        if (!app.busy && !cardGenerator.busy && deckById(deckId).id)
+            generateCardDialog.openForDeck(deckId)
     }
     function editGeneratedCard(draft) {
         if (detailDialog.visible)

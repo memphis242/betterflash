@@ -16,6 +16,7 @@ class CardGenerator final : public QObject {
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY changed)
     Q_PROPERTY(QVariantMap sourceCard READ sourceCard NOTIFY changed)
+    Q_PROPERTY(bool deckGeneration READ deckGeneration NOTIFY changed)
     Q_PROPERTY(bool verifying READ verifying NOTIFY changed)
     Q_PROPERTY(QVariantMap verification READ verification NOTIFY changed)
 public:
@@ -26,11 +27,13 @@ public:
     [[nodiscard]] QString error() const { return m_error; }
     [[nodiscard]] QVariantMap draft() const { return m_draft; }
     [[nodiscard]] QVariantMap sourceCard() const { return m_source; }
+    [[nodiscard]] bool deckGeneration() const { return m_deckGeneration; }
     [[nodiscard]] bool verifying() const { return m_verifying; }
     [[nodiscard]] QVariantMap verification() const { return m_verification; }
 
     Q_INVOKABLE void generate(const QString &cardId, const QString &instructions = QString{},
                               const QString &difficulty = QStringLiteral("similar"));
+    Q_INVOKABLE void generateForDeck(const QString &deckId, const QString &instructions);
     Q_INVOKABLE void refine(const QVariantMap &draft, const QString &instructions,
                             const QString &difficulty = QStringLiteral("similar"));
     Q_INVOKABLE void verify(const QVariantMap &draft);
@@ -76,4 +79,8 @@ private:
     QString m_independentAnswer{};
     QString m_solverReason{};
     QByteArray m_sourceFingerprint{};
+    QString m_generationDeckId{};
+    QString m_generationDeckName{};
+    QByteArray m_generationDeckFingerprint{};
+    bool m_deckGeneration = false;
 };
