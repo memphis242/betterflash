@@ -684,6 +684,17 @@ ApplicationWindow {
             after: end + (text.charAt(end) === "\n" ? 1 : 0)
         }
     }
+    function navigateEditorSide() {
+        if (editorTabs.currentIndex === 0) {
+            splitOrMove()
+            return
+        }
+        const viewport = editorPreviewScroll.contentItem
+        const maximum = Math.max(0, viewport.contentHeight - viewport.height)
+        const backPosition = Math.min(editorBackPreviewHeading.y, maximum)
+        viewport.contentY = viewport.contentY > 0 && viewport.contentY >= backPosition - 1
+            ? 0 : backPosition
+    }
     function splitOrMove() {
         const parts = splitSource(editorSource.text)
         if (parts.start >= 0)
@@ -1561,6 +1572,14 @@ ApplicationWindow {
     Sheet {
         id: cardDialog
         objectName: "cardDialog"
+        Shortcut {
+            sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+            context: Qt.WindowShortcut
+            autoRepeat: false
+            enabled: cardDialog.visible && cardDialog.activeFocus
+                && !window.editorSavePending && !window.editorRefining
+            onActivated: window.navigateEditorSide()
+        }
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
         closePolicy: editorSavePending || window.androidPlatform ? Popup.NoAutoClose : Popup.CloseOnEscape
         width: Math.min(1120, window.width - 2 * window.gutter)
@@ -1833,6 +1852,7 @@ ApplicationWindow {
                     }
                 }
                 ScrollView {
+                    id: editorPreviewScroll
                     objectName: "editorPreviewScroll"
                     clip: true
                     contentWidth: availableWidth
@@ -1869,6 +1889,7 @@ ApplicationWindow {
                             color: Theme.rule
                         }
                         RowLayout {
+                            id: editorBackPreviewHeading
                             Layout.fillWidth: true
                             spacing: 8
                             Label {
@@ -1931,7 +1952,7 @@ ApplicationWindow {
             }
             Label {
                 textFormat: Text.PlainText
-                text: shortcuts.bindings.editorSplit + " separates front and back or moves between them. " + shortcuts.bindings.editorCloze + " hides a selection."
+                text: "Ctrl+Tab / Ctrl+Shift+Tab moves between front and back. " + shortcuts.bindings.editorSplit + " separates front and back or moves between them. " + shortcuts.bindings.editorCloze + " hides a selection."
                 color: Theme.inkMuted
                 font.pixelSize: 11
                 wrapMode: Text.Wrap

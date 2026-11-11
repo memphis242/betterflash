@@ -81,6 +81,14 @@ Dialog {
         }
     }
 
+    Shortcut {
+        sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: detail.visible && detail.activeFocus && !detail.actionMenuOpen
+        onActivated: detail.activeSide = (detail.activeSide + 1) % sideTabs.count
+    }
+
     function rememberContentPosition() {
         if (!cardId) return
         contentPositions[cardId] = {

@@ -14,6 +14,15 @@ and width settings. The card pane is closed on first use.
   code and math. Each side has its own scroll position and selectable text.
   Editing, atomicizing, resetting and deleting remain available there.
 
+## Front and back keyboard navigation
+
+Ctrl+Tab and Ctrl+Shift+Tab cycle between Front and Back in New card, Edit card,
+and Card detail. In the editor's Source view, they move the caret between the
+two sections, inserting the separator if it is absent. In Preview, they scroll
+between the Front and Back sections. Card detail switches its selected side tab.
+These shortcuts apply only while the card modal has focus; a dialog opened above
+it keeps its own keyboard controls.
+
 ## Card detail layout
 
 The detail modal grows to fit the window, up to 1240 by 900 pixels. Front and
