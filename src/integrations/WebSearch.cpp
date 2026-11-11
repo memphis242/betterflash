@@ -18,7 +18,7 @@ const QString endpoint = QStringLiteral("https://api.tavily.com/search");
 }
 
 WebSearch::WebSearch(ApiKeyRegistry *registry, QObject *parent)
-    : QObject(parent), m_credentials(registry->binding(QStringLiteral("web-search"), this)),
+    : QObject(parent), m_registry(registry), m_credentials(registry->binding(QStringLiteral("web-search"), this)),
       m_enabled(m_settings.value(QStringLiteral("webSearch/enabled"), false).toBool()) {
     Q_ASSERT(registry && m_credentials);
     m_credentials->setEndpoint(endpoint);
@@ -27,6 +27,8 @@ WebSearch::WebSearch(ApiKeyRegistry *registry, QObject *parent)
         const QString key = m_credentials->key();
         if (key != m_credentialSnapshot) {
             m_credentialSnapshot = key;
+            cancelTest();
+            clearTestResult();
             cancel();
             emit configurationChanged();
         }
@@ -53,10 +55,72 @@ void WebSearch::cancel() {
     }
     m_context.clear(); m_callback = {}; m_body.clear();
 }
+void WebSearch::clearTestResult() {
+    m_testStatus.clear();
+    m_testErrorCode.clear();
+    m_testErrorDetail.clear();
+}
+
+void WebSearch::cancelTest() {
+    if (!m_testBusy) return;
+    Q_ASSERT(m_testSearch);
+    m_testSearch->cancel();
+    m_testBusy = false;
+    clearTestResult();
+    m_testStatus = QStringLiteral("Connection test canceled.");
+    emit changed();
+}
+
+void WebSearch::testConnection() {
+    if (m_testBusy) return;
+    clearTestResult();
+    if (!hasApiKey()) {
+        m_testErrorCode = QStringLiteral("WEB_SEARCH_CONFIG");
+        m_testStatus = QStringLiteral("Tavily connection test could not start. Save a Tavily API key and try again.");
+        emit changed();
+        return;
+    }
+    if (!m_testSearch) m_testSearch = new WebSearch(m_registry, this);
+    m_testBusy = true;
+    m_testStatus = QStringLiteral("Testing Tavily connection...");
+    emit changed();
+    m_testSearch->startSearch(QStringLiteral("What is the capital of France?"), this,
+        [this](std::expected<QVariantList, struct ProviderError> result) {
+            m_testBusy = false;
+            if (result) {
+                m_testStatus = QStringLiteral("Tavily connection succeeded. The API key can perform searches.");
+            } else {
+                const struct ProviderError &error = result.error();
+                m_testErrorCode = error.code;
+                m_testErrorDetail = error.message;
+                if (!error.detail.isEmpty()) m_testErrorDetail += QStringLiteral("\n") + error.detail;
+                if (error.code == QStringLiteral("WEB_SEARCH_HTTP_401") || error.code == QStringLiteral("WEB_SEARCH_HTTP_403"))
+                    m_testStatus = QStringLiteral("Tavily rejected the connection. Check the API key and account access, then try again.");
+                else if (error.code == QStringLiteral("WEB_SEARCH_HTTP_429"))
+                    m_testStatus = QStringLiteral("Tavily's rate limit was reached. Wait and try again.");
+                else if (error.code == QStringLiteral("WEB_SEARCH_HTTP_432"))
+                    m_testStatus = QStringLiteral("Tavily's plan credit limit was reached. Check the reset date or upgrade your plan.");
+                else if (error.code == QStringLiteral("WEB_SEARCH_HTTP_433"))
+                    m_testStatus = QStringLiteral("Tavily's pay-as-you-go billing limit was reached. Check your billing limit before retrying.");
+                else if (error.code == QStringLiteral("WEB_SEARCH_HTTP_434"))
+                    m_testStatus = QStringLiteral("Tavily's search capacity is temporarily unavailable. Wait and try again.");
+                else if (error.code == QStringLiteral("WEB_SEARCH_TIMEOUT"))
+                    m_testStatus = QStringLiteral("Tavily did not respond in time. Check your connection and try again.");
+                else
+                    m_testStatus = QStringLiteral("Tavily connection test failed. Check the details and try again.");
+            }
+            emit changed();
+        }, false);
+}
+
 void WebSearch::search(const QString &query, QObject *context, Completion callback) {
+    startSearch(query, context, std::move(callback), true);
+}
+
+void WebSearch::startSearch(const QString &query, QObject *context, Completion callback, const bool requireEnabled) {
     Q_ASSERT(context && callback && !m_reply);
     if (!context || !callback || m_reply) return;
-    if (!m_enabled || !hasApiKey()) {
+    if ((requireEnabled && !m_enabled) || !hasApiKey()) {
         callback(std::unexpected(ProviderError{QStringLiteral("WEB_SEARCH_CONFIG"),
             QStringLiteral("Web search is disabled or its Tavily API key is unavailable. Enable web search and add a key in Settings, or run the check without web search.")}));
         return;
@@ -71,7 +135,7 @@ void WebSearch::search(const QString &query, QObject *context, Completion callba
     request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + m_credentials->key().toUtf8());
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     const QJsonObject data{{QStringLiteral("query"), query.trimmed()},
-        {QStringLiteral("search_depth"), QStringLiteral("basic")}, {QStringLiteral("max_results"), maximumResults},
+        {QStringLiteral("search_depth"), QStringLiteral("basic")}, {QStringLiteral("max_results"), requireEnabled ? maximumResults : 1},
         {QStringLiteral("auto_parameters"), false}, {QStringLiteral("include_answer"), false},
         {QStringLiteral("include_raw_content"), false}, {QStringLiteral("include_images"), false}};
     m_context = context; m_callback = std::move(callback); m_body.clear(); m_tooLarge = false; m_timedOut = false;

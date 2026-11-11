@@ -45,6 +45,74 @@ ColumnLayout {
         Layout.minimumWidth: 0
     }
 
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 10
+        ModelActionButton {
+            actionKind: "test"
+            text: settings.service.testBusy ? "Testing..." : "Test connection"
+            enabled: !settings.service.testBusy && settings.service.hasApiKey
+            hint: settings.service.hasApiKey
+                ? "Run one basic search with a fixed query. This uses one Tavily credit."
+                : "Save a Tavily API key before testing the connection."
+            onClicked: settings.service.testConnection()
+        }
+        AppButton {
+            visible: settings.service.testBusy
+            text: "Cancel test"
+            hint: "Cancel the connection test; Tavily may still charge for a request already received."
+            onClicked: settings.service.cancelTest()
+        }
+    }
+
+    Label {
+        text: "The connection test sends a fixed query and uses one Tavily credit. It works while web search is disabled."
+        textFormat: Text.PlainText
+        color: Theme.inkMuted
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+        font.pixelSize: 15
+    }
+
+    Label {
+        visible: settings.service.testStatus.length > 0 && settings.service.testErrorCode.length === 0
+        text: settings.service.testStatus
+        textFormat: Text.PlainText
+        color: Theme.ink
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+        font.pixelSize: 16
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
+        visible: settings.service.testErrorCode.length > 0
+        implicitHeight: Math.min(errorBlock.implicitHeight, 180) + 24
+        radius: 6
+        color: Theme.errorSurface
+        border.color: Theme.error
+        border.width: 1
+
+        ScrollView {
+            id: errorScroll
+            anchors.fill: parent
+            anchors.margins: 12
+            clip: true
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+            ErrorBlock {
+                id: errorBlock
+                width: errorScroll.availableWidth
+                textSize: 15
+                message: settings.service.testErrorCode.length > 0 ? settings.service.testStatus : ""
+                code: settings.service.testErrorCode
+                details: settings.service.testErrorDetail
+            }
+        }
+    }
+
     Label {
         textFormat: Text.PlainText
         text: "Search results can be incomplete, misleading, or out of date. The language model can also make mistakes when interpreting them. Check important facts against the linked sources."
