@@ -80,8 +80,10 @@ at once. Feature details and priorities remain to be agreed as work resumes.
   and preview before saving. Refine edited drafts repeatedly with optional
   instructions, then accept the current draft into the deck. Saved cards open
   a preview and are selected and revealed in the Library.
-  Independent answer verification and optional difficulty controls remain
-  follow-ups. See [study support notes](study-support-ideas.md).
+  Easier/similar/harder controls and an optional independent answer check are
+  available for generated drafts. Review model quality and the two-request
+  answer check during use, then add behavioral coverage when testing resumes.
+  Quantity controls remain a follow-up. See [study support notes](study-support-ideas.md).
 - **Logo:** replace the current walnut mark with a deliberately drawn design.
   The user may draw it digitally or commission an artist; the current mark
   looks too AI-generated.

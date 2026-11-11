@@ -57,9 +57,15 @@ ApplicationWindow {
     property var generatedCardDraft: null
     property bool editingGeneratedCard: false
     property bool refinementPending: false
+    property string generationDifficulty: "similar"
+    readonly property var generationDifficultyChoices: [
+        {label: "Similar to source", key: "similar"},
+        {label: "Easier than source", key: "easier"},
+        {label: "Harder than source", key: "harder"}
+    ]
     readonly property bool repairingStoredCard: !!editingCardId && !!((editingCard().loadError || {}).code)
     readonly property int unreadableCardCount: app.cards.filter(card => !!(card.loadError && card.loadError.code)).length
-    readonly property bool editorRefining: editingGeneratedCard && cardGenerator.busy
+    readonly property bool editorModelBusy: editingGeneratedCard && cardGenerator.busy
     readonly property bool generationContextOpen: cardDialog.visible || detailDialog.visible || cardPreviewDialog.visible || editorReturnToPreview
     property bool cardInverted: false
     property bool initializingDeckParent: false
@@ -610,7 +616,7 @@ ApplicationWindow {
             openSelectedDetail()
     }
     function beginEditorSave(submission, destination) {
-        if (!cardDialog.visible || editorSavePending || editorRefining || app.busy || media.busy)
+        if (!cardDialog.visible || editorSavePending || editorModelBusy || app.busy || media.busy)
             return
         const target = editingCardId
         const requestId = "card-editor-" + Date.now() + "-" + (++editorSaveSerial)
@@ -759,7 +765,7 @@ ApplicationWindow {
         imageDialog.open()
     }
     function submitCard() {
-        if (editorSavePending || editorRefining || app.busy || media.busy)
+        if (editorSavePending || editorModelBusy || app.busy || media.busy)
             return
         const submission = cardSubmission()
         if (!submission)
@@ -769,9 +775,11 @@ ApplicationWindow {
     function refineGeneratedCard() {
         if (!editingGeneratedCard || editorSavePending || app.busy || media.busy)
             return
-        if (editorRefining) {
-            cardGenerator.cancel()
-            refinementPending = false
+        if (editorModelBusy) {
+            if (!cardGenerator.verifying) {
+                cardGenerator.cancel()
+                refinementPending = false
+            }
             return
         }
         const draft = cardSubmission()
@@ -779,7 +787,22 @@ ApplicationWindow {
             return
         localCardError = ""
         refinementPending = true
-        cardGenerator.refine(draft, refinementInstructions.text)
+        cardGenerator.refine(draft, refinementInstructions.text, generationDifficulty)
+    }
+    function checkGeneratedAnswer() {
+        if (!editingGeneratedCard || editorSavePending || app.busy || media.busy)
+            return
+        if (cardGenerator.verifying) {
+            cardGenerator.cancel()
+            return
+        }
+        if (editorModelBusy)
+            return
+        const draft = cardSubmission()
+        if (!draft)
+            return
+        localCardError = ""
+        cardGenerator.verify(draft)
     }
     function addAnotherCard(deckId) {
         setDeck(deckId, true)
@@ -873,7 +896,7 @@ ApplicationWindow {
         if (action === "undo" || action === "redo" || action === "redoAlternate")
             return historyActionAllowed(action)
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
-            return cardDialog.visible && !editorSavePending && !editorRefining && !narrationDialog.visible
+            return cardDialog.visible && !editorSavePending && !editorModelBusy && !narrationDialog.visible
                     && !imageDialog.visible && !errorDialog.visible
                     && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
@@ -1577,11 +1600,11 @@ ApplicationWindow {
             context: Qt.WindowShortcut
             autoRepeat: false
             enabled: cardDialog.visible && cardDialog.activeFocus
-                && !window.editorSavePending && !window.editorRefining
+                && !window.editorSavePending && !window.editorModelBusy
             onActivated: window.navigateEditorSide()
         }
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
-        closePolicy: editorSavePending || window.androidPlatform ? Popup.NoAutoClose : Popup.CloseOnEscape
+        closePolicy: Popup.NoAutoClose
         width: Math.min(1120, window.width - 2 * window.gutter)
         height: Math.min(800, window.height - 2 * window.gutter)
         padding: cardDialog.width < 650 ? 14 : 24
@@ -1678,7 +1701,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 AppComboBox {
                     id: cardDeck
-                    enabled: !window.editorRefining
+                    enabled: !window.editorModelBusy
                     objectName: "cardDeck"
                     model: window.deckPathChoices()
                     onActivated: window.editorDestinationDeckId = currentValue || ""
@@ -1695,7 +1718,7 @@ ApplicationWindow {
                 }
                 AppComboBox {
                     id: cardKind
-                    enabled: !window.editorRefining
+                    enabled: !window.editorModelBusy
                     objectName: "cardKind"
                     model: [
                         {
@@ -1720,7 +1743,7 @@ ApplicationWindow {
                 visible: cardKind.currentValue !== "cloze"
                 CheckBox {
                     id: createInverted
-                    enabled: !window.editorRefining
+                    enabled: !window.editorModelBusy
                     objectName: "createInverted"
                     text: "Create inverted form"
                     visible: cardKind.currentValue !== "cloze"
@@ -1778,13 +1801,13 @@ ApplicationWindow {
                 GlyphButton {
                     glyph: "image"
                     hint: "Insert image (" + shortcuts.bindings.editorImage + ")"
-                    enabled: editorTabs.currentIndex === 0 && !media.busy && !window.editorRefining
+                    enabled: editorTabs.currentIndex === 0 && !media.busy && !window.editorModelBusy
                     onClicked: chooseImage()
                 }
                 GlyphButton {
                     glyph: "eye-closed-lashes"
                     hint: "Hide selected words (" + shortcuts.bindings.editorCloze + ")"
-                    enabled: editorTabs.currentIndex === 0 && !window.editorRefining
+                    enabled: editorTabs.currentIndex === 0 && !window.editorModelBusy
                     onClicked: hideSelection()
                 }
             }
@@ -1827,7 +1850,7 @@ ApplicationWindow {
                     contentWidth: availableWidth
                     TextArea {
                         id: editorSource
-                        readOnly: window.editorRefining
+                        readOnly: window.editorModelBusy
                         objectName: "editorSource"
                         font.family: Theme.monoFont
                         font.pixelSize: 17
@@ -1962,7 +1985,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 TextField {
                     id: cardTags
-                    readOnly: window.editorRefining
+                    readOnly: window.editorModelBusy
                     objectName: "cardTags"
                     placeholderText: "Tags, separated by commas"
                     Layout.fillWidth: true
@@ -1984,7 +2007,7 @@ ApplicationWindow {
                 }
                 SpinBox {
                     id: cardPoints
-                    enabled: !window.editorRefining
+                    enabled: !window.editorModelBusy
                     objectName: "cardPoints"
                     from: 1
                     to: 1000
@@ -2012,48 +2035,152 @@ ApplicationWindow {
                     details: (editorErrors.sourceIssue.detail || "") + (window.repairingStoredCard ? "\nSaving a repair first creates a recovery copy beside the collection, in its recovery folder, and clears session Undo/Redo. Existing learning records are retained." : "")
                 }
             }
-            ColumnLayout {
+            ScrollView {
+                id: generatedControlsViewport
                 visible: window.editingGeneratedCard
                 Layout.fillWidth: true
-                spacing: 6
-                Label {
-                    text: "Refinement instructions (optional)"
-                    color: Theme.ink
-                    font.bold: true
-                }
-                ScrollView {
-                    id: refinementScroll
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 72
-                    contentWidth: availableWidth
-                    clip: true
-                    TextArea {
-                        id: refinementInstructions
-                        objectName: "refinementInstructions"
-                        width: refinementScroll.availableWidth
-                        height: Math.max(refinementScroll.availableHeight, implicitHeight)
-                        readOnly: window.editorRefining
-                        textFormat: TextEdit.PlainText
-                        wrapMode: TextEdit.Wrap
-                        selectByMouse: true
-                        padding: 10
-                        color: Theme.ink
-                        placeholderText: "Describe what to change in this draft."
-                        Accessible.name: "Refinement instructions"
-                        background: Rectangle {
-                            radius: 8
-                            color: Theme.editorField
-                            border.color: refinementInstructions.activeFocus ? Theme.accent : Theme.rule
-                            border.width: refinementInstructions.activeFocus ? 2 : 1
+                Layout.minimumHeight: 0
+                Layout.preferredHeight: Math.min(generatedControls.implicitHeight,
+                    Math.max(72, cardDialog.availableHeight * 0.35))
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: generatedControls
+                    width: generatedControlsViewport.availableWidth
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: "Difficulty"; color: Theme.ink }
+                        AppComboBox {
+                            objectName: "refinementDifficulty"
+                            model: window.generationDifficultyChoices
+                            textRole: "label"
+                            valueRole: "key"
+                            currentIndex: Math.max(0, indexOfValue(window.generationDifficulty))
+                            onActivated: window.generationDifficulty = currentValue
+                            enabled: !window.editorModelBusy && !window.editorSavePending
+                            Layout.fillWidth: true
+                            comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
                         }
                     }
-                }
-                AppButton {
-                    objectName: "refineGeneratedCard"
-                    text: window.editorRefining ? "Cancel refinement" : "Generate refinement"
-                    hint: "Refine the current edited draft with the configured model. Nothing is saved until you accept."
-                    enabled: !app.busy && !media.busy && !window.editorSavePending
-                    onClicked: window.refineGeneratedCard()
+                    Label {
+                        text: "Refinement instructions (optional)"
+                        color: Theme.ink
+                        font.bold: true
+                    }
+                    ScrollView {
+                        id: refinementScroll
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 72
+                        contentWidth: availableWidth
+                        clip: true
+                        TextArea {
+                            id: refinementInstructions
+                            objectName: "refinementInstructions"
+                            width: refinementScroll.availableWidth
+                            height: Math.max(refinementScroll.availableHeight, implicitHeight)
+                            readOnly: window.editorModelBusy
+                            textFormat: TextEdit.PlainText
+                            wrapMode: TextEdit.Wrap
+                            selectByMouse: true
+                            padding: 10
+                            color: Theme.ink
+                            placeholderText: "Describe what to change in this draft."
+                            Accessible.name: "Refinement instructions"
+                            background: Rectangle {
+                                radius: 8
+                                color: Theme.editorField
+                                border.color: refinementInstructions.activeFocus ? Theme.accent : Theme.rule
+                                border.width: refinementInstructions.activeFocus ? 2 : 1
+                            }
+                        }
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        AppButton {
+                            objectName: "refineGeneratedCard"
+                            text: window.editorModelBusy && !cardGenerator.verifying ? "Cancel refinement" : "Generate refinement"
+                            hint: "Refine the edited draft with the selected difficulty and instructions. Nothing is saved until you accept."
+                            enabled: !app.busy && !media.busy && !window.editorSavePending && !cardGenerator.verifying
+                            onClicked: window.refineGeneratedCard()
+                        }
+                        AppButton {
+                            objectName: "checkGeneratedAnswer"
+                            text: cardGenerator.verifying ? "Cancel check" : "Check answer"
+                            hint: "Ask the configured model to solve the question without the draft answer, then compare the two answers. Review the result before saving."
+                            enabled: !app.busy && !media.busy && !window.editorSavePending
+                                && (!window.editorModelBusy || cardGenerator.verifying)
+                            onClicked: window.checkGeneratedAnswer()
+                        }
+                    }
+                    Label {
+                        visible: cardGenerator.verifying
+                        text: "Checking the answer with the selected model..."
+                        color: Theme.inkMuted
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                    }
+                    ColumnLayout {
+                        id: answerCheck
+                        readonly property var result: cardGenerator.verification
+                        readonly property bool current: !!result.verdict
+                            && cardGenerator.verificationMatches(window.currentCardDraft())
+                        property bool expanded: false
+                        visible: !!result.verdict
+                        Layout.fillWidth: true
+                        spacing: 6
+                        onCurrentChanged: expanded = false
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                color: Theme.ink
+                                font.bold: true
+                                wrapMode: Text.Wrap
+                                text: {
+                                    if (!answerCheck.current) return "Draft changed. Check the answer again."
+                                    switch (answerCheck.result.verdict) {
+                                    case "agrees": return window.currentCardDraft().kind === "reverse"
+                                        ? "Answer check: model agrees (Front to Back)" : "Answer check: model agrees"
+                                    case "issues": return "Answer check: issues found"
+                                    default: return "Answer check: uncertain"
+                                    }
+                                }
+                            }
+                            AppButton {
+                                text: answerCheck.expanded ? "Hide details" : "Show details"
+                                visible: answerCheck.current
+                                onClicked: answerCheck.expanded = !answerCheck.expanded
+                            }
+                        }
+                        ScrollView {
+                            id: answerCheckDetails
+                            visible: answerCheck.current && answerCheck.expanded
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(120, answerCheckText.implicitHeight)
+                            contentWidth: availableWidth
+                            clip: true
+                            Label {
+                                id: answerCheckText
+                                width: answerCheckDetails.availableWidth
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                                color: Theme.ink
+                                text: (answerCheck.result.reason || "")
+                                    + (answerCheck.result.independentAnswer ? "\n\nIndependent answer:\n" + answerCheck.result.independentAnswer : "")
+                            }
+                        }
+                        Label {
+                            visible: answerCheck.current
+                            text: window.currentCardDraft().kind === "reverse"
+                                ? "The check covers Front to Back only. Review the inverted form separately. Model checks can be wrong."
+                                : "Model checks can be wrong. Review before accepting."
+                            color: Theme.inkMuted
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
             }
         }
@@ -2072,7 +2199,7 @@ ApplicationWindow {
                 text: editorSavePending ? "Saving card..." : editingGeneratedCard ? "Accept generated card" : repairingStoredCard ? "Repair card" : "Save card"
                 primary: true
                 hint: shortcuts.bindings.saveCard
-                enabled: !media.busy && !editorSavePending && !editorRefining && !app.busy
+                enabled: !media.busy && !editorSavePending && !editorModelBusy && !app.busy
                 onClicked: submitCard()
             }
         }

@@ -59,16 +59,20 @@ not decide a weakness formula or change the spaced-repetition algorithm.
 ## Generate similar card
 
 Available from card detail, card action menus and the active review card:
-**Generate similar card** requests one new variation from the configured local
-or remote model. This explicit action starts generation; selecting a card or
-opening the Library does not. A progress dialog offers cancellation and retry
-when generation fails.
+**Generate similar card** opens a request dialog. Choose **Similar to source**
+(the default), **Easier than source**, or **Harder than source**, and optionally
+add up to 2,000 characters of generation instructions. Press **Generate card** to
+request one variation from the configured local or remote model. Opening the
+dialog does not start inference. Difficulty is a request about the problem's
+challenge relative to its source; it does not change review scheduling.
+The dialog offers cancellation and retry when generation fails.
 
 The result opens as an editable draft with the source deck and tags preselected.
 Edit its content, kind, deck, tags or answer points. Add optional **Refinement
-instructions**, then press **Generate refinement**. Each request uses the latest
-edited draft, the original source card and these instructions, rather than an
-accumulating conversation. Repeat as needed. Instructions are limited to 2,000
+instructions**, choose the desired difficulty, then press **Generate refinement**.
+Each request uses the latest edited draft, the original source card, the chosen
+difficulty and these instructions, rather than an accumulating conversation.
+Repeat as needed. Instructions are limited to 2,000
 characters per request and clear after a successful refinement. During a request,
 fields are read-only and **Cancel refinement** stops it. Refusals, invalid
 responses and request failures preserve the editable draft and its instructions.
@@ -101,4 +105,30 @@ stays paused. Adding another card keeps the workflow open until its editor or
 preview is closed. Source edits or removal invalidate further model requests;
 the user's editable draft remains available for inspection and manual saving.
 
-Follow-ups: independent answer verification, quantity and difficulty controls.
+### Independent answer check
+
+The generated-draft editor offers **Check answer**. For text-only cards, it makes
+two fresh requests
+to the selected model: first solve the question without seeing the proposed
+answer, then compare that independent answer with the current draft. For cloze
+notes, the first request replaces complete cloze markers, including hints, with
+numbered blanks and omits the back. Neither request includes the source card,
+review history, narration, credentials, or image pixels.
+
+The result reports **model agrees**, **issues found**, or **uncertain**. Details
+show the explanation and the independent answer when available. This is a
+separate model check using the same configured model, not external fact checking
+or a guarantee of correctness. If the solver cannot answer independently, the
+result remains uncertain. Cards with image references on either side return
+**uncertain** immediately without model requests, because the check cannot see
+image pixels. Reverse-card checks cover Front to Back only; the inverted form
+remains for manual review.
+
+Edits to either side, card kind, or answer-point count make a displayed result
+stale. Model configuration changes invalidate the result. Checking is optional,
+cancelable, and never edits or saves the draft. Fields are read-only while a
+check runs; canceling, a request failure, or an invalid response preserves the
+draft. Review the content and use **Accept generated card** to save explicitly.
+Automated and live-model behavioral verification remain paused until requested.
+
+Remaining follow-up: quantity controls.
