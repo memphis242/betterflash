@@ -14,6 +14,20 @@ Dialog {
     property bool loading: false
     property bool preview: false
     property string localError: ""
+    property string generationInstructions: ""
+    readonly property var failure: localError.length > 0 ? ({
+        code: "ATOMIC_DRAFT",
+        message: "A proposed card is missing required content.",
+        action: "Write a front for every card and a back for cards without cloze markers, then choose Replace again.",
+        detail: localError
+    }) : atomic.errorInfo
+    readonly property bool hasFailure: !!failure.message
+    onFailureChanged: {
+        if (atomicError)
+            atomicError.expanded = false
+        if (visible && hasFailure)
+            Qt.callLater(function() { if (dialog.visible && dialog.hasFailure) errorPanel.forceActiveFocus() })
+    }
     readonly property int draftIndex: atomicTabs.currentIndex - 1
     readonly property var currentDraft: draftIndex >= 0 && draftIndex < drafts.length ? drafts[draftIndex] : ({})
     readonly property bool splitReady: atomic.hasProposal && atomic.decision === "split" && drafts.length >= 2 && drafts.length <= 5
@@ -63,6 +77,7 @@ Dialog {
         if (applying)
             return
         atomic.clear()
+        generationInstructions = ""
         drafts = []
         seeded = false
         preview = false
@@ -80,7 +95,7 @@ Dialog {
         preview = false
         localError = ""
         atomicTabs.currentIndex = 0
-        atomic.propose(cardId)
+        atomic.propose(cardId, generationInstructions)
     }
     function loadDraft() {
         if (!draftSource || !points)
@@ -154,6 +169,49 @@ Dialog {
     }
     contentItem: ColumnLayout {
         spacing: 10
+        Rectangle {
+            id: errorPanel
+            visible: dialog.hasFailure
+            color: Theme.surfaceRaised
+            border.color: Theme.error
+            border.width: 2
+            radius: 10
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(errorContents.implicitHeight + 24, Math.max(120, dialog.availableHeight * 0.4))
+            activeFocusOnTab: true
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: (dialog.failure.message || "") + " " + (dialog.failure.action || "")
+            ScrollView {
+                id: errorScroll
+                anchors.fill: parent
+                anchors.margins: 12
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: errorContents
+                    width: errorScroll.availableWidth
+                    spacing: 8
+                    Label {
+                        text: dialog.failure.message || ""
+                        textFormat: Text.PlainText
+                        font.family: Theme.contentFont
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: Theme.error
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    ErrorBlock {
+                        id: atomicError
+                        objectName: "atomicError"
+                        textSize: 17
+                        message: dialog.failure.action || ""
+                        details: (dialog.failure.code || "") + (dialog.failure.detail ? "\n\n" + dialog.failure.detail : "")
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+        }
         AppButton {
             id: generateProposal
             objectName: "atomicGenerate"
@@ -178,12 +236,12 @@ Dialog {
             onClicked: dialog.generate()
         }
         ColumnLayout {
-            visible: atomic.busy || atomic.status.length > 0
+            visible: atomic.busy || (!dialog.hasFailure && atomic.status.length > 0)
             Layout.fillWidth: true
             spacing: 8
             Label {
                 textFormat: Text.PlainText
-                text: dialog.applying ? "Saving the replacement cards" : atomic.status
+                text: dialog.applying ? "Saving the replacement cards..." : atomic.status
                 color: Theme.ink
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -198,6 +256,17 @@ Dialog {
                 Layout.fillWidth: true
                 Accessible.name: dialog.applying ? "Saving replacement cards" : "Generating card proposal"
             }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            AppButton {
+                objectName: "atomicEditInstructions"
+                visible: !dialog.splitReady
+                text: dialog.generationInstructions.length > 0 ? "Edit instructions (custom)" : "Edit instructions"
+                enabled: !atomic.busy && !app.busy
+                onClicked: instructionsDialog.openEditor()
+            }
+            Item { Layout.fillWidth: true }
         }
         Label {
             textFormat: Text.PlainText
@@ -244,13 +313,24 @@ Dialog {
                 wrapMode: Text.Wrap
             }
         }
-        ErrorBlock {
-            objectName: "atomicError"
-            message: dialog.localError || atomic.error
+        Rectangle {
+            visible: dialog.drafts.length === 0
+            color: Theme.rule
+            Layout.fillWidth: true
+            implicitHeight: 1
+        }
+        Label {
+            visible: dialog.drafts.length === 0
+            text: "Source"
+            color: Theme.ink
+            font.family: Theme.contentFont
+            font.pixelSize: 18
+            font.bold: true
             Layout.fillWidth: true
         }
         TabBar {
             id: atomicTabs
+            visible: dialog.drafts.length > 0
             objectName: "atomicTabs"
             Layout.fillWidth: true
             enabled: !dialog.applying
@@ -387,6 +467,87 @@ Dialog {
             wrapMode: Text.Wrap
             font.pixelSize: 11
             Layout.fillWidth: true
+        }
+    }
+    Dialog {
+        id: instructionsDialog
+        title: "Atomicize instructions"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        width: Math.min(760, dialog.ui.width - 2 * dialog.ui.gutter)
+        height: Math.min(520, dialog.ui.height - 36)
+        padding: 20
+        function openEditor() {
+            instructionsSource.text = dialog.generationInstructions
+            open()
+            instructionsSource.forceActiveFocus()
+        }
+        background: Rectangle { color: Theme.surface; border.color: Theme.rule; radius: 10 }
+        header: Item {
+            implicitHeight: 60
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 20
+                anchors.rightMargin: 20
+                Label { text: instructionsDialog.title; color: Theme.ink; font.pixelSize: 21; Layout.fillWidth: true }
+                GlyphButton { glyph: "close"; hint: "Close instructions without saving"; onClicked: instructionsDialog.close() }
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                text: "Additional instructions for the next proposal (optional)"
+                font.family: Theme.uiFont
+                color: Theme.ink
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            Label {
+                text: "Describe which concepts to separate or keep together. These instructions are sent to the selected model along with this card. Saving them does not start generation."
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                TextArea {
+                    id: instructionsSource
+                    objectName: "atomicInstructions"
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    font.family: Theme.contentFont
+                    font.pixelSize: 17
+                    padding: 12
+                    placeholderText: "For example: Separate atomicity, durability, and rollback into standalone cards about database transactions."
+                    Accessible.name: "Additional Atomicize instructions"
+                    background: Rectangle { color: Theme.editorField; border.color: instructionsSource.activeFocus ? Theme.accent : Theme.rule; radius: 6 }
+                }
+            }
+            Label {
+                text: instructionsSource.length + " / 4000 characters"
+                color: instructionsSource.length > 4000 ? Theme.error : Theme.inkMuted
+                font.family: Theme.monoFont
+            }
+        }
+        footer: RowLayout {
+            Item { Layout.fillWidth: true }
+            AppButton { text: "Cancel"; onClicked: instructionsDialog.close() }
+            AppButton {
+                text: "Save instructions"
+                primary: true
+                enabled: instructionsSource.length <= 4000
+                onClicked: {
+                    dialog.generationInstructions = instructionsSource.text
+                    instructionsDialog.close()
+                }
+            }
         }
     }
     footer: RowLayout {

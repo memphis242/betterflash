@@ -14,6 +14,7 @@ class Atomicizer final : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool applying READ applying NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QVariantMap errorInfo READ errorInfo NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString reason READ reason NOTIFY changed)
     Q_PROPERTY(QString decision READ decision NOTIFY changed)
@@ -26,6 +27,7 @@ public:
     bool busy() const { return m_busy; }
     bool applying() const { return m_applying; }
     QString error() const { return m_error; }
+    QVariantMap errorInfo() const { return m_errorInfo; }
     QString status() const { return m_status; }
     QString reason() const { return m_reason; }
     QString decision() const { return m_decision; }
@@ -33,7 +35,7 @@ public:
     QVariantMap sourceCard() const { return m_source; }
     bool hasProposal() const { return m_decision == QStringLiteral("split") && m_proposals.size() >= 2; }
     Q_INVOKABLE bool prepare(const QString &cardId);
-    Q_INVOKABLE void propose(const QString &cardId);
+    Q_INVOKABLE void propose(const QString &cardId, const QString &userInstructions = {});
     Q_INVOKABLE bool apply(const QVariantList &editedProposals);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clear();
@@ -41,7 +43,7 @@ signals:
     void changed();
     void applied();
 private:
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &action = {}, const QString &detail = {});
     void receiveContent(const QString &response);
     AppController *const m_app;
     Summarizer *const m_provider;
@@ -52,6 +54,7 @@ private:
     QString m_reason;
     QString m_decision;
     QString m_error;
+    QVariantMap m_errorInfo;
     bool m_busy = false;
     bool m_applying = false;
 };

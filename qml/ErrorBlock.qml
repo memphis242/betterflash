@@ -34,6 +34,7 @@ ColumnLayout {
         id: messageText
         textFormat: TextEdit.PlainText
         font.pixelSize: block.textSize
+        font.family: Theme.uiFont
         text: block.message
         color: Theme.ink
         Layout.fillWidth: true

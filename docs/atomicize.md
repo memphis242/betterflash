@@ -37,7 +37,7 @@ optional supporting text on the back. Back-side markers or malformed marker
 syntax are rejected with a correction message. Existing saved cards are not
 rewritten automatically.
 
- The bounded preview dialog keeps the original available in a Source tab. Each
+The bounded preview dialog keeps the original available in a Source tab. Each
 proposed card has editable Markdown question and answer fields and an answer-
 point count. Related multi-point answers can stay grouped and retain partial
 grading. Images must use the original card's collection references; proposals
@@ -64,6 +64,24 @@ replacement. Keep the edited proposal open and resolve the reported cause. For
 a changed source, close and reopen Atomicize to preview its current content
 before generating again. Generation always uses the source snapshot shown in
 the dialog.
+
+## Errors and retry instructions
+
+Failures appear at the top of the dialog with a red boundary, a plain-language
+summary, and a suggested next action. Technical codes and causes are available
+under Show details, collapsed by default. An inconsistent model response that
+recommends keeping the source while returning replacement cards does not change
+the original or silently choose one interpretation.
+
+Edit instructions opens an optional editor for guidance added to the next model
+request. Instructions are limited to 4000 characters, remain available across
+retries in the current dialog, and are sent only when Generate Proposal or Try
+again is clicked. They do not override structural validation or storage safety.
+Closing Atomicize discards these instructions. No automatic retry calls occur.
+
+The original-only preview uses a Source heading separated by a horizontal rule.
+Source becomes a navigation tab once replacement drafts are available. Ongoing
+progress messages end with three dots.
 
 ## Model boundaries
 
