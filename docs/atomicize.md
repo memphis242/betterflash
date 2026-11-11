@@ -11,9 +11,12 @@ The provider first decides whether the card should stay together. Ordered
 steps, procedures, comparisons, and closely related bullet lists are
 explicitly treated as candidates for keeping one recall unit. Several bullets
 alone do not justify a split. The requested benefit is distinct learning
-objectives with more targeted questions. Each replacement must stand alone: the prompt asks the model to
-restore explicit subjects and resolve pronouns whose antecedents would be lost
-when splitting, including inside cloze statements, using only source facts.
+objectives with more targeted questions. Every candidate, including optional
+candidates alongside a keep recommendation, must stand alone. The prompt requires
+an explicit subject and scope in each front, concrete nouns in place of dangling
+pronouns, and an isolation check of questions, answers, cloze text, and hints.
+Repeating the source-grounded noun is preferred to ambiguous references. Literal
+code is preserved, and missing context must not be filled with invented facts.
 
 If a split is useful, the proposal contains two through five basic or cloze
 cards. There are no recursive requests and no automatic follow-up splits. A
