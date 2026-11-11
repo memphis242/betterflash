@@ -116,7 +116,10 @@ recorded response time, including ties. Reverse directions and cloze groups keep
 separate timing histories. If no usable history exists, use the shortest estimated
 reading-time quarter. Unreadable cards and schedules are excluded. Discovery
 yields between bounded database batches and is canceled when the user engages
-in other work.
+in other work. Once a card is shown in Review Pit Stop, it is excluded from
+another Pit Stop for 24 hours on this device, even if dismissed. The cooldown
+covers every direction and cloze group of the card and does not affect normal
+review sessions. If all due cards are cooling down, no Pit Stop appears.
 
 The popup shares the normal review card panel: the question remains visible,
 the large **Reveal answer** control reveals the answer below it, and the timer,

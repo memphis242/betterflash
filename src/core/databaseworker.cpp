@@ -37,6 +37,20 @@
 
 namespace model = betterflash::model;
 namespace {
+constexpr qint64 startupReviewCooldownMs = 24LL * 60 * 60 * 1000;
+static_assert(startupReviewCooldownMs == 86400000);
+
+std::optional<qint64> startupReviewTimestamp(const QVariant &value, const qint64 now)
+{
+    if (value.metaType().id()!=QMetaType::QString) return std::nullopt;
+    const QString text=value.toString();
+    bool valid=false;
+    const qint64 timestamp=text.toLongLong(&valid);
+    if (!valid || timestamp<0 || QString::number(timestamp)!=text || timestamp>now+startupReviewCooldownMs)
+        return std::nullopt;
+    return timestamp;
+}
+
 QVariantMap object(const QVariantMap &map, const QString &key) { return map.value(key).toMap(); }
 QString json(const QVariantMap &map) { return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(QJsonDocument::Compact)); }
 struct model::Deck readDeck(const QSqlQuery &q)
@@ -1962,8 +1976,9 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         due.setForwardOnly(true);
         const QString sql=QStringLiteral("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,"
                          "n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,"
-                         "d.name,v.graduated AS graduated,v.rowid AS startup_rowid FROM review_variants v "
-                         "LEFT JOIN notes n ON n.id=v.card_id LEFT JOIN decks d ON d.id=n.deck_id")
+                         "d.name,v.graduated AS graduated,v.rowid AS startup_rowid,cooldown.value FROM review_variants v "
+                         "LEFT JOIN notes n ON n.id=v.card_id LEFT JOIN decks d ON d.id=n.deck_id "
+                         "LEFT JOIN metadata cooldown ON cooldown.key='startup_review_shown:'||v.card_id")
             + (scan.hasCursor?QStringLiteral(" WHERE v.rowid>?"):QString{})
             + QStringLiteral(" ORDER BY v.rowid LIMIT ?");
         if (!due.prepare(sql)) {
@@ -1988,7 +2003,26 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
             const double points=pointsValue.toDouble();
             const bool validPoints=(pointsType==QMetaType::LongLong || pointsType==QMetaType::Int || pointsType==QMetaType::Double)
                 && std::isfinite(points) && std::floor(points)==points && points>=1 && points<=1000;
-            if (storageError.isEmpty() && schedule.due<=scan.now && textFieldsValid && validPoints
+            const qint64 nowMs=QDateTime::fromString(scan.now,Qt::ISODateWithMs).toMSecsSinceEpoch();
+            bool cooledDown=true;
+            if (!due.value(18).isNull()) {
+                const auto shown=startupReviewTimestamp(due.value(18),nowMs);
+                if (!shown) {
+                    cooledDown=false;
+                    if (!scan.invalidCooldownCards.contains(schedule.cardId)) {
+                        scan.invalidCooldownCards.insert(schedule.cardId);
+                        if (m_collectionIssues.size()<100) {
+                            m_collectionIssues.append(QVariantMap{{"code","STARTUP_REVIEW_COOLDOWN"},
+                                {"message","A card's Review Pit Stop cooldown needs repair. Other cards remain available for review."},
+                                {"detail",QStringLiteral("Card %1 has an invalid or far-future cooldown timestamp in metadata key startup_review_shown:%1. Check the system clock and preserve a database recovery copy before repair.").arg(schedule.cardId)}});
+                            emit collectionIssuesReady(m_collectionIssues);
+                        }
+                    }
+                } else {
+                    cooledDown=*shown<=nowMs-startupReviewCooldownMs;
+                }
+            }
+            if (storageError.isEmpty() && schedule.due<=scan.now && textFieldsValid && validPoints && cooledDown
                 && !m_cardLoadErrors.contains(schedule.cardId)) {
                 QString metadataError;
                 const QVariantMap narrations=readMetadata(due.value(13).toString(),QStringLiteral("narrations"),&metadataError);
@@ -2181,6 +2215,38 @@ void DatabaseWorker::beginStartupReview(const QVariantMap &expected)
     });
     if (changed || current->value("due").toString()>model::nowUtc()) {
         fail("STARTUP_REVIEW_STALE","The proposed card changed or is no longer due. Start a regular review instead.");return;
+    }
+    const QString cardId=current->value("id").toString();
+    assert(model::validUuid(cardId));
+    const QString cooldownKey=QStringLiteral("startup_review_shown:")+cardId;
+    bool recent=false;
+    bool invalidCooldown=false;
+    if (!mutate([&] {
+        const qint64 nowMs=QDateTime::currentMSecsSinceEpoch();
+        QSqlQuery cooldown(m_db);
+        if (!cooldown.prepare(QStringLiteral("SELECT value FROM metadata WHERE key=?"))) {
+            m_sqlDetail=cooldown.lastError().text();return false;
+        }
+        cooldown.addBindValue(cooldownKey);
+        if (!cooldown.exec()) {m_sqlDetail=cooldown.lastError().text();return false;}
+        if (cooldown.next()) {
+            const auto shown=startupReviewTimestamp(cooldown.value(0),nowMs);
+            if (!shown) {
+                invalidCooldown=true;
+                m_sqlDetail=QStringLiteral("Card %1 has an invalid or far-future cooldown timestamp in metadata key %2. Check the system clock and preserve a database recovery copy before repair.").arg(cardId,cooldownKey);
+                return false;
+            }
+            if (*shown>nowMs-startupReviewCooldownMs) {recent=true;return false;}
+        }
+        if (cooldown.lastError().isValid()) {m_sqlDetail=cooldown.lastError().text();return false;}
+        cooldown.finish();
+        return execute(QStringLiteral("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
+                       {cooldownKey,QString::number(nowMs)});
+    })) {
+        if (recent) fail("STARTUP_REVIEW_COOLDOWN","This card was recently shown in Review Pit Stop. Start a regular review instead.");
+        else if (invalidCooldown) fail("STARTUP_REVIEW_COOLDOWN","This card's Review Pit Stop cooldown needs repair. Check the system clock or use a regular review.",m_sqlDetail);
+        else fail("STARTUP_REVIEW_COOLDOWN_STORAGE","Could not save the Review Pit Stop cooldown. Check storage and start a regular review instead.",m_sqlDetail);
+        return;
     }
     m_sessionId=model::uuid();m_sessionStartedAt=model::nowUtc();
     m_sessionDeckName=current->value("deckName").toString();

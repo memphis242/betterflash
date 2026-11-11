@@ -128,6 +128,7 @@ private:
         bool hasCursor=false;
         QList<struct StartupCandidate> candidates{};
         QHash<QString,qsizetype> positions{};
+        QSet<QString> invalidCooldownCards{};
         qsizetype activeCount=0;
         qsizetype historicCount=0;
         bool useHistory=false;
