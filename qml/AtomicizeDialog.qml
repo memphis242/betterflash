@@ -155,7 +155,19 @@ Dialog {
     contentItem: ColumnLayout {
         spacing: 10
         AppButton {
+            id: generateProposal
             objectName: "atomicGenerate"
+            readonly property bool retry: atomic.error.length > 0 && !atomic.busy
+            foreground: retry ? Theme.ink : Theme.actionInk
+            background: Rectangle {
+                radius: 14
+                color: !generateProposal.enabled ? Theme.surfaceRaised
+                    : generateProposal.retry ? (generateProposal.hovered || generateProposal.down ? Theme.retryActionHover : Theme.retryActionFill)
+                    : Theme.actionFill
+                border.width: generateProposal.activeFocus || generateProposal.hovered ? 3 : 2
+                border.color: generateProposal.retry ? Theme.retryActionOutline : Theme.accent
+                opacity: generateProposal.enabled ? 1 : 0.7
+            }
             visible: !dialog.splitReady
             text: atomic.busy ? "Generating proposal" : atomic.error.length > 0 ? "Try again" : atomic.decision === "keep" ? "Generate again" : "Generate Proposal"
             primary: true
