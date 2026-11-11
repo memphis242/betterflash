@@ -690,6 +690,11 @@ ApplicationWindow {
             after: end + (text.charAt(end) === "\n" ? 1 : 0)
         }
     }
+    function isCardSideNavigationKey(event) {
+        return (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+            && (event.modifiers & Qt.ControlModifier) !== 0
+            && (event.modifiers & (Qt.AltModifier | Qt.MetaModifier)) === 0
+    }
     function navigateEditorSide() {
         if (editorTabs.currentIndex === 0) {
             splitOrMove()
@@ -1595,14 +1600,7 @@ ApplicationWindow {
     Sheet {
         id: cardDialog
         objectName: "cardDialog"
-        Shortcut {
-            sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
-            context: Qt.WindowShortcut
-            autoRepeat: false
-            enabled: cardDialog.visible && cardDialog.activeFocus
-                && !window.editorSavePending && !window.editorModelBusy
-            onActivated: window.navigateEditorSide()
-        }
+        focus: true
         title: editingGeneratedCard ? "Generated card draft" : repairingStoredCard ? "Repair card" : editingCardId ? "Edit card" : "New card"
         closePolicy: Popup.NoAutoClose
         width: Math.min(1120, window.width - 2 * window.gutter)
@@ -1687,6 +1685,14 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             enabled: !editorSavePending
             spacing: 10
+            Shortcut {
+                sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+                context: Qt.WindowShortcut
+                autoRepeat: false
+                enabled: cardDialog.visible && cardDialog.activeFocus
+                    && !window.editorSavePending && !window.editorModelBusy
+                onActivated: window.navigateEditorSide()
+            }
             Instantiator {
                 model: ["editorSplit", "editorCloze", "editorImage", "saveCard"]
                 delegate: Shortcut {
@@ -1852,6 +1858,20 @@ ApplicationWindow {
                         id: editorSource
                         readOnly: window.editorModelBusy
                         objectName: "editorSource"
+                        Keys.priority: Keys.BeforeItem
+                        Keys.onShortcutOverride: function(event) {
+                            if (!window.editorSavePending && !window.editorModelBusy
+                                && window.isCardSideNavigationKey(event))
+                                event.accepted = true
+                        }
+                        Keys.onPressed: function(event) {
+                            if (window.editorSavePending || window.editorModelBusy
+                                || !window.isCardSideNavigationKey(event))
+                                return
+                            event.accepted = true
+                            if (!event.isAutoRepeat)
+                                window.navigateEditorSide()
+                        }
                         font.family: Theme.monoFont
                         font.pixelSize: 17
                         wrapMode: TextEdit.Wrap
