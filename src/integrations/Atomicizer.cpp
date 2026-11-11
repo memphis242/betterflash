@@ -202,10 +202,11 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
         "each can have a more targeted question. Do not split closely related bullet lists, ordered steps, procedures, "
         "comparisons, or components that need their shared context. Lists alone are not evidence for splitting. "
         "An already focused card should be kept. Avoid increasing the number of cards without a clear recall benefit. "
-        "Return exactly one of two mutually exclusive outcomes. If the card should stay together, "
-        "set decision to exactly keep and cards to an empty array. If proposing replacements, "
-        "set decision to exactly split and cards to an array of TWO to FIVE complete question/answer pairs. "
-        "Never return replacement cards when decision is keep. "
+        "Set decision to exactly keep when recommending that the source stay together, or exactly split "
+        "when recommending replacements. A keep recommendation may have an empty cards array or TWO to FIVE "
+        "optional replacement candidates for the user to consider. A split recommendation must include TWO "
+        "to FIVE complete question/answer pairs. Explain the recommendation in reason; optional candidates "
+        "do not mean that the user should necessarily replace the source. "
         "Do not recursively split proposals. Never create more than five cards, invent facts, drop facts, or produce "
         "near-duplicate questions. Every proposed card must stand alone without the source card or sibling proposals. "
         "Make the subject and scope explicit in each front, including cloze statements. Resolve pronouns and "
@@ -229,6 +230,8 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
         "For replacement cards use this shape: {\"decision\":\"split\",\"reason\":\"short explanation\","
         "\"cards\":[{\"front\":\"Markdown question 1\",\"back\":\"Markdown answer 1\",\"pointCount\":1},"
         "{\"front\":\"Markdown question 2\",\"back\":\"Markdown answer 2\",\"pointCount\":1}]}. "
+        "To recommend keeping the source while offering optional candidates, use the replacement shape "
+        "with decision set to keep instead of split. "
         "The example text describes the format, not facts about the source card.");
     const QJsonObject source{{QStringLiteral("kind"), m_source.value(QStringLiteral("kind")).toString()},
         {QStringLiteral("front"), front}, {QStringLiteral("back"), back},
@@ -289,13 +292,7 @@ void Atomicizer::receiveContent(const QString &response) {
             QStringLiteral("Adjust the generation instructions and try again, or select a model that supports JSON responses."), detail); return;
     }
     QVariantList cards = object.value(QStringLiteral("cards")).toArray().toVariantList();
-    if (decision == QStringLiteral("keep") && !cards.isEmpty()) {
-        fail(QStringLiteral("ATOMICIZE_DECISION_CONFLICT"),
-            QStringLiteral("The model gave conflicting recommendations: it said to keep the original card but also supplied replacements."),
-            QStringLiteral("In Edit instructions, ask for a split or for the card to stay together, then try again. If the conflict continues, choose a different model in Language model settings."),
-            QStringLiteral("The response set decision to keep and included %1 replacement cards. A keep response must have an empty cards array.").arg(cards.size())); return;
-    }
-    if (decision == QStringLiteral("split")) {
+    if (decision == QStringLiteral("split") || !cards.isEmpty()) {
         const auto valid = validateProposals(cards, m_source);
         if (!valid) {
             fail(QStringLiteral("ATOMICIZE_PROPOSAL"), QStringLiteral("The language model returned a proposal that cannot be used."),
@@ -305,7 +302,9 @@ void Atomicizer::receiveContent(const QString &response) {
         cards = *valid;
     }
     m_decision = decision; m_reason = reason; m_proposals = cards; m_busy = false;
-    m_status = decision == QStringLiteral("keep") ? QStringLiteral("Keep this card together.")
+    m_status = decision == QStringLiteral("keep")
+        ? cards.isEmpty() ? QStringLiteral("Keep this card together.")
+            : QStringLiteral("Review the optional replacement candidates. The original card stays unchanged until you choose Replace.")
         : QStringLiteral("Review %1 proposed cards before replacing the original.").arg(cards.size());
     emit changed();
 }

@@ -17,7 +17,8 @@ when splitting, including inside cloze statements, using only source facts.
 
 If a split is useful, the proposal contains two through five basic or cloze
 cards. There are no recursive requests and no automatic follow-up splits. A
-keep result has a reason and no proposed cards. This limits growth per action;
+keep result has a reason and may include optional replacement candidates. The
+recommendation remains visible while those candidates are reviewed. This limits growth per action;
 real examples and user review will guide further prompt refinement.
 
 ## Review and save
@@ -69,9 +70,11 @@ the dialog.
 
 Failures appear at the top of the dialog with a red boundary, a plain-language
 summary, and a suggested next action. Technical codes and causes are available
-under Show details, collapsed by default. An inconsistent model response that
-recommends keeping the source while returning replacement cards does not change
-the original or silently choose one interpretation.
+under Show details, collapsed by default. When the model recommends keeping the
+original but also supplies replacement candidates, the dialog displays that
+recommendation and allows inspection and editing of the optional candidates.
+They pass the same validation and normalization as a split recommendation. Only
+the explicit Replace action changes the original.
 
 Edit instructions opens an optional editor for guidance added to the next model
 request. Instructions are limited to 4000 characters, remain available across

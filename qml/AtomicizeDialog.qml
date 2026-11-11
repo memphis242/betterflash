@@ -30,7 +30,7 @@ Dialog {
     }
     readonly property int draftIndex: atomicTabs.currentIndex - 1
     readonly property var currentDraft: draftIndex >= 0 && draftIndex < drafts.length ? drafts[draftIndex] : ({})
-    readonly property bool splitReady: atomic.hasProposal && atomic.decision === "split" && drafts.length >= 2 && drafts.length <= 5
+    readonly property bool splitReady: atomic.hasProposal && drafts.length >= 2 && drafts.length <= 5
 
     title: "Atomicize card"
     parent: Overlay.overlay
@@ -146,7 +146,7 @@ Dialog {
         function onChanged() {
             if (!dialog.visible)
                 return
-            if (!dialog.seeded && atomic.hasProposal && atomic.decision === "split") {
+            if (!dialog.seeded && atomic.hasProposal) {
                 dialog.drafts = atomic.proposals.map(card => ({
                             front: card.front,
                             back: card.back,
@@ -296,6 +296,17 @@ Dialog {
                 }
             }
         }
+        Label {
+            visible: atomic.decision === "keep" && atomic.hasProposal
+            text: "The model recommends keeping the original card, but also offered atomic replacement candidates."
+            textFormat: Text.PlainText
+            color: Theme.warning
+            font.family: Theme.contentFont
+            font.pixelSize: 17
+            font.bold: true
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+        }
         ScrollView {
             id: reasonScroll
             objectName: "atomicReasonScroll"
@@ -308,7 +319,7 @@ Dialog {
                 textFormat: Text.PlainText
                 id: reasonLabel
                 width: reasonScroll.availableWidth
-                text: (atomic.decision === "keep" ? "Keep this card together. " : "") + atomic.reason
+                text: (atomic.decision === "keep" && !atomic.hasProposal ? "Keep this card together. " : "") + atomic.reason
                 color: Theme.ink
                 wrapMode: Text.Wrap
             }
