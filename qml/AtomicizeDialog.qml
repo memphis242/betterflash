@@ -11,6 +11,7 @@ Dialog {
     readonly property bool applying: atomic.applying
     property bool prepared: false
     property bool seeded: false
+    property bool editingSet: false
     property bool loading: false
     property bool preview: false
     property string localError: ""
@@ -30,7 +31,7 @@ Dialog {
     }
     readonly property int draftIndex: atomicTabs.currentIndex - 1
     readonly property var currentDraft: draftIndex >= 0 && draftIndex < drafts.length ? drafts[draftIndex] : ({})
-    readonly property bool splitReady: atomic.hasProposal && drafts.length >= 2 && drafts.length <= 5
+    readonly property bool splitReady: editingSet && drafts.length >= 2 && drafts.length <= atomic.maxCards
 
     title: "Atomicize card"
     parent: Overlay.overlay
@@ -81,6 +82,7 @@ Dialog {
         generationInstructions = ""
         drafts = []
         seeded = false
+        editingSet = false
         preview = false
         localError = ""
         atomicTabs.currentIndex = 0
@@ -93,10 +95,44 @@ Dialog {
         const cardId = atomic.sourceCard.id
         drafts = []
         seeded = false
+        editingSet = false
         preview = false
         localError = ""
         atomicTabs.currentIndex = 0
         atomic.propose(cardId, generationInstructions)
+    }
+    function startManual() {
+        if (atomic.busy || app.busy || !prepared || !atomic.beginManual())
+            return
+        seeded = true
+        editingSet = true
+        preview = false
+        localError = ""
+        drafts = [{ front: "", back: "", pointCount: 1 }, { front: "", back: "", pointCount: 1 }]
+        atomicTabs.currentIndex = 1
+        loadDraft()
+        Qt.callLater(function() { draftSource.forceActiveFocus() })
+    }
+    function addDraft() {
+        if (!editingSet || atomic.busy || app.busy || drafts.length >= atomic.maxCards)
+            return
+        updateDraft()
+        drafts = drafts.concat([{ front: "", back: "", pointCount: 1 }])
+        preview = false
+        atomicTabs.currentIndex = drafts.length
+        loadDraft()
+        Qt.callLater(function() { draftSource.forceActiveFocus() })
+    }
+    function removeDraft() {
+        if (!editingSet || atomic.busy || app.busy || draftIndex < 0)
+            return
+        const index = draftIndex
+        const next = drafts.slice()
+        next.splice(index, 1)
+        drafts = next
+        localError = ""
+        atomicTabs.currentIndex = drafts.length === 0 ? 0 : Math.min(index + 1, drafts.length)
+        loadDraft()
     }
     function loadDraft() {
         if (!draftSource || !points)
@@ -123,6 +159,8 @@ Dialog {
         localError = ""
     }
     function submit() {
+        if (!splitReady || atomic.busy || app.busy)
+            return
         updateDraft()
         for (let i = 0; i < drafts.length; ++i) {
             if (!drafts[i].front.trim() || (!app.hasClozeMarkers(drafts[i].front) && !drafts[i].back.trim())) {
@@ -140,6 +178,7 @@ Dialog {
             atomic.clear()
             drafts = []
             seeded = false
+            editingSet = false
         }
     }
     Connections {
@@ -154,6 +193,7 @@ Dialog {
                             pointCount: card.pointCount || 1
                         }))
                 dialog.seeded = true
+                dialog.editingSet = true
                 atomicTabs.currentIndex = 1
                 dialog.loadDraft()
             }
@@ -230,7 +270,7 @@ Dialog {
                 border.color: generateProposal.retry ? Theme.retryActionOutline : Theme.accent
                 opacity: generateProposal.enabled ? 1 : 0.7
             }
-            visible: !dialog.splitReady
+            visible: !dialog.editingSet
             text: atomic.busy ? "Generating proposal" : atomic.error.length > 0 ? "Try again" : atomic.decision === "keep" ? "Generate again" : "Generate Proposal"
             primary: true
             Layout.fillWidth: true
@@ -253,7 +293,7 @@ Dialog {
         }
         Rectangle {
             id: resultPanel
-            visible: !atomic.busy && !dialog.hasFailure && atomic.decision.length > 0
+            visible: !atomic.busy && !dialog.hasFailure && (atomic.decision === "keep" || atomic.decision === "split")
             color: Theme.surfaceRaised
             border.color: atomic.decision === "keep" ? Theme.warning : Theme.rule
             radius: 8
@@ -268,7 +308,7 @@ Dialog {
                 spacing: 10
                 Label {
                     text: atomic.decision === "keep" ? "Recommendation: keep this card together"
-                        : "Recommendation: split into " + dialog.drafts.length + " cards"
+                        : "Recommendation: split into " + atomic.proposals.length + " cards"
                     textFormat: Text.PlainText
                     color: atomic.decision === "keep" ? Theme.warning : Theme.ink
                     font.family: Theme.contentFont
@@ -333,23 +373,33 @@ Dialog {
                 Accessible.name: dialog.applying ? "Saving replacement cards" : "Generating card proposal"
             }
         }
-        RowLayout {
-            visible: !dialog.splitReady
+        GridLayout {
+            visible: !dialog.editingSet
+            columns: dialog.ui.width < 600 ? 1 : 3
             Layout.fillWidth: true
             AppButton {
                 objectName: "atomicEditInstructions"
+                Layout.fillWidth: dialog.ui.width < 600
                 text: dialog.generationInstructions.length > 0 ? "Edit instructions (custom)" : "Edit instructions"
                 enabled: !atomic.busy && !app.busy
                 onClicked: instructionsDialog.openEditor()
             }
-            Item { Layout.fillWidth: true }
+            AppButton {
+                objectName: "atomicManual"
+                Layout.fillWidth: dialog.ui.width < 600
+                text: "Create split manually"
+                hint: "Write replacement cards without calling the language model"
+                enabled: dialog.prepared && !atomic.busy && !app.busy
+                onClicked: dialog.startManual()
+            }
+            Item { visible: dialog.ui.width >= 600; Layout.fillWidth: true }
         }
         RowLayout {
-            visible: ai.provider === "remote" && !ai.hasApiKey
+            visible: !dialog.editingSet && ai.provider === "remote" && !ai.hasApiKey
             Layout.fillWidth: true
             Label {
                 textFormat: Text.PlainText
-                text: "Add a language model key in Settings to use this action."
+                text: "Add a language model key in Settings to generate a proposal, or create a split manually."
                 color: Theme.inkMuted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -361,6 +411,33 @@ Dialog {
                     dialog.close()
                     dialog.ui.openLanguageModelSettings()
                 }
+            }
+        }
+        GridLayout {
+            visible: dialog.editingSet
+            columns: dialog.ui.width < 600 ? 2 : 3
+            Layout.fillWidth: true
+            Label {
+                Layout.columnSpan: dialog.ui.width < 600 ? 2 : 1
+                text: dialog.drafts.length + " / " + atomic.maxCards + " cards"
+                color: Theme.inkMuted
+                font.family: Theme.monoFont
+                Layout.fillWidth: true
+            }
+            AppButton {
+                objectName: "atomicAddCard"
+                text: "Add card"
+                hint: "Add a manually written card to this replacement set (up to " + atomic.maxCards + " cards)"
+                enabled: !atomic.busy && !app.busy && dialog.drafts.length < atomic.maxCards
+                onClicked: dialog.addDraft()
+            }
+            AppButton {
+                objectName: "atomicRemoveCard"
+                text: "Remove card"
+                hint: "Remove this unsaved draft from the replacement set"
+                outline: Theme.error
+                enabled: !atomic.busy && !app.busy && dialog.draftIndex >= 0
+                onClicked: dialog.removeDraft()
             }
         }
         Rectangle {
@@ -389,7 +466,7 @@ Dialog {
                 text: "Source"
                 font.pixelSize: 12
                 padding: 5
-                width: atomicTabs.width / (dialog.drafts.length + 1)
+                width: Math.max(88, atomicTabs.width / (dialog.drafts.length + 1))
             }
             Repeater {
                 model: dialog.drafts.length
@@ -398,7 +475,7 @@ Dialog {
                     text: "Card " + (index + 1)
                     font.pixelSize: 12
                     padding: 5
-                    width: atomicTabs.width / (dialog.drafts.length + 1)
+                    width: Math.max(88, atomicTabs.width / (dialog.drafts.length + 1))
                 }
             }
         }
@@ -511,8 +588,9 @@ Dialog {
         }
         Label {
             textFormat: Text.PlainText
-            visible: dialog.splitReady
-            text: "The replacement cards will be new cards in the same deck, with cloze groups numbered from 1 on each card. Review history is retained."
+            visible: dialog.editingSet
+            text: dialog.drafts.length < 2 ? "Add at least two cards before replacing the original."
+                : "The replacement cards will be new cards in the same deck, with cloze groups numbered from 1 on each card. Review history is retained."
             color: Theme.inkMuted
             wrapMode: Text.Wrap
             font.pixelSize: 11
@@ -614,10 +692,10 @@ Dialog {
         }
         AppButton {
             objectName: "atomicApply"
-            visible: dialog.splitReady
+            visible: dialog.editingSet
             text: dialog.applying ? "Replacing" : "Replace with " + dialog.drafts.length + " cards"
             primary: true
-            enabled: !atomic.busy && !dialog.applying
+            enabled: dialog.splitReady && !atomic.busy && !app.busy
             onClicked: dialog.submit()
         }
     }

@@ -329,7 +329,7 @@ bool AppController::replaceCardWithAtomicCards(const QVariantMap &expectedSource
     if (!valid) {
         setError({{"code","INVALID_ATOMIC_SPLIT"},{"message","Could not replace the card. Correct the proposed cards."},{"detail",valid.error()}});return false;
     }
-    invoke([=](DatabaseWorker *worker){worker->replaceCardWithAtomicCards(expectedSource,proposals);});return true;
+    return invoke([=](DatabaseWorker *worker){worker->replaceCardWithAtomicCards(expectedSource,proposals);});
 }
 void AppController::requestStartupReview()
 {

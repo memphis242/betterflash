@@ -15,6 +15,8 @@ namespace betterflash::model {
 
 inline constexpr int maxTextLength = 1024 * 1024;
 inline constexpr int maxCollectionRecords = 100000;
+inline constexpr int maxAtomicReplacementCards = 20;
+static_assert(maxAtomicReplacementCards >= 2);
 inline constexpr qsizetype maxSyncEventBytes = 3 * 1024 * 1024;
 inline constexpr qsizetype maxSyncBatchBytes = 3584 * 1024;
 static_assert(maxSyncBatchBytes > maxSyncEventBytes);

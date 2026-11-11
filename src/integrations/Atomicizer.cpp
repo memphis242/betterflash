@@ -14,9 +14,14 @@
 #include <expected>
 
 namespace {
-std::expected<QVariantList, QString> validateProposals(const QVariantList &values, const QVariantMap &source) {
-    if (values.size() < 2 || values.size() > 5)
-        return std::unexpected(QStringLiteral("A split needs between two and five focused cards."));
+constexpr int maxGeneratedAtomicCards = 5;
+static_assert(maxGeneratedAtomicCards <= betterflash::model::maxAtomicReplacementCards);
+
+std::expected<QVariantList, QString> validateProposals(const QVariantList &values, const QVariantMap &source, const int maximum) {
+    Q_ASSERT(maximum >= 2 && maximum <= betterflash::model::maxAtomicReplacementCards);
+    if (values.size() < 2 || values.size() > maximum)
+        return std::unexpected(QStringLiteral("A split needs between 2 and %1 focused cards; received %2.")
+            .arg(maximum).arg(values.size()));
     const auto original = betterflash::model::cardFromMap(source);
     if (!original) return std::unexpected(original.error());
     const auto sourceImages = betterflash::model::mediaReferences({*original});
@@ -116,6 +121,11 @@ Atomicizer::Atomicizer(AppController *app, Summarizer *provider, QObject *parent
         });
 }
 Atomicizer::~Atomicizer() { cancel(); }
+bool Atomicizer::hasProposal() const {
+    return (m_decision == QStringLiteral("split") || m_decision == QStringLiteral("keep"))
+        && m_proposals.size() >= 2 && m_proposals.size() <= maxGeneratedAtomicCards;
+}
+int Atomicizer::maxCards() const { return betterflash::model::maxAtomicReplacementCards; }
 void Atomicizer::fail(const QString &code, const QString &message, const QString &action, const QString &detail) {
     Q_ASSERT(!code.isEmpty() && !message.isEmpty());
     m_busy = false;
@@ -165,13 +175,18 @@ bool Atomicizer::prepare(const QString &cardId) {
             QStringLiteral("Choose a saved card from the library and open Atomicize again."));
         return false;
     }
-    const QString front = m_source.value(QStringLiteral("front")).toString();
-    const QString back = m_source.value(QStringLiteral("back")).toString();
-    if (front.size() + back.size() > 32000) {
-        fail(QStringLiteral("ATOMICIZE_SIZE"), QStringLiteral("This card is too long to send for a proposal."),
-            QStringLiteral("Shorten the source card to at most 32000 characters across its two sides."),
-            QStringLiteral("The source contains %1 characters across both sides.").arg(front.size() + back.size())); return false;
+    emit changed();
+    return true;
+}
+bool Atomicizer::beginManual() {
+    if (m_busy || m_applying) return false;
+    if (m_source.isEmpty()) {
+        fail(QStringLiteral("ATOMICIZE_CARD"), QStringLiteral("The selected saved card is unavailable."),
+            QStringLiteral("Choose a saved card from the library and open Atomicize again."));
+        return false;
     }
+    m_proposals.clear(); m_error.clear(); m_errorInfo.clear(); m_status.clear(); m_reason.clear();
+    m_decision = QStringLiteral("manual");
     emit changed();
     return true;
 }
@@ -320,7 +335,7 @@ void Atomicizer::receiveContent(const QString &response) {
     }
     QVariantList cards = object.value(QStringLiteral("cards")).toArray().toVariantList();
     if (decision == QStringLiteral("split") || !cards.isEmpty()) {
-        const auto valid = validateProposals(cards, m_source);
+        const auto valid = validateProposals(cards, m_source, maxGeneratedAtomicCards);
         if (!valid) {
             fail(QStringLiteral("ATOMICIZE_PROPOSAL"), QStringLiteral("The language model returned a proposal that cannot be used."),
                 QStringLiteral("Adjust the generation instructions and try again, or choose a different model."), valid.error());
@@ -336,8 +351,13 @@ void Atomicizer::receiveContent(const QString &response) {
     emit changed();
 }
 bool Atomicizer::apply(const QVariantList &editedProposals) {
-    if (m_busy || !hasProposal()) return false;
-    const auto valid = validateProposals(editedProposals, m_source);
+    if (m_busy || m_applying) return false;
+    if (m_source.isEmpty()) {
+        fail(QStringLiteral("ATOMICIZE_CARD"), QStringLiteral("The selected saved card is unavailable."),
+            QStringLiteral("Choose a saved card from the library and open Atomicize again."));
+        return false;
+    }
+    const auto valid = validateProposals(editedProposals, m_source, betterflash::model::maxAtomicReplacementCards);
     if (!valid) {
         fail(QStringLiteral("ATOMICIZE_PROPOSAL"), QStringLiteral("The proposed cards cannot be saved yet."),
             QStringLiteral("Correct the proposed cards using the details below and try replacing again."), valid.error());

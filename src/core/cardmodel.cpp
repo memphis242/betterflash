@@ -328,8 +328,9 @@ std::expected<QVariantMap, QString> normalizeAtomicProposal(const QVariantMap &p
 }
 std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct Card &source,const QVariantList &proposals)
 {
-    if (proposals.size()<2||proposals.size()>5)
-        return std::unexpected(QStringLiteral("A replacement needs between two and five focused cards."));
+    if (proposals.size()<2||proposals.size()>maxAtomicReplacementCards)
+        return std::unexpected(QStringLiteral("A replacement needs between 2 and %1 focused cards; received %2.")
+            .arg(maxAtomicReplacementCards).arg(proposals.size()));
     const auto original=cardFromMap(toMap(source));
     if (!original) return std::unexpected(original.error());
     const QStringList originalMedia=*cardMediaReferences(source);

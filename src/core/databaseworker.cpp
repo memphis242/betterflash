@@ -1358,7 +1358,7 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
         return true;
     });
     if (!committed) {
-        if (stale) reject("ATOMIC_SPLIT_STALE","The original card changed or was deleted. Generate a new proposal from its current content.");
+        if (stale) reject("ATOMIC_SPLIT_STALE","The original card changed or was deleted. Reopen Atomicize for the current saved card before preparing replacements.");
         else reject("ATOMIC_SPLIT_SAVE","Could not replace the card. The original card and pending sync changes were preserved. Check storage and retry.",m_sqlDetail);
         return;
     }

@@ -21,6 +21,7 @@ class Atomicizer final : public QObject {
     Q_PROPERTY(QVariantList proposals READ proposals NOTIFY changed)
     Q_PROPERTY(QVariantMap sourceCard READ sourceCard NOTIFY changed)
     Q_PROPERTY(bool hasProposal READ hasProposal NOTIFY changed)
+    Q_PROPERTY(int maxCards READ maxCards CONSTANT)
 public:
     Atomicizer(AppController *app, Summarizer *provider, QObject *parent = nullptr);
     ~Atomicizer() override;
@@ -33,9 +34,10 @@ public:
     QString decision() const { return m_decision; }
     QVariantList proposals() const { return m_proposals; }
     QVariantMap sourceCard() const { return m_source; }
-    bool hasProposal() const { return (m_decision == QStringLiteral("split") || m_decision == QStringLiteral("keep"))
-        && m_proposals.size() >= 2 && m_proposals.size() <= 5; }
+    bool hasProposal() const;
+    int maxCards() const;
     Q_INVOKABLE bool prepare(const QString &cardId);
+    Q_INVOKABLE bool beginManual();
     Q_INVOKABLE void propose(const QString &cardId, const QString &userInstructions = {});
     Q_INVOKABLE bool apply(const QVariantList &editedProposals);
     Q_INVOKABLE void cancel();

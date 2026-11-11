@@ -30,6 +30,22 @@ keep result has a reason and may include optional replacement candidates. The
 recommendation remains visible while those candidates are reviewed. This limits growth per action;
 real examples and user review will guide further prompt refinement.
 
+## Manual replacement sets
+
+Create split manually opens two blank replacement drafts using the saved source
+as a reference, without requiring a model, API key, or generation request. The
+source remains accessible in its own tab. Add card also appends a blank draft to
+an existing model proposal, so the user can include concepts the model omitted.
+Remove card removes only an unsaved draft; it never deletes a saved card.
+
+Model output stays limited to two through five candidates. A user-edited or
+entirely manual replacement set may contain two through twenty cards. The card
+navigation scrolls horizontally when needed. At least two drafts are required
+for Replace; basic cards need a front and back, while cloze cards may have an
+empty back. Manual drafts use the same cloze normalization, media preservation,
+stale-source checks, and transactional save as generated proposals. Preparing a
+manual split is independent of the model request's source-length limit.
+
 ## Review and save
 
 Generate Proposal spans the top of the dialog. While the model is running, a
@@ -79,8 +95,8 @@ If the source is edited or deleted while the proposal is being prepared,
 saving the split is rejected. A failed write rolls back the entire
 replacement. Keep the edited proposal open and resolve the reported cause. For
 a changed source, close and reopen Atomicize to preview its current content
-before generating again. Generation always uses the source snapshot shown in
-the dialog.
+before generating or manually preparing replacements again. Both workflows use
+the source snapshot shown in the dialog.
 
 ## Errors and retry instructions
 
