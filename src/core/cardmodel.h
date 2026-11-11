@@ -109,6 +109,7 @@ QVariantMap toMap(const struct Variant &record);
 QVariantMap toMap(const struct Review &record);
 std::expected<struct Deck, QString> deckFromMap(const QVariantMap &value);
 std::expected<struct Card, QString> cardFromMap(const QVariantMap &value);
+std::expected<QVariantMap, QString> normalizeAtomicProposal(const QVariantMap &proposal);
 std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct Card &source,const QVariantList &proposals);
 std::expected<struct Variant, QString> variantFromMap(const QVariantMap &value);
 std::expected<struct Review, QString> reviewFromMap(const QVariantMap &value);

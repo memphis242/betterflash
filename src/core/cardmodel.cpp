@@ -286,6 +286,46 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
     if (!references) return std::unexpected(references.error());
     return card;
 }
+std::expected<QVariantMap, QString> normalizeAtomicProposal(const QVariantMap &proposal)
+{
+    const auto hasMarkers = [](const QString &source) {
+        for (qsizetype offset = source.indexOf(QStringLiteral("[cloze")); offset >= 0;
+             offset = source.indexOf(QStringLiteral("[cloze"), offset + 1)) {
+            if (!escapedCharacter(source, offset)) return true;
+        }
+        return false;
+    };
+    if (!text(proposal,"front",10000,true) || !text(proposal,"back",10000))
+        return std::unexpected(QStringLiteral("Each proposed side must be Markdown text of at most 10000 characters, with a nonempty front."));
+    QString front = proposal.value(QStringLiteral("front")).toString();
+    const QString back = proposal.value(QStringLiteral("back")).toString();
+    if (hasMarkers(back))
+        return std::unexpected(QStringLiteral("Cloze markers belong on the front. Move them to the front or escape literal markers in the back."));
+    QVariantMap normalized = proposal;
+    if (!hasMarkers(front)) {
+        if (back.trimmed().isEmpty())
+            return std::unexpected(QStringLiteral("A basic proposed card needs both a front and a back."));
+        normalized.insert(QStringLiteral("kind"), QStringLiteral("basic"));
+        return normalized;
+    }
+    const auto parts = parseCloze(front);
+    if (!parts) return std::unexpected(parts.error());
+    QSet<int> groups;
+    for (const struct ClozePart &part : *parts) groups.insert(part.group);
+    QList<int> ordered = groups.values();
+    std::sort(ordered.begin(), ordered.end());
+    for (auto it = parts->crbegin(); it != parts->crend(); ++it) {
+        const qsizetype index = ordered.indexOf(it->group);
+        assert(index >= 0);
+        const int digitsStart = it->start + 6;
+        const int digitsLength = it->answerStart - digitsStart - 1;
+        assert(digitsLength > 0);
+        front.replace(digitsStart, digitsLength, QString::number(index + 1));
+    }
+    normalized.insert(QStringLiteral("front"), front);
+    normalized.insert(QStringLiteral("kind"), QStringLiteral("cloze"));
+    return normalized;
+}
 std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct Card &source,const QVariantList &proposals)
 {
     if (proposals.size()<2||proposals.size()>5)
@@ -302,10 +342,12 @@ std::expected<QList<struct Card>,QString> atomicCardsFromProposals(const struct 
             return std::unexpected(QStringLiteral("Each proposed card must contain a question and answer."));
         QVariantMap fields=value.toMap();
         if (!fields.contains("pointCount")) fields.insert("pointCount",1);
-        if (!text(fields,"front",10000,true)||!text(fields,"back",10000,true)||!number(fields,"pointCount",1,1000,true))
-            return std::unexpected(QStringLiteral("Each proposed side needs Markdown text of at most 10000 characters and a whole answer-point count from 1 through 1000."));
-        const struct Card proposed{uuid(),source.deckId,QStringLiteral("basic"),fields.value("front").toString(),
-            fields.value("back").toString(),source.tags,fields.value("pointCount").toInt(),{}};
+        if (!number(fields,"pointCount",1,1000,true))
+            return std::unexpected(QStringLiteral("Each proposed card needs a whole answer-point count from 1 through 1000."));
+        const auto normalized = normalizeAtomicProposal(fields);
+        if (!normalized) return std::unexpected(normalized.error());
+        const struct Card proposed{uuid(),source.deckId,normalized->value("kind").toString(),normalized->value("front").toString(),
+            normalized->value("back").toString(),source.tags,normalized->value("pointCount").toInt(),{}};
         const auto valid=cardFromMap(toMap(proposed));
         if (!valid) return std::unexpected(valid.error());
         const QString question=proposed.front.simplified().toCaseFolded();

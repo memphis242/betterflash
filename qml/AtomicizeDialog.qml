@@ -42,14 +42,6 @@ Dialog {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
-            AppButton {
-                objectName: "atomicGenerate"
-                visible: !dialog.splitReady
-                text: atomic.busy ? "Generating" : atomic.error.length > 0 ? "Try again" : atomic.decision === "keep" ? "Generate again" : "Generate proposal"
-                primary: true
-                enabled: !atomic.busy && !app.busy && dialog.prepared && !!atomic.sourceCard.id
-                onClicked: dialog.generate()
-            }
             GlyphButton {
                 glyph: "close"
                 hint: "Close Atomicize"
@@ -117,8 +109,8 @@ Dialog {
     function submit() {
         updateDraft()
         for (let i = 0; i < drafts.length; ++i) {
-            if (!drafts[i].front.trim() || !drafts[i].back.trim()) {
-                localError = "ATOMIC_DRAFT: Write a front and a back for every proposed card."
+            if (!drafts[i].front.trim() || (!app.hasClozeMarkers(drafts[i].front) && !drafts[i].back.trim())) {
+                localError = "ATOMIC_DRAFT: Write a front for every card and a back for cards without cloze markers."
                 atomicTabs.currentIndex = i + 1
                 draftSource.forceActiveFocus()
                 return
@@ -162,6 +154,39 @@ Dialog {
     }
     contentItem: ColumnLayout {
         spacing: 10
+        AppButton {
+            objectName: "atomicGenerate"
+            visible: !dialog.splitReady
+            text: atomic.busy ? "Generating proposal" : atomic.error.length > 0 ? "Try again" : atomic.decision === "keep" ? "Generate again" : "Generate Proposal"
+            primary: true
+            Layout.fillWidth: true
+            Layout.preferredHeight: 52
+            font.pixelSize: 17
+            enabled: !atomic.busy && !app.busy && dialog.prepared && !!atomic.sourceCard.id
+            onClicked: dialog.generate()
+        }
+        ColumnLayout {
+            visible: atomic.busy || atomic.status.length > 0
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                textFormat: Text.PlainText
+                text: dialog.applying ? "Saving the replacement cards" : atomic.status
+                color: Theme.ink
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                font.pixelSize: atomic.busy ? 17 : 14
+                font.bold: atomic.busy
+                Accessible.role: Accessible.StaticText
+            }
+            ProgressBar {
+                objectName: "atomicProgress"
+                visible: atomic.busy
+                indeterminate: atomic.busy
+                Layout.fillWidth: true
+                Accessible.name: dialog.applying ? "Saving replacement cards" : "Generating card proposal"
+            }
+        }
         Label {
             textFormat: Text.PlainText
             text: ai.provider === "local" ? "Generate proposal processes the front and back on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
@@ -189,16 +214,6 @@ Dialog {
                     dialog.ui.openLanguageModelSettings()
                 }
             }
-        }
-        Label {
-            textFormat: Text.PlainText
-            visible: atomic.busy || atomic.status.length > 0
-            text: dialog.applying ? "Replacing the original card" : atomic.status
-            color: Theme.inkMuted
-            wrapMode: Text.Wrap
-            Layout.fillWidth: true
-            font.family: Theme.monoFont
-            font.pixelSize: 11
         }
         ScrollView {
             id: reasonScroll
@@ -301,6 +316,7 @@ Dialog {
                     }
                     MarkdownPane {
                         markdown: dialog.draftIndex < 0 ? (atomic.sourceCard.front || "") : (dialog.currentDraft.front || "")
+                        clozePreview: app.hasClozeMarkers(markdown)
                         mediaRoot: media.rootPath
                         baseFontSize: 18
                         Layout.fillWidth: true
@@ -320,6 +336,7 @@ Dialog {
                     }
                     MarkdownPane {
                         markdown: dialog.draftIndex < 0 ? (atomic.sourceCard.back || "") : (dialog.currentDraft.back || "")
+                        clozePreview: app.hasClozeMarkers(markdown)
                         mediaRoot: media.rootPath
                         baseFontSize: 18
                         Layout.fillWidth: true
@@ -353,7 +370,7 @@ Dialog {
         Label {
             textFormat: Text.PlainText
             visible: dialog.splitReady
-            text: "The replacement cards will be new basic cards in the same deck. Review history is retained."
+            text: "The replacement cards will be new cards in the same deck, with cloze groups numbered from 1 on each card. Review history is retained."
             color: Theme.inkMuted
             wrapMode: Text.Wrap
             font.pixelSize: 11

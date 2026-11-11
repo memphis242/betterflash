@@ -62,8 +62,12 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
                 observed += QStringLiteral(" (%1)").arg(valueText);
             return std::unexpected(QStringLiteral("Proposed card %1 has an invalid answer-point count: %2. It must be a whole number from 1 through 1000. Request another proposal or correct the count.").arg(cardNumber).arg(observed));
         }
-        struct betterflash::model::Card card{betterflash::model::uuid(), original->deckId, QStringLiteral("basic"),
-            frontValue.toString(), backValue.toString(), original->tags, static_cast<int>(points)};
+        const auto normalized = betterflash::model::normalizeAtomicProposal(proposal);
+        if (!normalized)
+            return std::unexpected(QStringLiteral("Proposed card %1: %2").arg(cardNumber).arg(normalized.error()));
+        const struct betterflash::model::Card card{betterflash::model::uuid(), original->deckId,
+            normalized->value(QStringLiteral("kind")).toString(), normalized->value(QStringLiteral("front")).toString(),
+            normalized->value(QStringLiteral("back")).toString(), original->tags, static_cast<int>(points)};
         const auto valid = betterflash::model::cardFromMap(betterflash::model::toMap(card));
         if (!valid) return std::unexpected(valid.error());
         const QString question = card.front.simplified().toCaseFolded();
@@ -79,7 +83,7 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
             usedImages.insert(name);
         }
         result.append(QVariantMap{{QStringLiteral("front"), card.front}, {QStringLiteral("back"), card.back},
-            {QStringLiteral("pointCount"), card.pointCount}});
+            {QStringLiteral("pointCount"), card.pointCount}, {QStringLiteral("kind"), card.kind}});
     }
     if (usedImages != allowedImages)
         return std::unexpected(QStringLiteral("Keep every attached image on a relevant proposed card before replacing the original."));
@@ -174,10 +178,20 @@ void Atomicizer::propose(const QString &cardId) {
         "An already focused card should be kept. Avoid increasing the number of cards without a clear recall benefit. "
         "Return a decision of keep with an empty cards array, or split with between TWO and FIVE complete question/answer pairs. "
         "Do not recursively split proposals. Never create more than five cards, invent facts, drop facts, or produce "
-        "near-duplicate questions. Preserve needed context, exact code, Markdown, LaTeX, and every existing media: image "
+        "near-duplicate questions. Every proposed card must stand alone without the source card or sibling proposals. "
+        "Make the subject and scope explicit in each front, including cloze statements. Resolve pronouns and "
+        "references such as it, they, this, that, these, the former, and the above to their concrete nouns when "
+        "the antecedent would be missing or ambiguous after splitting. Carry the minimum necessary context into "
+        "each card; an answer may rely on its own front, but neither side may rely on another card. "
+        "For example, replace 'It survives restart' with 'A committed transaction survives restart' only when "
+        "the source establishes that committed transactions are the subject. Do not guess an antecedent or add facts. "
+        "Before returning, read each card in isolation and repair dangling references, including within cloze text. "
+        "Preserve exact code, Markdown, LaTeX, and every existing media: image "
         "reference on at least one relevant card. Image pixels are not provided; do not infer their contents. "
-        "Never invent media references or external image URLs. New cards are basic, "
-        "even for a reverse or cloze source. Replace cloze markup with its known meaning when forming questions and answers. "
+        "Never invent media references or external image URLs. A proposed card may be basic or cloze. "
+        "For a cloze source, preserve useful numbered cloze markers and hints on each proposed card's front, "
+        "with distinct groups starting at 1 for each card. Keep repeated markers for the same group together. "
+        "Use [cloze1:answer|optional hint] syntax, and put cloze markers only on the front. "
         "Every proposed card must include pointCount as a whole number from 1 through 1000. "
         "For a related multi-point answer left together, pointCount records its recall points; otherwise use 1. "
         "Use a short reason explaining independent concepts or why a group must stay together. Use no emoji or em dash. "

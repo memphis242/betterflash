@@ -1346,8 +1346,14 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
         if (!stored||model::toMap(*stored)!=model::toMap(*expected)) {stale=true;return false;}
         if (!eraseCard(sourceId)||!enqueue("card.delete",{{"id",sourceId}})) return false;
         for (const struct model::Card &replacement:*replacements) {
-            const struct model::Variant schedule{model::variantId(replacement.id,"forward"),replacement.id,"forward",model::nowUtc()};
-            if (!upsertCard(replacement)||!upsertVariant(schedule)||!enqueue("card.upsert",cardPayload(replacement))) return false;
+            if (!upsertCard(replacement)) return false;
+            const auto keys = model::variantKeys(replacement);
+            Q_ASSERT(keys);
+            for (const QString &key : *keys) {
+                const struct model::Variant schedule{model::variantId(replacement.id,key),replacement.id,key,model::nowUtc()};
+                if (!upsertVariant(schedule)) return false;
+            }
+            if (!enqueue("card.upsert",cardPayload(replacement))) return false;
         }
         return true;
     });
