@@ -22,6 +22,8 @@ QtObject {
     readonly property color accentSoft: dark ? "#563b3f" : "#d7eef0"
     readonly property color actionFill: dark ? accent : "#bde4e8"
     readonly property color actionInk: dark ? onAccent : "#153d43"
+    readonly property color cancelActionFill: dark ? "#54333c" : "#f1d6d7"
+    readonly property color cancelActionHover: dark ? "#40262d" : "#e3b5b8"
     readonly property color retryActionFill: dark ? "#593c31" : "#f3ded3"
     readonly property color retryActionHover: dark ? "#704832" : "#ecc5ae"
     readonly property color retryActionOutline: dark ? "#e7a17d" : "#a34b34"

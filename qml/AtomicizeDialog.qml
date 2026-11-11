@@ -241,6 +241,10 @@ Dialog {
         }
         AppButton {
             objectName: "atomicCancelRequest"
+            fill: Theme.cancelActionFill
+            hoverFill: Theme.cancelActionHover
+            outline: Theme.error
+            focusOutline: Theme.error
             text: "Cancel request"
             hint: "Stop generating and keep the original card unchanged"
             visible: atomic.busy && !dialog.applying
