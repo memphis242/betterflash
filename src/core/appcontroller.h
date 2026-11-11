@@ -30,6 +30,8 @@ class AppController final : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool developmentToolsEnabled READ developmentToolsEnabled CONSTANT)
     Q_PROPERTY(bool reviewing READ reviewing NOTIFY reviewingChanged)
+    Q_PROPERTY(QVariantMap startupReviewCard READ startupReviewCard NOTIFY startupReviewCardChanged)
+    Q_PROPERTY(bool startupReviewActive READ startupReviewActive NOTIFY startupReviewActiveChanged)
     Q_PROPERTY(bool reviewingCompletedCard READ reviewingCompletedCard NOTIFY reviewStateChanged)
     Q_PROPERTY(QString reviewCursorVariantId READ reviewCursorVariantId NOTIFY reviewStateChanged)
     Q_PROPERTY(bool answerRevealed READ answerRevealed NOTIFY answerRevealedChanged)
@@ -63,6 +65,8 @@ public:
     bool busy() const { return m_busy; }
     bool developmentToolsEnabled() const;
     bool reviewing() const { return m_reviewing; }
+    [[nodiscard]] QVariantMap startupReviewCard() const { return m_startupReviewCard; }
+    [[nodiscard]] bool startupReviewActive() const { return m_startupReviewActive; }
     bool reviewingCompletedCard() const { return m_reviewingCompletedCard; }
     QString reviewCursorVariantId() const { return m_reviewCursorVariantId; }
     bool answerRevealed() const { return m_answerRevealed; }
@@ -107,6 +111,9 @@ public:
     Q_INVOKABLE void resetDeck(const QString &id);
     Q_INVOKABLE void resetCard(const QString &id);
     Q_INVOKABLE bool replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
+    Q_INVOKABLE void requestStartupReview();
+    Q_INVOKABLE void startStartupReview();
+    Q_INVOKABLE void dismissStartupReview();
     Q_INVOKABLE void startReview(const QString &deckId = {});
     Q_INVOKABLE void selectReviewCard(const QString &variantId);
     Q_INVOKABLE void navigateReview(int offset);
@@ -143,6 +150,7 @@ signals:
     void dueCountsChanged(); void historyChanged(); void reviewSessionsChanged(); void reviewOrderChanged();
     void selectedDeckIdChanged(); void statusMessageChanged(); void currentCardChanged();
     void lastErrorChanged(); void busyChanged(); void reviewingChanged();
+    void startupReviewCardChanged(); void startupReviewActiveChanged();
     void answerRevealedChanged(); void pausedChanged(); void reviewStateChanged();
     void responseSecondsChanged(); void spokenAnswerChanged();
     void pendingGradeCorrectionChanged();
@@ -206,6 +214,10 @@ private:
     QSet<QString> m_leftReviewedVariants;
     bool m_busy = true;
     bool m_reviewing = false;
+    QVariantMap m_startupReviewCard{};
+    bool m_startupReviewRequested = false;
+    bool m_startupReviewDismissed = false;
+    bool m_startupReviewActive = false;
     bool m_reviewingCompletedCard = false;
     bool m_answerRevealed = false;
     bool m_paused = false;

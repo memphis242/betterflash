@@ -129,7 +129,7 @@ Item {
     Connections {
         target: app
         function onPausedChanged() {
-            if (app.reviewing && !app.paused)
+            if (app.reviewing && !app.paused && !app.startupReviewActive)
                 page.ui.page = 0;
         }
         function onCurrentCardChanged() {

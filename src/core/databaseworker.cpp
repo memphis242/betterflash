@@ -5,13 +5,16 @@
 #include "studyguidance.h"
 #include "cardreadability.h"
 
+#include <QCryptographicHash>
 #include <QDate>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
+#include <QRandomGenerator>
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QSet>
@@ -19,6 +22,7 @@
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QThread>
+#include <QTimer>
 #include <QTimeZone>
 #include <algorithm>
 #include <array>
@@ -138,6 +142,16 @@ struct WeaknessSummary aggregateWeakness(const QList<struct model::Variant> &var
     return result;
 }
 
+QByteArray startupReviewFingerprint(const QVariantMap &card)
+{
+    static const QStringList fields{QStringLiteral("id"),QStringLiteral("deckId"),QStringLiteral("kind"),
+        QStringLiteral("front"),QStringLiteral("back"),QStringLiteral("pointCount"),QStringLiteral("variantId"),
+        QStringLiteral("variantKey"),QStringLiteral("due"),QStringLiteral("reviewCount"),QStringLiteral("stability"),
+        QStringLiteral("difficulty"),QStringLiteral("graduated"),QStringLiteral("question"),QStringLiteral("answer")};
+    QJsonObject value;
+    for (const QString &field:fields) value.insert(field,QJsonValue::fromVariant(card.value(field)));
+    return QCryptographicHash::hash(QJsonDocument(value).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256);
+}
 }
 
 DatabaseWorker::DatabaseWorker(QString path) : m_path(std::move(path)) {}
@@ -146,6 +160,7 @@ void DatabaseWorker::assertThread() const { assert(thread() == QThread::currentT
 void DatabaseWorker::shutdown()
 {
     assertThread();
+    cancelStartupReviewCandidate();
     if (m_db.isValid()) {
         m_db.close();
         m_db = QSqlDatabase();
@@ -990,7 +1005,14 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
         const QString now=model::nowUtc();
         QHash<QString,QVariantMap> cache;
         QSqlQuery q(m_db);
-        q.prepare("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name,v.graduated AS graduated FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id");
+        if (m_startupSession) q.setForwardOnly(true);
+        const QString sql=QStringLiteral("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,d.name,v.graduated AS graduated FROM review_variants v JOIN notes n ON n.id=v.card_id JOIN decks d ON d.id=n.deck_id")
+            + (m_startupSession?QStringLiteral(" WHERE v.id=?"):QString{});
+        if (!q.prepare(sql)) {fail("REVIEW_LOAD","Could not prepare the review queue. Refresh and try again.",q.lastError().text());return false;}
+        if (m_startupSession) {
+            assert(m_sessionOrder.size()==1);
+            q.addBindValue(m_sessionOrder.constFirst());
+        }
         if (!q.exec()) {fail("REVIEW_LOAD","Could not load the review queue. Refresh and try again.",q.lastError().text());return false;}
         while (q.next()) {
             QString storageError;
@@ -1003,6 +1025,7 @@ bool DatabaseWorker::publishQueue(bool resetCurrent)
                 ||!keys||!keys->contains(schedule.key)||m_cardLoadErrors.contains(note.id)) continue;
             cache.insert(schedule.id,reviewCard(note,schedule,q.value(15).toString()));
         }
+        if (q.lastError().isValid()) {fail("REVIEW_LOAD","Could not finish reading the review queue. Refresh and try again.",q.lastError().text());return false;}
         m_queueCache=std::move(cache);
     }
     m_queueDirty=false;
@@ -1479,8 +1502,313 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
     if (publishSnapshot()) done(QStringLiteral("Reset %1 source card(s). All variants are new and due now.").arg(count));
 #endif
 }
+void DatabaseWorker::cancelStartupReviewCandidate()
+{
+    assertThread();
+    ++m_startupScanGeneration;
+    m_startupScan.reset();
+}
+void DatabaseWorker::finishStartupReviewScan(const quint64 generation,const QVariantMap &card,const QVariantMap &error)
+{
+    assertThread();
+    if (!m_startupScan || m_startupScan->generation!=generation) return;
+    m_startupScan.reset();
+    emit startupReviewCandidateReady(card,error);
+}
+void DatabaseWorker::queueStartupReviewSlice(const quint64 generation)
+{
+    assertThread();
+    QTimer::singleShot(0,this,[this,generation] {processStartupReviewSlice(generation);});
+}
+void DatabaseWorker::selectStartupReviewCandidate()
+{
+    assertThread();
+    cancelStartupReviewCandidate();
+    if (!m_db.isOpen()) {
+        emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_UNAVAILABLE"},
+            {"message","Storage is unavailable for the optional quick review. Check the data directory and restart."},
+            {"detail",QString()}});
+        return;
+    }
+    if (m_sessionActive || m_startupSession) {emit startupReviewCandidateReady({},{});return;}
+    m_startupScan.emplace();
+    m_startupScan->generation=m_startupScanGeneration;
+    m_startupScan->now=model::nowUtc();
+    queueStartupReviewSlice(m_startupScanGeneration);
+}
+void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
+{
+    assertThread();
+    if (!m_startupScan || m_startupScan->generation!=generation || generation!=m_startupScanGeneration) return;
+    if (!m_db.isOpen() || m_sessionActive || m_startupSession) {cancelStartupReviewCandidate();return;}
+    m_sqlDetail.clear();
+    struct StartupScan &scan=*m_startupScan;
+    const auto failScan=[this,generation](const QString &code,const QString &message,const QString &detail) {
+        finishStartupReviewScan(generation,{},{{"code",code},{"message",message},{"detail",detail}});
+    };
+    constexpr int workBudgetMs=5;
+    constexpr int dueBatch=64;
+    constexpr int reviewBatch=256;
+    constexpr int cpuBatch=512;
+    constexpr int selectionBatch=8;
+    static_assert(dueBatch>0 && reviewBatch>0 && cpuBatch>0 && selectionBatch>0 && workBudgetMs>0);
+    QElapsedTimer elapsed;
+    elapsed.start();
+
+    if (scan.phase==StartupScan::Phase::Due) {
+        QSqlQuery due(m_db);
+        due.setForwardOnly(true);
+        const QString sql=QStringLiteral("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,"
+                         "n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,"
+                         "d.name,v.graduated AS graduated,v.rowid AS startup_rowid FROM review_variants v "
+                         "LEFT JOIN notes n ON n.id=v.card_id LEFT JOIN decks d ON d.id=n.deck_id")
+            + (scan.hasCursor?QStringLiteral(" WHERE v.rowid>?"):QString{})
+            + QStringLiteral(" ORDER BY v.rowid LIMIT ?");
+        if (!due.prepare(sql)) {
+            failScan(QStringLiteral("STARTUP_REVIEW_LOAD"),QStringLiteral("Could not prepare the quick review queue. Continue with a regular review or inspect storage."),due.lastError().text());return;
+        }
+        if (scan.hasCursor) due.addBindValue(scan.rowCursor);
+        due.addBindValue(dueBatch);
+        if (!due.exec()) {failScan(QStringLiteral("STARTUP_REVIEW_LOAD"),QStringLiteral("Could not read the quick review queue. Continue with a regular review or inspect storage."),due.lastError().text());return;}
+        int examined=0;
+        bool yielded=false;
+        while (due.next()) {
+            scan.rowCursor=due.value(17).toLongLong();
+            scan.hasCursor=true;
+            ++examined;
+            QString storageError;
+            const struct model::Variant schedule=readVariant(due,&storageError);
+            bool textFieldsValid=true;
+            for (const int column:{7,8,9,10,11,13,14,15})
+                if (due.value(column).isNull() || due.value(column).metaType().id()!=QMetaType::QString) textFieldsValid=false;
+            const QVariant pointsValue=due.value(12);
+            const int pointsType=pointsValue.metaType().id();
+            const double points=pointsValue.toDouble();
+            const bool validPoints=(pointsType==QMetaType::LongLong || pointsType==QMetaType::Int || pointsType==QMetaType::Double)
+                && std::isfinite(points) && std::floor(points)==points && points>=1 && points<=1000;
+            if (storageError.isEmpty() && schedule.due<=scan.now && textFieldsValid && validPoints
+                && !m_cardLoadErrors.contains(schedule.cardId)) {
+                QString metadataError;
+                const QVariantMap narrations=readMetadata(due.value(13).toString(),QStringLiteral("narrations"),&metadataError);
+                const QVariantMap fingerprints=readMetadata(due.value(14).toString(),QStringLiteral("narration fingerprints"),&metadataError);
+                const struct model::Card note{schedule.cardId,due.value(7).toString(),due.value(8).toString(),
+                    due.value(9).toString(),due.value(10).toString(),due.value(11).toString(),due.value(12).toInt(),narrations,fingerprints};
+                const auto keys=model::variantKeys(note);
+                if (metadataError.isEmpty() && model::cardFromMap(model::toMap(note))
+                    && model::variantFromMap(model::toMap(schedule)) && keys && keys->contains(schedule.key)) {
+                    const QVariantMap card=reviewCard(note,schedule,due.value(15).toString());
+                    const struct StartupCandidate candidate{schedule.id,schedule.cardId,startupReviewFingerprint(card),
+                        model::readingBudget(card.value("question").toString()),0,0,false};
+                    const auto position=scan.positions.constFind(schedule.id);
+                    if (position==scan.positions.cend()) {
+                        scan.positions.insert(schedule.id,scan.candidates.size());
+                        scan.candidates.append(candidate);
+                    } else {
+                        scan.candidates[*position]=candidate;
+                    }
+                }
+            }
+            if (examined>=dueBatch || elapsed.elapsed()>=workBudgetMs) {yielded=true;break;}
+        }
+        if (due.lastError().isValid()) {failScan(QStringLiteral("STARTUP_REVIEW_LOAD"),QStringLiteral("Could not finish reading the quick review queue. Continue with a regular review or inspect storage."),due.lastError().text());return;}
+        due.finish();
+        if (!yielded) {
+            if (scan.candidates.isEmpty()) {finishStartupReviewScan(generation,{},{});return;}
+            scan.activeCount=scan.candidates.size();
+            scan.rowCursor=0;
+            scan.hasCursor=false;
+            scan.phase=StartupScan::Phase::History;
+        }
+        queueStartupReviewSlice(generation);
+        return;
+    }
+    if (scan.phase==StartupScan::Phase::History) {
+        QSqlQuery reviews(m_db);
+        reviews.setForwardOnly(true);
+        const QString sql=QStringLiteral("SELECT id,card_id,variant_id,deck_name,grade,recall_fraction,response_seconds,"
+                             "reviewed_at,due,session_id,session_deck_name,session_started_at,rowid FROM reviews")
+            + (scan.hasCursor?QStringLiteral(" WHERE rowid>?"):QString{})
+            + QStringLiteral(" ORDER BY rowid LIMIT ?");
+        if (!reviews.prepare(sql)) {
+            failScan(QStringLiteral("STARTUP_REVIEW_HISTORY"),QStringLiteral("Could not prepare the quick review history. Continue with a regular review or inspect storage."),reviews.lastError().text());return;
+        }
+        if (scan.hasCursor) reviews.addBindValue(scan.rowCursor);
+        reviews.addBindValue(reviewBatch);
+        if (!reviews.exec()) {failScan(QStringLiteral("STARTUP_REVIEW_HISTORY"),QStringLiteral("Could not read quick review times. Continue with a regular review or inspect storage."),reviews.lastError().text());return;}
+        int examined=0;
+        bool yielded=false;
+        while (reviews.next()) {
+            scan.rowCursor=reviews.value(12).toLongLong();
+            scan.hasCursor=true;
+            ++examined;
+            const QVariant variantId=reviews.value(2);
+            const QVariant cardId=reviews.value(1);
+            if (!variantId.isNull() && !cardId.isNull()
+                && variantId.metaType().id()==QMetaType::QString && cardId.metaType().id()==QMetaType::QString) {
+                const auto position=scan.positions.constFind(variantId.toString());
+                if (position!=scan.positions.cend()) {
+                    struct StartupCandidate &candidate=scan.candidates[*position];
+                    if (candidate.cardId==cardId.toString()) {
+                        QString storageError;
+                        const struct model::Review review=readReview(reviews,&storageError);
+                        if (storageError.isEmpty() && review.responseSeconds>0.0 && std::isfinite(review.responseSeconds)) {
+                            if (candidate.sampleCount==0) ++scan.historicCount;
+                            ++candidate.sampleCount;
+                            candidate.meanSeconds+=(review.responseSeconds-candidate.meanSeconds)/static_cast<double>(candidate.sampleCount);
+                        }
+                    }
+                }
+            }
+            if (examined>=reviewBatch || elapsed.elapsed()>=workBudgetMs) {yielded=true;break;}
+        }
+        if (reviews.lastError().isValid()) {failScan(QStringLiteral("STARTUP_REVIEW_HISTORY"),QStringLiteral("Could not finish reading quick review times. Continue with a regular review or inspect storage."),reviews.lastError().text());return;}
+        reviews.finish();
+        if (!yielded) {
+            scan.useHistory=scan.historicCount>0;
+            const qsizetype eligible=scan.useHistory?scan.historicCount:scan.activeCount;
+            assert(eligible>0);
+            scan.rankLimit=(eligible+3)/4;
+            scan.index=0;
+            scan.phase=StartupScan::Phase::Rank;
+        }
+        queueStartupReviewSlice(generation);
+        return;
+    }
+    if (scan.phase==StartupScan::Phase::Rank) {
+        int examined=0;
+        while (scan.index<scan.candidates.size()) {
+            const struct StartupCandidate &candidate=scan.candidates.at(scan.index++);
+            if (!candidate.excluded && (!scan.useHistory || candidate.sampleCount>0)) {
+                const double score=scan.useHistory?candidate.meanSeconds:candidate.readingBudget;
+                assert(std::isfinite(score) && score>0);
+                if (scan.fastest.size()<scan.rankLimit) {
+                    scan.fastest.append(score);
+                    std::push_heap(scan.fastest.begin(),scan.fastest.end());
+                } else if (score<scan.fastest.constFirst()) {
+                    std::pop_heap(scan.fastest.begin(),scan.fastest.end());
+                    scan.fastest.last()=score;
+                    std::push_heap(scan.fastest.begin(),scan.fastest.end());
+                }
+            }
+            if (++examined>=cpuBatch || elapsed.elapsed()>=workBudgetMs) break;
+        }
+        if (scan.index==scan.candidates.size()) {
+            assert(!scan.fastest.isEmpty() && scan.fastest.size()==scan.rankLimit);
+            scan.threshold=scan.fastest.constFirst();
+            scan.fastest.clear();
+            scan.index=0;
+            scan.phase=StartupScan::Phase::Pool;
+        }
+        queueStartupReviewSlice(generation);
+        return;
+    }
+    if (scan.phase==StartupScan::Phase::Pool) {
+        int examined=0;
+        while (scan.index<scan.candidates.size()) {
+            const qsizetype position=scan.index++;
+            const struct StartupCandidate &candidate=scan.candidates.at(position);
+            if (!candidate.excluded && (!scan.useHistory || candidate.sampleCount>0)) {
+                const double score=scan.useHistory?candidate.meanSeconds:candidate.readingBudget;
+                if (score<=scan.threshold) scan.pool.append(position);
+            }
+            if (++examined>=cpuBatch || elapsed.elapsed()>=workBudgetMs) break;
+        }
+        if (scan.index==scan.candidates.size()) {
+            assert(!scan.pool.isEmpty());
+            scan.phase=StartupScan::Phase::Pick;
+        }
+        queueStartupReviewSlice(generation);
+        return;
+    }
+    assert(scan.phase==StartupScan::Phase::Pick);
+    int examined=0;
+    while (!scan.pool.isEmpty()) {
+        const qsizetype selected=static_cast<qsizetype>(QRandomGenerator::global()->bounded(static_cast<quint64>(scan.pool.size())));
+        const qsizetype position=scan.pool.at(selected);
+        scan.pool[selected]=scan.pool.constLast();
+        scan.pool.removeLast();
+        struct StartupCandidate &candidate=scan.candidates[position];
+        assert(!candidate.excluded && scan.activeCount>0);
+        const auto card=reviewCardByVariant(candidate.id);
+        if (!m_sqlDetail.isEmpty()) {
+            failScan(QStringLiteral("STARTUP_REVIEW_LOAD"),QStringLiteral("Could not load the selected quick review card. Continue with a regular review or inspect storage."),m_sqlDetail);return;
+        }
+        if (card && card->value("due").toString()<=model::nowUtc()
+            && startupReviewFingerprint(*card)==candidate.fingerprint) {
+            QVariantMap result=*card;
+            if (candidate.sampleCount>0) {
+                result.insert("averageResponseSeconds",candidate.meanSeconds);
+                result.insert("historySampleCount",QVariant::fromValue(static_cast<qlonglong>(candidate.sampleCount)));
+            }
+            finishStartupReviewScan(generation,result,{});
+            return;
+        }
+        candidate.excluded=true;
+        --scan.activeCount;
+        if (candidate.sampleCount>0) {assert(scan.historicCount>0);--scan.historicCount;}
+        if (++examined>=selectionBatch || elapsed.elapsed()>=workBudgetMs) break;
+    }
+    if (scan.pool.isEmpty()) {
+        if (scan.activeCount==0) {finishStartupReviewScan(generation,{},{});return;}
+        scan.useHistory=scan.historicCount>0;
+        const qsizetype eligible=scan.useHistory?scan.historicCount:scan.activeCount;
+        scan.rankLimit=(eligible+3)/4;
+        scan.index=0;
+        scan.fastest.clear();
+        scan.phase=StartupScan::Phase::Rank;
+    }
+    queueStartupReviewSlice(generation);
+}
+
+void DatabaseWorker::beginStartupReview(const QVariantMap &expected)
+{
+    cancelStartupReviewCandidate();
+    if (!ready()) return;
+    if (!m_historyReady) {fail("UNDO_CAPTURE_UNAVAILABLE","Undo history is unavailable. Restart before starting a quick review.");return;}
+    if (m_sessionActive || m_startupSession) {fail("STARTUP_REVIEW_ACTIVE","A review is already active. Finish it before starting a quick review.");return;}
+    const QString id=expected.value("variantId").toString();
+    if (!model::validUuid(id)) {fail("STARTUP_REVIEW_STALE","The proposed quick review is no longer available. Start a regular review.");return;}
+    const auto current=reviewCardByVariant(id);
+    if (!m_sqlDetail.isEmpty()) {fail("STARTUP_REVIEW_LOAD","Could not load the proposed review card. Start a regular review or inspect storage.",m_sqlDetail);return;}
+    static const QStringList fields{QStringLiteral("id"),QStringLiteral("deckId"),QStringLiteral("kind"),
+        QStringLiteral("front"),QStringLiteral("back"),QStringLiteral("pointCount"),QStringLiteral("variantId"),
+        QStringLiteral("variantKey"),QStringLiteral("due"),QStringLiteral("reviewCount"),QStringLiteral("stability"),
+        QStringLiteral("difficulty"),QStringLiteral("graduated"),QStringLiteral("question"),QStringLiteral("answer")};
+    const bool changed=!current || std::any_of(fields.cbegin(),fields.cend(),[&](const QString &field) {
+        return expected.value(field)!=current->value(field);
+    });
+    if (changed || current->value("due").toString()>model::nowUtc()) {
+        fail("STARTUP_REVIEW_STALE","The proposed card changed or is no longer due. Start a regular review instead.");return;
+    }
+    m_sessionId=model::uuid();m_sessionStartedAt=model::nowUtc();
+    m_sessionDeckName=current->value("deckName").toString();
+    m_queue={id};m_sessionOrder={id};m_queueCache.clear();m_sessionGrades.clear();
+    m_selectedVariant=id;m_queueDirty=true;m_sessionTotal=1;m_sessionActive=true;m_startupSession=true;
+    if (!publishQueue(true)) {
+        m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
+        m_selectedVariant.clear();m_sessionTotal=0;m_sessionActive=false;m_startupSession=false;m_queueDirty=true;
+        return;
+    }
+    if (m_sessionOrder.isEmpty()) {
+        m_startupSession=false;
+        fail("STARTUP_REVIEW_STALE","The proposed card is no longer available for review. Start a regular review instead.");return;
+    }
+    done("Quick review started");
+}
+
+void DatabaseWorker::endStartupReview()
+{
+    if (!ready()) return;
+    if (!m_startupSession) {fail("STARTUP_REVIEW_INACTIVE","The quick review has already ended. Return to your collection.");return;}
+    m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
+    m_sessionActive=false;m_startupSession=false;m_selectedVariant.clear();m_queueDirty=true;
+    emit reviewQueueReady({},m_sessionTotal,true,{},false,{});
+    done("Quick review ended");
+}
+
 void DatabaseWorker::beginReview(const QString &deckId, const QString &order)
 {
+    cancelStartupReviewCandidate();
     const struct HistoryScope history(this, QStringLiteral("Start review"));
     if (!history) return;
     if (!ready()) return;
@@ -1609,6 +1937,10 @@ void DatabaseWorker::gradeCard(int grade,double recall,double seconds,const QStr
     const struct HistoryScope history(this, QStringLiteral("Grade card"));
     if (!history) return;
     if (!ready()) return;
+    if (m_startupSession) {
+        m_historyBeforeSession={};
+        m_historySuppressSession=true;
+    }
     if (grade<0||grade>4||!std::isfinite(recall)||recall<0||recall>1||!std::isfinite(seconds)||seconds<0||seconds>86400) {fail("INVALID_GRADE","Choose a grade from 0 to 4 and a recall fraction between 0 and 1.");return;}
     if (!m_sessionActive||!m_sessionOrder.contains(expectedVariant)||m_selectedVariant!=expectedVariant) {fail("REVIEW_STALE","The review card changed. Read the current card and try again.");return;}
     const auto old=variant(expectedVariant,true);

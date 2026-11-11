@@ -41,6 +41,10 @@ public:
     void moveCards(const QVariantList &cardIds, const QString &destinationDeckId, const QString &requestId = {});
     void resetReviewState(const QString &id, bool deckScope);
     void replaceCardWithAtomicCards(const QVariantMap &expectedSource,const QVariantList &proposals);
+    void selectStartupReviewCandidate();
+    void cancelStartupReviewCandidate();
+    void beginStartupReview(const QVariantMap &expected);
+    void endStartupReview();
     void beginReview(const QString &deckId, const QString &order = QStringLiteral("due"));
     void selectReviewCard(const QString &variantId);
     void endReview();
@@ -79,6 +83,7 @@ signals:
     void cardSaved(const QString &cardId, const QString &requestId, bool success);
     void cardNarrationSaved(const QString &cardId, const QString &variantKey, const QString &side,
                             const QString &requestId, bool success);
+    void startupReviewCandidateReady(const QVariantMap &card, const QVariantMap &error);
     void reviewQueueReady(const QVariantList &cards, int total, bool resetCurrent, const QVariantMap &selectedCard,
                           bool inspecting, const QString &cursorVariantId);
     void gradeCommitted(bool correction);
@@ -96,6 +101,38 @@ private:
     QString m_path;
     QString m_connectionName;
     QSqlDatabase m_db;
+    struct StartupCandidate {
+        QString id{};
+        QString cardId{};
+        QByteArray fingerprint{};
+        double readingBudget=0;
+        double meanSeconds=0;
+        qsizetype sampleCount=0;
+        bool excluded=false;
+    };
+    struct StartupScan {
+        enum class Phase { Due, History, Rank, Pool, Pick };
+        quint64 generation=0;
+        Phase phase=Phase::Due;
+        QString now{};
+        qint64 rowCursor=0;
+        bool hasCursor=false;
+        QList<struct StartupCandidate> candidates{};
+        QHash<QString,qsizetype> positions{};
+        qsizetype activeCount=0;
+        qsizetype historicCount=0;
+        bool useHistory=false;
+        qsizetype index=0;
+        qsizetype rankLimit=0;
+        QList<double> fastest{};
+        double threshold=0;
+        QList<qsizetype> pool{};
+    };
+    std::optional<struct StartupScan> m_startupScan{};
+    quint64 m_startupScanGeneration=0;
+    void queueStartupReviewSlice(quint64 generation);
+    void processStartupReviewSlice(quint64 generation);
+    void finishStartupReviewScan(quint64 generation, const QVariantMap &card, const QVariantMap &error);
     QString m_deviceId;
     QString m_collectionId;
     bool m_allowHierarchyRepair = false;
@@ -124,6 +161,7 @@ private:
     bool m_queueDirty = true;
     int m_sessionTotal = 0;
     bool m_sessionActive = false;
+    bool m_startupSession = false;
     QString m_sessionId;
     QString m_sessionDeckName;
     QString m_sessionStartedAt;
@@ -173,6 +211,7 @@ private:
     bool m_historyReady = false;
     bool m_historyCommitted = false;
     bool m_historyRuntimeChanged = false;
+    bool m_historySuppressSession = false;
     QStringList m_syncHistoryConflicts;
     bool m_historyValidationFailure = false;
     enum class HistoryFailure { Conflict, MissingParent, MissingDeck, MissingReview, PendingRestore, Cycle };

@@ -8,7 +8,37 @@ import BetterFlash.Native 1.0 as Native
 
 ApplicationWindow {
     id: window
-    Component.onCompleted: actionHistory.watchProperties(Theme.preferences, "Change appearance", ["reducedMotion", "savedDark", "hasThemeChoice", "showUndoRedo"])
+    Component.onCompleted: {
+        actionHistory.watchProperties(Theme.preferences, "Change appearance", ["reducedMotion", "savedDark", "hasThemeChoice", "showUndoRedo"])
+        Qt.callLater(window.requestStartupReviewWhenReady)
+    }
+    property bool startupReviewRequested: false
+    property bool startupReviewOffered: false
+
+    function requestStartupReviewWhenReady() {
+        if (startupReviewRequested || !app.collectionLoaded || app.busy)
+            return
+        startupReviewRequested = true
+        if (!app.reviewing && !modalOpen && !typing)
+            app.requestStartupReview()
+    }
+    function abandonStartupReviewOffer() {
+        if (!startupReviewRequested || startupReviewOffered || app.startupReviewActive)
+            return
+        startupReviewOffered = true
+        app.dismissStartupReview()
+    }
+    function maybeOfferStartupReview() {
+        if (startupReviewOffered || !startupReviewRequested || !app.collectionLoaded
+            || !app.startupReviewCard.variantId || app.busy)
+            return
+        startupReviewOffered = true
+        if (modalOpen || app.reviewing || typing) {
+            app.dismissStartupReview()
+            return
+        }
+        startupReviewDialog.open()
+    }
     objectName: "mainWindow"
     visible: true
     width: 1320
@@ -106,9 +136,17 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
+    onHistoryBlockingModalOpenChanged: {
+        if (historyBlockingModalOpen && !startupReviewDialog.visible)
+            window.abandonStartupReviewOffer()
+    }
+    onTypingChanged: {
+        if (typing)
+            window.abandonStartupReviewOffer()
+    }
     readonly property var selectedDeck: deckById(app.selectedDeckId)
     readonly property var selectedCard: cardById(selectedCardId)
     Binding {
@@ -303,8 +341,9 @@ ApplicationWindow {
         property string pinnedDecks: "[]"
     }
     onPageChanged: {
+        window.abandonStartupReviewOffer()
         preferences.page = page
-        if (page !== 0 && app.reviewing) {
+        if (page !== 0 && app.reviewing && !app.startupReviewActive) {
             app.pauseReview()
             voice.enabled = false
         }
@@ -313,7 +352,10 @@ ApplicationWindow {
     onDeckBrowserParentIdChanged: preferences.deckBrowserParentId = deckBrowserParentId
     onDeckTreeExpandedChanged: preferences.deckTreeExpanded = deckTreeExpanded
     onDetailOpenChanged: preferences.detailOpen = detailOpen
-    onSelectedCardIdChanged: preferences.selectedCardId = selectedCardId
+    onSelectedCardIdChanged: {
+        window.abandonStartupReviewOffer()
+        preferences.selectedCardId = selectedCardId
+    }
     onLibraryScrollYChanged: preferences.libraryY = libraryScrollY
 
     readonly property bool canNavigateBack: Qt.inputMethod.visible
@@ -342,6 +384,11 @@ ApplicationWindow {
     }
 
     onClosing: function(close) {
+        if (androidPlatform && startupReviewDialog.visible) {
+            startupReviewDialog.requestClose()
+            close.accepted = false
+            return
+        }
         if (androidPlatform && (modalOpen || navigateBack()))
             close.accepted = false
     }
@@ -2953,6 +3000,10 @@ ApplicationWindow {
         id: cardPreviewDialog
         ui: window
     }
+    StartupReviewDialog {
+        id: startupReviewDialog
+        ui: window
+    }
     CardDetailDialog {
         id: detailDialog
         objectName: "cardDetailDialog"
@@ -3023,8 +3074,20 @@ ApplicationWindow {
     }
     Connections {
         target: app
+        function onCollectionLoadedChanged() {
+            Qt.callLater(window.requestStartupReviewWhenReady)
+        }
+        function onStartupReviewCardChanged() {
+            Qt.callLater(window.maybeOfferStartupReview)
+        }
+        function onBusyChanged() {
+            if (!app.busy) {
+                Qt.callLater(window.requestStartupReviewWhenReady)
+                Qt.callLater(window.maybeOfferStartupReview)
+            }
+        }
         function onReviewingChanged() {
-            if (app.reviewing)
+            if (app.reviewing && !app.startupReviewActive)
                 window.page = 0
         }
         function onDecksChanged() {
@@ -3045,6 +3108,7 @@ ApplicationWindow {
             }
         }
         function onSelectedDeckIdChanged() {
+            window.abandonStartupReviewOffer()
             preferences.selectedDeckId = app.selectedDeckId
             if (window.deckSelectionRestored)
                 preferences.libraryAllDecks = !app.selectedDeckId

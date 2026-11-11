@@ -74,6 +74,7 @@ DatabaseWorker::HistoryScope::HistoryScope(DatabaseWorker *value, const QString 
 {
     assert(worker);
     worker->assertThread();
+    assert(!worker->m_historySuppressSession);
     if (!capture) { worker = nullptr; return; }
     if (!worker->m_historyReady) {
         if (worker->m_db.isOpen()) {
@@ -156,6 +157,8 @@ void DatabaseWorker::finishHistory()
     assertThread();
     assert(m_historyCapturing);
     m_historyCapturing = false;
+    const bool suppressSession = m_historySuppressSession;
+    m_historySuppressSession = false;
     const QString originalError = m_sqlDetail;
     if (!execute("DELETE FROM temp.history_capture_active")) {
         m_historyReady = false;
@@ -168,7 +171,7 @@ void DatabaseWorker::finishHistory()
     frame.id = model::uuid();
     frame.label = m_historyLabel;
     frame.beforeSession = std::move(m_historyBeforeSession);
-    frame.afterSession = historySession();
+    frame.afterSession = suppressSession ? HistorySession{} : historySession();
     QSqlQuery query(m_db);
     if (!query.exec("SELECT entity,id,before_row,after_row FROM temp.history_capture ORDER BY entity,id")) {
         m_historyReady = false;

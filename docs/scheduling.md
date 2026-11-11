@@ -101,6 +101,38 @@ The original pre-review phase also determines whether a correction uses a
 learning step or a proportional daily adjustment. A corrected short interval
 may already be due if enough time has passed since the original review.
 
+## Optional startup review
+
+After the collection loads, the application offers one quick review in a
+dismissible popup, once per application launch. No popup appears when there
+are no due cards, another modal or editor is in use, or a regular review has
+already started. Navigation before the offer is ready cancels it for that
+launch. The offer does not change the selected deck or current page.
+
+Selection covers due review variants across the collection. When valid positive
+review times are available, choose randomly from the fastest quarter of variants
+ranked by their own average recorded response time. Reverse directions and cloze
+groups keep separate timing histories. If no usable history exists, choose
+randomly from the shortest estimated reading-time quarter of due variants.
+Unreadable cards and schedules are excluded.
+
+The popup initially offers **Review card** or **Not now**, with the selected
+deck and historical timing when available. **Review card** starts a temporary
+session containing only that variant; the question and response timer begin
+then, so an unattended invitation never counts as a slow review. Timing pauses
+while the application window is inactive. Reveal the answer and use the normal
+ratings, including the usual Partial recall control. A successful grade uses
+the normal schedule, history, undo and outgoing-sync transaction, then ends the
+one-card session. The next card is never opened automatically. Opening,
+revealing, or dismissing this temporary session does not consume undo history;
+Undo after grading reverses the grade.
+
+**Not now**, **Leave for later**, X, Escape, or clicking outside dismisses the
+popup without grading an unreviewed card. Closing waits for an active database
+operation; a failed save leaves the review available for recovery. A card that
+changed or is no longer due is revalidated before starting. Startup review does
+not start narration, capture microphone audio, or call a model.
+
 ## Storage and compatibility
 
 Schema 8 accepts stability down to 10 minutes and preserves existing schedules,

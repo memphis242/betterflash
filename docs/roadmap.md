@@ -15,6 +15,11 @@ at once. Feature details and priorities remain to be agreed as work resumes.
 
 ## Completed desktop follow-ups
 
+- **Quick startup review:** an optional popup offers one randomly selected due
+  variant, preferring short historical review times. It records one normal review
+  on acceptance and grading, and can be dismissed without changing schedules.
+  See [startup review](scheduling.md#optional-startup-review).
+
 - **Collection recovery:** unreadable cards remain visible with a repair action;
   healthy cards remain available for review. Derived-view failures produce
   warnings, repairs preserve recovery copies, and unsafe portable exports stop

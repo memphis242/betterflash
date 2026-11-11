@@ -286,7 +286,7 @@ int main(int argc, char **argv) {
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
 
     const auto speakSide = [&](const QString &side, const QString &markdown) {
-        if (narration.sessionActive()) return;
+        if (narration.sessionActive() || app.startupReviewActive()) return;
         narration.stopPlayback();
         voice.stopSpeaking();
         const QVariantMap card = app.currentCard();
@@ -302,20 +302,40 @@ int main(int argc, char **argv) {
         voice.speak(MarkdownView::spokenText(markdown));
     };
     const auto speakQuestion = [&] {
-        if (voice.enabled() && app.reviewing() && !app.paused()) {
+        if (voice.enabled() && app.reviewing() && !app.paused() && !app.startupReviewActive()) {
             const bool answerVisible = app.answerRevealed();
             speakSide(answerVisible ? QStringLiteral("back") : QStringLiteral("front"),
                 app.currentCard().value(answerVisible ? QStringLiteral("answer") : QStringLiteral("question")).toString());
         }
     };
+    bool startupWasArmed = false;
+    QString startupVoiceMode{};
+    QObject::connect(&app, &AppController::startupReviewActiveChanged, &application, [&] {
+        if (app.startupReviewActive()) {
+            startupWasArmed = voice.microphoneArmed();
+            startupVoiceMode = voice.reviewMode();
+            voice.stopListening();
+            narration.stopPlayback();
+            voice.stopSpeaking();
+        } else {
+            const bool resumeCapture = startupWasArmed && voice.enabled()
+                && startupVoiceMode == voice.reviewMode();
+            startupWasArmed = false;
+            startupVoiceMode.clear();
+            if (resumeCapture) {
+                if (voice.reviewMode() == QStringLiteral("trigger")) voice.triggerMicrophone();
+                else voice.startListening();
+            }
+        }
+    });
     bool voiceSummaryPending = false;
     QObject::connect(&ai, &Summarizer::changed, &application, [&] {
         if (!voiceSummaryPending || ai.busy()) return;
         voiceSummaryPending = false;
-        if (voice.enabled()) voice.speak(ai.summary().isEmpty() ? ai.error() : MarkdownView::spokenText(ai.summary()));
+        if (voice.enabled() && !app.startupReviewActive()) voice.speak(ai.summary().isEmpty() ? ai.error() : MarkdownView::spokenText(ai.summary()));
     });
     QObject::connect(&voice, &VoiceController::readyChanged, &application, [&] {
-        if (voice.ready()) {
+        if (voice.ready() && !app.startupReviewActive()) {
             if (app.reviewing()) speakQuestion();
             else voice.startListening();
         }
@@ -329,6 +349,7 @@ int main(int argc, char **argv) {
         const bool ratingChanged = card.value(QStringLiteral("sessionGrade")) != narratedCard.value(QStringLiteral("sessionGrade"))
             || card.value(QStringLiteral("sessionRecall")) != narratedCard.value(QStringLiteral("sessionRecall"));
         narratedCard = card;
+        if (app.startupReviewActive()) return;
         if (contentChanged) {
             narration.stopPlayback();
             voice.stopSpeaking();
@@ -342,15 +363,16 @@ int main(int argc, char **argv) {
         }
     });
     QObject::connect(&app, &AppController::pendingGradeCorrectionChanged, &application, [&] {
-        if (voice.enabled() && !app.pendingGradeCorrection().isEmpty())
+        if (voice.enabled() && !app.startupReviewActive() && !app.pendingGradeCorrection().isEmpty())
             voice.speak(QStringLiteral("Change the earlier rating? Say confirm rating to change it, or keep rating to cancel. The original review time will be kept."));
     });
     QObject::connect(&app, &AppController::answerRevealedChanged, &application, [&] {
-        if (voice.enabled() && app.answerRevealed() && !app.reviewingCompletedCard()) {
+        if (voice.enabled() && !app.startupReviewActive() && app.answerRevealed() && !app.reviewingCompletedCard()) {
             speakSide(QStringLiteral("back"), app.currentCard().value(QStringLiteral("answer")).toString());
         }
     });
     QObject::connect(&app, &AppController::pausedChanged, &application, [&] {
+        if (app.startupReviewActive()) return;
         if (app.paused()) {
             narration.stopPlayback();
             voice.stopSpeaking();
@@ -364,16 +386,17 @@ int main(int argc, char **argv) {
             voice.cancelPendingRecognition();
             voice.stopSpeaking();
         }
-        if (voice.enabled() && !app.reviewing() && app.sessionTotal() > 0)
+        if (voice.enabled() && !app.startupReviewActive() && !app.reviewing() && app.sessionTotal() > 0)
             voice.speak(QStringLiteral("Review ended. %1 of %2 items reviewed. Say start review to begin again.")
                 .arg(app.reviewedCount()).arg(app.sessionTotal()));
     });
     QObject::connect(&app, &AppController::lastErrorChanged, &application, [&] {
-        if (voice.enabled() && !app.lastError().isEmpty())
+        if (voice.enabled() && !app.startupReviewActive() && !app.lastError().isEmpty()
+            && !app.lastError().value(QStringLiteral("code")).toString().startsWith(QStringLiteral("STARTUP_REVIEW_")))
             voice.speak(app.lastError().value(QStringLiteral("message")).toString());
     });
     QObject::connect(&voice, &VoiceController::answerRecognized, &application, [&](const QString &answer) {
-        if (!app.reviewing() || app.paused() || !app.pendingGradeCorrection().isEmpty()) return;
+        if (app.startupReviewActive() || !app.reviewing() || app.paused() || !app.pendingGradeCorrection().isEmpty()) return;
         app.setSpokenAnswer(answer);
         if (!app.answerRevealed()) app.revealAnswer();
     });
@@ -405,6 +428,7 @@ int main(int argc, char **argv) {
     };
     QObject::connect(&voice, &VoiceController::commandRecognized, &application,
         [&](const QString &command, const QVariant &argument) {
+            if (app.startupReviewActive()) return;
             if (!app.pendingGradeCorrection().isEmpty()
                 && command != QStringLiteral("confirm_rating") && command != QStringLiteral("cancel_rating")
                 && command != QStringLiteral("stop")) {

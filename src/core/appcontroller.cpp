@@ -57,6 +57,13 @@ AppController::AppController(const QString &storageDir,QObject *parent)
     connect(m_worker,&DatabaseWorker::historyClearedForRecovery,this,&AppController::historyInvalidated);
     connect(m_worker,&DatabaseWorker::operationFinished,this,&AppController::handleOperation);
     connect(m_worker,&DatabaseWorker::reviewQueueReady,this,&AppController::handleQueue);
+    connect(m_worker,&DatabaseWorker::startupReviewCandidateReady,this,[this](const QVariantMap &card,const QVariantMap &error) {
+        if (m_startupReviewDismissed || m_reviewing || m_startupReviewActive) return;
+        if (!error.isEmpty()) { setError(error); return; }
+        if (card.isEmpty()) return;
+        m_startupReviewCard=card;
+        emit startupReviewCardChanged();
+    });
 
     connect(m_worker,&DatabaseWorker::atomicSplitApplied,this,&AppController::atomicSplitApplied);
     connect(m_worker,&DatabaseWorker::syncBatchReady,this,&AppController::syncBatchReady);
@@ -324,9 +331,69 @@ bool AppController::replaceCardWithAtomicCards(const QVariantMap &expectedSource
     }
     invoke([=](DatabaseWorker *worker){worker->replaceCardWithAtomicCards(expectedSource,proposals);});return true;
 }
+void AppController::requestStartupReview()
+{
+    if (!m_collectionLoaded || m_startupReviewRequested) return;
+    m_startupReviewRequested=true;
+    if (m_reviewing || m_startupReviewActive || m_startupReviewDismissed) {
+        m_startupReviewDismissed=true;
+        return;
+    }
+    const bool queued=QMetaObject::invokeMethod(m_worker,[worker=m_worker] {
+        worker->selectStartupReviewCandidate();
+    },Qt::QueuedConnection);
+    if (!queued)
+        setError({{"code","STARTUP_REVIEW_UNAVAILABLE"},{"message","Could not request a quick review. Continue with a regular review or restart the application."},{"detail",QString()}});
+}
+void AppController::startStartupReview()
+{
+    if (m_busy) return;
+    if (m_reviewing || m_startupReviewActive || m_startupReviewCard.isEmpty()) {
+        setError({{"code","STARTUP_REVIEW_UNAVAILABLE"},
+                  {"message","This quick review is no longer available. Start a regular review instead."},
+                  {"detail",QString()}});
+        return;
+    }
+    const QVariantMap expected=m_startupReviewCard;
+    QVariantMap context=historyContext();
+    context.insert("startupReviewStart",true);
+    m_reviewedCount=0;m_sessionTotal=0;m_spokenAnswer.clear();m_paused=false;m_leftReviewedVariants.clear();clearPendingGradeCorrection();
+    m_startupReviewActive=true;
+    emit startupReviewActiveChanged();
+    emit spokenAnswerChanged();emit pausedChanged();emit reviewStateChanged();
+    (void)invoke([expected](DatabaseWorker *worker){worker->beginStartupReview(expected);},context);
+}
+void AppController::dismissStartupReview()
+{
+    if (!m_startupReviewActive) {
+        m_startupReviewDismissed=true;
+        const bool queued=QMetaObject::invokeMethod(m_worker,[worker=m_worker] {
+            worker->cancelStartupReviewCandidate();
+        },Qt::QueuedConnection);
+        if (!queued)
+            setError({{"code","STARTUP_REVIEW_UNAVAILABLE"},{"message","Could not cancel quick review preparation. Restart the application if it continues."},{"detail",QString()}});
+        if (!m_startupReviewCard.isEmpty()) {
+            m_startupReviewCard.clear();
+            emit startupReviewCardChanged();
+        }
+        return;
+    }
+    if (m_busy) return;
+    m_startupReviewDismissed=true;
+    clearPendingGradeCorrection();freezeElapsed();
+    QVariantMap context=historyContext();
+    context.insert("startupReviewEnd",true);
+    (void)invoke([](DatabaseWorker *worker){worker->endStartupReview();},context);
+}
 void AppController::startReview(const QString &deckId)
 {
     if (m_busy) return;
+    if (m_startupReviewActive) {
+        setError({{"code","STARTUP_REVIEW_ACTIVE"},{"message","Close the quick review before starting another review."},{"detail",QString()}});
+        return;
+    }
+    m_startupReviewDismissed=true;
+    if (!m_startupReviewCard.isEmpty()) {m_startupReviewCard.clear();emit startupReviewCardChanged();}
     const QVariantMap context=historyContext();
     m_reviewedCount=0;m_sessionTotal=0;m_spokenAnswer.clear();m_paused=false;m_leftReviewedVariants.clear();clearPendingGradeCorrection();
     emit spokenAnswerChanged();emit pausedChanged();emit reviewStateChanged();
@@ -382,6 +449,10 @@ bool AppController::reviewActionReady(bool needsAnswer, bool allowPaused)
 void AppController::revealAnswer()
 {
     if (!reviewActionReady(false)||m_answerRevealed) return;
+    if (m_startupReviewActive) {
+        freezeElapsed();m_answerRevealed=true;emit answerRevealedChanged();
+        return;
+    }
     QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     freezeElapsed();m_answerRevealed=true;emit answerRevealedChanged();
     invoke([](DatabaseWorker *worker){worker->recordReviewUiAction(QStringLiteral("Reveal answer"));},context);
@@ -449,6 +520,10 @@ void AppController::postponeDays(int days)
 void AppController::pauseReview()
 {
     if (m_busy||!m_reviewing||m_paused) return;
+    if (m_startupReviewActive) {
+        clearPendingGradeCorrection();freezeElapsed();m_paused=true;emit pausedChanged();
+        return;
+    }
     QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     clearPendingGradeCorrection();freezeElapsed();m_paused=true;emit pausedChanged();
     invoke([](DatabaseWorker *worker){worker->recordReviewUiAction(QStringLiteral("Pause review"));},context);
@@ -456,6 +531,14 @@ void AppController::pauseReview()
 void AppController::resumeReview()
 {
     if (m_busy||!m_reviewing||!m_paused) return;
+    if (m_startupReviewActive) {
+        m_paused=false;
+        if (!m_answerRevealed&&!m_reviewingCompletedCard&&m_currentCard.value("sessionGrade",-1).toInt()<0) {
+            m_elapsed.start();m_elapsedTick.start();
+        }
+        emit pausedChanged();
+        return;
+    }
     QVariantMap context=historyContext();context.insert("restoreOnFailure",true);
     m_paused=false;
     if (!m_answerRevealed&&!m_reviewingCompletedCard&&m_currentCard.value("sessionGrade",-1).toInt()<0) {m_elapsed.start();m_elapsedTick.start();}
@@ -464,6 +547,7 @@ void AppController::resumeReview()
 }
 void AppController::stopReview()
 {
+    if (m_startupReviewActive) { dismissStartupReview(); return; }
     if (!m_reviewing) return;
     clearPendingGradeCorrection();freezeElapsed();invoke([](DatabaseWorker *worker){worker->endReview();});
 }
@@ -538,7 +622,14 @@ void AppController::handleOperation(bool ok,const QString &message,const QVarian
     assert(!m_operationContexts.isEmpty());
     m_completedOperationContext=m_operationContexts.takeFirst();
     const bool automaticDueRefresh=m_completedOperationContext.value("automaticDueRefresh").toBool();
+    const bool startupReviewStart=m_completedOperationContext.value("startupReviewStart").toBool();
+    const bool startupReviewEnd=m_completedOperationContext.value("startupReviewEnd").toBool();
     assert(m_pendingOperations>0);--m_pendingOperations;setBusy(m_pendingOperations>0||m_pendingCompletions>0);
+    if ((startupReviewStart && !ok) || (startupReviewEnd && ok)) {
+        m_startupReviewDismissed=true;
+        if (m_startupReviewActive) {m_startupReviewActive=false;emit startupReviewActiveChanged();}
+        if (!m_startupReviewCard.isEmpty()) {m_startupReviewCard.clear();emit startupReviewCardChanged();}
+    }
     if (automaticDueRefresh) m_automaticDueRefreshPending=false;
     if (automaticDueRefresh&&ok) {
         scheduleDueRefresh();
