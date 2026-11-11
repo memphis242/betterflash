@@ -2,7 +2,8 @@
 
 Atomicize is an optional library action. It uses the local model selected in
 Language model settings by default, or an explicitly configured remote
-endpoint, model, and key. Clicking it sends the selected saved card's front,
+endpoint, model, and key. Opening the dialog previews the saved source without
+calling the model. Choose Generate proposal to send the selected saved card's front,
 back, kind, and answer-point count to that provider. It sends no other cards,
 review history, credentials in content, or image pixels.
 
@@ -29,7 +30,10 @@ Only the named Replace action changes the collection. It creates fresh, due
 review items for the new basic cards and deletes the original source note in one
 SQLite transaction with its outgoing sync events. Historical reviews of the
 original remain in history. The preview stays open until storage confirms the
-transaction. Canceling a provider request leaves the original unchanged.
+transaction. Canceling a provider request leaves the original unchanged and
+keeps the dialog open. A failed request exposes Try again; a keep decision can be regenerated
+with Generate again. Closing the dialog discards unsaved proposals. Writable
+proposals require an explicit close or named action.
 
 The replacement transaction is local to the device. Sync carries the deletion
 and new cards as separate events, so another device can temporarily see part of
@@ -38,16 +42,21 @@ all of the saved changes.
 
 If the source is edited or deleted while the proposal is being prepared, saving
 the split is rejected. A failed write rolls back the entire replacement. Keep
-the edited proposal open, resolve the reported cause, or request a new proposal
-from the current source.
+the edited proposal open and resolve the reported cause. For a changed source,
+close and reopen Atomicize to preview its current content before generating
+again. Generation always uses the source snapshot shown in the dialog.
 
 ## Model boundaries
 
 The request uses chat completions with JSON object mode. The local model and
-remote provider must support
-that mode. Provider output is checked for types, bounds, duplicate questions,
-image references, and a maximum of five cards. These checks do not determine
-whether the meaning is correct or whether closely related concepts belong
+remote provider must support that mode. Provider output is checked for types, bounds, duplicate questions,
+image references, and a maximum of five cards. Whole-number counts represented
+as JSON numbers or numeric strings are accepted, but missing, fractional, and
+out-of-range counts are rejected with the affected proposal identified. These
+checks do not determine whether the meaning is correct or whether closely related concepts belong
 together; that remains the purpose of the editable review step. Automated
 verification uses mocked keep and split responses. Live model quality requires
 the user's examples and key.
+
+Automated GUI coverage is currently paused. When resumed, update the Atomicize
+sweep to invoke Generate proposal explicitly before waiting for a response.

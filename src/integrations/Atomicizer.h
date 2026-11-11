@@ -32,6 +32,7 @@ public:
     QVariantList proposals() const { return m_proposals; }
     QVariantMap sourceCard() const { return m_source; }
     bool hasProposal() const { return m_decision == QStringLiteral("split") && m_proposals.size() >= 2; }
+    Q_INVOKABLE bool prepare(const QString &cardId);
     Q_INVOKABLE void propose(const QString &cardId);
     Q_INVOKABLE bool apply(const QVariantList &editedProposals);
     Q_INVOKABLE void cancel();

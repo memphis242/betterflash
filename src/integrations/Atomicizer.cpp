@@ -25,7 +25,9 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
     for (const QString &name : *sourceImages) if (betterflash::model::validImageName(name)) allowedImages.insert(name);
     QSet<QString> usedImages, distinctQuestions;
     QVariantList result;
+    int cardNumber = 0;
     for (const QVariant &value : values) {
+        ++cardNumber;
         if (value.metaType().id() != QMetaType::QVariantMap)
             return std::unexpected(QStringLiteral("Every proposed card must have a question, answer, and answer-point count."));
         const QVariantMap proposal = value.toMap();
@@ -35,14 +37,31 @@ std::expected<QVariantList, QString> validateProposals(const QVariantList &value
         if (frontValue.metaType().id() != QMetaType::QString || backValue.metaType().id() != QMetaType::QString
             || frontValue.toString().size() > 10000 || backValue.toString().size() > 10000)
             return std::unexpected(QStringLiteral("Each proposed side must be Markdown text of at most 10000 characters."));
+        if (!proposal.contains(QStringLiteral("pointCount")) || pointsValue.isNull())
+            return std::unexpected(QStringLiteral("Proposed card %1 has no answer-point count. Request another proposal.").arg(cardNumber));
+        bool numeric = false;
+        double points = 0;
         switch (pointsValue.metaType().id()) {
         case QMetaType::Int: case QMetaType::UInt: case QMetaType::LongLong: case QMetaType::ULongLong:
-        case QMetaType::Double: break;
-        default: return std::unexpected(QStringLiteral("Answer-point counts must be whole numbers from 1 through 1000."));
+        case QMetaType::Double:
+            points = pointsValue.toDouble(&numeric);
+            break;
+        case QMetaType::QString: {
+            const QString count = pointsValue.toString().trimmed();
+            static const QRegularExpression integerString(QStringLiteral("^[0-9]+$"));
+            if (integerString.match(count).hasMatch()) points = count.toDouble(&numeric);
+            break;
         }
-        const double points = pointsValue.toDouble();
-        if (!std::isfinite(points) || points < 1 || points > 1000 || std::floor(points) != points)
-            return std::unexpected(QStringLiteral("Answer-point counts must be whole numbers from 1 through 1000."));
+        default: break;
+        }
+        if (!numeric || !std::isfinite(points) || points < 1 || points > 1000 || std::floor(points) != points) {
+            QString observed = QString::fromLatin1(pointsValue.metaType().name());
+            const QString valueText = pointsValue.toString();
+            static const QRegularExpression numericText(QStringLiteral("^[+-]?[0-9]+(?:\\.[0-9]+)?$"));
+            if (valueText.size() <= 32 && numericText.match(valueText).hasMatch())
+                observed += QStringLiteral(" (%1)").arg(valueText);
+            return std::unexpected(QStringLiteral("Proposed card %1 has an invalid answer-point count: %2. It must be a whole number from 1 through 1000. Request another proposal or correct the count.").arg(cardNumber).arg(observed));
+        }
         struct betterflash::model::Card card{betterflash::model::uuid(), original->deckId, QStringLiteral("basic"),
             frontValue.toString(), backValue.toString(), original->tags, static_cast<int>(points)};
         const auto valid = betterflash::model::cardFromMap(betterflash::model::toMap(card));
@@ -111,21 +130,37 @@ void Atomicizer::clear() {
     m_source.clear(); m_proposals.clear(); m_error.clear(); m_status.clear(); m_reason.clear(); m_decision.clear();
     emit changed();
 }
-void Atomicizer::propose(const QString &cardId) {
-    if (m_applying) return;
+bool Atomicizer::prepare(const QString &cardId) {
+    if (m_applying) return false;
     clear();
     for (const QVariant &entry : m_app->cards()) {
         const QVariantMap note = entry.toMap();
         if (note.value(QStringLiteral("id")).toString() != cardId) continue;
         if (!note.value(QStringLiteral("loadError")).toMap().isEmpty()) {
             fail(QStringLiteral("ATOMICIZE_REPAIR"),QStringLiteral("Repair this card before splitting it. Its saved content and learning history are retained."));
-            return;
+            return false;
         }
         const auto parsed = betterflash::model::cardFromMap(note);
         if (parsed) m_source = betterflash::model::toMap(*parsed);
         break;
     }
-    if (m_source.isEmpty()) { fail(QStringLiteral("ATOMICIZE_CARD"), QStringLiteral("Choose a saved card from the library.")); return; }
+    if (m_source.isEmpty()) { fail(QStringLiteral("ATOMICIZE_CARD"), QStringLiteral("Choose a saved card from the library.")); return false; }
+    const QString front = m_source.value(QStringLiteral("front")).toString();
+    const QString back = m_source.value(QStringLiteral("back")).toString();
+    if (front.size() + back.size() > 32000) {
+        fail(QStringLiteral("ATOMICIZE_SIZE"), QStringLiteral("Use a source card with at most 32000 characters across its two sides.")); return false;
+    }
+    emit changed();
+    return true;
+}
+void Atomicizer::propose(const QString &cardId) {
+    if (m_applying) return;
+    if (m_source.isEmpty() || m_source.value(QStringLiteral("id")).toString() != cardId) {
+        if (!prepare(cardId)) return;
+    } else {
+        cancel();
+        m_proposals.clear(); m_error.clear(); m_status.clear(); m_reason.clear(); m_decision.clear();
+    }
     const QString front = m_source.value(QStringLiteral("front")).toString();
     const QString back = m_source.value(QStringLiteral("back")).toString();
     if (front.size() + back.size() > 32000) {
@@ -143,6 +178,7 @@ void Atomicizer::propose(const QString &cardId) {
         "reference on at least one relevant card. Image pixels are not provided; do not infer their contents. "
         "Never invent media references or external image URLs. New cards are basic, "
         "even for a reverse or cloze source. Replace cloze markup with its known meaning when forming questions and answers. "
+        "Every proposed card must include pointCount as a whole number from 1 through 1000. "
         "For a related multi-point answer left together, pointCount records its recall points; otherwise use 1. "
         "Use a short reason explaining independent concepts or why a group must stay together. Use no emoji or em dash. "
         "Output only one JSON object with exactly this shape: "

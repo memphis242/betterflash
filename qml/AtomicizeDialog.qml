@@ -9,6 +9,7 @@ Dialog {
     required property var ui
     property var drafts: []
     readonly property bool applying: atomic.applying
+    property bool prepared: false
     property bool seeded: false
     property bool loading: false
     property bool preview: false
@@ -24,7 +25,39 @@ Dialog {
     width: Math.min(900, ui.width - 2 * ui.gutter)
     height: Math.min(760, ui.height - 36)
     padding: ui.width < 600 ? 14 : 20
-    closePolicy: applying ? Popup.NoAutoClose : Popup.CloseOnEscape
+    focus: true
+    closePolicy: Popup.NoAutoClose
+    header: Item {
+        implicitHeight: 64
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: dialog.padding
+            anchors.rightMargin: dialog.padding
+            spacing: 12
+            Label {
+                text: dialog.title
+                color: Theme.ink
+                font.pixelSize: 22
+                font.bold: true
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            AppButton {
+                objectName: "atomicGenerate"
+                visible: !dialog.splitReady
+                text: atomic.busy ? "Generating" : atomic.error.length > 0 ? "Try again" : atomic.decision === "keep" ? "Generate again" : "Generate proposal"
+                primary: true
+                enabled: !atomic.busy && !app.busy && dialog.prepared && !!atomic.sourceCard.id
+                onClicked: dialog.generate()
+            }
+            GlyphButton {
+                glyph: "close"
+                hint: "Close Atomicize"
+                enabled: !dialog.applying
+                onClicked: dialog.close()
+            }
+        }
+    }
     background: Rectangle {
         color: Theme.surface
         border.color: Theme.rule
@@ -44,6 +77,17 @@ Dialog {
         localError = ""
         atomicTabs.currentIndex = 0
         open()
+        prepared = atomic.prepare(cardId)
+    }
+    function generate() {
+        if (atomic.busy || app.busy || !prepared || !atomic.sourceCard.id)
+            return
+        const cardId = atomic.sourceCard.id
+        drafts = []
+        seeded = false
+        preview = false
+        localError = ""
+        atomicTabs.currentIndex = 0
         atomic.propose(cardId)
     }
     function loadDraft() {
@@ -120,8 +164,8 @@ Dialog {
         spacing: 10
         Label {
             textFormat: Text.PlainText
-            text: ai.provider === "local" ? "The front and back are processed on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
-                : "The front and back are sent to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
+            text: ai.provider === "local" ? "Generate proposal processes the front and back on this device using " + ai.localModelLabel + ". Related lists and procedures can stay together."
+                : "Generate proposal sends the front and back to " + ai.endpoint + " using " + ai.model + ". Related lists and procedures can stay together."
             color: Theme.inkMuted
             font.pixelSize: 11
             wrapMode: Text.Wrap
@@ -215,7 +259,7 @@ Dialog {
             }
             Label {
                 textFormat: Text.PlainText
-                text: "Points"
+                text: "Answer points"
                 color: Theme.inkMuted
                 ToolTip.visible: pointsHover.containsMouse
                 ToolTip.text: "Answer points used to grade partial recall"
@@ -294,6 +338,13 @@ Dialog {
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                     textFormat: TextEdit.PlainText
+                    placeholderText: "Question Markdown, then a line containing ---, then answer Markdown"
+                    padding: 12
+                    background: Rectangle {
+                        color: Theme.surface
+                        border.color: draftSource.activeFocus ? Theme.accent : Theme.rule
+                        radius: 6
+                    }
                     readOnly: dialog.applying
                     onTextChanged: dialog.updateDraft()
                 }
@@ -318,7 +369,12 @@ Dialog {
             objectName: "atomicCancel"
             text: atomic.busy && !dialog.applying ? "Cancel request" : dialog.splitReady ? "Cancel" : "Close"
             enabled: !dialog.applying
-            onClicked: dialog.close()
+            onClicked: {
+                if (atomic.busy && !dialog.applying)
+                    atomic.cancel()
+                else
+                    dialog.close()
+            }
         }
         AppButton {
             objectName: "atomicApply"
