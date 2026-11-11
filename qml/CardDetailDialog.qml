@@ -65,7 +65,7 @@ Dialog {
     padding: width < 650 ? 14 : 24
     modal: true
     focus: true
-    closePolicy: Popup.CloseOnEscape
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     background: Rectangle { radius: 16; color: Theme.surface; border.color: Theme.ledgerRule }
     Overlay.modal: Rectangle { color: Theme.scrim }
 

@@ -22,6 +22,9 @@ height above the statistics. Review statistics and the recall trace remain
 below it, in that order. Actions and side tabs stay visible while the card text
 scrolls.
 
+Card detail is read-only: click outside the modal, press Escape, or use its X
+button to close it. Editing opens a separate card editor.
+
 Review statistics form a compact block immediately above the recall trace.
 Their height follows their content, with spare vertical space above the block.
 They remain visible. The trace starts expanded and can be collapsed to give
