@@ -81,6 +81,11 @@ pinned, actions visible, and lists bounded.
   not use `git add .` or `git add -A` in a shared checkout.
 - The root agent owns Git writes in coordinated work. Commit and push completed
   work regularly, including direct work on `main` under the standing authorization.
+- Completed development changes are preauthorized for commit and push to `main`,
+  followed by build and installation, without another confirmation. If a feature
+  branch is used, merge it into `main` when ready and remove the finished branch
+  and worktree. Preserve foreign edits and existing restrictions on destructive
+  operations.
 - Git commands in this project's primary checkout and worktrees are preauthorized,
   including branch management, commits, pushes, and merges. Use judgment and do
   not ask for per-command permission. This does not authorize discarding foreign
