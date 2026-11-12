@@ -103,10 +103,14 @@ search is reported explicitly. **Retry without web search** runs the same draft
 through the model without changing the global search setting or leaving the
 editor.
 
-The search loop permits at most four model turns. If a remote web-enabled check
-returns a report that is not valid JSON, the app may make one additional model
-request to format that report using the existing evidence; it cannot start another
-search. This request can incur additional model usage charges. Network requests
+The search loop permits at most four model turns. If a search query is missing,
+blank, not a string, or longer than 400 UTF-16 code units, the app can request
+one correction from the model without running that search or using a Tavily
+credit. A second invalid query ends the check with details that identify the
+problem without revealing the query. If a remote web-enabled check returns a
+report that is not valid JSON, the app may make one additional model request to
+format that report using the existing evidence; it cannot start another search.
+These extra requests can incur additional model usage charges. Network requests
 have time and size limits, and evidence is bounded to the selected model's context budget. The
 result indicates shortened evidence. Only source IDs actually supplied to the
 model may be cited by structured findings. Source links come from Tavily, are

@@ -14,10 +14,11 @@
 
 namespace {
 constexpr int maxSearches = 3;
+constexpr int maxQueryLength = 400;
 constexpr int maxTurns = maxSearches + 1;
 constexpr int maxSources = 15;
 constexpr int maxFindings = 12;
-static_assert(maxSearches > 0 && maxTurns > maxSearches && maxSources >= maxSearches);
+static_assert(maxSearches > 0 && maxQueryLength > 0 && maxTurns > maxSearches && maxSources >= maxSearches);
 QString json(const QJsonObject &value) {
     QString text = QString::fromUtf8(QJsonDocument(value).toJson(QJsonDocument::Compact));
     text.replace(u'<', QStringLiteral("\\u003c")); text.replace(u'>', QStringLiteral("\\u003e"));
@@ -41,6 +42,16 @@ std::expected<QJsonObject, QString> parseObject(const QString &input) {
     }
     if (!parsed.isObject()) return std::unexpected(QStringLiteral("The response was not a JSON object."));
     return parsed.object();
+}
+QString searchQueryError(const QJsonObject &object) {
+    const QJsonValue value = object.value(QStringLiteral("query"));
+    if (value.isUndefined()) return QStringLiteral("The query field was missing.");
+    if (!value.isString()) return QStringLiteral("The query field was not a string.");
+    const QString query = value.toString();
+    if (query.trimmed().isEmpty()) return QStringLiteral("The query was empty or contained only whitespace.");
+    if (query.size() > maxQueryLength)
+        return QStringLiteral("The query contained %1 UTF-16 code units; the limit is %2.").arg(query.size()).arg(maxQueryLength);
+    return {};
 }
 bool textField(const QJsonObject &object, const QString &name, const int limit, const bool required = true) {
     const QJsonValue value = object.value(name);
@@ -86,14 +97,16 @@ void CardChecker::cancel() {
 }
 void CardChecker::clear() {
     cancel(); m_status.clear(); m_mode.clear(); m_errorInfo.clear(); m_result.clear(); m_sources.clear(); m_messages = {};
-    m_searchCount = 0; m_turnCount = 0; m_evidenceTruncated = false; m_formatting = false; m_initialFormatError.clear(); emit changed();
+    m_searchCount = 0; m_turnCount = 0; m_evidenceTruncated = false; m_formatting = false; m_searchCorrectionUsed = false; m_initialFormatError.clear(); m_initialSearchError.clear(); emit changed();
 }
 void CardChecker::fail(const QString &code, const QString &message, const QString &action, const QString &detail) {
     Q_ASSERT(!code.isEmpty() && !message.isEmpty());
     m_busy = false; m_job = 0; m_pendingReset.clear(); m_status.clear();
-    const QString layeredDetail = m_formatting && !m_initialFormatError.isEmpty() && !detail.contains(m_initialFormatError)
-        ? QStringLiteral("Initial report: ") + m_initialFormatError + (detail.isEmpty() ? QString() : QLatin1Char('\n') + detail)
-        : detail;
+    QString layeredDetail = detail;
+    if (m_formatting && !m_initialFormatError.isEmpty() && !layeredDetail.contains(m_initialFormatError))
+        layeredDetail = QStringLiteral("Initial report: ") + m_initialFormatError + (layeredDetail.isEmpty() ? QString() : QLatin1Char('\n') + layeredDetail);
+    if (m_searchCorrectionUsed && !m_initialSearchError.isEmpty() && !layeredDetail.contains(m_initialSearchError))
+        layeredDetail = QStringLiteral("First invalid web search request: ") + m_initialSearchError + (layeredDetail.isEmpty() ? QString() : QLatin1Char('\n') + layeredDetail);
     m_errorInfo = {{QStringLiteral("code"), code}, {QStringLiteral("message"), message},
         {QStringLiteral("action"), action}, {QStringLiteral("detail"), layeredDetail.left(2048)}};
     emit changed();
@@ -137,7 +150,7 @@ void CardChecker::check(const QString &mode, const QString &front, const QString
         "Never supply source URLs in the response or cite sources not supplied to you. "
         "If there are no findings, return an empty findings array.");
     if (m_searchEnabled) {
-        instructions += QStringLiteral(" You may search the web at most three times for evidence. Make at most one tool call per turn. Search queries must be short and relevant; never put sensitive or unrelated card content into queries. ");
+        instructions += QStringLiteral(" You may search the web at most three times for evidence. Make at most one tool call per turn. Search queries must be relevant, nonempty strings of at most 400 UTF-16 code units; never put sensitive or unrelated card content into queries. ");
         if (m_provider->provider() == QStringLiteral("local"))
             instructions += QStringLiteral("To search, return only JSON {\"action\":\"search\",\"query\":\"your search query\"}. After search data arrives, return a final JSON object or request another search.");
         else
@@ -210,7 +223,7 @@ bool CardChecker::validateContext() {
     return true;
 }
 void CardChecker::requestTurn() {
-    Q_ASSERT(m_busy && m_turnCount < maxTurns + (m_formatting ? 1 : 0));
+    Q_ASSERT(m_busy && m_turnCount < maxTurns + (m_searchCorrectionUsed ? 1 : 0) + (m_formatting ? 1 : 0));
     if (!validateContext()) return;
     ++m_turnCount;
     const bool local = m_provider->provider() == QStringLiteral("local");
@@ -220,7 +233,8 @@ void CardChecker::requestTurn() {
     if (m_searchEnabled && !local && !m_formatting) {
         const QJsonObject parameters{{QStringLiteral("type"), QStringLiteral("object")},
             {QStringLiteral("properties"), QJsonObject{{QStringLiteral("query"), QJsonObject{{QStringLiteral("type"), QStringLiteral("string")},
-                {QStringLiteral("description"), QStringLiteral("A focused public web search query")}}}}},
+                {QStringLiteral("description"), QStringLiteral("A focused public web search query, nonempty and at most 400 UTF-16 code units")},
+                {QStringLiteral("minLength"), 1}, {QStringLiteral("maxLength"), maxQueryLength}}}}},
             {QStringLiteral("required"), QJsonArray{QStringLiteral("query")}}};
         payload.insert(QStringLiteral("tools"), QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("function")},
             {QStringLiteral("function"), QJsonObject{{QStringLiteral("name"), QStringLiteral("web_search")},
@@ -259,16 +273,33 @@ void CardChecker::receiveTurn(const QJsonObject &message) {
     }
     if (!callsValue.isUndefined() && !callsValue.isNull() && (!callsValue.isArray() || !callsValue.toArray().isEmpty())) {
         if (!callsValue.isArray() || callsValue.toArray().size() != 1) {
-            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an unsupported set of tools."), QStringLiteral("Try again or choose a model that makes one web search at a time.")); return;
+            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an unsupported set of tools."),
+                 QStringLiteral("Try again or choose a model that makes one web search at a time."),
+                 callsValue.isArray() ? QStringLiteral("Expected one tool call; received %1.").arg(callsValue.toArray().size())
+                                      : QStringLiteral("The tool calls field was not an array.")); return;
         }
         const QJsonObject call = callsValue.toArray().first().toObject();
         const QJsonObject function = call.value(QStringLiteral("function")).toObject();
         const QString id = call.value(QStringLiteral("id")).toString();
-        const auto arguments = parseObject(function.value(QStringLiteral("arguments")).toString());
-        if (call.value(QStringLiteral("type")).toString() != QStringLiteral("function") || function.value(QStringLiteral("name")).toString() != QStringLiteral("web_search")
-            || id.isEmpty() || id.size() > 200 || !arguments || !textField(*arguments, QStringLiteral("query"), 400)) {
-            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an invalid web search."), QStringLiteral("Try again or choose another model.")); return;
+        QString problem;
+        if (!callsValue.toArray().first().isObject()) problem = QStringLiteral("The tool call was not an object.");
+        else if (call.value(QStringLiteral("type")).toString() != QStringLiteral("function")) problem = QStringLiteral("The tool call type was not function.");
+        else if (!call.value(QStringLiteral("function")).isObject()) problem = QStringLiteral("The function description was not an object.");
+        else if (function.value(QStringLiteral("name")).toString() != QStringLiteral("web_search")) problem = QStringLiteral("The requested function was not web_search.");
+        else if (id.isEmpty()) problem = QStringLiteral("The tool call ID was missing or empty.");
+        else if (id.size() > 200) problem = QStringLiteral("The tool call ID exceeded 200 UTF-16 code units.");
+        else if (!function.value(QStringLiteral("arguments")).isString()) problem = QStringLiteral("The tool arguments were not a JSON string.");
+        if (!problem.isEmpty()) {
+            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an invalid web search."),
+                 QStringLiteral("Try the check again or retry without web search."), QStringLiteral("Native tool call: ") + problem); return;
         }
+        const auto arguments = parseObject(function.value(QStringLiteral("arguments")).toString());
+        if (!arguments) {
+            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an invalid web search."),
+                 QStringLiteral("Try the check again or retry without web search."), QStringLiteral("Native tool arguments: ") + arguments.error()); return;
+        }
+        problem = searchQueryError(*arguments);
+        if (!problem.isEmpty()) { correctSearchQuery(message, id, problem); return; }
         search(arguments->value(QStringLiteral("query")).toString(), message, id); return;
     }
     const auto parsed = parseObject(message.value(QStringLiteral("content")).toString());
@@ -318,15 +349,33 @@ void CardChecker::receiveTurn(const QJsonObject &message) {
                  QStringLiteral("The formatting response requested another search instead of a final report. Initial response: ") + m_initialFormatError);
             return;
         }
-        if (!textField(*parsed, QStringLiteral("query"), 400)) {
-            fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an invalid web search."), QStringLiteral("Try again or choose another model.")); return;
-        }
+        const QString problem = searchQueryError(*parsed);
+        if (!problem.isEmpty()) { correctSearchQuery(message, {}, problem); return; }
         search(parsed->value(QStringLiteral("query")).toString(), message, {}); return;
     }
     finish(*parsed);
 }
+void CardChecker::correctSearchQuery(const QJsonObject &assistant, const QString &toolId, const QString &problem) {
+    Q_ASSERT(m_busy && !problem.isEmpty());
+    if (!m_searchEnabled || m_searchCount >= maxSearches || m_searchCorrectionUsed) {
+        fail(QStringLiteral("CARD_CHECK_TOOL"), QStringLiteral("The model requested an invalid web search."),
+             QStringLiteral("Try the check again or retry without web search."),
+             (toolId.isEmpty() ? QStringLiteral("JSON search request: ") : QStringLiteral("Native web search query: ")) + problem);
+        return;
+    }
+    m_searchCorrectionUsed = true;
+    m_initialSearchError = problem;
+    m_messages.append(assistant);
+    const QString feedback = QStringLiteral("The web search was not run. %1 Submit one nonempty query of at most 400 UTF-16 code units, or return your final report without another search.").arg(problem);
+    if (toolId.isEmpty()) m_messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")}, {QStringLiteral("content"), feedback}});
+    else m_messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("tool")}, {QStringLiteral("tool_call_id"), toolId}, {QStringLiteral("content"), feedback}});
+    m_status = QStringLiteral("Correcting the web search request...");
+    const quint64 generation = m_generation;
+    emit changed();
+    if (m_busy && generation == m_generation) requestTurn();
+}
 void CardChecker::search(const QString &query, const QJsonObject &assistant, const QString &toolId) {
-    if (!m_searchEnabled || m_searchCount >= maxSearches || m_turnCount >= maxTurns) {
+    if (!m_searchEnabled || m_searchCount >= maxSearches || m_turnCount >= maxTurns + (m_searchCorrectionUsed ? 1 : 0)) {
         fail(QStringLiteral("CARD_CHECK_SEARCH_LIMIT"), QStringLiteral("The model requested an unavailable web search or exceeded the search limit."),
             QStringLiteral("Try again, enable web search in Settings, or choose another model.")); return;
     }

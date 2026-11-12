@@ -23,9 +23,9 @@ GridLayout {
     AppButton {
         fill: Theme.completenessActionFill
         hoverFill: Theme.completenessActionHover
-        outline: Theme.checkActionOutline
-        focusOutline: Theme.checkActionOutline
-        foreground: Theme.checkActionInk
+        outline: Theme.completenessActionOutline
+        focusOutline: Theme.completenessActionOutline
+        foreground: Theme.completenessActionInk
         objectName: "checkCardCompleteness"
         text: "Check completeness"
         hint: "Ask the configured model to identify missing parts, qualifications, or partial truths within this card's scope. Uses this unsaved draft."
