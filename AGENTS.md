@@ -73,10 +73,10 @@ pinned, actions visible, and lists bounded.
 
 ## Collaboration and Git
 
-- Inspect `git status` and `git worktree list` before editing. Make changes in
-  independent worktrees created from `/home/aalmo/projects/betterflash`, the
-  primary checkout. Coordinate file ownership for parallel work and preserve
-  concurrent edits.
+- Inspect `git status` and `git worktree list` before editing. Until the user
+  says otherwise, work directly on `main` in `/home/aalmo/projects/betterflash`,
+  the primary checkout. Do not create worktrees by default. Coordinate file
+  ownership for parallel work and preserve concurrent edits.
 - Preserve foreign edits. Stage only named files belonging to this change; do
   not use `git add .` or `git add -A` in a shared checkout.
 - The root agent owns Git writes in coordinated work. Commit and push completed
