@@ -26,6 +26,8 @@ QtObject {
     readonly property color checkActionHover: dark ? "#3a5542" : "#ccdfc8"
     readonly property color checkActionOutline: dark ? "#86b496" : "#568060"
     readonly property color checkActionInk: dark ? "#e6f1e7" : "#24472d"
+    readonly property color completenessActionFill: dark ? "#405d49" : "#cbdcc7"
+    readonly property color completenessActionHover: dark ? "#4a6c55" : "#b9cfb3"
     readonly property color cancelActionFill: dark ? "#54333c" : "#f1d6d7"
     readonly property color cancelActionHover: dark ? "#40262d" : "#e3b5b8"
     readonly property color retryActionFill: dark ? "#593c31" : "#f3ded3"

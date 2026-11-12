@@ -21,8 +21,8 @@ GridLayout {
         onClicked: actions.checkRequested("correctness")
     }
     AppButton {
-        fill: Theme.checkActionFill
-        hoverFill: Theme.checkActionHover
+        fill: Theme.completenessActionFill
+        hoverFill: Theme.completenessActionHover
         outline: Theme.checkActionOutline
         focusOutline: Theme.checkActionOutline
         foreground: Theme.checkActionInk
