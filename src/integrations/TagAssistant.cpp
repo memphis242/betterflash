@@ -144,6 +144,7 @@ void TagAssistant::startVocabulary(const QStringList &existingVocabulary) { star
 void TagAssistant::startTagging(const QStringList &vocabulary) { start(QStringLiteral("tagging"), vocabulary); }
 void TagAssistant::start(const QString &mode, const QStringList &vocabulary) {
     if (m_busy) return;
+    if (m_provider) m_provider->beginDiagnosticOperation(this);
     if (!m_provider) {
         fail(QStringLiteral("TAG_MODEL_UNAVAILABLE"), QStringLiteral("The language model is unavailable."), QStringLiteral("Select a model and try again."));
         return;
@@ -364,10 +365,12 @@ void TagAssistant::receive(const QString &response, const quint64 generation) {
 }
 
 void TagAssistant::fail(const QString &code, const QString &message, const QString &action, const QString &detail) {
+    const QString diagnosticPath = m_provider ? m_provider->logOperationFailure(this, code, message, detail) : QString();
+    const QString diagnosticDetail = detail + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     m_busy = false;
     m_job = 0;
     m_status.clear();
-    m_errorInfo = makeError(code, message, action, detail);
+    m_errorInfo = makeError(code, message, action, diagnosticDetail);
     emit changed();
 }
 
@@ -392,6 +395,7 @@ void TagAssistant::cancel() {
 
 void TagAssistant::clear() {
     cancel();
+    if (m_provider) m_provider->beginDiagnosticOperation(this);
     ++m_generation;
     m_cards.clear(); m_results.clear(); m_currentCards.clear(); m_vocabulary.clear(); m_suggestedVocabulary.clear();
     m_scopeName.clear(); m_status.clear(); m_mode.clear(); m_errorInfo.clear();

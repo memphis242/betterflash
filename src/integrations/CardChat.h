@@ -67,6 +67,7 @@ private:
     void startTurn();
     void requestTurn();
     void receiveTurn(const QJsonObject &message);
+    void correctToolCall(const QJsonObject &assistant, const QString &toolId, const QString &problem, bool preserveNativeCall);
     void runTool(const QString &name, const QJsonObject &arguments,
                  const QJsonObject &assistant, const QString &toolId);
     void addCardEvidence(const QVariantList &cards, bool readCard,
@@ -93,6 +94,8 @@ private:
     QVariantMap m_errorInfo{};
     quint64 m_generation = 0;
     quint64 m_job = 0;
+    int m_toolCorrections = 0;
+    QString m_lastToolDiagnostic{};
     int m_turnCount = 0;
     int m_toolCount = 0;
     int m_webCount = 0;

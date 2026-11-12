@@ -11,7 +11,7 @@ class SecretStore final : public QObject {
 public:
     explicit SecretStore(QString service, QString environmentVariable = {}, QObject *parent = nullptr);
     ~SecretStore() override;
-    QString key() const { return m_key; }
+    QString key() const;
     bool hasKey() const { return !m_key.isEmpty(); }
     QString status() const { return m_status; }
     QString storageState() const { return m_storageState; }

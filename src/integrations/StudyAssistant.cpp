@@ -154,9 +154,11 @@ QString StudyAssistant::systemInstructions() const {
 }
 
 void StudyAssistant::fail(const QString &code, const QString &message, const QString &detail) {
+    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message, detail) : QString();
+    const QString diagnosticDetail = detail + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     m_busy = false;
     m_error = {{QStringLiteral("code"), code}, {QStringLiteral("message"), message},
-               {QStringLiteral("detail"), detail}};
+               {QStringLiteral("detail"), diagnosticDetail}};
     emit changed();
 }
 
@@ -190,6 +192,7 @@ void StudyAssistant::cancel() {
 
 void StudyAssistant::clear() {
     cancel();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     m_result.clear();
     m_error.clear();
     m_cardId.clear();
@@ -202,6 +205,7 @@ void StudyAssistant::clear() {
 void StudyAssistant::requestHelp(const QString &cardId, const QString &variantId) {
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_busy) cancel();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     m_result.clear();
     m_error.clear();
     m_stale = false;

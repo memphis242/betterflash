@@ -9,6 +9,7 @@ import BetterFlash.Native 1.0 as Native
 ApplicationWindow {
     id: window
     Component.onCompleted: {
+        Qt.callLater(window.reportLoggingError)
         actionHistory.watchProperties(Theme.preferences, "Change appearance", ["reducedMotion", "savedDark", "hasThemeChoice", "showUndoRedo"])
         actionHistory.watchProperties(reviewPreferences, "Change review settings", ["pitStopEnabled"])
         Qt.callLater(window.requestStartupReviewWhenReady)
@@ -962,6 +963,17 @@ ApplicationWindow {
         globalErrorMessage = message
         globalErrorDetails = details || ""
         errorDialog.open()
+    }
+    function reportLoggingError() {
+        const error = diagnostics.errorInfo
+        if (!error.message || errorDialog.visible)
+            return
+        showError(error.code || "LOG_WRITE", error.message, error.detail || "")
+        diagnostics.acknowledgeError()
+    }
+    Connections {
+        target: diagnostics
+        function onChanged() { Qt.callLater(window.reportLoggingError) }
     }
     function errorReport() {
         const lines = []
@@ -2949,6 +2961,7 @@ ApplicationWindow {
     Sheet {
         id: errorDialog
         objectName: "errorDialog"
+        onClosed: Qt.callLater(window.reportLoggingError)
         title: "Action could not complete"
         property string copyFeedback: ""
         height: Math.min(430, window.height - 2 * window.gutter)

@@ -1,6 +1,7 @@
 #include "Summarizer.h"
 #include "ApiKeyRegistry.h"
 #include "core/appcontroller.h"
+#include "core/DiagnosticLog.h"
 #include "core/cardmodel.h"
 #include "models/LocalLanguageModel.h"
 
@@ -19,6 +20,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -121,15 +123,15 @@ std::expected<QJsonObject, struct ProviderError> anthropicResponse(const QJsonOb
             const QString id = block.value(QStringLiteral("id")).toString();
             const QString name = block.value(QStringLiteral("name")).toString();
             const QJsonValue input = block.value(QStringLiteral("input"));
-            if (id.isEmpty() || name.isEmpty() || !input.isObject()) return invalid(QStringLiteral("A retrieval tool call is malformed."));
-            const QString args = QString::fromUtf8(QJsonDocument(input.toObject()).toJson(QJsonDocument::Compact));
+            const QByteArray encoded = QJsonDocument(QJsonArray{input.isUndefined() ? QJsonValue::Null : input}).toJson(QJsonDocument::Compact);
+            const QString args = QString::fromUtf8(encoded.mid(1, encoded.size() - 2));
             calls.append(QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("type"), QStringLiteral("function")},
                 {QStringLiteral("function"), QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("arguments"), args}}}});
         } else if (type != QStringLiteral("thinking") && type != QStringLiteral("redacted_thinking")) {
             return invalid(QStringLiteral("Unsupported Claude content block type: %1.").arg(type.left(100)));
         }
     }
-    if ((stop == QStringLiteral("tool_use") && calls.size() != 1)
+    if ((stop == QStringLiteral("tool_use") && calls.isEmpty())
         || (stop == QStringLiteral("end_turn") && !calls.isEmpty()))
         return invalid(QStringLiteral("Claude returned an unexpected number of retrieval calls."));
     const QString answer = text.join(QLatin1Char('\n')).trimmed();
@@ -241,26 +243,109 @@ void Summarizer::setAcceleration(const QString &acceleration) {
 }
 quint64 Summarizer::complete(const QJsonObject &payload, QObject *context, Completion callback) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
-    return completeMessage(payload, context, [callback = std::move(callback)](std::expected<QJsonObject, struct ProviderError> result) {
+    return completeMessage(payload, context, [this, guardedContext = QPointer<QObject>(context), callback = std::move(callback)](std::expected<QJsonObject, struct ProviderError> result) {
         if (!result) {
             struct ProviderError error = result.error();
             if (!error.detail.isEmpty()) error.message += QStringLiteral(" Details: ") + error.detail;
             callback(std::unexpected(error)); return;
         }
+        const QJsonValue calls = result->value(QStringLiteral("tool_calls"));
+        if (!calls.isUndefined() && !calls.isNull() && (!calls.isArray() || !calls.toArray().isEmpty())) {
+            const struct ProviderError error{QStringLiteral("LLM_UNEXPECTED_TOOL"),
+                QStringLiteral("The model requested a tool where only a text response is supported. Retry or choose another model.")};
+            if (guardedContext) (void)logOperationFailure(guardedContext, error.code, error.message);
+            callback(std::unexpected(error));
+            return;
+        }
         const QString content = result->value(QStringLiteral("content")).toString().trimmed();
         if (content.isEmpty()) {
-            callback(std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"),
-                QStringLiteral("The provider returned no usable text. Check chat-completion model compatibility.")}));
+            const struct ProviderError error{QStringLiteral("LLM_RESPONSE"),
+                QStringLiteral("The provider returned no usable text. Check chat-completion model compatibility.")};
+            if (guardedContext) (void)logOperationFailure(guardedContext, error.code, error.message);
+            callback(std::unexpected(error));
             return;
         }
         callback(content);
     });
 }
+namespace {
+// Provider reasoning and signatures are not needed to inspect the visible tool protocol.
+QJsonValue diagnosticValue(const QJsonValue &value) {
+    if (value.isArray()) {
+        QJsonArray result;
+        for (const QJsonValue &item : value.toArray()) result.append(diagnosticValue(item));
+        return result;
+    }
+    if (!value.isObject()) return value;
+    const QJsonObject input = value.toObject();
+    const QString type = input.value(QStringLiteral("type")).toString();
+    if (type == QStringLiteral("thinking") || type == QStringLiteral("redacted_thinking"))
+        return QJsonObject{{QStringLiteral("type"), type}, {QStringLiteral("omitted"), true}};
+    QJsonObject result;
+    for (auto it = input.constBegin(); it != input.constEnd(); ++it) {
+        if (it.key() == QStringLiteral("signature") || it.key() == QStringLiteral("reasoning")
+            || it.key() == QStringLiteral("reasoning_content") || it.key() == QStringLiteral("reasoning_details")) continue;
+        result.insert(it.key(), diagnosticValue(it.value()));
+    }
+    return result;
+}
+}
+void Summarizer::beginDiagnosticOperation(QObject *context) {
+    Q_ASSERT(context && QThread::currentThread() == thread());
+    if (!m_diagnosticJournals.contains(context))
+        connect(context, &QObject::destroyed, this, [this, context] { m_diagnosticJournals.remove(context); });
+    auto journal = std::make_shared<struct DiagnosticJournal>();
+    journal->operationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_diagnosticJournals.insert(context, journal);
+}
+void Summarizer::appendDiagnostic(const std::shared_ptr<struct DiagnosticJournal> &journal, const QJsonObject &entry) {
+    if (!journal) return;
+    constexpr qsizetype maxBytes = 768 * 1024;
+    constexpr qsizetype maxEntries = 24;
+    QJsonObject clean = diagnosticValue(entry).toObject();
+    qsizetype bytes = QJsonDocument(clean).toJson(QJsonDocument::Compact).size();
+    if (bytes > maxBytes) {
+        journal->truncated = true;
+        clean = QJsonObject{{QStringLiteral("stage"), entry.value(QStringLiteral("stage"))},
+            {QStringLiteral("omittedBytes"), bytes}, {QStringLiteral("reason"), QStringLiteral("One entry exceeded the diagnostic limit.")}};
+        bytes = QJsonDocument(clean).toJson(QJsonDocument::Compact).size();
+    }
+    while (!journal->entries.isEmpty() && (journal->entries.size() >= maxEntries || journal->bytes + bytes > maxBytes)) {
+        const qsizetype index = journal->entries.size() > 1 ? 1 : 0;
+        journal->bytes -= QJsonDocument(journal->entries.at(index).toObject()).toJson(QJsonDocument::Compact).size();
+        journal->entries.removeAt(index);
+        journal->truncated = true;
+    }
+    journal->entries.append(clean);
+    journal->bytes += bytes;
+}
+QString Summarizer::logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail) {
+    return logDiagnosticJournal(m_diagnosticJournals.value(context), code, message, detail);
+}
+QString Summarizer::logDiagnosticJournal(const std::shared_ptr<struct DiagnosticJournal> &journal,
+                                        const QString &code, const QString &message, const QString &detail) {
+    auto *const log = DiagnosticLog::instance();
+    if (!log) return {};
+    QJsonObject record{{QStringLiteral("code"), code}, {QStringLiteral("message"), message},
+        {QStringLiteral("detail"), detail}, {QStringLiteral("provider"), provider()},
+        {QStringLiteral("api"), provider() == QStringLiteral("local") ? QStringLiteral("local") : remoteApi()},
+        {QStringLiteral("model"), model()}};
+    if (journal) {
+        record.insert(QStringLiteral("operationId"), journal->operationId);
+        record.insert(QStringLiteral("turns"), journal->entries);
+        record.insert(QStringLiteral("traceTruncated"), journal->truncated);
+    }
+    return log->record(QStringLiteral("warning"), QStringLiteral("llm.operation.failure"), record);
+}
 quint64 Summarizer::completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
     const quint64 id = ++m_jobSequence;
     auto job = std::make_shared<struct CompletionJob>();
+    if (!m_diagnosticJournals.contains(context)) beginDiagnosticOperation(context);
     job->payload = payload; job->context = context; job->callback = std::move(callback);
+    job->journal = m_diagnosticJournals.value(context); job->id = id;
+    appendDiagnostic(job->journal, QJsonObject{{QStringLiteral("job"), static_cast<qint64>(id)},
+        {QStringLiteral("stage"), QStringLiteral("request")}, {QStringLiteral("payload"), payload}});
     job->contextConnection = connect(context, &QObject::destroyed, this, [this, id] { cancelCompletion(id); });
     m_jobs.insert(id, job);
     QTimer::singleShot(0, this, [this, id] { startCompletion(id); });
@@ -411,6 +496,40 @@ void Summarizer::finishCompletion(quint64 id, std::expected<QJsonObject, struct 
     const auto job = m_jobs.take(id);
     if (!job) return;
     disconnect(job->contextConnection);
+    QJsonObject entry{{QStringLiteral("job"), static_cast<qint64>(id)}, {QStringLiteral("stage"), QStringLiteral("response")}};
+    if (result) entry.insert(QStringLiteral("message"), *result);
+    else {
+        entry.insert(QStringLiteral("error"), QJsonObject{{QStringLiteral("code"), result.error().code},
+            {QStringLiteral("message"), result.error().message}, {QStringLiteral("detail"), result.error().detail}});
+        if (!job->body.isEmpty()) {
+            QJsonParseError parseError{};
+            const QJsonDocument document = QJsonDocument::fromJson(job->body, &parseError);
+            if (parseError.error == QJsonParseError::NoError && document.isObject())
+                entry.insert(QStringLiteral("providerResponse"), document.object());
+            else if (parseError.error == QJsonParseError::NoError && document.isArray())
+                entry.insert(QStringLiteral("providerResponse"), document.array());
+            else {
+                entry.insert(QStringLiteral("providerResponseOmitted"), QStringLiteral("Unparseable response body was omitted because provider reasoning and credentials cannot be reliably separated from it."));
+                entry.insert(QStringLiteral("providerResponseBytes"), job->body.size());
+                entry.insert(QStringLiteral("providerResponseParseError"), parseError.errorString());
+            }
+        }
+    }
+    appendDiagnostic(job->journal, entry);
+    if (result) {
+        if (auto *const log = DiagnosticLog::instance(); log && log->level() == QStringLiteral("debug")) {
+            const QJsonObject details{{QStringLiteral("operationId"), job->journal ? job->journal->operationId : QString()},
+                {QStringLiteral("job"), static_cast<qint64>(id)}, {QStringLiteral("request"), diagnosticValue(job->payload)},
+                {QStringLiteral("response"), diagnosticValue(*result)}};
+            (void)log->record(QStringLiteral("debug"), QStringLiteral("llm.completion"), details);
+        }
+    }
+    if (!result && job->context) {
+        const QString code = result.error().code;
+        const QString message = result.error().message;
+        const QString detail = result.error().detail;
+        (void)logDiagnosticJournal(job->journal, code, message, detail);
+    }
     if (job->context && !job->canceled->load()) job->callback(std::move(result));
 }
 void Summarizer::cancelCompletion(quint64 id) {
@@ -457,7 +576,8 @@ void Summarizer::testModel() {
         {QStringLiteral("response_format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_object")}}}};
     if (groqReasoningModel)
         payload.insert(QStringLiteral("reasoning_effort"), QStringLiteral("low"));
-    m_testJob = complete(payload, this, [this](std::expected<QString, struct ProviderError> result) {
+    beginDiagnosticOperation(&m_testContext);
+    m_testJob = complete(payload, &m_testContext, [this](std::expected<QString, struct ProviderError> result) {
         m_testJob = 0; m_testBusy = false;
         if (!result) {
             m_testStatus.clear(); m_testError = result.error().code + QStringLiteral(": ") + result.error().message;
@@ -473,6 +593,7 @@ void Summarizer::testModel() {
                 m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("passed"));
             } else {
                 m_testStatus.clear(); m_testError = QStringLiteral("LLM_TEST_ANSWER: The model responded but did not return the expected JSON answer. Choose another profile or a model supporting JSON output.");
+                (void)logOperationFailure(&m_testContext, QStringLiteral("LLM_TEST_ANSWER"), m_testError);
                 m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
                 m_testReport.insert(QStringLiteral("details"), m_testError);
             }
@@ -497,6 +618,7 @@ void Summarizer::configureCredentials() {
         connect(m_credentials, &ApiKeyBinding::changed, this, [this] {
             const QString id = m_credentials->selectedKeyId();
             const QString key = m_credentials->key();
+            if (auto *const log = DiagnosticLog::instance()) log->addSecret(key);
             const bool resolvedChanged = id != m_lastCredentialId || key != m_lastKey;
             m_lastCredentialId = id;
             m_lastKey = key;
@@ -510,6 +632,7 @@ void Summarizer::configureCredentials() {
     }
     m_credentials->setEndpoint(m_endpoint);
     m_lastKey = m_credentials->key();
+    if (auto *const log = DiagnosticLog::instance()) log->addSecret(m_lastKey);
     m_lastCredentialId = m_credentials->selectedKeyId();
     emit keyChanged();
 }
@@ -704,10 +827,13 @@ void Summarizer::summarizePending(const QVariantList &pending, const QString &sc
             .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName)
         : QStringLiteral("Summarizing the first %1 of %2 remaining items in %3.").arg(prompts.size()).arg(pending.size())
             .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName);
-    m_summaryJob = complete(payload, this, [this](std::expected<QString, struct ProviderError> result) {
+    beginDiagnosticOperation(&m_summaryContext);
+    m_summaryJob = complete(payload, &m_summaryContext, [this](std::expected<QString, struct ProviderError> result) {
         m_summaryJob = 0;
         if (!result) { fail(result.error().code, result.error().message); return; }
         if (result->isEmpty() || result->size() > 32000) {
+            (void)logOperationFailure(&m_summaryContext, QStringLiteral("LLM_RESPONSE"),
+                QStringLiteral("The model returned no usable summary. Choose another model."));
             fail(QStringLiteral("LLM_RESPONSE"), QStringLiteral("The model returned no usable summary. Choose another model.")); return;
         }
         m_summary = *result;

@@ -35,7 +35,8 @@ private:
     bool validateContext();
     void requestTurn();
     void receiveTurn(const QJsonObject &message);
-    void correctSearchQuery(const QJsonObject &assistant, const QString &toolId, const QString &problem);
+    void correctToolCall(const QJsonObject &assistant, const QString &toolId, const QString &problem,
+                         const QString &diagnostic, bool preserveNativeCall);
     void search(const QString &query, const QJsonObject &assistant, const QString &toolId);
     void finish(const QJsonObject &object);
     void fail(const QString &code, const QString &message, const QString &action, const QString &detail = {});
@@ -48,11 +49,12 @@ private:
     bool m_searchEnabled = false;
     bool m_evidenceTruncated = false;
     bool m_formatting = false;
-    bool m_searchCorrectionUsed = false;
+    int m_toolCorrections = 0;
     int m_searchCount = 0;
     int m_turnCount = 0;
     QString m_initialFormatError{};
     QString m_initialSearchError{};
+    QString m_lastToolDiagnostic{};
     QString m_pendingReset{};
     QString m_mode{};
     QString m_status{};

@@ -25,8 +25,8 @@ Item {
         }
         if (section !== 4) syncTokenDraft = ""
     }
-    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering", "Review", "Web search"]
-    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering", "Review", "Web search"]
+    readonly property var sections: ["Appearance", "Keyboard", "Voice Control", "Language model", "Sync", "Data", "Search", "Code rendering", "Review", "Web search", "Logging"]
+    readonly property var sectionTitles: ["Appearance", "Key bindings", "Voice Control", "Language model", "Device sync", "Collection data", "Library search", "Code rendering", "Review", "Web search", "Logging"]
     property var sectionScrollPositions: ({})
     property var voiceTabScrollPositions: ({})
     property string aiEndpointDraft: ai.endpoint
@@ -755,6 +755,12 @@ Item {
                         id: webSearchSettings
                         service: webSearch
                         visible: settingsPage.section === 9
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    LoggingSettings {
+                        service: diagnostics
+                        visible: settingsPage.section === 10
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                     }

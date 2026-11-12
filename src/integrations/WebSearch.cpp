@@ -1,4 +1,5 @@
 #include "WebSearch.h"
+#include "core/DiagnosticLog.h"
 #include "ApiKeyBinding.h"
 #include "ApiKeyRegistry.h"
 
@@ -23,8 +24,10 @@ WebSearch::WebSearch(ApiKeyRegistry *registry, QObject *parent)
     Q_ASSERT(registry && m_credentials);
     m_credentials->setEndpoint(endpoint);
     m_credentialSnapshot = m_credentials->key();
+    if (auto *const log = DiagnosticLog::instance()) log->addSecret(m_credentialSnapshot);
     connect(m_credentials, &ApiKeyBinding::changed, this, [this] {
         const QString key = m_credentials->key();
+        if (auto *const log = DiagnosticLog::instance()) log->addSecret(key);
         if (key != m_credentialSnapshot) {
             m_credentialSnapshot = key;
             cancelTest();

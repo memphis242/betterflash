@@ -218,12 +218,14 @@ QString CardGenerator::systemInstructions() const
 
 void CardGenerator::fail(const QString &code, const QString &message)
 {
+    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message) : QString();
     m_busy = false;
     if (m_verifying) {
         m_verifying = false;
         clearVerification();
     }
-    m_error = code + QStringLiteral(": ") + message;
+    m_error = code + QStringLiteral(": ") + message
+        + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     emit changed();
 }
 
@@ -276,6 +278,7 @@ void CardGenerator::cancel()
 void CardGenerator::clear()
 {
     cancel();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     m_error.clear();
     m_source.clear();
     m_draft.clear();
@@ -293,6 +296,7 @@ void CardGenerator::generate(const QString &cardId, const QString &instructions,
 {
     Q_ASSERT(QThread::currentThread() == thread());
     clear();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     if (!validDifficulty(difficulty)) {
         fail(QStringLiteral("CARD_GENERATION_DIFFICULTY"),
              QStringLiteral("Choose easier, similar, or harder before generating a card."));
@@ -355,6 +359,7 @@ void CardGenerator::generateForDeck(const QString &deckId, const QString &instru
 {
     Q_ASSERT(QThread::currentThread() == thread());
     clear();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     const QString topic = instructions.trimmed();
     if (topic.isEmpty()) {
         fail(QStringLiteral("CARD_GENERATION_TOPIC"),
@@ -410,6 +415,7 @@ void CardGenerator::refine(const QVariantMap &draft, const QString &instructions
 {
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_busy) return;
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     clearVerification();
     if (!validDifficulty(difficulty)) {
         fail(QStringLiteral("CARD_GENERATION_DIFFICULTY"),
@@ -774,6 +780,7 @@ void CardGenerator::verify(const QVariantMap &draft)
 {
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_busy) return;
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     clearVerification();
     m_error.clear();
     if (!m_app || !m_summarizer || m_source.isEmpty() || m_draft.isEmpty()) {

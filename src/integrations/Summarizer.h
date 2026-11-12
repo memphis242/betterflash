@@ -4,6 +4,7 @@
 #include "models/ModelDownload.h"
 #include <QHash>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QPointer>
@@ -103,6 +104,8 @@ public:
     [[nodiscard]] quint64 complete(const QJsonObject &payload, QObject *context, Completion callback);
     [[nodiscard]] quint64 completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback);
     void cancelCompletion(quint64 id);
+    void beginDiagnosticOperation(QObject *context);
+    QString logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail = {});
     std::expected<QNetworkRequest, struct ProviderError> configuredRequest() const;
     Q_INVOKABLE void setApiKey(const QString &key);
     Q_INVOKABLE void clearApiKey();
@@ -124,8 +127,19 @@ private:
     void finishCompletion(quint64 id, std::expected<QJsonObject, struct ProviderError> result);
     void cancelAllCompletions();
     void resetTestReport();
+    struct DiagnosticJournal {
+        QString operationId{};
+        QJsonArray entries{};
+        qsizetype bytes = 0;
+        bool truncated = false;
+    };
+    void appendDiagnostic(const std::shared_ptr<struct DiagnosticJournal> &journal, const QJsonObject &entry);
+    QString logDiagnosticJournal(const std::shared_ptr<struct DiagnosticJournal> &journal,
+                                 const QString &code, const QString &message, const QString &detail);
     struct CompletionJob {
         QJsonObject payload{};
+        std::shared_ptr<struct DiagnosticJournal> journal{};
+        quint64 id = 0;
         QPointer<QObject> context{};
         MessageCompletion callback{};
         QPointer<QNetworkReply> reply{};
@@ -144,6 +158,9 @@ private:
     ModelDownload m_localDownload;
     QThreadPool m_inferencePool{};
     QHash<quint64, std::shared_ptr<struct CompletionJob>> m_jobs{};
+    QHash<QObject *, std::shared_ptr<struct DiagnosticJournal>> m_diagnosticJournals{};
+    QObject m_testContext{};
+    QObject m_summaryContext{};
     quint64 m_jobSequence = 0;
     quint64 m_summaryJob = 0;
     quint64 m_testJob = 0;

@@ -127,11 +127,13 @@ bool Atomicizer::hasProposal() const {
 }
 int Atomicizer::maxCards() const { return betterflash::model::maxAtomicReplacementCards; }
 void Atomicizer::fail(const QString &code, const QString &message, const QString &action, const QString &detail) {
+    const QString diagnosticPath = m_provider ? m_provider->logOperationFailure(this, code, message, detail) : QString();
+    const QString diagnosticDetail = detail + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     Q_ASSERT(!code.isEmpty() && !message.isEmpty());
     m_busy = false;
     m_error = code + QStringLiteral(": ") + message;
     m_errorInfo = {{QStringLiteral("code"), code}, {QStringLiteral("message"), message},
-        {QStringLiteral("action"), action}, {QStringLiteral("detail"), detail.left(2048)}};
+        {QStringLiteral("action"), action}, {QStringLiteral("detail"), diagnosticDetail.left(4096)}};
     m_status.clear();
     emit changed();
 }
@@ -147,6 +149,7 @@ void Atomicizer::cancel() {
 void Atomicizer::clear() {
     if (m_applying) return;
     cancel();
+    if (m_provider) m_provider->beginDiagnosticOperation(this);
     m_source.clear(); m_proposals.clear(); m_error.clear(); m_errorInfo.clear(); m_status.clear(); m_reason.clear(); m_decision.clear();
     emit changed();
 }
@@ -198,6 +201,7 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
         cancel();
         m_proposals.clear(); m_error.clear(); m_errorInfo.clear(); m_status.clear(); m_reason.clear(); m_decision.clear();
     }
+    m_provider->beginDiagnosticOperation(this);
     const QString front = m_source.value(QStringLiteral("front")).toString();
     const QString back = m_source.value(QStringLiteral("back")).toString();
     if (front.size() + back.size() > 32000) {

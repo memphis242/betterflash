@@ -102,6 +102,7 @@ void CheckpointSummary::cancel() {
 
 void CheckpointSummary::clear() {
     cancel();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     m_error.clear();
     m_summary.clear();
     m_status.clear();
@@ -115,8 +116,10 @@ void CheckpointSummary::clear() {
 }
 
 void CheckpointSummary::fail(const QString &code, const QString &message) {
+    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message) : QString();
     m_busy = false;
-    m_error = code + QStringLiteral(": ") + message;
+    m_error = code + QStringLiteral(": ") + message
+        + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     m_status = QStringLiteral("Summary unavailable.");
     m_batches.clear();
     m_results.clear();
@@ -262,6 +265,7 @@ void CheckpointSummary::startNextBatch(quint64 generation) {
 void CheckpointSummary::generate(const QVariantMap &preview, const QString &deckName) {
     Q_ASSERT(QThread::currentThread() == thread());
     clear();
+    if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     if (!m_summarizer) {
         fail(QStringLiteral("CHECKPOINT_SUMMARY_UNAVAILABLE"),
              QStringLiteral("The language model is unavailable. Reopen the checkpoint dialog and try again."));

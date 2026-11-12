@@ -1,4 +1,5 @@
 #include "SecretStore.h"
+#include "core/DiagnosticLog.h"
 
 #include <QElapsedTimer>
 #include <QDebug>
@@ -10,10 +11,14 @@
 
 SecretStore::SecretStore(QString service, QString environmentVariable, QObject *parent)
     : QObject(parent), m_service(std::move(service)) {
+    connect(this, &SecretStore::changed, this, [this] {
+        if (auto *const log = DiagnosticLog::instance()) log->addSecret(m_key);
+    });
     if (!environmentVariable.isEmpty()) {
         m_key = qEnvironmentVariable(environmentVariable.toLocal8Bit().constData()).trimmed();
         if (m_key.size() > 4096 || m_key.contains(QLatin1Char('\n')) || m_key.contains(QLatin1Char('\r'))) m_key.clear();
         if (!m_key.isEmpty()) {
+            if (auto *const log = DiagnosticLog::instance()) log->addSecret(m_key);
             m_environment = true;
             m_status = QStringLiteral("Using a read-only key from the environment. Change or unset its environment variable and restart to replace or remove it.");
             m_storageState = QStringLiteral("environment");
@@ -21,6 +26,10 @@ SecretStore::SecretStore(QString service, QString environmentVariable, QObject *
         }
     }
     QTimer::singleShot(0, this, &SecretStore::load);
+}
+QString SecretStore::key() const {
+    if (auto *const log = DiagnosticLog::instance()) log->addSecret(m_key);
+    return m_key;
 }
 SecretStore::~SecretStore() {
     if (!finishPending()) qWarning("KEYRING_PENDING: Credential changes did not finish. Check the desktop keyring before restarting.");

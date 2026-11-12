@@ -176,6 +176,7 @@ scope for the initial client work.
 - [Code rendering](docs/code-rendering.md): Markdown code themes and limits.
 - [Atomicize](docs/atomicize.md): proposed focused-card workflow.
 - [Card checks](docs/card-checks.md): correctness, completeness, and optional web search.
+- [Diagnostic logging](docs/logging.md): local rotating logs, verbosity, and model/tool failure traces.
 - [Deck tag vocabularies and suggested tags](docs/tags.md): manual vocabularies, model scans, and reviewable card assignments.
 - [Ask AI](docs/card-chat.md): separate card chats with read-only information retrieval.
 - [Roadmap](docs/roadmap.md): deferred desktop and platform work.

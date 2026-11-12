@@ -1,3 +1,4 @@
+#include "core/DiagnosticLog.h"
 #include "core/appcontroller.h"
 #include "core/actionhistory.h"
 #include "core/cardmodel.h"
@@ -156,6 +157,8 @@ int main(int argc, char **argv) {
     if (parser.isSet(QStringLiteral("data-dir")))
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dataDirectory + QStringLiteral("/settings"));
 
+    DiagnosticLog diagnostics(dataDirectory);
+
     if (selectedGallery) {
         const bool deckGraphs = parser.isSet(QStringLiteral("deck-graph-designs"));
         bool validVariant = false;
@@ -214,6 +217,12 @@ int main(int argc, char **argv) {
     }
 
     AppController app(dataDirectory);
+    QObject::connect(&app, &AppController::lastErrorChanged, &diagnostics, [&app, &diagnostics] {
+        if (!app.lastError().isEmpty()) {
+            const QString path = diagnostics.record(QStringLiteral("warning"), QStringLiteral("application.error"), QJsonObject::fromVariantMap(app.lastError()));
+            (void)path; // Logging failures are exposed through the diagnostic settings and notice.
+        }
+    });
     MediaStore media(dataDirectory);
     ShortcutManager shortcuts;
     ApiKeyRegistry apiKeys;
@@ -233,6 +242,11 @@ int main(int argc, char **argv) {
     StudyAssistant studyAssistant(&ai, &app);
     SyncController sync(&app, media.rootPath());
     VoiceController voice(nullptr, &apiKeys);
+    QObject::connect(&voice, &VoiceController::errorOccurred, &diagnostics, [&diagnostics](const QString &code, const QString &message) {
+        const QString path = diagnostics.record(QStringLiteral("warning"), QStringLiteral("voice.error"),
+            QJsonObject{{QStringLiteral("code"), code}, {QStringLiteral("message"), message}});
+        (void)path; // Logging failures are exposed independently of the voice error.
+    });
     CardNarration narration(&app, &voice, dataDirectory, &application);
     voice.attachLanguageModel(&ai);
     ActionHistory actionHistory(&app);
@@ -287,6 +301,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty(QStringLiteral("narration"), &narration);
     engine.rootContext()->setContextProperty(QStringLiteral("ai"), &ai);
     engine.rootContext()->setContextProperty(QStringLiteral("librarySearch"), &librarySearch);
+    engine.rootContext()->setContextProperty(QStringLiteral("diagnostics"), &diagnostics);
     engine.rootContext()->setContextProperty(QStringLiteral("codeRendering"), CodeRendering::instance());
     engine.rootContext()->setContextProperty(QStringLiteral("atomic"), &atomic);
     engine.rootContext()->setContextProperty(QStringLiteral("cardGenerator"), &cardGenerator);
