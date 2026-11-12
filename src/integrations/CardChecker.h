@@ -46,8 +46,10 @@ private:
     bool m_busy = false;
     bool m_searchEnabled = false;
     bool m_evidenceTruncated = false;
+    bool m_formatting = false;
     int m_searchCount = 0;
     int m_turnCount = 0;
+    QString m_initialFormatError{};
     QString m_pendingReset{};
     QString m_mode{};
     QString m_status{};

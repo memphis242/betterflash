@@ -91,7 +91,7 @@ Enabling search allows the model to request up to three basic searches during
 an explicitly started card check. Model-generated queries derived from the
 card are sent to Tavily. Result snippets are sent to the configured language
 model. Searches use the user's Tavily quota and may incur charges under their
-account plan. There are no background searches or automatic retries. The
+account plan. There are no background searches or automatic search retries. The
 integration explicitly disables Tavily's automatic search-depth selection.
 
 Remote chat-completion models use native `web_search` function calls, one at a
@@ -103,8 +103,11 @@ search is reported explicitly. **Retry without web search** runs the same draft
 through the model without changing the global search setting or leaving the
 editor.
 
-The loop permits at most four model turns. Network requests have time and size
-limits, and evidence is bounded to the selected model's context budget. The
+The search loop permits at most four model turns. If a remote web-enabled check
+returns a report that is not valid JSON, the app may make one additional model
+request to format that report using the existing evidence; it cannot start another
+search. This request can incur additional model usage charges. Network requests
+have time and size limits, and evidence is bounded to the selected model's context budget. The
 result indicates shortened evidence. Only source IDs actually supplied to the
 model may be cited by structured findings. Source links come from Tavily, are
 restricted to HTTP(S), and open only on an explicit click. The app does not
