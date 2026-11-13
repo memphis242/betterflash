@@ -9,11 +9,11 @@ QtObject {
     readonly property bool reducedMotion: preferences.reducedMotion
     readonly property bool hasChoice: preferences.hasThemeChoice
     readonly property bool dark: hasChoice ? preferences.savedDark : Qt.styleHints.colorScheme !== Qt.Light
-    readonly property color canvas: dark ? "#211722" : "#e0dbd2"
-    readonly property color surface: dark ? "#2c202c" : "#eae5dc"
+    readonly property color canvas: dark ? "#211722" : "#eee9e0"
+    readonly property color surface: dark ? "#2c202c" : "#f8f3ea"
     readonly property color surfaceRaised: dark ? "#362838" : "#ffffff"
     readonly property color rule: dark ? "#594454" : "#b8a69a"
-    readonly property color ledgerSurface: dark ? "#312531" : "#eae5dc"
+    readonly property color ledgerSurface: dark ? "#312531" : "#f8f3ea"
     readonly property color ledgerSurfaceRaised: dark ? "#3a2c39" : "#ffffff"
     readonly property color ledgerRule: dark ? "#655360" : "#ad9b8f"
     readonly property color ink: dark ? "#f7eee8" : "#322832"
