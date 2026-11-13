@@ -98,7 +98,7 @@ Dialog {
                 GlyphButton {
                     id: pitStopClose
                     glyph: "close"
-                    hint: "Close Review Pit Stop (Q, Space, Esc)"
+                    hint: "Close Review Pit Stop (Q, Esc)"
                     enabled: !app.busy && !dialog.ui.pitStopToolOpen
                     onClicked: dialog.requestClose()
                 }
@@ -177,7 +177,7 @@ Dialog {
     }
     function isDismissSequence(sequence) {
         const key = String(sequence).replace(/\s/g, "").toLowerCase()
-        return key === "q" || key === "space" || key === "esc" || key === "escape"
+        return key === "q" || key === "esc" || key === "escape"
     }
     function requestClose() {
         if (app.busy || ui.pitStopToolOpen)

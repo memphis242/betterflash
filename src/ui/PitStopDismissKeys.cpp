@@ -10,7 +10,6 @@ bool dismissalKey(const int key)
 {
     switch (key) {
     case Qt::Key_Q:
-    case Qt::Key_Space:
     case Qt::Key_Escape: return true;
     default: return false;
     }
