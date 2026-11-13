@@ -38,7 +38,7 @@ unsaved drafts and model results. A deck vocabulary belongs to that deck;
 subdecks retain their own vocabularies even when a parent run includes them.
 Reserved check follow-up tags are excluded from the vocabulary.
 
-The desktop storage schema is version 9. Opening an existing collection
+The desktop storage schema is version 10. Opening an existing collection
 migrates it transactionally; older desktop builds cannot open that migrated
 SQLite file. Optional vocabulary fields in older sync events are treated as
 absent and preserve the current vocabulary. Use an updated sync server to

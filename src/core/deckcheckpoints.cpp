@@ -54,7 +54,7 @@ bool onlyKeys(const QVariantMap &value, const QSet<QString> &allowed)
 bool contentKeys(const QVariantMap &value, bool card)
 {
     static const QSet<QString> deckKeys{"id", "name", "description", "createdAt", "parentId", "tagVocabulary"};
-    static const QSet<QString> cardKeys{"id", "deckId", "kind", "front", "back", "tags", "pointCount", "narrations", "narrationFingerprints"};
+    static const QSet<QString> cardKeys{"id", "deckId", "kind", "front", "back", "tags", "pointCount", "narrations", "narrationFingerprints", "createdAt", "modifiedAt"};
     return onlyKeys(value, card ? cardKeys : deckKeys);
 }
 
@@ -90,7 +90,13 @@ QVariantList recordChanges(const QMap<QString, QVariantMap> &before,
     for (const QString &id : ordered) {
         const QVariantMap oldRecord = before.value(id);
         const QVariantMap newRecord = after.value(id);
-        if (oldRecord == newRecord) continue;
+        QVariantMap oldContent=oldRecord;
+        QVariantMap newContent=newRecord;
+        if (labelField==QStringLiteral("front")) {
+            oldContent.remove("createdAt"); oldContent.remove("modifiedAt");
+            newContent.remove("createdAt"); newContent.remove("modifiedAt");
+        }
+        if (oldContent == newContent) continue;
         const QString type = oldRecord.isEmpty() ? QStringLiteral("added")
             : newRecord.isEmpty() ? QStringLiteral("deleted") : QStringLiteral("modified");
         result.append(QVariantMap{{"type", type}, {"id", id},
@@ -130,7 +136,7 @@ std::expected<struct checkpoints::Snapshot, QString> readCurrentSnapshot(QSqlDat
     if (deckMaps.isEmpty())
         return std::unexpected(QStringLiteral("This deck no longer exists. Refresh the library."));
     QSqlQuery cards(database);
-    cards.prepare(QStringLiteral("WITH RECURSIVE subtree(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN subtree ON d.parent_id=subtree.id) SELECT n.id,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints FROM notes n JOIN subtree s ON s.id=n.deck_id ORDER BY n.id"));
+    cards.prepare(QStringLiteral("WITH RECURSIVE subtree(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN subtree ON d.parent_id=subtree.id) SELECT n.id,n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,n.created_at,n.modified_at FROM notes n JOIN subtree s ON s.id=n.deck_id ORDER BY n.id"));
     cards.addBindValue(rootId);
     if (!cards.exec()) return std::unexpected(cards.lastError().text());
     QVariantList cardMaps;
@@ -145,7 +151,9 @@ std::expected<struct checkpoints::Snapshot, QString> readCurrentSnapshot(QSqlDat
                                 {"kind", cards.value(2)}, {"front", cards.value(3)},
                                 {"back", cards.value(4)}, {"tags", cards.value(5)},
                                 {"pointCount", cards.value(6)}, {"narrations", *narrations},
-                                {"narrationFingerprints", *fingerprints}};
+                                {"narrationFingerprints", *fingerprints}, {"createdAt", cards.value(9)}, {"modifiedAt", cards.value(10)}};
+        const auto validatedCard=model::cardFromMap(value);
+        if (!validatedCard) return std::unexpected(QStringLiteral("Card %1 has invalid content or date metadata: %2 Preserve a recovery copy before repairing it.").arg(cards.value(0).toString(),validatedCard.error()));
         byteCount += encoded(value).size() + 1;
         if (byteCount > checkpoints::maxSnapshotBytes)
             return std::unexpected(QStringLiteral("This deck's content exceeds the 64 MiB checkpoint limit. Create checkpoints for smaller subdecks."));
@@ -382,6 +390,8 @@ std::expected<struct Snapshot, QString> validateSnapshot(const QVariantMap &valu
         if (!parents.contains(card->deckId) || ids.contains(card->id))
             return std::unexpected(QStringLiteral("Checkpoint card identifiers or deck references are invalid."));
         ids.insert(card->id);
+        if (!entry.toMap().contains("createdAt")) result.cardsWithoutCreatedAt.insert(card->id);
+        if (!entry.toMap().contains("modifiedAt")) result.cardsWithoutModifiedAt.insert(card->id);
         result.cards.append(*card);
     }
     std::sort(result.decks.begin(), result.decks.end(), [](const struct model::Deck &a, const struct model::Deck &b) { return a.id < b.id; });
@@ -398,7 +408,12 @@ QVariantMap snapshotMap(const struct Snapshot &snapshot)
         if (snapshot.decksWithoutVocabulary.contains(deck.id)) value.remove("tagVocabulary");
         decks.append(value);
     }
-    for (const struct model::Card &card : snapshot.cards) cards.append(model::toMap(card));
+    for (const struct model::Card &card : snapshot.cards) {
+        QVariantMap value=model::toMap(card);
+        if (snapshot.cardsWithoutCreatedAt.contains(card.id)) value.remove("createdAt");
+        if (snapshot.cardsWithoutModifiedAt.contains(card.id)) value.remove("modifiedAt");
+        cards.append(value);
+    }
     return {{"version", 1}, {"rootId", snapshot.rootId}, {"decks", decks}, {"cards", cards}};
 }
 
@@ -462,7 +477,10 @@ std::expected<void, QString> validateChanges(const QVariantMap &value)
                     if (!contentKeys(record, true)) return std::unexpected(QStringLiteral("Checkpoint card changes contain fields outside card content."));
                     const auto valid = model::cardFromMap(record);
                     if (!valid) return std::unexpected(valid.error());
-                    if (model::toMap(*valid) != record)
+                    QVariantMap normalized=model::toMap(*valid);
+                    if (!record.contains("createdAt")) normalized.remove("createdAt");
+                    if (!record.contains("modifiedAt")) normalized.remove("modifiedAt");
+                    if (normalized != record)
                         return std::unexpected(QStringLiteral("Checkpoint card changes must contain complete normalized content fields."));
                 } else {
                     if (!contentKeys(record, false)) return std::unexpected(QStringLiteral("Checkpoint deck changes contain fields outside deck content."));
@@ -725,13 +743,18 @@ void DatabaseWorker::restoreDeckCheckpoint(const QString &deckId, const QString 
             const QVariantMap payload{{"deck", model::toMap(record)}, {"restore", true}};
             if (!upsertDeck(record) || !enqueue("deck.upsert", payload)) return false;
         }
-        for (const struct model::Card &record : restored.cards) {
+        for (struct model::Card record : restored.cards) {
             const auto existing = card(record.id);
             if (!m_sqlDetail.isEmpty()) return false;
             if (existing && !currentCardIds.contains(record.id)) {
                 m_sqlDetail = QStringLiteral("A checkpoint card moved outside this deck before restoration. Refresh the preview and move it back before restoring."); return false;
             }
             if (!execute("DELETE FROM tombstones WHERE entity_type='card' AND entity_id=?", {record.id})) return false;
+            if (existing) model::setCardEditDates(record,&*existing,now);
+            else {
+                record.modifiedAt=std::max(now,record.modifiedAt);
+                if (!record.createdAt.isEmpty()) record.modifiedAt=std::max(record.modifiedAt,record.createdAt);
+            }
             QList<struct model::Variant> schedules;
             QVariantList freshVariantIds;
             const QList<struct model::Variant> retained = cardVariants(record.id);

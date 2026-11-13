@@ -5,6 +5,7 @@ import QtQml
 
 QtObject {
     id: theme
+    readonly property real disabledControlOpacity: 0.35
     readonly property bool reducedMotion: preferences.reducedMotion
     readonly property bool hasChoice: preferences.hasThemeChoice
     readonly property bool dark: hasChoice ? preferences.savedDark : Qt.styleHints.colorScheme !== Qt.Light

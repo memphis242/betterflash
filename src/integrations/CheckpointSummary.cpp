@@ -308,9 +308,18 @@ void CheckpointSummary::generate(const QVariantMap &preview, const QString &deck
         ? (m_summarizer->resolvedProfile() == QStringLiteral("gemma") ? DesktopInputBytes : CompactInputBytes)
         : RemoteInputBytes;
     QJsonArray records;
-    for (const QJsonValue &change : cardChanges)
+    for (const QJsonValue &change : cardChanges) {
+        QJsonObject contentChange = change.toObject();
+        for (const QString &side : {QStringLiteral("before"), QStringLiteral("after")}) {
+            if (!contentChange.value(side).isObject()) continue;
+            QJsonObject content = contentChange.value(side).toObject();
+            content.remove(QStringLiteral("createdAt"));
+            content.remove(QStringLiteral("modifiedAt"));
+            contentChange.insert(side, content);
+        }
         records.append(QJsonObject{{QStringLiteral("category"), QStringLiteral("card")},
-                                   {QStringLiteral("change"), change}});
+                                   {QStringLiteral("change"), contentChange}});
+    }
     for (const QJsonValue &change : metadataChanges)
         records.append(QJsonObject{{QStringLiteral("category"), QStringLiteral("deck")},
                                    {QStringLiteral("change"), change}});

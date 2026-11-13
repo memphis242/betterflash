@@ -96,9 +96,28 @@ struct model::Card readCard(const QSqlQuery &q, QString *metadataError=nullptr)
             if (q.value(column).metaType().id()!=QMetaType::QString)
                 *metadataError+=QStringLiteral(" Stored %1 must be text; preserve a recovery copy before repairing it.").arg(q.record().fieldName(column));
     }
+    QString dateError;
+    const auto date = [&q, &dateError](const QString &name) {
+        const int index = q.record().indexOf(name);
+        if (index < 0) return QString();
+        const QVariant value = q.value(index);
+        if (value.metaType().id() != QMetaType::QString) {
+            dateError += QStringLiteral("Stored %1 must be text. ").arg(name); return QString();
+        }
+        if (value.toString().isEmpty()) return QString();
+        const auto parsed = model::utcInstant(value.toString());
+        if (!parsed) { dateError += QStringLiteral("Stored %1 is invalid: %2. ").arg(name, parsed.error()); return QString(); }
+        return *parsed;
+    };
+    const QString createdAt=date(QStringLiteral("created_at"));
+    QString modifiedAt=date(QStringLiteral("modified_at"));
+    if (!createdAt.isEmpty() && !modifiedAt.isEmpty() && modifiedAt<createdAt) {
+        dateError+=QStringLiteral("The stored last-modified time precedes the creation time. ");
+        modifiedAt.clear();
+    }
     return {q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toString(),q.value(6).toInt(),
             readMetadata(q.value(7).toString(),QStringLiteral("narrations"),metadataError),
-            readMetadata(q.value(8).toString(),QStringLiteral("narration fingerprints"),metadataError)};
+            readMetadata(q.value(8).toString(),QStringLiteral("narration fingerprints"),metadataError),createdAt,modifiedAt,dateError};
 }
 struct model::Variant readVariant(const QSqlQuery &q, QString *storageError=nullptr)
 {
@@ -272,11 +291,11 @@ bool DatabaseWorker::migrate()
     const int version = versionQuery.value(0).toInt();
     versionQuery.finish();
     assert(!versionQuery.isActive());
-    if (version > 9) {
-        m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 9. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
+    if (version > 10) {
+        m_sqlDetail = QStringLiteral("Collection %1 has schema %2; this build supports schema 10. Update BetterFlash before opening this collection.").arg(m_path).arg(version);
         return false;
     }
-    const bool migrating=version<9;
+    const bool migrating=version<10;
     if (migrating&&(m_db.tables().contains(QStringLiteral("notes"))||m_db.tables().contains(QStringLiteral("cards")))
         &&!createRecoveryBackup()) return false;
     if (migrating&&(!execute("PRAGMA foreign_keys=OFF")||!execute("PRAGMA ignore_check_constraints=ON"))) return false;
@@ -355,6 +374,13 @@ bool DatabaseWorker::migrate()
             QSet<QString> names; while (columns.next()) names.insert(columns.value(1).toString());
             if (!names.contains("narration_fingerprints") && !execute("ALTER TABLE notes ADD COLUMN narration_fingerprints TEXT NOT NULL DEFAULT '{}'")) return false;
         }
+        if (version < 10) {
+            QSqlQuery columns(m_db);
+            if (!columns.exec("PRAGMA table_info(notes)")) { m_sqlDetail=columns.lastError().text(); return false; }
+            QSet<QString> names; while (columns.next()) names.insert(columns.value(1).toString());
+            if (!names.contains("created_at") && !execute("ALTER TABLE notes ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")) return false;
+            if (!names.contains("modified_at") && !execute("ALTER TABLE notes ADD COLUMN modified_at TEXT NOT NULL DEFAULT ''")) return false;
+        }
         if (!execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('device_id',?)",{model::uuid()})
             || !execute("INSERT OR IGNORE INTO metadata(key,value) VALUES('sync_cursor','0')")) return false;
         QSqlQuery device(m_db);
@@ -407,7 +433,7 @@ bool DatabaseWorker::migrate()
             const QVariantMap event{{"id",pending.value(0)},{"deviceId",pending.value(1)},{"type",pending.value(2)},{"payload",payload.object().toVariantMap()},{"createdAt",pending.value(4)}};
             if (!execute("INSERT OR IGNORE INTO local_events(id,target_type,target_id,event) VALUES(?,?,?,?)",{pending.value(0),pending.value(5),pending.value(6),json(event)})) return false;
         }
-        return execute("PRAGMA user_version=9");
+        return execute("PRAGMA user_version=10");
     });
     const QString migrationError=m_sqlDetail;
     if (migrating&&(!execute("PRAGMA ignore_check_constraints=OFF")||!execute("PRAGMA foreign_keys=ON"))) return false;
@@ -422,11 +448,13 @@ std::optional<struct model::Deck> DatabaseWorker::deck(const QString &id)
 }
 std::optional<struct model::Card> DatabaseWorker::card(const QString &id)
 {
-    QSqlQuery q(m_db);q.prepare("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");q.addBindValue(id);
+    QSqlQuery q(m_db);q.prepare("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at FROM notes WHERE id=?");q.addBindValue(id);
     if (!q.exec()) {m_sqlDetail=q.lastError().text();return std::nullopt;}
-    if (!q.next()) return std::nullopt;
+    if (!q.next()) { m_cardDateErrors.remove(id); return std::nullopt; }
     QString metadataError;
     const struct model::Card result=readCard(q,&metadataError);
+    if (!result.dateMetadataError.isEmpty()) m_cardDateErrors.insert(id);
+    else m_cardDateErrors.remove(id);
     const QVariantMap issue=model::cardReadIssue(result,cardVariants(id),metadataError);
     if (!issue.isEmpty()) m_cardLoadErrors.insert(id,issue);
     return result;
@@ -466,7 +494,29 @@ bool DatabaseWorker::upsertDeck(const struct model::Deck &r)
     return execute("INSERT INTO decks(id,name,description,created_at,parent_id,tag_vocabulary) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,created_at=excluded.created_at,parent_id=excluded.parent_id,tag_vocabulary=excluded.tag_vocabulary",{r.id,r.name,r.description,r.createdAt,r.parentId,vocabulary});
 }
 bool DatabaseWorker::upsertCard(const struct model::Card &r)
-{ return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count,narrations=excluded.narrations,narration_fingerprints=excluded.narration_fingerprints",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount,json(r.narrations),json(r.narrationFingerprints)}); }
+{
+    if (!r.dateMetadataError.isEmpty()) { m_sqlDetail = QStringLiteral("Card %1: %2 Preserve a recovery copy before repairing its dates.").arg(r.id,r.dateMetadataError); return false; }
+    QSqlQuery existing(m_db);
+    if (!existing.prepare("SELECT created_at,modified_at FROM notes WHERE id=?")) { m_sqlDetail=existing.lastError().text(); return false; }
+    existing.addBindValue(r.id);
+    if (!existing.exec()) { m_sqlDetail=existing.lastError().text(); return false; }
+    if (existing.next()) {
+        QStringList dates;
+        for (const int index : {0,1}) {
+            const QVariant value=existing.value(index);
+            if (value.metaType().id()!=QMetaType::QString || (!value.toString().isEmpty() && !model::utcInstant(value.toString()))) {
+                m_sqlDetail=QStringLiteral("Card %1 has invalid saved %2 metadata. Preserve a recovery copy before repair.").arg(r.id,index==0?QStringLiteral("creation date"):QStringLiteral("last-modified date")); return false;
+            }
+            dates.append(value.toString().isEmpty()?QString():*model::utcInstant(value.toString()));
+        }
+        if (!dates.at(0).isEmpty() && !dates.at(1).isEmpty() && dates.at(1)<dates.at(0)) {
+            m_sqlDetail=QStringLiteral("Card %1 has a saved last-modified date before its creation date. Preserve a recovery copy before repair.").arg(r.id); return false;
+        }
+    }
+    if (existing.lastError().isValid()) { m_sqlDetail=existing.lastError().text(); return false; }
+    existing.finish();
+    return execute("INSERT INTO notes(id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET deck_id=excluded.deck_id,kind=excluded.kind,front=excluded.front,back=excluded.back,tags=excluded.tags,point_count=excluded.point_count,narrations=excluded.narrations,narration_fingerprints=excluded.narration_fingerprints,created_at=excluded.created_at,modified_at=excluded.modified_at",{r.id,r.deckId,r.kind,r.front,r.back,r.tags,r.pointCount,json(r.narrations),json(r.narrationFingerprints),r.createdAt,r.modifiedAt});
+}
 bool DatabaseWorker::upsertVariant(const struct model::Variant &r,const QString &reviewId)
 {
     const auto previous=variant(r.id);
@@ -535,7 +585,11 @@ bool DatabaseWorker::replaceVariants(const struct model::Card &record, const QLi
     return m_sqlDetail.isEmpty();
 }
 QVariantMap DatabaseWorker::cardPayload(const struct model::Card &record)
-{ return {{"card",model::toMap(record)},{"variants",variantMaps(cardVariants(record.id))}}; }
+{
+    const auto persisted=card(record.id);
+    if (!persisted) { if (m_sqlDetail.isEmpty()) m_sqlDetail=QStringLiteral("Card %1 could not be read after saving.").arg(record.id); return {}; }
+    return {{"card",model::toMap(*persisted)},{"variants",variantMaps(cardVariants(record.id))}};
+}
 bool DatabaseWorker::enqueue(const QString &type, const QVariantMap &suppliedPayload)
 {
     QVariantMap payload=suppliedPayload;
@@ -686,6 +740,7 @@ bool DatabaseWorker::publishSnapshot()
     assertThread();
     m_collectionIssues=m_recoveryNotices;
     m_cardLoadErrors.clear();
+    m_cardDateErrors.clear();
     m_invalidScheduleValues.clear();
     m_hasUnreadableHistory=false;
     m_hasOrphanSchedules=false;
@@ -727,7 +782,7 @@ bool DatabaseWorker::publishSnapshot()
         if (!storageError.isEmpty()) {m_invalidScheduleValues.insert(schedule.cardId);rawScheduleErrors.insert(schedule.cardId,storageError);}
     }
     if (query.lastError().isValid()) {fail("STORAGE_READ","Schedule reading stopped before completion. Preserve the collection and retry.",query.lastError().text());return false;}
-    if (!query.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {
+    if (!query.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at FROM notes ORDER BY id")) {
         fail("STORAGE_READ","Could not read saved cards. No cards have been removed by this failed load. Check storage and retry.",query.lastError().text());return false;
     }
     while (query.next()) {
@@ -741,6 +796,11 @@ bool DatabaseWorker::publishSnapshot()
             issue={{"code","CARD_DECK"},{"cardId",note.id},{"message","This card's deck is missing. Its saved content and history are retained. Choose an existing deck when repairing it."},{"detail",QStringLiteral("Card %1 refers to missing deck %2.").arg(note.id,note.deckId)}};
         if (!issue.isEmpty()) m_cardLoadErrors.insert(note.id,issue);
         QVariantMap map=model::toMap(note);
+        if (!note.dateMetadataError.isEmpty()) {
+            m_cardDateErrors.insert(note.id);
+            map.insert("dateMetadataError",note.dateMetadataError);
+            warning("CARD_DATE_METADATA","A card has invalid date metadata. Its content and review remain available; preserve a recovery copy before repairing its dates.",QStringLiteral("Card %1: %2").arg(note.id,note.dateMetadataError));
+        }
         map.insert("loadError",issue);map.insert("reviewable",issue.isEmpty());
         notes.insert(note.id,note);cards.append(map);
     }
@@ -1285,8 +1345,11 @@ void DatabaseWorker::applySuggestedTags(const QVariantList &proposals, const QSt
             }
             if (updated.tags!=current->tags) updates.append(updated);
         }
-        for (const struct model::Card &record : updates) {
-            if (!execute("UPDATE notes SET tags=? WHERE id=?",{record.tags,record.id})) return false;
+        for (struct model::Card record : updates) {
+            const auto previous=card(record.id);
+            if (!previous || !m_sqlDetail.isEmpty()) return false;
+            model::setCardEditDates(record,&*previous,model::nowUtc());
+            if (!upsertCard(record)) return false;
             const QVariantMap payload=cardPayload(record);
             if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert",payload)) return false;
         }
@@ -1346,8 +1409,8 @@ void DatabaseWorker::deleteDeck(const QString &id)
         const QVariantMap issue=model::cardReadIssue(*target,cardVariants(cardId));
         if (!issue.isEmpty()) m_cardLoadErrors.insert(cardId,issue);
     }
-    const bool recovering=std::any_of(cardIds.cbegin(),cardIds.cend(),[this](const QString &cardId){return m_cardLoadErrors.contains(cardId);});
-    if (recovering&&!createRecoveryBackup()) {fail("DECK_RECOVERY_BACKUP","Could not preserve unreadable cards before deleting this deck. Nothing was deleted.",m_sqlDetail);return;}
+    const bool recovering=std::any_of(cardIds.cbegin(),cardIds.cend(),[this](const QString &cardId){return m_cardLoadErrors.contains(cardId)||m_cardDateErrors.contains(cardId);});
+    if (recovering&&!createRecoveryBackup()) {fail("DECK_RECOVERY_BACKUP","Could not preserve damaged card data before deleting this deck. Nothing was deleted.",m_sqlDetail);return;}
     const struct HistoryScope history(this,QStringLiteral("Delete deck"),!recovering);
     if (!history) return;
     if (!mutate([&] {
@@ -1415,7 +1478,8 @@ void DatabaseWorker::saveCard(const QString &id,const QString &deckId,const QStr
             }
     }
     const QString savedTags=id.isEmpty()?tags:betterflash::checkfollowup::withoutTags(tags);
-    const struct model::Card record{recordId,deckId,kind,front,back,savedTags,points,narrations,fingerprints};
+    struct model::Card record{recordId,deckId,kind,front,back,savedTags,points,narrations,fingerprints};
+    model::setCardEditDates(record,previous?&*previous:nullptr,model::nowUtc());
     const auto valid=model::cardFromMap(model::toMap(record));
     if (!valid) {failRequest(kind==QStringLiteral("cloze")?"INVALID_CLOZE":"INVALID_CARD","Could not save the card. Correct the card fields.",valid.error());return;}
     if (!validateMedia(record)) {failRequest("CARD_MEDIA","Could not save the card images. Restore missing images, insert them again, or split cards containing more than 64 MiB of images.",m_sqlDetail);return;}
@@ -1480,6 +1544,7 @@ void DatabaseWorker::setCardNarration(const QString &cardId,const QString &varia
     if (mediaName.isEmpty()) updated.narrations.remove(key); else updated.narrations.insert(key,mediaName);
     if (mediaName.isEmpty() || fingerprint.isEmpty()) updated.narrationFingerprints.remove(key);
     else updated.narrationFingerprints.insert(key,fingerprint);
+    model::setCardEditDates(updated,&*existing,model::nowUtc());
     const auto valid = model::cardFromMap(model::toMap(updated));
     if (!valid) { failRequest("NARRATION_INVALID","Could not save this narration.",valid.error()); return; }
     if (!validateMedia(updated)) { failRequest("NARRATION_MEDIA_INVALID","Could not save the narration because an attached media asset is missing or invalid.",m_sqlDetail); return; }
@@ -1523,6 +1588,7 @@ void DatabaseWorker::confirmCardNarration(const QString &cardId,const QString &v
         }
         struct model::Card updated = *existing;
         updated.narrationFingerprints.insert(key,currentFingerprint);
+        model::setCardEditDates(updated,&*existing,model::nowUtc());
         const auto valid = model::cardFromMap(model::toMap(updated));
         if (!valid) { m_sqlDetail=valid.error(); return false; }
         if (!validateMedia(updated)) {
@@ -1561,9 +1627,11 @@ void DatabaseWorker::replaceCardWithAtomicCards(const QVariantMap &expectedSourc
         const auto stored=card(sourceId);
         if (!m_sqlDetail.isEmpty()) return false;
         if (m_cardLoadErrors.contains(sourceId)) {m_sqlDetail=m_cardLoadErrors.value(sourceId).value("detail").toString();return false;}
+        if (stored && !stored->dateMetadataError.isEmpty()) {m_sqlDetail=QStringLiteral("Card %1: %2 Preserve a recovery copy before repairing its dates.").arg(sourceId,stored->dateMetadataError);return false;}
         if (!stored||model::toMap(*stored)!=model::toMap(*expected)) {stale=true;return false;}
         if (!eraseCard(sourceId)||!enqueue("card.delete",{{"id",sourceId}})) return false;
-        for (const struct model::Card &replacement:*replacements) {
+        for (struct model::Card replacement:*replacements) {
+            model::setCardEditDates(replacement,nullptr,model::nowUtc());
             if (!upsertCard(replacement)) return false;
             const auto keys = model::variantKeys(replacement);
             Q_ASSERT(keys);
@@ -1595,12 +1663,12 @@ void DatabaseWorker::deleteCard(const QString &id)
         const QVariantMap issue=model::cardReadIssue(*target,cardVariants(id));
         if (!issue.isEmpty()) m_cardLoadErrors.insert(id,issue);
     }
-    const bool recovering=m_cardLoadErrors.contains(id);
-    if (recovering&&!createRecoveryBackup()) {fail("CARD_RECOVERY_BACKUP","Could not preserve the unreadable card before deletion. No card was deleted.",m_sqlDetail);return;}
+    const bool recovering=m_cardLoadErrors.contains(id)||m_cardDateErrors.contains(id);
+    if (recovering&&!createRecoveryBackup()) {fail("CARD_RECOVERY_BACKUP","Could not preserve the card's damaged data before deletion. No card was deleted.",m_sqlDetail);return;}
     const struct HistoryScope history(this,QStringLiteral("Delete card"),!recovering);
     if (!history) return;
     if (!mutate([&]{return eraseCard(id)&&enqueue("card.delete",{{"id",id}});})) {fail("CARD_DELETE","Could not delete the card. Check storage and try again.",m_sqlDetail);return;}
-    if (recovering) clearHistoryForRecovery(QStringLiteral("The unreadable card was deleted by request. Its original content and learning records remain in the recovery copy."),m_lastRecoveryBackup);
+    if (recovering) clearHistoryForRecovery(QStringLiteral("The card with damaged saved data was deleted by request. Its original content and learning records remain in the recovery copy."),m_lastRecoveryBackup);
     m_queueDirty=true;
     if (publishSnapshot()&&publishQueue(false)) done("Card deleted");
 }
@@ -1673,7 +1741,8 @@ void DatabaseWorker::dismissCheckFollowUp(const QString &cardId, const QString &
         if (retained==current->tags) return true;
         struct model::Card updated=*current;
         updated.tags=retained;
-        if (!execute(QStringLiteral("UPDATE notes SET tags=? WHERE id=?"),{updated.tags,cardId})) return false;
+        model::setCardEditDates(updated,&*current,model::nowUtc());
+        if (!upsertCard(updated)) return false;
         const QVariantMap payload=cardPayload(updated);
         if (!m_sqlDetail.isEmpty() || !enqueue(QStringLiteral("card.upsert"),payload)) return false;
         changed=true;
@@ -1774,8 +1843,11 @@ void DatabaseWorker::markCardsForCheckReview(const QVariantList &expectedCards, 
             }
             updates.append(updated);
         }
-        for (const struct model::Card &record : updates) {
-            if (!execute("UPDATE notes SET tags=? WHERE id=?",{record.tags,record.id})) return false;
+        for (struct model::Card record : updates) {
+            const auto previous=card(record.id);
+            if (!previous || !m_sqlDetail.isEmpty()) return false;
+            model::setCardEditDates(record,&*previous,model::nowUtc());
+            if (!upsertCard(record)) return false;
             const QVariantMap payload=cardPayload(record);
             if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert",payload)) return false;
         }
@@ -1830,8 +1902,10 @@ void DatabaseWorker::moveCards(const QVariantList &cardIds, const QString &desti
     const bool committed = mutate([&] {
         for (const struct model::Card &existing : cards) {
             if (existing.deckId == destinationDeckId) continue;
-            if (!execute("UPDATE notes SET deck_id=? WHERE id=?", {destinationDeckId, existing.id})) return false;
-            const struct model::Card moved{existing.id, destinationDeckId, existing.kind, existing.front, existing.back, existing.tags, existing.pointCount, existing.narrations, existing.narrationFingerprints};
+            struct model::Card moved=existing;
+            moved.deckId=destinationDeckId;
+            model::setCardEditDates(moved,&existing,model::nowUtc());
+            if (!upsertCard(moved)) return false;
             const QVariantMap payload = cardPayload(moved);
             if (!m_sqlDetail.isEmpty() || !enqueue("card.upsert", payload)) return false;
         }
@@ -1863,8 +1937,8 @@ void DatabaseWorker::resetReviewState(const QString &id, bool deckScope)
     if (!exists) {fail("RESET_TARGET_MISSING","This deck or card is unavailable. Refresh the collection and try again.",m_sqlDetail);return;}
     QSqlQuery query(m_db);
     query.prepare(deckScope
-        ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
-        : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes WHERE id=?");
+        ? "WITH RECURSIVE descendants(id) AS (SELECT id FROM decks WHERE id=? UNION SELECT d.id FROM decks d JOIN descendants ON d.parent_id=descendants.id) SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at FROM notes WHERE deck_id IN (SELECT id FROM descendants)"
+        : "SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at FROM notes WHERE id=?");
     query.addBindValue(id);
     if (!query.exec()) {fail("REVIEW_RESET_FAILED","Could not read the selected cards. No schedules were reset.",query.lastError().text());return;}
     QList<struct model::Card> cards;
@@ -2629,7 +2703,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
     applied=true;
     const QString type=event.value("type").toString();
     const QVariantMap payload=object(event,"payload");
-    if (type==QStringLiteral("history.apply")) return historyEventEffects(payload.value("changes").toList(),seq,executeEffects,applied);
+    if (type==QStringLiteral("history.apply")) return historyEventEffects(payload.value("changes").toList(),seq,executeEffects,applied,event.value("createdAt").toString());
     if (type==QStringLiteral("deck.delete")) {
         const QString id=payload.value("id").toString();
         return applyDeckDelete(id,seq,applied,executeEffects)
@@ -2688,8 +2762,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         const auto parsedRecord = model::cardFromMap(incomingCardMap);
         if (!parsedRecord) { m_sqlDetail=parsedRecord.error(); return false; }
         struct model::Card record=*parsedRecord;
-        const auto stored = (!incomingCardMap.contains(QStringLiteral("narrations"))
-            || !incomingCardMap.contains(QStringLiteral("narrationFingerprints"))) ? card(record.id) : std::optional<struct model::Card>{};
+        const auto stored = card(record.id);
         if (!m_sqlDetail.isEmpty()) return false;
         if (!incomingCardMap.contains(QStringLiteral("narrations"))) {
             if (stored) {
@@ -2708,6 +2781,18 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
                     && record.narrations.value(it.key()) == stored->narrations.value(it.key()))
                     record.narrationFingerprints.insert(it.key(),it.value());
             }
+        }
+        if (stored) {
+            if (!stored->createdAt.isEmpty()) record.createdAt=stored->createdAt;
+            if (!incomingCardMap.contains(QStringLiteral("modifiedAt")) || record.modifiedAt.isEmpty()) {
+                const auto eventTime=model::utcInstant(event.value(QStringLiteral("createdAt")).toString());
+                if (!eventTime) { m_sqlDetail=eventTime.error(); return false; }
+                record.modifiedAt=model::sameCardContent(record,*stored)?stored->modifiedAt:*eventTime;
+            }
+        }
+        if (!record.modifiedAt.isEmpty()) {
+            if (stored && !stored->modifiedAt.isEmpty()) record.modifiedAt=std::max(record.modifiedAt,stored->modifiedAt);
+            if (!record.createdAt.isEmpty()) record.modifiedAt=std::max(record.modifiedAt,record.createdAt);
         }
         QList<struct model::Variant> schedules;
         for (const QVariant &value : payload.value("variants").toList()) schedules.append(*model::variantFromMap(value.toMap()));
@@ -3049,7 +3134,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
     const qint64 cursor=response.value("cursor").toLongLong();
     QSet<QString> acceptedIds;for (const QVariant &id:response.value("acceptedIds").toList()) acceptedIds.insert(id.toString());
     if (!publishSnapshot()) {appliedSignal(false,false);return;}
-    const bool recovering=!m_cardLoadErrors.isEmpty()||m_hasUnreadableHistory||m_hasOrphanSchedules||std::any_of(m_collectionIssues.cbegin(),m_collectionIssues.cend(),[](const QVariant &entry) {
+    const bool recovering=!m_cardLoadErrors.isEmpty()||!m_cardDateErrors.isEmpty()||m_hasUnreadableHistory||m_hasOrphanSchedules||std::any_of(m_collectionIssues.cbegin(),m_collectionIssues.cend(),[](const QVariant &entry) {
         const QString code=entry.toMap().value("code").toString();
         return code==QStringLiteral("REVIEW_RECORD")||code==QStringLiteral("SYNC_STORAGE");
     });
@@ -3103,7 +3188,7 @@ void DatabaseWorker::applySyncResponse(const QVariantMap &response)
         return execute("INSERT INTO metadata(key,value) VALUES('sync_notices',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",{json(notices)});
     });
     if (!ok) {fail("SYNC_APPLY","Could not apply sync changes. Existing records and pending uploads were preserved.",m_sqlDetail);appliedSignal(false,false);return;}
-    if (recovering) clearHistoryForRecovery(QStringLiteral("Sync applied with unreadable local records present. Their original stored data is retained in a recovery copy."),m_lastRecoveryBackup);
+    if (recovering) clearHistoryForRecovery(QStringLiteral("Sync applied with damaged local records present. Their original stored data is retained in a recovery copy."),m_lastRecoveryBackup);
     m_cursor=cursor;
     if (!responseCollectionId.isEmpty()) m_collectionId=responseCollectionId;
     m_queueDirty=true;
@@ -3133,10 +3218,11 @@ void DatabaseWorker::exportCollection(const QString &path)
         if (!savedDeck.tagVocabularyError.isEmpty()) { fail("EXPORT_DAMAGED_DECK_TAGS","Portable export stopped because a deck's tag vocabulary needs repair. Preserve a raw SQLite recovery copy before repairing it.",savedDeck.tagVocabularyError); return; }
         decks.append(model::toMap(savedDeck));
     }
-    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
+    if (!q.exec("SELECT id,deck_id,kind,front,back,tags,point_count,narrations,narration_fingerprints,created_at,modified_at FROM notes ORDER BY id")) {fail("EXPORT_READ","Could not read cards for export.",q.lastError().text());return;}
     while (q.next()) {
         QString storageError;
         const struct model::Card note=readCard(q,&storageError);
+        if (!note.dateMetadataError.isEmpty()) { fail("EXPORT_DAMAGED_CARD_DATES","Portable export stopped because a card's saved dates need repair. Preserve a raw SQLite recovery copy before repairing the dates.",QStringLiteral("Card %1: %2").arg(note.id,note.dateMetadataError)); return; }
         const QVariantMap issue=model::cardReadIssue(note,cardVariants(note.id),storageError);
         if (!issue.isEmpty()) {fail("EXPORT_DAMAGED_CARD","Portable export stopped because a saved card needs repair. No export was written. Preserve a raw SQLite recovery copy before repairing the card.",issue.value("detail").toString());return;}
         notes.append(note);cards.append(model::toMap(note));
@@ -3314,7 +3400,8 @@ void DatabaseWorker::importCollection(const QString &path)
     }
     for (const struct model::Card &record : records.cards) {
         const auto existing=card(record.id);
-        if (isDeleted("card",record.id)||(existing&&model::toMap(*existing)!=model::toMap(record))) {collision("Card "+record.id);return;}
+        if (isDeleted("card",record.id) || (existing && (!model::sameCardContent(*existing,record)
+            || (!existing->createdAt.isEmpty() && !record.createdAt.isEmpty() && existing->createdAt!=record.createdAt)))) {collision("Card "+record.id);return;}
     }
     for (const struct model::Variant &record : records.variants) {
         const auto existing=variant(record.id);
@@ -3767,7 +3854,8 @@ void DatabaseWorker::loadExample()
     add("cloze","[cloze1:Atomicity|transaction property] means a transaction commits together. [cloze2:Durability|transaction property] means it survives restart. A [cloze1:rollback] leaves no partial mutation.","Each distinct cloze group has its own review schedule.","storage, cloze");
     const bool ok=mutate([&] {
         if (!upsertDeck(example)||!enqueue("deck.upsert",{{"deck",model::toMap(example)}})) return false;
-        for (const struct model::Card &note : notes) {
+        for (struct model::Card note : notes) {
+            model::setCardEditDates(note,nullptr,example.createdAt);
             const auto valid=model::cardFromMap(model::toMap(note));assert(valid.has_value());
             if (!upsertCard(note)) return false;
             for (const QString &key : *model::variantKeys(note)) {

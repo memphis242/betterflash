@@ -51,6 +51,9 @@ struct Card {
     QVariantMap narrations{};
     // Accepted text-and-audio baselines keyed by the same narration side.
     QVariantMap narrationFingerprints{};
+    QString createdAt{};
+    QString modifiedAt{};
+    QString dateMetadataError{};
 };
 struct Variant {
     QString id;
@@ -109,6 +112,8 @@ double readingBudget(const QString &question);
 QString gradeLabel(int grade);
 QVariantMap toMap(const struct Deck &record);
 QVariantMap toMap(const struct Card &record);
+bool sameCardContent(const struct Card &left, const struct Card &right);
+void setCardEditDates(struct Card &record, const struct Card *previous, const QString &when);
 QVariantMap toMap(const struct Variant &record);
 QVariantMap toMap(const struct Review &record);
 std::expected<QStringList, QString> tagVocabularyFromVariant(const QVariant &value);

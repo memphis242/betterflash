@@ -16,6 +16,8 @@ struct Snapshot {
     QList<struct model::Deck> decks{};
     QList<struct model::Card> cards{};
     QSet<QString> decksWithoutVocabulary{};
+    QSet<QString> cardsWithoutCreatedAt{};
+    QSet<QString> cardsWithoutModifiedAt{};
 };
 
 std::expected<struct Snapshot, QString> validateSnapshot(const QVariantMap &value);

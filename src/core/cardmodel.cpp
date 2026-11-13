@@ -231,7 +231,26 @@ QString gradeLabel(int grade)
 QVariantMap toMap(const struct Deck &r)
 { return {{"id",r.id},{"name",r.name},{"description",r.description},{"createdAt",r.createdAt},{"parentId",r.parentId},{"tagVocabulary",QJsonArray::fromStringList(r.tagVocabulary).toVariantList()}}; }
 QVariantMap toMap(const struct Card &r)
-{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations},{"narrationFingerprints",r.narrationFingerprints}}; }
+{ return {{"id",r.id},{"deckId",r.deckId},{"kind",r.kind},{"front",r.front},{"back",r.back},{"tags",r.tags},{"pointCount",r.pointCount},{"narrations",r.narrations},{"narrationFingerprints",r.narrationFingerprints},{"createdAt",r.createdAt.isNull()?QStringLiteral(""):r.createdAt},{"modifiedAt",r.modifiedAt.isNull()?QStringLiteral(""):r.modifiedAt}}; }
+bool sameCardContent(const struct Card &left, const struct Card &right)
+{
+    return left.id==right.id && left.deckId==right.deckId && left.kind==right.kind
+        && left.front==right.front && left.back==right.back && left.tags==right.tags
+        && left.pointCount==right.pointCount && left.narrations==right.narrations
+        && left.narrationFingerprints==right.narrationFingerprints;
+}
+void setCardEditDates(struct Card &record, const struct Card *previous, const QString &when)
+{
+    assert(utcInstant(when));
+    if (!previous) { record.createdAt=when; record.modifiedAt=when; return; }
+    record.createdAt=previous->createdAt;
+    record.modifiedAt=previous->modifiedAt;
+    if (!sameCardContent(record,*previous)) {
+        record.modifiedAt=std::max(when,previous->modifiedAt);
+        if (!record.createdAt.isEmpty()) record.modifiedAt=std::max(record.modifiedAt,record.createdAt);
+    }
+    record.dateMetadataError=previous->dateMetadataError;
+}
 QVariantMap toMap(const struct Variant &r)
 { return {{"id",r.id},{"cardId",r.cardId},{"key",r.key},{"due",r.due},{"reviewCount",r.reviewCount},{"stability",r.stability},{"difficulty",r.difficulty},{"graduated",r.graduated}}; }
 QVariantMap toMap(const struct Review &r)
@@ -293,7 +312,22 @@ std::expected<struct Card, QString> cardFromMap(const QVariantMap &m)
     const QVariantMap fingerprints = m.contains("narrationFingerprints") ? m.value("narrationFingerprints").toMap() : QVariantMap{};
     if (m.contains("narrationFingerprints") && m.value("narrationFingerprints").metaType().id() != QMetaType::QVariantMap)
         return std::unexpected(QStringLiteral("Card narration fingerprints must be an object."));
-    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt(),narrations,fingerprints};
+    QString createdAt;
+    QString modifiedAt;
+    for (const QString &field : {QStringLiteral("createdAt"), QStringLiteral("modifiedAt")}) {
+        if (!m.contains(field)) continue;
+        if (m.value(field).metaType().id() != QMetaType::QString)
+            return std::unexpected(QStringLiteral("Card %1 must be a UTC timestamp or an empty string.").arg(field));
+        const QString value = m.value(field).toString();
+        if (value.isEmpty()) continue;
+        const auto parsed = utcInstant(value);
+        if (!parsed) return std::unexpected(QStringLiteral("Card %1 is invalid: %2").arg(field, parsed.error()));
+        if (field == QStringLiteral("createdAt")) createdAt = *parsed;
+        else modifiedAt = *parsed;
+    }
+    if (!createdAt.isEmpty() && !modifiedAt.isEmpty() && modifiedAt < createdAt)
+        return std::unexpected(QStringLiteral("Card last-modified time %1 precedes its creation time %2. Check the source clock and preserve the original record.").arg(modifiedAt,createdAt));
+    const struct Card card{m.value("id").toString(),m.value("deckId").toString(),m.value("kind").toString(),m.value("front").toString(),m.value("back").toString(),m.value("tags").toString(),m.value("pointCount").toInt(),narrations,fingerprints,createdAt,modifiedAt};
     if (card.kind != QStringLiteral("cloze") && card.back.trimmed().isEmpty())
         return std::unexpected(QStringLiteral("A basic or reverse card needs both sides."));
     const auto keys = variantKeys(card);

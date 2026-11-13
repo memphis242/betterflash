@@ -211,6 +211,14 @@ def card_keys(card):
     back = text(card, "back", 1024 * 1024)
     text(card, "tags", 4096)
     number(card, "pointCount", 1, 1000, True)
+    card_dates = {}
+    for field in ("createdAt", "modifiedAt"):
+        if field in card:
+            value = text(card, field, 40)
+            if value:
+                card_dates[field] = instant(value)
+    if len(card_dates) == 2 and card_dates["modifiedAt"] < card_dates["createdAt"]:
+        raise ProtocolError("INVALID_EVENT", "Card last-modified time precedes its creation time. Check the sending device clock.")
     narrations = card.get("narrations", {})
     if not isinstance(narrations, dict):
         raise ProtocolError("INVALID_EVENT", "Card narrations must be an object.")

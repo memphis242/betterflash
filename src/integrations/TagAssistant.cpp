@@ -89,7 +89,8 @@ bool TagAssistant::cardCurrent(const QVariantMap &card) const {
     if (it == m_currentCards.cend() || !it->value(QStringLiteral("loadError")).toMap().isEmpty()) return false;
     for (const QString &field : {QStringLiteral("id"), QStringLiteral("deckId"), QStringLiteral("kind"), QStringLiteral("front"),
                                  QStringLiteral("back"), QStringLiteral("tags"), QStringLiteral("pointCount"),
-                                 QStringLiteral("narrations"), QStringLiteral("narrationFingerprints")})
+                                 QStringLiteral("narrations"), QStringLiteral("narrationFingerprints"),
+                                 QStringLiteral("createdAt"), QStringLiteral("modifiedAt")})
         if (it->value(field) != card.value(field)) return false;
     return true;
 }

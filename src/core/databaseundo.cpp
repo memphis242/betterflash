@@ -55,7 +55,7 @@ struct CaptureTable {
 };
 constexpr std::array captureTables{
     CaptureTable{"decks", "deck", "id", "1", "'id',%1.id,'name',%1.name,'description',%1.description,'createdAt',%1.created_at,'parentId',%1.parent_id,'tagVocabulary',json(%1.tag_vocabulary)"},
-    CaptureTable{"notes", "card", "id", "1", "'id',%1.id,'deckId',%1.deck_id,'kind',%1.kind,'front',%1.front,'back',%1.back,'tags',%1.tags,'pointCount',%1.point_count,'narrations',json(%1.narrations),'narrationFingerprints',json(%1.narration_fingerprints)"},
+    CaptureTable{"notes", "card", "id", "1", "'id',%1.id,'deckId',%1.deck_id,'kind',%1.kind,'front',%1.front,'back',%1.back,'tags',%1.tags,'pointCount',%1.point_count,'narrations',json(%1.narrations),'narrationFingerprints',json(%1.narration_fingerprints),'createdAt',%1.created_at,'modifiedAt',%1.modified_at"},
     // Explicit full-precision JSON numbers preserve stored REAL values for exact
     // history conflict checks and restoration of schedules and response times.
     CaptureTable{"review_variants", "variant", "id", "1", "'id',%1.id,'cardId',%1.card_id,'key',%1.variant_key,'due',%1.due,'reviewCount',%1.review_count,'stability',json(printf('%!.26g',%1.stability)),'difficulty',json(printf('%!.26g',%1.difficulty)),'graduated',json(CASE WHEN %1.graduated THEN 'true' ELSE 'false' END)"},
@@ -283,7 +283,7 @@ QVariantMap DatabaseWorker::historyRow(const QString &entity, const QString &id)
     return {};
 }
 
-bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq)
+bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq, const QString &eventTime)
 {
     m_historyValidationFailure=false;
     m_historyFailure=HistoryFailure::Conflict;
@@ -294,9 +294,15 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
         const QString entity = change.value("entity").toString();
         const QString id = change.value("id").toString();
         if (remote && entity == QStringLiteral("checkpoint")) { m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("Checkpoints are local records."); return false; }
-        const QVariantMap current = historyRow(entity, id);
+        QVariantMap current = historyRow(entity, id);
         if (!m_sqlDetail.isEmpty()) return false;
-        const QVariantMap expected = change.value("before").toMap();
+        if (entity==QStringLiteral("card") && m_cardDateErrors.contains(id)) {
+            m_historyValidationFailure=true;
+            m_sqlDetail=QStringLiteral("Card %1 has damaged saved date metadata. Preserve a recovery copy and repair its dates before changing it through history.").arg(id);
+            return false;
+        }
+        QVariantMap expected = change.value("before").toMap();
+        if (entity==QStringLiteral("card")) { current.remove("modifiedAt"); expected.remove("modifiedAt"); }
         if (!remote && current != expected) {
             m_historyValidationFailure=true; m_sqlDetail = QStringLiteral("The %1 record %2 changed since this action. Its current content was preserved.").arg(entity, id);
             return false;
@@ -421,8 +427,27 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
             const QVariantMap after = change.value("after").toMap();
             if (change.value("entity") != entity || after.isEmpty()) continue;
             if (entity == QStringLiteral("card")) {
-                const auto record = model::cardFromMap(after);
+                auto record = model::cardFromMap(after);
                 assert(record);
+                const auto current = card(id);
+                if (!m_sqlDetail.isEmpty()) return false;
+                if (remote) {
+                    if (current && !current->createdAt.isEmpty()) record->createdAt=current->createdAt;
+                    if (current && (!after.contains("modifiedAt") || record->modifiedAt.isEmpty())) {
+                        const auto instant=model::utcInstant(eventTime);
+                        if (!instant) { m_sqlDetail=instant.error(); return false; }
+                        record->modifiedAt=model::sameCardContent(*record,*current)?current->modifiedAt:*instant;
+                    }
+                    if (!record->modifiedAt.isEmpty()) {
+                        if (current && !current->modifiedAt.isEmpty()) record->modifiedAt=std::max(record->modifiedAt,current->modifiedAt);
+                        if (!record->createdAt.isEmpty()) record->modifiedAt=std::max(record->modifiedAt,record->createdAt);
+                    }
+                } else if (current) {
+                    model::setCardEditDates(*record,&*current,model::nowUtc());
+                } else {
+                    record->modifiedAt=std::max(model::nowUtc(),record->modifiedAt);
+                    if (!record->createdAt.isEmpty()) record->modifiedAt=std::max(record->modifiedAt,record->createdAt);
+                }
                 if (!upsertCard(*record) || !execute("DELETE FROM tombstones WHERE entity_type='card' AND entity_id=?", {id})) return false;
                 if (remote) {
                     const auto keys=model::variantKeys(*record);
@@ -685,7 +710,28 @@ void DatabaseWorker::applyHistory(const QString &id, bool redo)
             change.insert("before", change.value("after")); change.insert("after", before); value = change;
         }
     }
-    if (!mutate([&] { return applyHistoryChanges(changes, false) && enqueueHistory(changes); })) {
+    if (!mutate([&] {
+        QVariantList outgoing=changes;
+        for (QVariant &value : outgoing) {
+            QVariantMap change=value.toMap();
+            if (change.value("entity")==QStringLiteral("card")) {
+                const QVariantMap before=historyRow(QStringLiteral("card"),change.value("id").toString());
+                if (!m_sqlDetail.isEmpty()) return false;
+                if (!before.isEmpty()) change.insert("before",before);
+                value=change;
+            }
+        }
+        if (!applyHistoryChanges(changes, false)) return false;
+        for (QVariant &value : outgoing) {
+            QVariantMap change=value.toMap();
+            if (change.value("entity")==QStringLiteral("card") && present(change.value("after"))) {
+                const QVariantMap after=historyRow(QStringLiteral("card"),change.value("id").toString());
+                if (after.isEmpty() || !m_sqlDetail.isEmpty()) return false;
+                change.insert("after",after); value=change;
+            }
+        }
+        return enqueueHistory(outgoing);
+    })) {
         fail("UNDO_CONFLICT", QStringLiteral("Could not %1 %2. Current records were preserved. Sync or resolve the changed records before trying again.").arg(redo ? QStringLiteral("redo") : QStringLiteral("undo"), frame.label.toLower()), m_sqlDetail);
         emit historyApplied(id, redo, false); return;
     }
@@ -731,7 +777,7 @@ bool DatabaseWorker::pendingHistoryEntity(const QString &type, const QString &id
     if (!query.exec()) { m_sqlDetail = query.lastError().text(); return false; }
     return query.next();
 }
-bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq, bool executeEffects, bool &applied)
+bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq, bool executeEffects, bool &applied, const QString &eventTime)
 {
     applied=true;
     if (!executeEffects) {
@@ -833,7 +879,7 @@ bool DatabaseWorker::historyEventEffects(const QVariantList &changes, qint64 seq
     }
     if (!m_sqlDetail.isEmpty()) return false;
     if (!execute("SAVEPOINT apply_history_event")) return false;
-    if (!applyHistoryChanges(usable,true,seq)) {
+    if (!applyHistoryChanges(usable,true,seq,eventTime)) {
         const QString detail=m_sqlDetail;
         const bool validationFailure=m_historyValidationFailure;
         const HistoryFailure failure=m_historyFailure;

@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import QtCore
 import "DeckSearch.js" as DeckSearch
 import "ReviewPresentation.js" as ReviewPresentation
+import "CardSorting.js" as CardSorting
 
 Item {
     id: library
@@ -38,6 +39,7 @@ Item {
     property bool deckSearchVisible: librarySettings.deckSearchVisible
     property bool deckContentSearchVisible: librarySettings.deckContentSearchVisible
     property bool cardSearchVisible: librarySettings.cardSearchVisible
+    property var cardSortKeys: CardSorting.readKeys(librarySettings.cardSortKeys)
     property bool weakestFirst: librarySettings.weakestFirst
     property bool restoringSearchSelection: false
     property string searchPageAnchorId: ""
@@ -87,6 +89,7 @@ Item {
         property bool deckSearchVisible: false
         property bool deckContentSearchVisible: false
         property bool cardSearchVisible: false
+        property string cardSortKeys: "[]"
         property bool weakestFirst: false
         property string cardFilterTags: "[]"
         property string cardFilterKind: ""
@@ -95,6 +98,7 @@ Item {
     }
 
     Component.onCompleted: {
+        if (cardSortKeys.length > 0) weakestFirst = false
         library.initializeExpansion()
         library.synchronizeTreeModel()
         library.searchReady = true
@@ -114,12 +118,28 @@ Item {
     }
     onLeftOpenChanged: librarySettings.leftOpen = leftOpen
     onRightOpenChanged: librarySettings.rightOpen = rightOpen
-    onCardsVisibleChanged: if (!cardsVisible && cardFilters && cardFilters.visible) cardFilters.close()
+    onCardsVisibleChanged: {
+        if (!cardsVisible && cardFilters && cardFilters.visible) cardFilters.close()
+        if (!cardsVisible && cardSorting && cardSorting.visible) cardSorting.close()
+    }
     onSplitRatioChanged: librarySettings.splitRatio = splitRatio
     onDeckSearchVisibleChanged: librarySettings.deckSearchVisible = deckSearchVisible
     onDeckContentSearchVisibleChanged: librarySettings.deckContentSearchVisible = deckContentSearchVisible
     onCardSearchVisibleChanged: librarySettings.cardSearchVisible = cardSearchVisible
-    onWeakestFirstChanged: { librarySettings.weakestFirst = weakestFirst; resetPage() }
+    onWeakestFirstChanged: {
+        librarySettings.weakestFirst = weakestFirst
+        if (weakestFirst && cardSortKeys.length > 0) cardSortKeys = []
+        resetPage()
+    }
+    onCardSortKeysChanged: {
+        librarySettings.cardSortKeys = JSON.stringify(cardSortKeys)
+        resetPage()
+    }
+    function chooseCardSortKeys(keys) {
+        const normalized = CardSorting.normalizeKeys(keys)
+        if (normalized.length > 0) weakestFirst = false
+        cardSortKeys = normalized
+    }
     onDeckSearchTextChanged: {
         librarySettings.deckQuery = deckSearchText
         searchCollapsedDecks = ({})
@@ -237,9 +257,10 @@ Item {
         }
         const result = []
         for (const group of groups) {
-            if (weakestFirst) group.sort((a, b) => weaknessRank(b) - weaknessRank(a))
-            for (let index = 0; index < group.length; ++index)
-                result.push(Object.assign({}, group[index], { groupStart: !!group[index].searchGroup && (index === 0 || group[index].searchGroup !== group[index - 1].searchGroup) }))
+            const ordered = cardSortKeys.length > 0 ? CardSorting.sortedCards(group, cardSortKeys)
+                : weakestFirst ? group.sort((a, b) => weaknessRank(b) - weaknessRank(a)) : group
+            for (let index = 0; index < ordered.length; ++index)
+                result.push(Object.assign({}, ordered[index], { groupStart: !!ordered[index].searchGroup && (index === 0 || ordered[index].searchGroup !== ordered[index - 1].searchGroup) }))
         }
         return result
     }
@@ -807,6 +828,7 @@ Item {
         updateCardSearch()
         updateDeckSearch()
         if (!visible && cardFilters && cardFilters.visible) cardFilters.close()
+        if (!visible && cardSorting && cardSorting.visible) cardSorting.close()
     }
     Connections {
         target: ui
@@ -1161,6 +1183,7 @@ Item {
                             implicitHeight: 32
                             glyphSize: 15
                             enabled: library.boundedPageIndex > 0
+                            opacity: enabled ? 1 : Theme.disabledControlOpacity
                             onClicked: library.changePage(library.boundedPageIndex - 1)
                         }
                         Label {
@@ -1183,6 +1206,7 @@ Item {
                             implicitHeight: 32
                             glyphSize: 15
                             enabled: library.boundedPageIndex + 1 < library.cardPages.length
+                            opacity: enabled ? 1 : Theme.disabledControlOpacity
                             onClicked: library.changePage(library.boundedPageIndex + 1)
                         }
                     }
@@ -1207,11 +1231,28 @@ Item {
                         onClicked: ui.openCardEditor("")
                     }
                     GlyphButton { glyph: "search"; selected: library.searchingCards || library.cardSearchVisible; hint: library.cardSearchVisible ? "Hide card search" : "Show card search"; onClicked: library.toggleCardSearch() }
-                    GlyphButton {
-                        id: cardFilterButton
-                        glyph: "filter"; selected: library.activeFilterCount > 0 || cardFilters.visible
-                        hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
-                        onClicked: cardFilters.visible ? cardFilters.close() : cardFilters.open()
+                    Row {
+                        spacing: 8
+                        GlyphButton {
+                            id: cardFilterButton
+                            glyph: "filter"; selected: library.activeFilterCount > 0 || cardFilters.visible
+                            hint: "Filter cards" + (library.activeFilterCount > 0 ? " (" + library.activeFilterCount + " active)" : "")
+                            onClicked: {
+                                cardSorting.close()
+                                cardFilters.visible ? cardFilters.close() : cardFilters.open()
+                            }
+                        }
+                        GlyphButton {
+                            id: cardSortButton
+                            objectName: "libraryCardSort"
+                            glyph: "sort-down"
+                            selected: library.cardSortKeys.length > 0 || cardSorting.visible
+                            hint: "Sort cards" + (library.cardSortKeys.length > 0 ? "\n" + CardSorting.summary(library.cardSortKeys) : "")
+                            onClicked: {
+                                cardFilters.close()
+                                cardSorting.visible ? cardSorting.close() : cardSorting.open()
+                            }
+                        }
                     }
                     GlyphButton {
                         visible: cardPane.width < 440
@@ -1571,6 +1612,29 @@ Item {
                 hint: "Open card pane"
                 onClicked: library.setCardsVisible(true)
             }
+        }
+    }
+    CardSortPopup {
+        id: cardSorting
+        parent: cardSortButton
+        property real availableBelow: 520
+        width: Math.min(430, library.width - 24)
+        height: Math.min(520, availableBelow)
+        x: cardSortButton.width - width
+        y: cardSortButton.height + 8
+        margins: 12
+        sortKeys: library.cardSortKeys
+        onKeysChosen: function(keys) { library.chooseCardSortKeys(keys) }
+        function fitBelowButton() {
+            const top = cardSortButton.mapToItem(library, 0, cardSortButton.height + 8).y
+            availableBelow = Math.max(0, library.height - top - 12)
+        }
+        onAboutToShow: fitBelowButton()
+        onClosed: if (library.visible && library.cardsVisible) cardSortButton.forceActiveFocus()
+        Connections {
+            target: library
+            function onHeightChanged() { if (cardSorting.visible) Qt.callLater(cardSorting.fitBelowButton) }
+            function onWidthChanged() { if (cardSorting.visible) Qt.callLater(cardSorting.fitBelowButton) }
         }
     }
     CardFilterPopup {

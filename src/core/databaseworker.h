@@ -177,6 +177,7 @@ private:
     QString m_sessionStartedAt;
     QString m_sqlDetail;
     QHash<QString, QVariantMap> m_cardLoadErrors;
+    QSet<QString> m_cardDateErrors;
     QVariantList m_collectionIssues;
     QString m_lastRecoveryBackup;
     QSet<QString> m_invalidScheduleValues;
@@ -234,8 +235,8 @@ private:
     void restoreHistorySession(const struct HistorySession &session);
     QSet<QString> historyMediaNames() const;
     QVariantMap historyRow(const QString &entity, const QString &id);
-    bool applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq = 0);
-    bool historyEventEffects(const QVariantList &changes, qint64 seq, bool executeEffects, bool &applied);
+    bool applyHistoryChanges(const QVariantList &changes, bool remote, qint64 seq = 0, const QString &eventTime = {});
+    bool historyEventEffects(const QVariantList &changes, qint64 seq, bool executeEffects, bool &applied, const QString &eventTime);
     bool enqueueHistory(const QVariantList &changes);
     bool pendingHistoryEntity(const QString &type, const QString &id, bool restoreOnly = false);
 

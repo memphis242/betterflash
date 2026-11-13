@@ -175,6 +175,7 @@ scope for the initial client work.
 - [Sync protocol](docs/sync.md): collection and media synchronization.
 - [Code rendering](docs/code-rendering.md): Markdown code themes and limits.
 - [Atomicize](docs/atomicize.md): proposed focused-card workflow.
+- [Library card sorting](docs/library-sorting.md): ordered date keys, directions, and [stored card dates](docs/card-dates.md).
 - [Card checks](docs/card-checks.md): correctness, completeness, and optional web search.
 - [Diagnostic logging](docs/logging.md): local rotating logs, verbosity, and model/tool failure traces.
 - [Deck tag vocabularies and suggested tags](docs/tags.md): manual vocabularies, model scans, and reviewable card assignments.
