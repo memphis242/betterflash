@@ -32,23 +32,31 @@
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <sys/stat.h>
 #include <unistd.h>
 
 namespace model = betterflash::model;
 namespace {
-constexpr qint64 startupReviewCooldownMs = 24LL * 60 * 60 * 1000;
-static_assert(startupReviewCooldownMs == 86400000);
-
-std::optional<qint64> startupReviewTimestamp(const QVariant &value, const qint64 now)
+std::optional<qint64> startupReviewTimestamp(const QVariant &value)
 {
     if (value.metaType().id()!=QMetaType::QString) return std::nullopt;
     const QString text=value.toString();
     bool valid=false;
     const qint64 timestamp=text.toLongLong(&valid);
-    if (!valid || timestamp<0 || QString::number(timestamp)!=text || timestamp>now+startupReviewCooldownMs)
+    if (!valid || timestamp<0 || QString::number(timestamp)!=text)
         return std::nullopt;
     return timestamp;
+}
+
+std::optional<qint64> startupReviewOrder(const QVariant &value)
+{
+    if (value.metaType().id()!=QMetaType::QString) return std::nullopt;
+    const QString text=value.toString();
+    bool valid=false;
+    const qint64 order=text.toLongLong(&valid);
+    if (!valid || order<1 || QString::number(order)!=text) return std::nullopt;
+    return order;
 }
 
 QVariantMap object(const QVariantMap &map, const QString &key) { return map.value(key).toMap(); }
@@ -2021,8 +2029,55 @@ void DatabaseWorker::selectStartupReviewCandidate()
         return;
     }
     if (m_sessionActive || m_startupSession) {emit startupReviewCandidateReady({},{});return;}
+    QSqlQuery sequence(m_db);
+    if (!sequence.exec(QStringLiteral("SELECT value FROM metadata WHERE key='startup_review_order_sequence'"))) {
+        emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_STORAGE"},
+            {"message","Could not read the Review Pit Stop rotation. Continue with a regular review or inspect storage."},
+            {"detail",sequence.lastError().text()}});
+        return;
+    }
+    qint64 currentSequence=-1;
+    if (sequence.next()) {
+        const auto stored=startupReviewOrder(sequence.value(0));
+        if (!stored) {
+            emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_INVALID"},
+                {"message","The Review Pit Stop rotation needs repair. Continue with a regular review and preserve a recovery copy."},
+                {"detail","The metadata key startup_review_order_sequence is not a positive whole number."}});
+            return;
+        }
+        currentSequence=*stored;
+    }
+    if (sequence.lastError().isValid()) {
+        emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_STORAGE"},
+            {"message","Could not read the Review Pit Stop rotation. Continue with a regular review or inspect storage."},
+            {"detail",sequence.lastError().text()}});
+        return;
+    }
+    sequence.finish();
+    if (currentSequence<0) {
+        QSqlQuery existing(m_db);
+        if (!existing.exec(QStringLiteral("SELECT key FROM metadata WHERE key>='startup_review_order:' AND key<'startup_review_order;' LIMIT 1"))) {
+            emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_STORAGE"},
+                {"message","Could not inspect the Review Pit Stop rotation. Continue with a regular review or inspect storage."},
+                {"detail",existing.lastError().text()}});
+            return;
+        }
+        if (existing.next()) {
+            emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_INVALID"},
+                {"message","The Review Pit Stop rotation needs repair. Continue with a regular review and preserve a recovery copy."},
+                {"detail","Card rotation entries exist but metadata key startup_review_order_sequence is missing."}});
+            return;
+        }
+        if (existing.lastError().isValid()) {
+            emit startupReviewCandidateReady({},{{"code","STARTUP_REVIEW_ORDER_STORAGE"},
+                {"message","Could not inspect the Review Pit Stop rotation. Continue with a regular review or inspect storage."},
+                {"detail",existing.lastError().text()}});
+            return;
+        }
+    }
     m_startupScan.emplace();
     m_startupScan->generation=m_startupScanGeneration;
+    m_startupScan->sequence=currentSequence;
     m_startupScan->now=model::nowUtc();
     queueStartupReviewSlice(m_startupScanGeneration);
 }
@@ -2050,9 +2105,10 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         due.setForwardOnly(true);
         const QString sql=QStringLiteral("SELECT v.id,v.card_id,v.variant_key,v.due,v.review_count,v.stability,v.difficulty,"
                          "n.deck_id,n.kind,n.front,n.back,n.tags,n.point_count,n.narrations,n.narration_fingerprints,"
-                         "d.name,v.graduated AS graduated,v.rowid AS startup_rowid,cooldown.value FROM review_variants v "
+                         "d.name,v.graduated AS graduated,v.rowid AS startup_rowid,shown.value,rotation.value FROM review_variants v "
                          "LEFT JOIN notes n ON n.id=v.card_id LEFT JOIN decks d ON d.id=n.deck_id "
-                         "LEFT JOIN metadata cooldown ON cooldown.key='startup_review_shown:'||v.card_id")
+                         "LEFT JOIN metadata shown ON shown.key='startup_review_shown:'||v.card_id "
+                         "LEFT JOIN metadata rotation ON rotation.key='startup_review_order:'||v.card_id")
             + (scan.hasCursor?QStringLiteral(" WHERE v.rowid>?"):QString{})
             + QStringLiteral(" ORDER BY v.rowid LIMIT ?");
         if (!due.prepare(sql)) {
@@ -2077,26 +2133,31 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
             const double points=pointsValue.toDouble();
             const bool validPoints=(pointsType==QMetaType::LongLong || pointsType==QMetaType::Int || pointsType==QMetaType::Double)
                 && std::isfinite(points) && std::floor(points)==points && points>=1 && points<=1000;
-            const qint64 nowMs=QDateTime::fromString(scan.now,Qt::ISODateWithMs).toMSecsSinceEpoch();
-            bool cooledDown=true;
-            if (!due.value(18).isNull()) {
-                const auto shown=startupReviewTimestamp(due.value(18),nowMs);
-                if (!shown) {
-                    cooledDown=false;
-                    if (!scan.invalidCooldownCards.contains(schedule.cardId)) {
-                        scan.invalidCooldownCards.insert(schedule.cardId);
-                        if (m_collectionIssues.size()<100) {
-                            m_collectionIssues.append(QVariantMap{{"code","STARTUP_REVIEW_COOLDOWN"},
-                                {"message","A card's Review Pit Stop cooldown needs repair. Other cards remain available for review."},
-                                {"detail",QStringLiteral("Card %1 has an invalid or far-future cooldown timestamp in metadata key startup_review_shown:%1. Check the system clock and preserve a database recovery copy before repair.").arg(schedule.cardId)}});
-                            emit collectionIssuesReady(m_collectionIssues);
-                        }
-                    }
-                } else {
-                    cooledDown=*shown<=nowMs-startupReviewCooldownMs;
+            int rotationGroup=0;
+            qint64 rotationOrder=0;
+            bool rotationValid=true;
+            const QVariant legacy=due.value(18);
+            const QVariant order=due.value(19);
+            QString rotationToken;
+            if (!order.isNull()) {
+                const auto shown=startupReviewOrder(order);
+                if (!shown || scan.sequence<0 || *shown>scan.sequence) rotationValid=false;
+                else {rotationGroup=2;rotationOrder=*shown;rotationToken=QStringLiteral("order:")+QString::number(*shown);}
+            } else if (!legacy.isNull()) {
+                const auto shown=startupReviewTimestamp(legacy);
+                if (!shown) rotationValid=false;
+                else {rotationGroup=1;rotationOrder=*shown;rotationToken=QStringLiteral("legacy:")+QString::number(*shown);}
+            } else rotationToken=QStringLiteral("unseen");
+            if (!rotationValid && !scan.invalidRotationCards.contains(schedule.cardId)) {
+                scan.invalidRotationCards.insert(schedule.cardId);
+                if (m_collectionIssues.size()<100) {
+                    m_collectionIssues.append(QVariantMap{{"code","STARTUP_REVIEW_ORDER_INVALID"},
+                        {"message","A card's Review Pit Stop rotation needs repair. Other cards remain available for review."},
+                        {"detail",QStringLiteral("Card %1 has invalid rotation metadata or a sequence beyond startup_review_order_sequence. Preserve a database recovery copy before repair.").arg(schedule.cardId)}});
+                    emit collectionIssuesReady(m_collectionIssues);
                 }
             }
-            if (storageError.isEmpty() && schedule.due<=scan.now && textFieldsValid && validPoints && cooledDown
+            if (storageError.isEmpty() && schedule.due<=scan.now && textFieldsValid && validPoints && rotationValid
                 && !m_cardLoadErrors.contains(schedule.cardId)) {
                 QString metadataError;
                 const QVariantMap narrations=readMetadata(due.value(13).toString(),QStringLiteral("narrations"),&metadataError);
@@ -2108,7 +2169,7 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
                     && model::variantFromMap(model::toMap(schedule)) && keys && keys->contains(schedule.key)) {
                     const QVariantMap card=reviewCard(note,schedule,due.value(15).toString());
                     const struct StartupCandidate candidate{schedule.id,schedule.cardId,startupReviewFingerprint(card),
-                        model::readingBudget(card.value("question").toString()),0,0,false};
+                        model::readingBudget(card.value("question").toString()),0,0,false,rotationGroup,rotationOrder,rotationToken};
                     const auto position=scan.positions.constFind(schedule.id);
                     if (position==scan.positions.cend()) {
                         scan.positions.insert(schedule.id,scan.candidates.size());
@@ -2162,7 +2223,6 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
                         QString storageError;
                         const struct model::Review review=readReview(reviews,&storageError);
                         if (storageError.isEmpty() && review.responseSeconds>0.0 && std::isfinite(review.responseSeconds)) {
-                            if (candidate.sampleCount==0) ++scan.historicCount;
                             ++candidate.sampleCount;
                             candidate.meanSeconds+=(review.responseSeconds-candidate.meanSeconds)/static_cast<double>(candidate.sampleCount);
                         }
@@ -2174,9 +2234,39 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         if (reviews.lastError().isValid()) {failScan(QStringLiteral("STARTUP_REVIEW_HISTORY"),QStringLiteral("Could not finish reading quick review times. Continue with a regular review or inspect storage."),reviews.lastError().text());return;}
         reviews.finish();
         if (!yielded) {
-            scan.useHistory=scan.historicCount>0;
-            const qsizetype eligible=scan.useHistory?scan.historicCount:scan.activeCount;
-            assert(eligible>0);
+            scan.index=0;
+            scan.oldestGroup=3;
+            scan.oldestOrder=0;
+            scan.rotationCount=0;
+            scan.rotationHistoricCount=0;
+            scan.phase=StartupScan::Phase::Rotation;
+        }
+        queueStartupReviewSlice(generation);
+        return;
+    }
+    if (scan.phase==StartupScan::Phase::Rotation) {
+        int examined=0;
+        while (scan.index<scan.candidates.size()) {
+            const struct StartupCandidate &candidate=scan.candidates.at(scan.index++);
+            if (!candidate.excluded) {
+                if (candidate.rotationGroup<scan.oldestGroup
+                    || (candidate.rotationGroup==scan.oldestGroup && candidate.rotationOrder<scan.oldestOrder)) {
+                    scan.oldestGroup=candidate.rotationGroup;
+                    scan.oldestOrder=candidate.rotationOrder;
+                    scan.rotationCount=0;
+                    scan.rotationHistoricCount=0;
+                }
+                if (candidate.rotationGroup==scan.oldestGroup && candidate.rotationOrder==scan.oldestOrder) {
+                    ++scan.rotationCount;
+                    if (candidate.sampleCount>0) ++scan.rotationHistoricCount;
+                }
+            }
+            if (++examined>=cpuBatch || elapsed.elapsed()>=workBudgetMs) break;
+        }
+        if (scan.index==scan.candidates.size()) {
+            assert(scan.rotationCount>0);
+            scan.useHistory=scan.rotationHistoricCount>0;
+            const qsizetype eligible=scan.useHistory?scan.rotationHistoricCount:scan.rotationCount;
             scan.rankLimit=(eligible+3)/4;
             scan.index=0;
             scan.phase=StartupScan::Phase::Rank;
@@ -2188,7 +2278,8 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         int examined=0;
         while (scan.index<scan.candidates.size()) {
             const struct StartupCandidate &candidate=scan.candidates.at(scan.index++);
-            if (!candidate.excluded && (!scan.useHistory || candidate.sampleCount>0)) {
+            if (!candidate.excluded && candidate.rotationGroup==scan.oldestGroup && candidate.rotationOrder==scan.oldestOrder
+                && (!scan.useHistory || candidate.sampleCount>0)) {
                 const double score=scan.useHistory?candidate.meanSeconds:candidate.readingBudget;
                 assert(std::isfinite(score) && score>0);
                 if (scan.fastest.size()<scan.rankLimit) {
@@ -2217,7 +2308,8 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         while (scan.index<scan.candidates.size()) {
             const qsizetype position=scan.index++;
             const struct StartupCandidate &candidate=scan.candidates.at(position);
-            if (!candidate.excluded && (!scan.useHistory || candidate.sampleCount>0)) {
+            if (!candidate.excluded && candidate.rotationGroup==scan.oldestGroup && candidate.rotationOrder==scan.oldestOrder
+                && (!scan.useHistory || candidate.sampleCount>0)) {
                 const double score=scan.useHistory?candidate.meanSeconds:candidate.readingBudget;
                 if (score<=scan.threshold) scan.pool.append(position);
             }
@@ -2246,6 +2338,8 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         if (card && card->value("due").toString()<=model::nowUtc()
             && startupReviewFingerprint(*card)==candidate.fingerprint) {
             QVariantMap result=*card;
+            result.insert(QStringLiteral("startupReviewRotationToken"),candidate.rotationToken);
+            result.insert(QStringLiteral("startupReviewRotationSequence"),QString::number(scan.sequence));
             if (candidate.sampleCount>0) {
                 result.insert("averageResponseSeconds",candidate.meanSeconds);
                 result.insert("historySampleCount",QVariant::fromValue(static_cast<qlonglong>(candidate.sampleCount)));
@@ -2255,17 +2349,17 @@ void DatabaseWorker::processStartupReviewSlice(const quint64 generation)
         }
         candidate.excluded=true;
         --scan.activeCount;
-        if (candidate.sampleCount>0) {assert(scan.historicCount>0);--scan.historicCount;}
         if (++examined>=selectionBatch || elapsed.elapsed()>=workBudgetMs) break;
     }
     if (scan.pool.isEmpty()) {
         if (scan.activeCount==0) {finishStartupReviewScan(generation,{},{});return;}
-        scan.useHistory=scan.historicCount>0;
-        const qsizetype eligible=scan.useHistory?scan.historicCount:scan.activeCount;
-        scan.rankLimit=(eligible+3)/4;
         scan.index=0;
+        scan.oldestGroup=3;
+        scan.oldestOrder=0;
+        scan.rotationCount=0;
+        scan.rotationHistoricCount=0;
         scan.fastest.clear();
-        scan.phase=StartupScan::Phase::Rank;
+        scan.phase=StartupScan::Phase::Rotation;
     }
     queueStartupReviewSlice(generation);
 }
@@ -2292,40 +2386,89 @@ void DatabaseWorker::beginStartupReview(const QVariantMap &expected)
     }
     const QString cardId=current->value("id").toString();
     assert(model::validUuid(cardId));
-    const QString cooldownKey=QStringLiteral("startup_review_shown:")+cardId;
-    bool recent=false;
-    bool invalidCooldown=false;
+    const QString orderKey=QStringLiteral("startup_review_order:")+cardId;
+    const QString legacyKey=QStringLiteral("startup_review_shown:")+cardId;
+    const QString sequenceKey=QStringLiteral("startup_review_order_sequence");
+    const QString expectedToken=expected.value(QStringLiteral("startupReviewRotationToken")).toString();
+    const QString expectedSequence=expected.value(QStringLiteral("startupReviewRotationSequence")).toString();
+    bool stale=false;
+    bool invalidOrder=false;
+    bool loadFailed=false;
+    QVariantMap preparedCard;
     if (!mutate([&] {
-        const qint64 nowMs=QDateTime::currentMSecsSinceEpoch();
-        QSqlQuery cooldown(m_db);
-        if (!cooldown.prepare(QStringLiteral("SELECT value FROM metadata WHERE key=?"))) {
-            m_sqlDetail=cooldown.lastError().text();return false;
+        QSqlQuery rotation(m_db);
+        if (!rotation.prepare(QStringLiteral("SELECT (SELECT value FROM metadata WHERE key=?),"
+                                             "(SELECT value FROM metadata WHERE key=?),"
+                                             "(SELECT value FROM metadata WHERE key=?)"))) {
+            m_sqlDetail=rotation.lastError().text();return false;
         }
-        cooldown.addBindValue(cooldownKey);
-        if (!cooldown.exec()) {m_sqlDetail=cooldown.lastError().text();return false;}
-        if (cooldown.next()) {
-            const auto shown=startupReviewTimestamp(cooldown.value(0),nowMs);
-            if (!shown) {
-                invalidCooldown=true;
-                m_sqlDetail=QStringLiteral("Card %1 has an invalid or far-future cooldown timestamp in metadata key %2. Check the system clock and preserve a database recovery copy before repair.").arg(cardId,cooldownKey);
-                return false;
+        rotation.addBindValue(sequenceKey);
+        rotation.addBindValue(orderKey);
+        rotation.addBindValue(legacyKey);
+        if (!rotation.exec() || !rotation.next()) {m_sqlDetail=rotation.lastError().text();return false;}
+        const QVariant storedSequence=rotation.value(0);
+        const QVariant storedOrder=rotation.value(1);
+        const QVariant storedLegacy=rotation.value(2);
+        qint64 sequence=-1;
+        if (!storedSequence.isNull()) {
+            const auto value=startupReviewOrder(storedSequence);
+            if (!value) {invalidOrder=true;m_sqlDetail=QStringLiteral("The metadata key %1 is not a positive whole number.").arg(sequenceKey);return false;}
+            sequence=*value;
+        }
+        QString token=QStringLiteral("unseen");
+        if (!storedOrder.isNull()) {
+            const auto value=startupReviewOrder(storedOrder);
+            if (!value || sequence<0 || *value>sequence) {
+                invalidOrder=true;m_sqlDetail=QStringLiteral("Card %1 has an invalid rotation order or an order beyond the global sequence.").arg(cardId);return false;
             }
-            if (*shown>nowMs-startupReviewCooldownMs) {recent=true;return false;}
+            token=QStringLiteral("order:")+QString::number(*value);
+        } else if (!storedLegacy.isNull()) {
+            const auto value=startupReviewTimestamp(storedLegacy);
+            if (!value) {
+                invalidOrder=true;m_sqlDetail=QStringLiteral("Card %1 has an invalid saved Review Pit Stop timestamp in metadata key %2. Preserve a database recovery copy before repair.").arg(cardId,legacyKey);return false;
+            }
+            token=QStringLiteral("legacy:")+QString::number(*value);
         }
-        if (cooldown.lastError().isValid()) {m_sqlDetail=cooldown.lastError().text();return false;}
-        cooldown.finish();
+        rotation.finish();
+        if (token!=expectedToken || QString::number(sequence)!=expectedSequence) {stale=true;return false;}
+        const auto refreshed=reviewCardByVariant(id);
+        if (!m_sqlDetail.isEmpty()) {loadFailed=true;return false;}
+        if (!refreshed || refreshed->value("due").toString()>model::nowUtc()
+            || std::any_of(fields.cbegin(),fields.cend(),[&](const QString &field) {
+                return expected.value(field)!=refreshed->value(field);
+            })) {stale=true;return false;}
+        preparedCard=*refreshed;
+        if (sequence<0) {
+            QSqlQuery existing(m_db);
+            if (!existing.exec(QStringLiteral("SELECT key FROM metadata WHERE key>='startup_review_order:' AND key<'startup_review_order;' LIMIT 1"))) {
+                m_sqlDetail=existing.lastError().text();return false;
+            }
+            if (existing.next()) {
+                invalidOrder=true;m_sqlDetail=QStringLiteral("Card rotation entries exist but metadata key %1 is missing.").arg(sequenceKey);return false;
+            }
+            if (existing.lastError().isValid()) {m_sqlDetail=existing.lastError().text();return false;}
+            sequence=0;
+        }
+        if (sequence==std::numeric_limits<qint64>::max()) {
+            invalidOrder=true;m_sqlDetail=QStringLiteral("The Review Pit Stop rotation sequence has reached its maximum value. Preserve a database recovery copy before repair.");return false;
+        }
+        const QString next=QString::number(sequence+1);
         return execute(QStringLiteral("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
-                       {cooldownKey,QString::number(nowMs)});
+                       {sequenceKey,next})
+            && execute(QStringLiteral("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"),
+                       {orderKey,next});
     })) {
-        if (recent) fail("STARTUP_REVIEW_COOLDOWN","This card was recently shown in Review Pit Stop. Start a regular review instead.");
-        else if (invalidCooldown) fail("STARTUP_REVIEW_COOLDOWN","This card's Review Pit Stop cooldown needs repair. Check the system clock or use a regular review.",m_sqlDetail);
-        else fail("STARTUP_REVIEW_COOLDOWN_STORAGE","Could not save the Review Pit Stop cooldown. Check storage and start a regular review instead.",m_sqlDetail);
+        if (stale) fail("STARTUP_REVIEW_STALE","The Review Pit Stop rotation changed. Start a regular review or reopen the app to select another card.");
+        else if (invalidOrder) fail("STARTUP_REVIEW_ORDER_INVALID","The Review Pit Stop rotation needs repair. Preserve a recovery copy or use a regular review.",m_sqlDetail);
+        else if (loadFailed) fail("STARTUP_REVIEW_LOAD","Could not reload the proposed review card. Start a regular review or inspect storage.",m_sqlDetail);
+        else fail("STARTUP_REVIEW_ORDER_STORAGE","Could not save the Review Pit Stop rotation. Check storage and start a regular review instead.",m_sqlDetail);
         return;
     }
+    assert(!preparedCard.isEmpty());
     m_sessionId=model::uuid();m_sessionStartedAt=model::nowUtc();
-    m_sessionDeckName=current->value("deckName").toString();
-    m_queue={id};m_sessionOrder={id};m_queueCache.clear();m_sessionGrades.clear();
-    m_selectedVariant=id;m_queueDirty=true;m_sessionTotal=1;m_sessionActive=true;m_startupSession=true;
+    m_sessionDeckName=preparedCard.value("deckName").toString();
+    m_queue={id};m_sessionOrder={id};m_queueCache.clear();m_queueCache.insert(id,preparedCard);m_sessionGrades.clear();
+    m_selectedVariant=id;m_queueDirty=false;m_sessionTotal=1;m_sessionActive=true;m_startupSession=true;
     if (!publishQueue(true)) {
         m_queue.clear();m_sessionOrder.clear();m_queueCache.clear();m_sessionGrades.clear();
         m_selectedVariant.clear();m_sessionTotal=0;m_sessionActive=false;m_startupSession=false;m_queueDirty=true;

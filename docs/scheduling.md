@@ -110,16 +110,24 @@ is in use, or a regular review has already started. Navigation or typing before
 the offer is ready cancels it for that launch. The selected deck and current
 page stay in place beneath the popup.
 
-Selection covers due review variants across the collection. With valid positive
-review times, choose randomly from the fastest quarter by their own average
-recorded response time, including ties. Reverse directions and cloze groups keep
-separate timing histories. If no usable history exists, use the shortest estimated
-reading-time quarter. Unreadable cards and schedules are excluded. Discovery
-yields between bounded database batches and is canceled when the user engages
-in other work. Once a card is shown in Review Pit Stop, it is excluded from
-another Pit Stop for 24 hours on this device, even if dismissed. The cooldown
-covers every direction and cloze group of the card and does not affect normal
-review sessions. If all due cards are cooling down, no Pit Stop appears.
+Selection rotates through due cards across the collection. Cards never shown in
+Review Pit Stop come first, followed by those shown least recently. Showing a
+card moves it to the back of this device's rotation, even if it is dismissed.
+The position applies to the whole card, including reverse directions and cloze
+groups. There is no minimum waiting time: once the eligible queue cycles, a
+card can appear again that day if it is still due. Normal review schedules are
+independent of the rotation; cards that are not due are skipped.
+
+Within the oldest eligible group, valid positive review times favor a random
+choice from the fastest quarter by average recorded response time, including
+ties. Reverse directions and cloze groups keep separate timing histories. If
+no usable history exists in that group, use the shortest estimated reading-time
+quarter. Speed preferences do not move recently shown cards ahead of older
+eligible cards. Unreadable cards and schedules are excluded. Discovery yields
+between bounded database batches and is canceled when the user engages in other
+work. The rotation persists across application restarts on this device.
+Existing last-shown timestamps seed the order; subsequent offers use a saved
+sequence so wall-clock changes cannot move a shown card ahead in the rotation.
 
 Press **Q** or **Escape** to dismiss the Pit Stop without grading.
 These keys apply only to the Pit Stop itself; dialogs opened from it retain

@@ -118,9 +118,12 @@ private:
         double meanSeconds=0;
         qsizetype sampleCount=0;
         bool excluded=false;
+        int rotationGroup=0;
+        qint64 rotationOrder=0;
+        QString rotationToken{};
     };
     struct StartupScan {
-        enum class Phase { Due, History, Rank, Pool, Pick };
+        enum class Phase { Due, History, Rotation, Rank, Pool, Pick };
         quint64 generation=0;
         Phase phase=Phase::Due;
         QString now{};
@@ -128,9 +131,13 @@ private:
         bool hasCursor=false;
         QList<struct StartupCandidate> candidates{};
         QHash<QString,qsizetype> positions{};
-        QSet<QString> invalidCooldownCards{};
+        QSet<QString> invalidRotationCards{};
+        qint64 sequence=-1;
+        int oldestGroup=3;
+        qint64 oldestOrder=0;
+        qsizetype rotationCount=0;
+        qsizetype rotationHistoricCount=0;
         qsizetype activeCount=0;
-        qsizetype historicCount=0;
         bool useHistory=false;
         qsizetype index=0;
         qsizetype rankLimit=0;
