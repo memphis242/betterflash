@@ -1,13 +1,7 @@
 <div id="paper-shades">
-  <div class="viz-carousel" aria-label="BetterFlash light background shades">
-    <section data-variant="Current ivory" aria-label="Current ivory"></section>
-    <section data-variant="Soft parchment" aria-label="Soft parchment" hidden></section>
-    <section data-variant="Warm paper" aria-label="Warm paper" hidden></section>
-    <section data-variant="Deep ivory" aria-label="Deep ivory" hidden></section>
-  </div>
-  <template id="paper-window-template">
-    <div class="sample" aria-label="Light theme Library preview">
-      <div class="palette-line"><strong class="shade-name"></strong><span class="palette-values"></span></div>
+  <section data-variant="Current ivory" aria-label="Current ivory">
+    <div class="sample" aria-label="Current ivory Library preview" style="--paper-canvas:#f5f0e7;--paper-surface:#fffaf1">
+      <div class="palette-line"><strong class="shade-name">Current ivory</strong><span class="palette-values">Canvas #F5F0E7 / Surface #FFFAF1</span></div>
       <div class="window">
         <header class="topbar"><strong>BetterFlash / Library</strong><span class="top-actions"><i data-lucide="keyboard" aria-hidden="true"></i><i data-lucide="moon" aria-hidden="true"></i><i data-lucide="undo-2" aria-hidden="true"></i></span></header>
         <div class="workspace">
@@ -57,10 +51,173 @@
       </div>
       <div class="preview-controls"><label><input type="checkbox" class="modal-switch" checked> Card modal open</label><span class="muted">Background study / unchanged accent and text colors</span></div>
     </div>
-  </template>
+
+  </section>
+  <section data-variant="Soft parchment" aria-label="Soft parchment">
+    <div class="sample" aria-label="Soft parchment Library preview" style="--paper-canvas:#eee9e0;--paper-surface:#f8f3ea">
+      <div class="palette-line"><strong class="shade-name">Soft parchment</strong><span class="palette-values">Canvas #EEE9E0 / Surface #F8F3EA</span></div>
+      <div class="window">
+        <header class="topbar"><strong>BetterFlash / Library</strong><span class="top-actions"><i data-lucide="keyboard" aria-hidden="true"></i><i data-lucide="moon" aria-hidden="true"></i><i data-lucide="undo-2" aria-hidden="true"></i></span></header>
+        <div class="workspace">
+          <nav class="sidebar" aria-label="Application navigation">
+            <div><i data-lucide="panel-left-close" aria-hidden="true"></i></div>
+            <div><i data-lucide="notebook-tabs" aria-hidden="true"></i>Review</div>
+            <div class="active"><i data-lucide="library" aria-hidden="true"></i>Library</div>
+            <div><i data-lucide="history" aria-hidden="true"></i>History</div>
+            <div><i data-lucide="settings" aria-hidden="true"></i>Settings</div>
+          </nav>
+          <div class="panes">
+            <section class="deck-pane" aria-label="Deck pane">
+              <div class="pane-heading"><h3>Decks</h3><i data-lucide="folder-plus" aria-hidden="true"></i></div>
+              <div class="deck selected"><i data-lucide="folder-open" aria-hidden="true"></i>Computer science<span>24</span></div>
+              <div class="deck child">Transactions<span>7</span></div>
+              <div class="deck child">C++<span>12</span></div>
+              <div class="deck child">Algorithms<span>5</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Mathematics<span>18</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Languages<span>9</span></div>
+            </section>
+            <section class="cards-pane" aria-label="Card pane">
+              <div class="pane-heading"><h3>Cards</h3><span class="muted">Transactions / 7 cards</span></div>
+              <div class="toolbar"><span>1 / 1</span><i data-lucide="plus" aria-hidden="true"></i><i data-lucide="search" aria-hidden="true"></i><i data-lucide="list-filter" aria-hidden="true"></i><i data-lucide="arrow-down-wide-narrow" aria-hidden="true"></i></div>
+              <div class="toolbar"><span class="static-control">Weakest first</span><span class="static-control">Generate New Card</span></div>
+              <div class="card-row current"><span>What does transaction durability guarantee?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does atomicity mean for a transaction?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does rollback leave behind?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>How does isolation protect concurrent transactions?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>When is a transaction committed?</span><small>Computer science / Transactions</small></div>
+            </section>
+          </div>
+          <div class="modal-layer">
+            <section class="detail-modal" aria-label="Card detail preview">
+              <div class="modal-title"><strong>Card detail</strong><button type="button" class="close-modal" aria-label="Close card detail preview"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <div class="muted">Computer science / Transactions</div>
+              <div class="modal-toolbar"><span class="tag">storage</span><span class="tag second">transactions</span><span class="spacer"></span><span class="static-control"><i data-lucide="bot" aria-hidden="true"></i>Ask AI</span><span class="static-control"><i data-lucide="pencil" aria-hidden="true"></i>Edit</span></div>
+              <div class="tabs"><span class="selected-tab">Front</span><span>Back</span></div>
+              <div class="question">What does transaction durability guarantee?</div>
+              <div class="divider"></div>
+              <strong>Review statistics</strong>
+              <div class="statistics"><span>Reviews<strong>12</strong></span><span>Last grade<strong>Good</strong></span><span>Average time<strong>8 seconds</strong></span></div>
+              <div class="trace-heading"><strong>Recall trace</strong><span class="muted">2026-11-13</span></div>
+              <div class="trace"><span>Missed</span><span>Hard</span><span>Good</span><span>Good</span><span>Easy</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="preview-controls"><label><input type="checkbox" class="modal-switch" checked> Card modal open</label><span class="muted">Background study / unchanged accent and text colors</span></div>
+    </div>
+
+  </section>
+  <section data-variant="Warm paper" aria-label="Warm paper">
+    <div class="sample" aria-label="Warm paper Library preview" style="--paper-canvas:#e7e2d9;--paper-surface:#f1ece3">
+      <div class="palette-line"><strong class="shade-name">Warm paper</strong><span class="palette-values">Canvas #E7E2D9 / Surface #F1ECE3</span></div>
+      <div class="window">
+        <header class="topbar"><strong>BetterFlash / Library</strong><span class="top-actions"><i data-lucide="keyboard" aria-hidden="true"></i><i data-lucide="moon" aria-hidden="true"></i><i data-lucide="undo-2" aria-hidden="true"></i></span></header>
+        <div class="workspace">
+          <nav class="sidebar" aria-label="Application navigation">
+            <div><i data-lucide="panel-left-close" aria-hidden="true"></i></div>
+            <div><i data-lucide="notebook-tabs" aria-hidden="true"></i>Review</div>
+            <div class="active"><i data-lucide="library" aria-hidden="true"></i>Library</div>
+            <div><i data-lucide="history" aria-hidden="true"></i>History</div>
+            <div><i data-lucide="settings" aria-hidden="true"></i>Settings</div>
+          </nav>
+          <div class="panes">
+            <section class="deck-pane" aria-label="Deck pane">
+              <div class="pane-heading"><h3>Decks</h3><i data-lucide="folder-plus" aria-hidden="true"></i></div>
+              <div class="deck selected"><i data-lucide="folder-open" aria-hidden="true"></i>Computer science<span>24</span></div>
+              <div class="deck child">Transactions<span>7</span></div>
+              <div class="deck child">C++<span>12</span></div>
+              <div class="deck child">Algorithms<span>5</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Mathematics<span>18</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Languages<span>9</span></div>
+            </section>
+            <section class="cards-pane" aria-label="Card pane">
+              <div class="pane-heading"><h3>Cards</h3><span class="muted">Transactions / 7 cards</span></div>
+              <div class="toolbar"><span>1 / 1</span><i data-lucide="plus" aria-hidden="true"></i><i data-lucide="search" aria-hidden="true"></i><i data-lucide="list-filter" aria-hidden="true"></i><i data-lucide="arrow-down-wide-narrow" aria-hidden="true"></i></div>
+              <div class="toolbar"><span class="static-control">Weakest first</span><span class="static-control">Generate New Card</span></div>
+              <div class="card-row current"><span>What does transaction durability guarantee?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does atomicity mean for a transaction?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does rollback leave behind?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>How does isolation protect concurrent transactions?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>When is a transaction committed?</span><small>Computer science / Transactions</small></div>
+            </section>
+          </div>
+          <div class="modal-layer">
+            <section class="detail-modal" aria-label="Card detail preview">
+              <div class="modal-title"><strong>Card detail</strong><button type="button" class="close-modal" aria-label="Close card detail preview"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <div class="muted">Computer science / Transactions</div>
+              <div class="modal-toolbar"><span class="tag">storage</span><span class="tag second">transactions</span><span class="spacer"></span><span class="static-control"><i data-lucide="bot" aria-hidden="true"></i>Ask AI</span><span class="static-control"><i data-lucide="pencil" aria-hidden="true"></i>Edit</span></div>
+              <div class="tabs"><span class="selected-tab">Front</span><span>Back</span></div>
+              <div class="question">What does transaction durability guarantee?</div>
+              <div class="divider"></div>
+              <strong>Review statistics</strong>
+              <div class="statistics"><span>Reviews<strong>12</strong></span><span>Last grade<strong>Good</strong></span><span>Average time<strong>8 seconds</strong></span></div>
+              <div class="trace-heading"><strong>Recall trace</strong><span class="muted">2026-11-13</span></div>
+              <div class="trace"><span>Missed</span><span>Hard</span><span>Good</span><span>Good</span><span>Easy</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="preview-controls"><label><input type="checkbox" class="modal-switch" checked> Card modal open</label><span class="muted">Background study / unchanged accent and text colors</span></div>
+    </div>
+
+  </section>
+  <section data-variant="Deep ivory" aria-label="Deep ivory">
+    <div class="sample" aria-label="Deep ivory Library preview" style="--paper-canvas:#e0dbd2;--paper-surface:#eae5dc">
+      <div class="palette-line"><strong class="shade-name">Deep ivory</strong><span class="palette-values">Canvas #E0DBD2 / Surface #EAE5DC</span></div>
+      <div class="window">
+        <header class="topbar"><strong>BetterFlash / Library</strong><span class="top-actions"><i data-lucide="keyboard" aria-hidden="true"></i><i data-lucide="moon" aria-hidden="true"></i><i data-lucide="undo-2" aria-hidden="true"></i></span></header>
+        <div class="workspace">
+          <nav class="sidebar" aria-label="Application navigation">
+            <div><i data-lucide="panel-left-close" aria-hidden="true"></i></div>
+            <div><i data-lucide="notebook-tabs" aria-hidden="true"></i>Review</div>
+            <div class="active"><i data-lucide="library" aria-hidden="true"></i>Library</div>
+            <div><i data-lucide="history" aria-hidden="true"></i>History</div>
+            <div><i data-lucide="settings" aria-hidden="true"></i>Settings</div>
+          </nav>
+          <div class="panes">
+            <section class="deck-pane" aria-label="Deck pane">
+              <div class="pane-heading"><h3>Decks</h3><i data-lucide="folder-plus" aria-hidden="true"></i></div>
+              <div class="deck selected"><i data-lucide="folder-open" aria-hidden="true"></i>Computer science<span>24</span></div>
+              <div class="deck child">Transactions<span>7</span></div>
+              <div class="deck child">C++<span>12</span></div>
+              <div class="deck child">Algorithms<span>5</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Mathematics<span>18</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Languages<span>9</span></div>
+            </section>
+            <section class="cards-pane" aria-label="Card pane">
+              <div class="pane-heading"><h3>Cards</h3><span class="muted">Transactions / 7 cards</span></div>
+              <div class="toolbar"><span>1 / 1</span><i data-lucide="plus" aria-hidden="true"></i><i data-lucide="search" aria-hidden="true"></i><i data-lucide="list-filter" aria-hidden="true"></i><i data-lucide="arrow-down-wide-narrow" aria-hidden="true"></i></div>
+              <div class="toolbar"><span class="static-control">Weakest first</span><span class="static-control">Generate New Card</span></div>
+              <div class="card-row current"><span>What does transaction durability guarantee?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does atomicity mean for a transaction?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does rollback leave behind?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>How does isolation protect concurrent transactions?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>When is a transaction committed?</span><small>Computer science / Transactions</small></div>
+            </section>
+          </div>
+          <div class="modal-layer">
+            <section class="detail-modal" aria-label="Card detail preview">
+              <div class="modal-title"><strong>Card detail</strong><button type="button" class="close-modal" aria-label="Close card detail preview"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <div class="muted">Computer science / Transactions</div>
+              <div class="modal-toolbar"><span class="tag">storage</span><span class="tag second">transactions</span><span class="spacer"></span><span class="static-control"><i data-lucide="bot" aria-hidden="true"></i>Ask AI</span><span class="static-control"><i data-lucide="pencil" aria-hidden="true"></i>Edit</span></div>
+              <div class="tabs"><span class="selected-tab">Front</span><span>Back</span></div>
+              <div class="question">What does transaction durability guarantee?</div>
+              <div class="divider"></div>
+              <strong>Review statistics</strong>
+              <div class="statistics"><span>Reviews<strong>12</strong></span><span>Last grade<strong>Good</strong></span><span>Average time<strong>8 seconds</strong></span></div>
+              <div class="trace-heading"><strong>Recall trace</strong><span class="muted">2026-11-13</span></div>
+              <div class="trace"><span>Missed</span><span>Hard</span><span>Good</span><span>Good</span><span>Easy</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="preview-controls"><label><input type="checkbox" class="modal-switch" checked> Card modal open</label><span class="muted">Background study / unchanged accent and text colors</span></div>
+    </div>
+
+  </section>
 </div>
 <style>
-#paper-shades { width:100%; }
+#paper-shades { width:100%; display:grid; gap:32px; }
 #paper-shades .sample { --paper-ink:#322832; --paper-muted:#685a63; --paper-rule:#b8a69a; --paper-accent:#176f7b; --paper-soft:#d7eef0; --paper-selected:#c9b2d3; --paper-tag:#d4e5d5; --paper-tag-ink:#2f5438; --paper-other-tag:#e4d4ed; --paper-other-tag-ink:#4b315c; --paper-scrim:rgba(50,40,50,.18); font:14px/1.5 'IBM Plex Mono',ui-monospace,monospace; }
 #paper-shades .palette-line { display:flex; gap:16px; flex-wrap:wrap; align-items:baseline; margin-bottom:12px; }
 #paper-shades .palette-values { font:12px/1.5 ui-monospace,monospace; }
@@ -134,7 +291,6 @@
 <script>
 (() => {
   const root = document.getElementById('paper-shades');
-  const template = root.querySelector('template');
   const shades = [
     {name:'Current ivory', canvas:'#f5f0e7', surface:'#fffaf1'},
     {name:'Soft parchment', canvas:'#eee9e0', surface:'#f8f3ea'},
@@ -142,7 +298,6 @@
     {name:'Deep ivory', canvas:'#e0dbd2', surface:'#eae5dc'}
   ];
   root.querySelectorAll('[data-variant]').forEach((section,index) => {
-    section.append(template.content.cloneNode(true));
     const sample = section.querySelector('.sample');
     const state = {...shades[index], modal:true};
     const toggle = sample.querySelector('.modal-switch');
