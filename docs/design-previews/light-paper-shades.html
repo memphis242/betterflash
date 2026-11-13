@@ -1,0 +1,169 @@
+<div id="paper-shades">
+  <div class="viz-carousel" aria-label="BetterFlash light background shades">
+    <section data-variant="Current ivory" aria-label="Current ivory"></section>
+    <section data-variant="Soft parchment" aria-label="Soft parchment" hidden></section>
+    <section data-variant="Warm paper" aria-label="Warm paper" hidden></section>
+    <section data-variant="Deep ivory" aria-label="Deep ivory" hidden></section>
+  </div>
+  <template id="paper-window-template">
+    <div class="sample" aria-label="Light theme Library preview">
+      <div class="palette-line"><strong class="shade-name"></strong><span class="palette-values"></span></div>
+      <div class="window">
+        <header class="topbar"><strong>BetterFlash / Library</strong><span class="top-actions"><i data-lucide="keyboard" aria-hidden="true"></i><i data-lucide="moon" aria-hidden="true"></i><i data-lucide="undo-2" aria-hidden="true"></i></span></header>
+        <div class="workspace">
+          <nav class="sidebar" aria-label="Application navigation">
+            <div><i data-lucide="panel-left-close" aria-hidden="true"></i></div>
+            <div><i data-lucide="notebook-tabs" aria-hidden="true"></i>Review</div>
+            <div class="active"><i data-lucide="library" aria-hidden="true"></i>Library</div>
+            <div><i data-lucide="history" aria-hidden="true"></i>History</div>
+            <div><i data-lucide="settings" aria-hidden="true"></i>Settings</div>
+          </nav>
+          <div class="panes">
+            <section class="deck-pane" aria-label="Deck pane">
+              <div class="pane-heading"><h3>Decks</h3><i data-lucide="folder-plus" aria-hidden="true"></i></div>
+              <div class="deck selected"><i data-lucide="folder-open" aria-hidden="true"></i>Computer science<span>24</span></div>
+              <div class="deck child">Transactions<span>7</span></div>
+              <div class="deck child">C++<span>12</span></div>
+              <div class="deck child">Algorithms<span>5</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Mathematics<span>18</span></div>
+              <div class="deck"><i data-lucide="folder" aria-hidden="true"></i>Languages<span>9</span></div>
+            </section>
+            <section class="cards-pane" aria-label="Card pane">
+              <div class="pane-heading"><h3>Cards</h3><span class="muted">Transactions / 7 cards</span></div>
+              <div class="toolbar"><span>1 / 1</span><i data-lucide="plus" aria-hidden="true"></i><i data-lucide="search" aria-hidden="true"></i><i data-lucide="list-filter" aria-hidden="true"></i><i data-lucide="arrow-down-wide-narrow" aria-hidden="true"></i></div>
+              <div class="toolbar"><span class="static-control">Weakest first</span><span class="static-control">Generate New Card</span></div>
+              <div class="card-row current"><span>What does transaction durability guarantee?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does atomicity mean for a transaction?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>What does rollback leave behind?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>How does isolation protect concurrent transactions?</span><small>Computer science / Transactions</small></div>
+              <div class="card-row"><span>When is a transaction committed?</span><small>Computer science / Transactions</small></div>
+            </section>
+          </div>
+          <div class="modal-layer">
+            <section class="detail-modal" aria-label="Card detail preview">
+              <div class="modal-title"><strong>Card detail</strong><button type="button" class="close-modal" aria-label="Close card detail preview"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <div class="muted">Computer science / Transactions</div>
+              <div class="modal-toolbar"><span class="tag">storage</span><span class="tag second">transactions</span><span class="spacer"></span><span class="static-control"><i data-lucide="bot" aria-hidden="true"></i>Ask AI</span><span class="static-control"><i data-lucide="pencil" aria-hidden="true"></i>Edit</span></div>
+              <div class="tabs"><span class="selected-tab">Front</span><span>Back</span></div>
+              <div class="question">What does transaction durability guarantee?</div>
+              <div class="divider"></div>
+              <strong>Review statistics</strong>
+              <div class="statistics"><span>Reviews<strong>12</strong></span><span>Last grade<strong>Good</strong></span><span>Average time<strong>8 seconds</strong></span></div>
+              <div class="trace-heading"><strong>Recall trace</strong><span class="muted">2026-11-13</span></div>
+              <div class="trace"><span>Missed</span><span>Hard</span><span>Good</span><span>Good</span><span>Easy</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="preview-controls"><label><input type="checkbox" class="modal-switch" checked> Card modal open</label><span class="muted">Background study / unchanged accent and text colors</span></div>
+    </div>
+  </template>
+</div>
+<style>
+#paper-shades { width:100%; }
+#paper-shades .sample { --paper-ink:#322832; --paper-muted:#685a63; --paper-rule:#b8a69a; --paper-accent:#176f7b; --paper-soft:#d7eef0; --paper-selected:#c9b2d3; --paper-tag:#d4e5d5; --paper-tag-ink:#2f5438; --paper-other-tag:#e4d4ed; --paper-other-tag-ink:#4b315c; --paper-scrim:rgba(50,40,50,.18); font:14px/1.5 'IBM Plex Mono',ui-monospace,monospace; }
+#paper-shades .palette-line { display:flex; gap:16px; flex-wrap:wrap; align-items:baseline; margin-bottom:12px; }
+#paper-shades .palette-values { font:12px/1.5 ui-monospace,monospace; }
+#paper-shades .window { background:var(--paper-canvas); color:var(--paper-ink); border:1px solid var(--paper-rule); }
+#paper-shades .topbar { display:flex; justify-content:space-between; align-items:center; padding:18px; border-bottom:1px solid var(--paper-rule); background:var(--paper-canvas); }
+#paper-shades .top-actions { display:flex; gap:18px; }
+#paper-shades svg { width:18px; height:18px; flex-shrink:0; }
+#paper-shades .workspace { display:flex; position:relative; min-height:580px; }
+#paper-shades .sidebar { width:116px; flex-shrink:0; background:var(--paper-surface); border-right:1px solid var(--paper-rule); }
+#paper-shades .sidebar>div { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px 8px; border-bottom:1px solid var(--paper-rule); }
+#paper-shades .sidebar .active { color:var(--paper-accent); background:var(--paper-soft); border-left:3px solid var(--paper-accent); }
+#paper-shades .panes { display:grid; grid-template-columns:minmax(180px,.85fr) minmax(250px,1.15fr); gap:12px; padding:18px; width:100%; min-width:0; }
+#paper-shades .deck-pane,#paper-shades .cards-pane { background:var(--paper-surface); border:1px solid var(--paper-rule); padding:14px; min-width:0; }
+#paper-shades .pane-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+#paper-shades h3 { font:600 20px/1.3 'IBM Plex Mono',ui-monospace,monospace; margin:0; }
+#paper-shades .muted { color:var(--paper-muted); font-size:12px; }
+#paper-shades .deck { display:flex; align-items:center; gap:8px; padding:14px 4px; overflow-wrap:anywhere; }
+#paper-shades .deck span { margin-left:auto; color:var(--paper-muted); font-size:12px; }
+#paper-shades .deck.child { padding-left:28px; }
+#paper-shades .deck.selected { color:var(--paper-accent); }
+#paper-shades .toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+#paper-shades .static-control { border:1px solid var(--paper-rule); padding:6px 8px; border-radius:4px; display:inline-flex; align-items:center; gap:6px; font-size:12px; }
+#paper-shades .card-row { padding:16px 8px; border-bottom:1px solid var(--paper-rule); border-left:3px solid var(--paper-rule); margin-top:8px; }
+#paper-shades .card-row span { display:block; }
+#paper-shades small { display:block; color:var(--paper-muted); font-size:11px; margin-top:12px; }
+#paper-shades .card-row.current { border-left-color:var(--paper-accent); }
+#paper-shades .modal-layer { position:absolute; inset:0; background:var(--paper-scrim); display:flex; align-items:center; justify-content:flex-end; padding:24px; pointer-events:none; }
+#paper-shades .modal-layer[hidden] { display:none; }
+#paper-shades .detail-modal { pointer-events:auto; width:68%; max-width:600px; box-sizing:border-box; padding:22px; background:var(--paper-surface); border:1px solid var(--paper-rule); border-radius:12px; display:flex; flex-direction:column; gap:14px; }
+#paper-shades .modal-title { display:flex; align-items:center; justify-content:space-between; font-size:21px; }
+#paper-shades .close-modal { color:var(--paper-ink); background:transparent; border:1px solid var(--paper-rule); border-radius:50%; width:32px; height:32px; display:grid; place-items:center; }
+#paper-shades button { cursor:pointer; }
+#paper-shades .modal-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+#paper-shades .spacer { flex:1; }
+#paper-shades .tag { padding:3px 7px; border-radius:8px; font-size:11px; background:var(--paper-tag); color:var(--paper-tag-ink); }
+#paper-shades .tag.second { background:var(--paper-other-tag); color:var(--paper-other-tag-ink); }
+#paper-shades .tabs { display:flex; gap:8px; border-bottom:1px solid var(--paper-rule); padding-bottom:8px; }
+#paper-shades .tabs span { padding:6px 18px; }
+#paper-shades .selected-tab { background:var(--paper-selected); font-weight:600; border-radius:4px; }
+#paper-shades .question { min-height:80px; font-size:18px; padding:12px 0; }
+#paper-shades .divider { height:1px; background:var(--paper-rule); }
+#paper-shades .statistics { display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--paper-muted); }
+#paper-shades .statistics strong { display:block; margin-top:6px; color:var(--paper-ink); font-size:14px; font-weight:500; }
+#paper-shades .trace-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:4px; }
+#paper-shades .trace { display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid var(--paper-rule); padding:16px 0; color:var(--paper-muted); font-size:11px; }
+#paper-shades .preview-controls { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:12px; }
+#paper-shades .preview-controls label { display:flex; align-items:center; gap:8px; }
+@media(max-width:700px) {
+ #paper-shades .sidebar { width:72px; font-size:11px; }
+ #paper-shades .sidebar>div { padding:24px 4px; }
+ #paper-shades .panes { padding:10px; gap:8px; grid-template-columns:minmax(100px,.8fr) minmax(130px,1.2fr); }
+ #paper-shades .deck-pane,#paper-shades .cards-pane { padding:8px; }
+ #paper-shades .workspace { min-height:700px; }
+ #paper-shades .modal-layer { padding:10px; align-items:flex-end; }
+ #paper-shades .detail-modal { width:85%; padding:16px; margin-bottom:24px; }
+ #paper-shades .deck { font-size:12px; flex-wrap:wrap; }
+ #paper-shades .deck.child { padding-left:12px; }
+ #paper-shades .modal-title { font-size:18px; }
+ #paper-shades .question { font-size:16px; }
+ #paper-shades h3 { font-size:16px; }
+}
+@media(max-width:420px) {
+ #paper-shades .sidebar { display:none; }
+ #paper-shades .detail-modal { width:96%; }
+ #paper-shades .top-actions { gap:8px; }
+ #paper-shades .topbar { padding:12px; font-size:12px; }
+ #paper-shades .modal-layer { padding:6px; }
+ #paper-shades .trace-heading { flex-wrap:wrap; }
+}
+</style>
+<script>
+(() => {
+  const root = document.getElementById('paper-shades');
+  const template = root.querySelector('template');
+  const shades = [
+    {name:'Current ivory', canvas:'#f5f0e7', surface:'#fffaf1'},
+    {name:'Soft parchment', canvas:'#eee9e0', surface:'#f8f3ea'},
+    {name:'Warm paper', canvas:'#e7e2d9', surface:'#f1ece3'},
+    {name:'Deep ivory', canvas:'#e0dbd2', surface:'#eae5dc'}
+  ];
+  root.querySelectorAll('[data-variant]').forEach((section,index) => {
+    section.append(template.content.cloneNode(true));
+    const sample = section.querySelector('.sample');
+    const state = {...shades[index], modal:true};
+    const toggle = sample.querySelector('.modal-switch');
+    const render = () => {
+      sample.style.setProperty('--paper-canvas',state.canvas);
+      sample.style.setProperty('--paper-surface',state.surface);
+      sample.querySelector('.shade-name').textContent = state.name;
+      sample.querySelector('.palette-values').textContent = 'Canvas '+state.canvas.toUpperCase()+' / Surface '+state.surface.toUpperCase();
+      sample.querySelector('.modal-layer').hidden = !state.modal;
+      toggle.checked = state.modal;
+    };
+    toggle.addEventListener('change',() => { state.modal=toggle.checked; render(); });
+    sample.querySelector('.close-modal').addEventListener('click',() => { state.modal=false; render(); });
+    render();
+    if(globalThis.Tweak) {
+      const tweak = new Tweak({container:sample,onChange:render});
+      tweak.addColorPicker(state,'canvas',{label:'Window background',reference:'--paper-canvas'});
+      tweak.addColorPicker(state,'surface',{label:'Pane and modal background',reference:'--paper-surface'});
+      tweak.addToggle(state,'modal',{label:'Card modal open'});
+    }
+  });
+  if(globalThis.lucide) lucide.createIcons();
+})();
+</script>
