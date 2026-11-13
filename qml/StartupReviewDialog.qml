@@ -87,9 +87,10 @@ Dialog {
                     toolTipOnFocus: true
                 }
                 Item { Layout.fillWidth: true }
-                ReviewUtilityButton {
+                AppButton {
                     id: pitStopPause
                     objectName: "pitStopPause"
+                    text: app.paused ? "Resume" : "Pause"
                     glyph: app.paused ? "play" : "pause"
                     hint: (app.paused ? "Resume review" : "Pause review") + " (" + shortcuts.bindings.pause + ")"
                     enabled: dialog.inReview && !app.busy && !dialog.ui.pitStopToolOpen

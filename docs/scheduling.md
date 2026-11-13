@@ -128,7 +128,8 @@ their own input controls. Space retains its normal review binding, including wit
 The popup shares the normal review card panel: the question remains visible,
 the large **Reveal answer** control reveals the answer below it, and the timer,
 rating buttons, and partial-recall adjustment use the normal presentation.
-The header shows the deck and tags, a Pause/Resume button, **Generate similar
+The header shows the deck and tags, a labeled Pause/Resume button with its
+play/pause icon, **Generate similar
 card**, and **Recall & study help**. The title's question-mark tooltip explains
 the feature and points to **Settings > Review** to disable it. The setting is
 remembered on this device and defaults to enabled.
