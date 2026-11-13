@@ -207,6 +207,7 @@ Dialog {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
+        ModelCacheControl { operation: tagAssistant; policyEnabled: !dialog.locked; Layout.fillWidth: true }
         ProgressBar { visible: tagAssistant.busy; from: 0; to: Math.max(1, tagAssistant.total); value: tagAssistant.completed; Layout.fillWidth: true }
         Rectangle {
             visible: !!dialog.failure.message

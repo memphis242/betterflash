@@ -20,6 +20,7 @@ Rectangle {
     property bool summaryRetryVisible: false
     property string summaryRetryText: "Retry summary"
     property bool summaryBusy: false
+    property var summaryOperation: null
     property bool saveExternally: false
     property string mediaRoot: ""
     property bool heatmapAvailable: false
@@ -462,6 +463,12 @@ Rectangle {
                         font.family: Theme.monoFont
                         font.pixelSize: 10
                         wrapMode: Text.Wrap
+                    }
+                    ModelCacheControl {
+                        operation: pane.summaryOperation
+                        visible: pane.summaryRetryVisible && !!pane.summaryOperation
+                        policyEnabled: !pane.busy && !pane.summaryBusy
+                        Layout.fillWidth: true
                     }
                     AppButton {
                         visible: pane.summaryRetryVisible

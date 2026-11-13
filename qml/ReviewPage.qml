@@ -13,6 +13,16 @@ Item {
     readonly property bool previewHasFocus: reviewQueuePreviewList.activeFocus
     readonly property bool timelineScrollHasFocus: reviewQueueScrollBar.activeFocus
     readonly property bool reviewUtilityHasFocus: returnToActive.activeFocus || deferUtility.activeFocus || postponeUtility.activeFocus || voiceUtility.activeFocus || reviewPause.activeFocus || reviewEnd.activeFocus
+    property var voiceCorrectionCacheInfo: ({})
+    function refreshVoiceCorrectionCacheInfo() {
+        voiceCorrectionCacheInfo = typeof ai.operationCacheInfo === "function"
+            ? ai.operationCacheInfo(voice.transcriptCorrector) : ({})
+    }
+    Component.onCompleted: refreshVoiceCorrectionCacheInfo()
+    Connections {
+        target: ai
+        function onCacheChanged() { page.refreshVoiceCorrectionCacheInfo() }
+    }
     property bool queueCollapsed: preferences.reviewQueueCollapsed
     property Settings preferences: Settings {
         category: "review"
@@ -801,6 +811,21 @@ Item {
                             font.pixelSize: 11
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
+                        }
+                        Label {
+                            visible: voice.enabled && voice.transcriptCorrector.enabled
+                                && !voice.transcriptCorrector.busy
+                                && Number(page.voiceCorrectionCacheInfo.hits || 0) > 0
+                            text: "Used cached model response for transcript correction"
+                            textFormat: Text.PlainText
+                            color: Theme.inkMuted
+                            font.family: Theme.monoFont
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                            ToolTip.visible: voiceCorrectionCacheHover.hovered
+                            ToolTip.text: "The last transcript-correction operation used a saved model reply. Use Fresh response under transcript correction in Settings > Voice Control to bypass cached model replies."
+                            HoverHandler { id: voiceCorrectionCacheHover }
                         }
                     }
                     ReviewNavigationBar {

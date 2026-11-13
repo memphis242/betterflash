@@ -315,6 +315,7 @@ Item {
                 onClicked: { confirmDialog.action = "discard"; confirmDialog.open() }
             }
         }
+        ModelCacheControl { operation: cardChat; Layout.fillWidth: true }
         Label {
             text: "Your question"
             color: Theme.ink

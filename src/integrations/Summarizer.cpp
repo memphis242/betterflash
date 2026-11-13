@@ -1,11 +1,14 @@
 #include "Summarizer.h"
 #include "ApiKeyRegistry.h"
+#include "ModelResponseCache.h"
 #include "core/appcontroller.h"
 #include "core/DiagnosticLog.h"
 #include "core/cardmodel.h"
 #include "models/LocalLanguageModel.h"
 
 #include <QDateTime>
+#include <QCryptographicHash>
+#include <QFileInfo>
 #include <QHash>
 #include <QDir>
 #include <QFutureWatcher>
@@ -146,7 +149,7 @@ std::expected<QJsonObject, struct ProviderError> anthropicResponse(const QJsonOb
 }
 }
 
-Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *registry)
+Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *registry, const QString &dataDirectory)
     : QObject(parent), m_app(app), m_registry(registry ? registry : new ApiKeyRegistry(this)), m_localDownload(qEnvironmentVariable("BETTERFLASH_MODEL_DIR",
         QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/BetterFlash/models")), this) {
     Q_ASSERT(m_app);
@@ -167,6 +170,9 @@ Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *regi
     if (m_profile != QStringLiteral("gemma") && m_profile != QStringLiteral("lfm")) m_profile = QStringLiteral("automatic");
     m_acceleration = m_settings.value(QStringLiteral("llm/acceleration"), QStringLiteral("automatic")).toString();
     if (m_acceleration != QStringLiteral("cpu")) m_acceleration = QStringLiteral("automatic");
+    if (!dataDirectory.isEmpty()) m_responseCache = std::make_shared<ModelResponseCache>(dataDirectory);
+    m_cachePool.setMaxThreadCount(1);
+    m_cachePool.setExpiryTimeout(30000);
     m_inferencePool.setMaxThreadCount(1);
     m_inferencePool.setExpiryTimeout(30000);
     m_localDownload.configure({LocalLanguageModel::spec(resolvedProfile()).asset});
@@ -188,6 +194,7 @@ Summarizer::~Summarizer() {
     cancelAllCompletions();
     m_localDownload.cancel();
     m_inferencePool.waitForDone();
+    m_cachePool.waitForDone();
 }
 QString Summarizer::resolvedProfile() const {
     return m_profile == QStringLiteral("automatic") ? LocalLanguageModel::automaticProfile() : m_profile;
@@ -290,13 +297,70 @@ QJsonValue diagnosticValue(const QJsonValue &value) {
     return result;
 }
 }
-void Summarizer::beginDiagnosticOperation(QObject *context) {
+void Summarizer::ensureCacheContext(QObject *context) {
     Q_ASSERT(context && QThread::currentThread() == thread());
-    if (!m_diagnosticJournals.contains(context))
-        connect(context, &QObject::destroyed, this, [this, context] { m_diagnosticJournals.remove(context); });
+    if (m_cacheContexts.contains(context)) return;
+    m_cacheContexts.insert(context);
+    connect(context, &QObject::destroyed, this, [this, context] {
+        m_cacheContexts.remove(context);
+        m_freshPreferences.remove(context);
+        m_diagnosticJournals.remove(context);
+        m_visibleCacheJournals.remove(context);
+        m_responseCallbacks.remove(context);
+    });
+}
+bool Summarizer::operationFresh(QObject *context) const {
+    if (!context) return false;
+    return m_freshPreferences.value(context, false);
+}
+void Summarizer::setOperationFresh(QObject *context, const bool fresh) {
+    if (!context || operationFresh(context) == fresh) return;
+    ensureCacheContext(context);
+    m_freshPreferences.insert(context, fresh);
+    emit cachePolicyChanged();
+}
+QVariantMap Summarizer::operationCacheInfo(QObject *context) const {
+    const auto journal = m_visibleCacheJournals.value(context);
+    const auto stats = journal ? journal->cacheStats : nullptr;
+    return {{QStringLiteral("hits"), stats ? stats->hits : 0},
+            {QStringLiteral("requests"), stats ? stats->requests : 0}};
+}
+void Summarizer::acknowledgeCacheError() {
+    if (m_cacheErrorInfo.isEmpty()) return;
+    m_cacheErrorInfo = m_pendingCacheErrors.isEmpty() ? QVariantMap() : m_pendingCacheErrors.takeFirst();
+    emit cacheChanged();
+}
+void Summarizer::reportCacheError(const QVariantMap &error) {
+    if (error.isEmpty()) return;
+    if (auto *const log = DiagnosticLog::instance())
+        (void)log->record(QStringLiteral("warning"), QStringLiteral("llm.cache.error"), QJsonObject::fromVariantMap(error));
+    if (m_cacheErrorInfo.isEmpty()) { m_cacheErrorInfo = error; emit cacheChanged(); return; }
+    if (m_cacheErrorInfo == error || m_pendingCacheErrors.contains(error)) return;
+    constexpr qsizetype maxPending = 15;
+    if (m_pendingCacheErrors.size() < maxPending) {
+        m_pendingCacheErrors.append(error);
+    } else {
+        const QVariantMap overflow{{QStringLiteral("code"), QStringLiteral("LLM_CACHE_ERRORS_OVERFLOW")},
+            {QStringLiteral("message"), QStringLiteral("Additional cache errors occurred. Inspect the diagnostic log for details.")},
+            {QStringLiteral("detail"), QStringLiteral("The cache error notice queue reached its limit.")}};
+        if (!m_pendingCacheErrors.contains(overflow)) m_pendingCacheErrors.append(overflow);
+    }
+}
+void Summarizer::beginDiagnosticOperation(QObject *context, QObject *policyContext, const bool aggregateCache, const bool disableCache) {
+    Q_ASSERT(context && QThread::currentThread() == thread());
+    if (!policyContext) policyContext = context;
+    ensureCacheContext(context);
+    ensureCacheContext(policyContext);
     auto journal = std::make_shared<struct DiagnosticJournal>();
     journal->operationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto parentJournal = aggregateCache ? m_visibleCacheJournals.value(policyContext) : nullptr;
+    journal->cacheStats = parentJournal ? parentJournal->cacheStats : std::make_shared<struct CacheStats>();
+    Q_ASSERT(journal->cacheStats);
+    if (!parentJournal) journal->cacheStats->forceFresh = operationFresh(policyContext);
+    journal->disableCache = disableCache || context == &m_testContext;
     m_diagnosticJournals.insert(context, journal);
+    m_visibleCacheJournals.insert(policyContext, journal);
+    QMetaObject::invokeMethod(this, [this] { emit cacheChanged(); }, Qt::QueuedConnection);
 }
 void Summarizer::appendDiagnostic(const std::shared_ptr<struct DiagnosticJournal> &journal, const QJsonObject &entry) {
     if (!journal) return;
@@ -319,8 +383,11 @@ void Summarizer::appendDiagnostic(const std::shared_ptr<struct DiagnosticJournal
     journal->entries.append(clean);
     journal->bytes += bytes;
 }
-QString Summarizer::logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail) {
-    return logDiagnosticJournal(m_diagnosticJournals.value(context), code, message, detail);
+QString Summarizer::logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail, const bool responseRejected) {
+    const auto callbacks = m_responseCallbacks.value(context);
+    const auto journal = callbacks.isEmpty() ? m_diagnosticJournals.value(context) : callbacks.constLast()->journal;
+    if (journal && responseRejected) ++journal->failureCount;
+    return logDiagnosticJournal(journal, code, message, detail);
 }
 QString Summarizer::logDiagnosticJournal(const std::shared_ptr<struct DiagnosticJournal> &journal,
                                         const QString &code, const QString &message, const QString &detail) {
@@ -337,6 +404,146 @@ QString Summarizer::logDiagnosticJournal(const std::shared_ptr<struct Diagnostic
     }
     return log->record(QStringLiteral("warning"), QStringLiteral("llm.operation.failure"), record);
 }
+namespace {
+bool apparentRefusal(const QJsonObject &message) {
+    QString content = message.value(QStringLiteral("content")).toString().trimmed();
+    if (content.isEmpty()) return false;
+    static const QRegularExpression pattern(QStringLiteral(
+        "^(?:(?:i(?:'m| am) sorry|sorry)[,.:]?\\s*(?:but\\s+)?)?"
+        "(?:i\\s+(?:cannot|can't|can’t|won't|won’t|am unable to|am not able to|must decline)\\b|"
+        "as an ai(?: language model)?\\b)"), QRegularExpression::CaseInsensitiveOption);
+    const auto matches = [](const QString &text) { return pattern.match(text.trimmed().left(500)).hasMatch(); };
+    if (matches(content)) return true;
+    static const QRegularExpression fenced(QStringLiteral("^```(?:json)?\\s*([\\s\\S]*?)\\s*```$"), QRegularExpression::CaseInsensitiveOption);
+    const auto match = fenced.match(content);
+    if (match.hasMatch()) content = match.captured(1).trimmed();
+    if (!content.startsWith(u'{') || !content.endsWith(u'}')) return false;
+    QJsonParseError parse{};
+    const QJsonDocument document = QJsonDocument::fromJson(content.toUtf8(), &parse);
+    if (parse.error != QJsonParseError::NoError || !document.isObject()) return false;
+    const QJsonObject object = document.object();
+    if (object.value(QStringLiteral("decision")).toString() == QStringLiteral("refuse")) return true;
+    for (const QString &field : {QStringLiteral("summary"), QStringLiteral("answer"), QStringLiteral("reason"), QStringLiteral("message")})
+        if (object.value(field).isString() && matches(object.value(field).toString())) return true;
+    return false;
+}
+
+QVariantMap cacheSafetyError(const QJsonObject &message) {
+    auto *const log = DiagnosticLog::instance();
+    if (!log) return {{QStringLiteral("code"), QStringLiteral("LLM_CACHE_REDACTION_UNAVAILABLE")},
+        {QStringLiteral("message"), QStringLiteral("A model response was not cached because credential redaction is unavailable. The response remains available.")},
+        {QStringLiteral("detail"), QStringLiteral("Restart the application and check diagnostic logging before caching responses.")}};
+    bool excessiveNesting = false;
+    std::function<bool(const QJsonValue &, int)> safeValue;
+    safeValue = [log, &safeValue, &excessiveNesting](const QJsonValue &value, const int depth) {
+        if (depth > 32) { excessiveNesting = true; return false; }
+        if (value.isString()) {
+            const QString raw = value.toString();
+            if (log->redact(raw) != raw) return false;
+            const QString text = raw.trimmed();
+            if (text.size() >= 2 && ((text.startsWith(u'{') && text.endsWith(u'}'))
+                || (text.startsWith(u'[') && text.endsWith(u']')) || (text.startsWith(u'"') && text.endsWith(u'"')))) {
+                QJsonParseError parse{};
+                const QJsonDocument nested = QJsonDocument::fromJson(
+                    text.startsWith(u'"') ? QByteArray("[") + text.toUtf8() + ']' : text.toUtf8(), &parse);
+                if (parse.error == QJsonParseError::NoError) {
+                    if (nested.isArray() && !safeValue(nested.array(), depth + 1)) return false;
+                    if (nested.isObject() && !safeValue(nested.object(), depth + 1)) return false;
+                }
+            }
+            return true;
+        }
+        if (value.isArray()) {
+            for (const QJsonValue &item : value.toArray()) if (!safeValue(item, depth + 1)) return false;
+        } else if (value.isObject()) {
+            const QJsonObject object = value.toObject();
+            for (auto it = object.constBegin(); it != object.constEnd(); ++it)
+                if (log->redact(it.key()) != it.key() || !safeValue(it.value(), depth + 1)) return false;
+        }
+        return true;
+    };
+    if (safeValue(message, 0)) return {};
+    return {{QStringLiteral("code"), excessiveNesting ? QStringLiteral("LLM_CACHE_NESTING") : QStringLiteral("LLM_CACHE_SECRET")},
+        {QStringLiteral("message"), excessiveNesting
+            ? QStringLiteral("A model response was too deeply nested to cache safely. The response remains available.")
+            : QStringLiteral("A model response contained credential-like data and was not cached. The response remains available.")},
+        {QStringLiteral("detail"), excessiveNesting
+            ? QStringLiteral("The response exceeded the 32-level cache safety limit.")
+            : QStringLiteral("Remove credentials from model input and output before requesting a reusable response.")}};
+}
+bool cacheableTools(const QJsonObject &payload) {
+    const QJsonValue toolsValue = payload.value(QStringLiteral("tools"));
+    if (toolsValue.isUndefined() || toolsValue.isNull()) return true;
+    if (!toolsValue.isArray()) return false;
+    for (const QJsonValue &value : toolsValue.toArray()) {
+        if (!value.isObject()) return false;
+        const QJsonObject tool = value.toObject();
+        const QJsonObject function = tool.value(QStringLiteral("function")).toObject();
+        const QString name = function.value(QStringLiteral("name")).toString();
+        if (tool.value(QStringLiteral("type")).toString() != QStringLiteral("function")
+            || (name != QStringLiteral("web_search") && name != QStringLiteral("search_cards") && name != QStringLiteral("read_card"))) return false;
+    }
+    return true;
+}
+}
+QByteArray Summarizer::completionCacheKey(const QJsonObject &effectivePayload, const QByteArray &assetDigest) const {
+    QJsonObject identity{{QStringLiteral("version"), 1}, {QStringLiteral("provider"), m_provider},
+                         {QStringLiteral("payload"), effectivePayload}};
+    if (m_provider == QStringLiteral("remote")) {
+        const QByteArray credentialDigest = QCryptographicHash::hash(m_credentials->key().toUtf8(), QCryptographicHash::Sha256).toHex();
+        identity.insert(QStringLiteral("api"), m_remoteApi);
+        identity.insert(QStringLiteral("endpoint"), QUrl(m_endpoint).toString(QUrl::FullyEncoded));
+        identity.insert(QStringLiteral("accountDigest"), QString::fromLatin1(credentialDigest));
+        if (m_remoteApi == QStringLiteral("anthropic")) {
+            identity.insert(QStringLiteral("workspace"), m_workspaceId);
+            identity.insert(QStringLiteral("apiVersion"), QStringLiteral("2026-10-21"));
+        }
+    } else {
+        const QString profile = resolvedProfile();
+        const struct LocalLanguageSpec spec = LocalLanguageModel::spec(profile);
+        const QFileInfo asset(QDir(m_localDownload.directory()).filePath(spec.filename));
+        identity.insert(QStringLiteral("profile"), profile);
+        identity.insert(QStringLiteral("acceleration"), m_acceleration);
+        Q_ASSERT(!assetDigest.isEmpty());
+        identity.insert(QStringLiteral("assetSha256"), QString::fromLatin1(assetDigest));
+        identity.insert(QStringLiteral("expectedAssetSha256"), QString::fromLatin1(spec.asset.sha256));
+        identity.insert(QStringLiteral("assetPath"), asset.canonicalFilePath());
+        identity.insert(QStringLiteral("assetBytes"), static_cast<double>(asset.size()));
+        identity.insert(QStringLiteral("assetModified"), asset.lastModified().toUTC().toString(Qt::ISODateWithMs));
+    }
+    return QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex();
+}
+void Summarizer::acceptModelResponse(QObject *context) {
+    Q_ASSERT(context && QThread::currentThread() == thread());
+    const auto found = m_responseCallbacks.constFind(context);
+    Q_ASSERT(found != m_responseCallbacks.cend() && !found->isEmpty());
+    if (found == m_responseCallbacks.cend() || found->isEmpty()) return;
+    found->constLast()->acceptedByConsumer = true;
+}
+void Summarizer::discardCachedResponse(const QByteArray &key, const QByteArray &token) {
+    if (!m_responseCache || key.isEmpty() || token.isEmpty()) return;
+    const auto cache = m_responseCache;
+    auto *const watcher = new QFutureWatcher<QVariantMap>(this);
+    connect(watcher, &QFutureWatcher<QVariantMap>::finished, this, [this, watcher] {
+        const QVariantMap failure = watcher->result(); watcher->deleteLater();
+        reportCacheError(failure);
+    });
+    watcher->setFuture(QtConcurrent::run(&m_cachePool, [cache, key, token] { return cache->discard(key, token); }));
+}
+void Summarizer::storeCachedResponse(const QByteArray &key, const QJsonObject &message) {
+    if (!m_responseCache || key.isEmpty()) return;
+    if (const QVariantMap failure = cacheSafetyError(message); !failure.isEmpty()) {
+        reportCacheError(failure);
+        return;
+    }
+    const auto cache = m_responseCache;
+    auto *const watcher = new QFutureWatcher<QVariantMap>(this);
+    connect(watcher, &QFutureWatcher<QVariantMap>::finished, this, [this, watcher] {
+        const QVariantMap failure = watcher->result(); watcher->deleteLater();
+        reportCacheError(failure);
+    });
+    watcher->setFuture(QtConcurrent::run(&m_cachePool, [cache, key, message] { return cache->store(key, message); }));
+}
 quint64 Summarizer::completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
     const quint64 id = ++m_jobSequence;
@@ -344,6 +551,11 @@ quint64 Summarizer::completeMessage(const QJsonObject &payload, QObject *context
     if (!m_diagnosticJournals.contains(context)) beginDiagnosticOperation(context);
     job->payload = payload; job->context = context; job->callback = std::move(callback);
     job->journal = m_diagnosticJournals.value(context); job->id = id;
+    if (m_responseCache && job->journal && !job->journal->disableCache) {
+        Q_ASSERT(job->journal->cacheStats);
+        ++job->journal->cacheStats->requests;
+        QMetaObject::invokeMethod(this, [this] { emit cacheChanged(); }, Qt::QueuedConnection);
+    }
     appendDiagnostic(job->journal, QJsonObject{{QStringLiteral("job"), static_cast<qint64>(id)},
         {QStringLiteral("stage"), QStringLiteral("request")}, {QStringLiteral("payload"), payload}});
     job->contextConnection = connect(context, &QObject::destroyed, this, [this, id] { cancelCompletion(id); });
@@ -355,10 +567,119 @@ void Summarizer::startCompletion(quint64 id) {
     const auto job = m_jobs.value(id);
     if (!job) return;
     if (!job->context || job->canceled->load()) { cancelCompletion(id); return; }
-    if (m_provider == QStringLiteral("local")) {
-        if (!localModelReady()) {
-            job->waitingForDownload = true; m_localDownload.start(); return;
+    if (job->cacheLookupPending) return;
+    const bool local = m_provider == QStringLiteral("local");
+    if (local && !localModelReady()) {
+        job->waitingForDownload = true; m_localDownload.start(); return;
+    }
+    QJsonObject requestPayload = job->payload;
+    std::optional<QNetworkRequest> request;
+    if (!local) {
+        const auto configured = configuredRequest();
+        if (!configured) { finishCompletion(id, std::unexpected(configured.error())); return; }
+        request = *configured;
+        job->anthropic = m_remoteApi == QStringLiteral("anthropic");
+        if (job->anthropic) {
+            const auto converted = anthropicRequest(requestPayload);
+            if (!converted) { finishCompletion(id, std::unexpected(converted.error())); return; }
+            requestPayload = *converted;
         }
+    }
+    const bool cacheAllowed = m_responseCache && job->journal && !job->journal->disableCache
+        && !job->cacheDisabledForJob && cacheableTools(job->payload);
+    if (cacheAllowed && local) {
+        const struct LocalLanguageSpec spec = LocalLanguageModel::spec(resolvedProfile());
+        const QString path = QDir(m_localDownload.directory()).filePath(spec.filename);
+        const QByteArray identity = ModelResponseCache::assetIdentity(path);
+        if (job->assetDigest.isEmpty() || job->assetIdentity != identity || job->assetPath != path) {
+            if (!job->assetIdentity.isEmpty() && ++job->assetChanges > 2) {
+                job->cacheDisabledForJob = true;
+                reportCacheError({{QStringLiteral("code"), QStringLiteral("LLM_CACHE_MODEL_CHANGED")},
+                    {QStringLiteral("message"), QStringLiteral("The local model changed repeatedly. The model will run without cached responses.")},
+                    {QStringLiteral("detail"), path}});
+                startCompletion(id); return;
+            }
+            if (job->assetFingerprintPending) return;
+            job->assetFingerprintPending = true;
+            const auto cache = m_responseCache;
+            const auto canceled = job->canceled;
+            auto *const watcher = new QFutureWatcher<struct ModelResponseCache::AssetFingerprint>(this);
+            connect(watcher, &QFutureWatcher<struct ModelResponseCache::AssetFingerprint>::finished, this, [this, watcher, id, path] {
+                const struct ModelResponseCache::AssetFingerprint fingerprint = watcher->result(); watcher->deleteLater();
+                const auto current = m_jobs.value(id);
+                if (!current) return;
+                current->assetFingerprintPending = false;
+                if (!fingerprint.error.isEmpty() || fingerprint.digest.isEmpty()) {
+                    current->cacheDisabledForJob = true;
+                    reportCacheError(fingerprint.error);
+                } else {
+                    current->assetPath = path;
+                    current->assetIdentity = fingerprint.identity;
+                    current->assetDigest = fingerprint.digest;
+                    current->cacheKey.clear();
+                    current->cacheChecked = false;
+                }
+                if (m_jobs.value(id) == current) startCompletion(id);
+            });
+            watcher->setFuture(QtConcurrent::run(&m_cachePool, [cache, path, canceled] { return cache->fingerprintAsset(path, canceled); }));
+            return;
+        }
+    }
+    if (cacheAllowed) {
+        const QByteArray key = completionCacheKey(requestPayload, job->assetDigest);
+        if (job->cacheKey != key) { job->cacheKey = key; job->cacheChecked = false; }
+        if (!job->cacheChecked) {
+            Q_ASSERT(job->journal->cacheStats);
+            if (job->journal->cacheStats->forceFresh) {
+                job->cacheChecked = true;
+            } else {
+                job->cacheLookupPending = true;
+                const auto cache = m_responseCache;
+                auto *const watcher = new QFutureWatcher<struct ModelResponseCache::Lookup>(this);
+                connect(watcher, &QFutureWatcher<struct ModelResponseCache::Lookup>::finished, this, [this, watcher, id, key] {
+                    const struct ModelResponseCache::Lookup cached = watcher->result(); watcher->deleteLater();
+                    const auto current = m_jobs.value(id);
+                    if (!current || current->canceled->load() || current->cacheKey != key) return;
+                    reportCacheError(cached.error);
+                    if (m_jobs.value(id) != current) return;
+                    current->cacheLookupPending = false;
+                    current->cacheChecked = true;
+                    if (cached.message) {
+                        current->cacheToken = cached.token;
+                        if (const QVariantMap failure = cacheSafetyError(*cached.message); !failure.isEmpty()) {
+                            reportCacheError(failure);
+                            if (m_jobs.value(id) != current) return;
+                            discardCachedResponse(key, cached.token);
+                            startCompletion(id);
+                            return;
+                        }
+                        if (apparentRefusal(*cached.message)) {
+                            discardCachedResponse(key, cached.token);
+                            startCompletion(id);
+                            return;
+                        }
+                        if (!current->assetPath.isEmpty() && ModelResponseCache::assetIdentity(current->assetPath) != current->assetIdentity) {
+                            current->assetDigest.clear();
+                            current->cacheKey.clear();
+                            current->cacheChecked = false;
+                            startCompletion(id);
+                            return;
+                        }
+                        current->cacheHit = true;
+                        Q_ASSERT(current->journal && current->journal->cacheStats);
+                        ++current->journal->cacheStats->hits;
+                        emit cacheChanged();
+                        if (m_jobs.value(id) == current) finishCompletion(id, *cached.message);
+                    } else {
+                        startCompletion(id);
+                    }
+                });
+                watcher->setFuture(QtConcurrent::run(&m_cachePool, [cache, key] { return cache->lookup(key); }));
+                return;
+            }
+        }
+    }
+    if (local) {
         const struct LocalLanguageSpec spec = LocalLanguageModel::spec(resolvedProfile());
         const QString path = QDir(m_localDownload.directory()).filePath(spec.filename);
         const QString profile = resolvedProfile();
@@ -374,6 +695,7 @@ void Summarizer::startCompletion(quint64 id) {
                 finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_LOCAL"), result.error()})); return;
             }
             m_acceleratorStatus = result->accelerator; emit localChanged();
+            if (const auto current = m_jobs.value(id)) current->responseCacheable = true;
             finishCompletion(id, QJsonObject{{QStringLiteral("role"), QStringLiteral("assistant")},
                 {QStringLiteral("content"), result->text}});
         });
@@ -382,15 +704,7 @@ void Summarizer::startCompletion(quint64 id) {
         }));
         return;
     }
-    const auto request = configuredRequest();
-    if (!request) { finishCompletion(id, std::unexpected(request.error())); return; }
-    job->anthropic = m_remoteApi == QStringLiteral("anthropic");
-    QJsonObject requestPayload = job->payload;
-    if (job->anthropic) {
-        const auto converted = anthropicRequest(requestPayload);
-        if (!converted) { finishCompletion(id, std::unexpected(converted.error())); return; }
-        requestPayload = *converted;
-    }
+    Q_ASSERT(request.has_value());
     QNetworkReply *const reply = m_network.post(*request, QJsonDocument(requestPayload).toJson(QJsonDocument::Compact));
     job->reply = reply; reply->setReadBufferSize(128 * 1024);
     const int timeoutMs = job->anthropic ? 120000 : 45000;
@@ -468,11 +782,17 @@ void Summarizer::startCompletion(quint64 id) {
                 finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_RESPONSE"),
                     QStringLiteral("Claude returned an unreadable response. Retry or check the configured endpoint."), parseError.errorString()})); return;
             }
+            const QString stopReason = document.object().value(QStringLiteral("stop_reason")).toString();
+            current->responseCacheable = stopReason == QStringLiteral("end_turn") || stopReason == QStringLiteral("tool_use");
             finishCompletion(id, anthropicResponse(document.object())); return;
         }
         const QJsonArray choices = document.object().value(QStringLiteral("choices")).toArray();
-        QJsonObject message = choices.isEmpty() ? QJsonObject() : choices.first().toObject()
-            .value(QStringLiteral("message")).toObject();
+        const QJsonObject choice = choices.isEmpty() ? QJsonObject() : choices.first().toObject();
+        QJsonObject message = choice.value(QStringLiteral("message")).toObject();
+        const QString finishReason = choice.value(QStringLiteral("finish_reason")).toString();
+        const QJsonValue refusal = message.value(QStringLiteral("refusal"));
+        current->responseCacheable = (finishReason == QStringLiteral("stop") || finishReason == QStringLiteral("tool_calls"))
+            && (refusal.isNull() || refusal.isUndefined() || (refusal.isString() && refusal.toString().isEmpty()));
         const QJsonValue content = message.value(QStringLiteral("content"));
         const QJsonValue calls = message.value(QStringLiteral("tool_calls"));
         const bool hasText = content.isString() && !content.toString().trimmed().isEmpty();
@@ -530,7 +850,33 @@ void Summarizer::finishCompletion(quint64 id, std::expected<QJsonObject, struct 
         const QString detail = result.error().detail;
         (void)logDiagnosticJournal(job->journal, code, message, detail);
     }
-    if (job->context && !job->canceled->load()) job->callback(std::move(result));
+    if (!job->context || job->canceled->load()) return;
+    const bool hasResponse = result.has_value();
+    const QJsonObject response = hasResponse ? *result : QJsonObject();
+    const quint64 failures = job->journal ? job->journal->failureCount : 0;
+    const QPointer<QObject> guardedContext = job->context;
+    QObject *const rawContext = guardedContext.data();
+    const QPointer<Summarizer> guardedThis(this);
+    m_responseCallbacks[rawContext].append(job);
+    job->callback(std::move(result));
+    if (!guardedThis || !guardedContext) return;
+    auto callbacks = m_responseCallbacks.find(rawContext);
+    Q_ASSERT(callbacks != m_responseCallbacks.end() && !callbacks->isEmpty() && callbacks->constLast() == job);
+    if (callbacks == m_responseCallbacks.end() || callbacks->isEmpty() || callbacks->constLast() != job) return;
+    callbacks->removeLast();
+    if (callbacks->isEmpty()) m_responseCallbacks.erase(callbacks);
+    const bool rejected = !job->acceptedByConsumer || (job->journal && job->journal->failureCount != failures);
+    if (job->cacheHit && rejected) discardCachedResponse(job->cacheKey, job->cacheToken);
+    else if (hasResponse && !job->cacheHit && job->responseCacheable && !rejected && !apparentRefusal(response)
+             && job->journal && !job->journal->disableCache && !job->cacheKey.isEmpty()) {
+        if (!job->assetPath.isEmpty() && ModelResponseCache::assetIdentity(job->assetPath) != job->assetIdentity) {
+            reportCacheError({{QStringLiteral("code"), QStringLiteral("LLM_CACHE_MODEL_CHANGED")},
+                {QStringLiteral("message"), QStringLiteral("The local model changed during generation, so this response was not cached. The response remains available.")},
+                {QStringLiteral("detail"), job->assetPath}});
+        } else {
+            storeCachedResponse(job->cacheKey, response);
+        }
+    }
 }
 void Summarizer::cancelCompletion(quint64 id) {
     const auto job = m_jobs.take(id);
@@ -827,7 +1173,7 @@ void Summarizer::summarizePending(const QVariantList &pending, const QString &sc
             .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName)
         : QStringLiteral("Summarizing the first %1 of %2 remaining items in %3.").arg(prompts.size()).arg(pending.size())
             .arg(scopeName.isEmpty() ? QStringLiteral("the review queue") : scopeName);
-    beginDiagnosticOperation(&m_summaryContext);
+    beginDiagnosticOperation(&m_summaryContext, this);
     m_summaryJob = complete(payload, &m_summaryContext, [this](std::expected<QString, struct ProviderError> result) {
         m_summaryJob = 0;
         if (!result) { fail(result.error().code, result.error().message); return; }
@@ -836,6 +1182,7 @@ void Summarizer::summarizePending(const QVariantList &pending, const QString &sc
                 QStringLiteral("The model returned no usable summary. Choose another model."));
             fail(QStringLiteral("LLM_RESPONSE"), QStringLiteral("The model returned no usable summary. Choose another model.")); return;
         }
+        acceptModelResponse(&m_summaryContext);
         m_summary = *result;
         m_busy = false;
         m_status = QStringLiteral("Summary generated for %1 remaining items.").arg(m_pendingCount);

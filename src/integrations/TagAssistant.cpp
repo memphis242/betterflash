@@ -360,6 +360,7 @@ void TagAssistant::receive(const QString &response, const quint64 generation) {
                                      {QStringLiteral("reason"), reasonValue.toString().trimmed()},
                                      {QStringLiteral("stale"), false}, {QStringLiteral("errorInfo"), QVariantMap{}}});
     }
+    m_provider->acceptModelResponse(this);
     ++m_completed;
     emit changed();
     QTimer::singleShot(0, this, [this, generation] { if (generation == m_generation) advance(); });

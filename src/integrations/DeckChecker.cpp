@@ -17,14 +17,14 @@ QVariantMap error(const QString &code, const QString &message, const QString &ac
 
 DeckChecker::DeckChecker(AppController *app, Summarizer *provider, WebSearch *search,
                          CardChecker *cardChecker, QObject *parent)
-    : QObject(parent), m_app(app), m_cardChecker(cardChecker) {
+    : QObject(parent), m_app(app), m_provider(provider), m_cardChecker(cardChecker) {
     Q_ASSERT(app && provider && search && cardChecker);
     // Register before the checker's configuration handlers so an interrupted
     // request is never mistaken for a completed card.
     connect(provider, &Summarizer::configurationChanged, this, &DeckChecker::configurationChanged);
     connect(provider, &Summarizer::actualCredentialChanged, this, &DeckChecker::configurationChanged);
     connect(search, &WebSearch::configurationChanged, this, &DeckChecker::configurationChanged);
-    m_checker = new CardChecker(app, provider, search, this);
+    m_checker = new CardChecker(app, provider, search, this, this);
     connect(m_checker, &CardChecker::changed, this, &DeckChecker::checkerChanged);
     connect(app, &AppController::cardsSnapshotChanged, this, [this] {
         if (m_cards.isEmpty()) return;
@@ -72,6 +72,7 @@ bool DeckChecker::cardCurrent(const QVariantMap &card) const {
 void DeckChecker::start(const QString &deckId, const QString &mode) {
     if (m_busy) return;
     clear();
+    m_provider->beginDiagnosticOperation(this);
     // A card check and deck check share one web search request at a time.
     if (m_cardChecker->busy()) {
         stopWithError(error(QStringLiteral("DECK_CHECK_BUSY"), QStringLiteral("A card check is already running."),

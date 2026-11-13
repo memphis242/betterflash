@@ -236,6 +236,7 @@ void CheckpointSummary::startNextBatch(quint64 generation) {
                      QStringLiteral("The model did not return a short usable annotation. Try again or enter your own note."));
                 return;
             }
+            m_summarizer->acceptModelResponse(this);
             text.replace(QChar(0x2014), QStringLiteral(" - "));
             m_results.append(text.simplified());
             if (m_nextBatch < m_batches.size()) {

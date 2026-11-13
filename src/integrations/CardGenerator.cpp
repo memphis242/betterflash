@@ -727,6 +727,7 @@ void CardGenerator::receiveContent(const QString &response, quint64 generation)
              QStringLiteral("The model returned the source card unchanged. Request a genuinely varied example."));
         return;
     }
+    m_summarizer->acceptModelResponse(this);
     QVariantMap acceptedDraft = m_requestDraft;
     acceptedDraft.insert(QStringLiteral("id"), QString{});
     acceptedDraft.insert(QStringLiteral("front"), front);
@@ -958,6 +959,7 @@ void CardGenerator::receiveVerification(const QString &response, const quint64 g
             "two string fields: verdict must be exactly agrees, issues, or uncertain, and reason must be a concise explanation. "
             "For example: {\"verdict\":\"agrees\",\"reason\":\"The answers match.\"}. "
             "Use no emoji or em dash.");
+        m_summarizer->acceptModelResponse(this);
         requestVerification(system, data, generation, true);
         return;
     }
@@ -972,6 +974,7 @@ void CardGenerator::receiveVerification(const QString &response, const quint64 g
              QStringLiteral("The answer comparison returned an invalid verdict or explanation. Try the check again with a JSON-capable model."));
         return;
     }
+    m_summarizer->acceptModelResponse(this);
     m_verification = {{QStringLiteral("verdict"), m_solverUncertain ? QStringLiteral("uncertain") : verdict},
                       {QStringLiteral("reason"), m_solverUncertain ? m_solverReason : reason},
                       {QStringLiteral("independentAnswer"), m_independentAnswer}};

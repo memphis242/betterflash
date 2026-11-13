@@ -46,6 +46,7 @@ private:
                       const QVariantMap &failure, bool stale);
     void stopWithError(const QVariantMap &failure);
     AppController *const m_app;
+    Summarizer *const m_provider;
     CardChecker *const m_cardChecker;
     CardChecker *m_checker = nullptr;
     bool m_busy = false;

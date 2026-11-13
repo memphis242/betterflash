@@ -298,11 +298,92 @@ void DiagnosticLog::addSecret(const QString &secret) {
     const QMutexLocker lock(&m_mutex);
     if (!m_secrets.contains(secret)) m_secrets.append(secret);
 }
+namespace {
+QString decodeJsonEscapes(const QString &source) {
+    QString decoded;
+    decoded.reserve(source.size());
+    const auto hexDigit = [](const QChar c) -> int {
+        const ushort n = c.unicode();
+        if (n >= u'0' && n <= u'9') return int(n - u'0');
+        if (n >= u'a' && n <= u'f') return int(n - u'a') + 10;
+        if (n >= u'A' && n <= u'F') return int(n - u'A') + 10;
+        return -1;
+    };
+    for (qsizetype index = 0; index < source.size(); ++index) {
+        const QChar current = source.at(index);
+        if (current != u'\\' || index + 1 >= source.size()) { decoded.append(current); continue; }
+        const QChar next = source.at(index + 1);
+        switch (next.unicode()) {
+        case u'\\': decoded.append(u'\\'); ++index; break;
+        case u'"': decoded.append(u'"'); ++index; break;
+        case u'/': decoded.append(u'/'); ++index; break;
+        case u'b': decoded.append(u'\b'); ++index; break;
+        case u'f': decoded.append(u'\f'); ++index; break;
+        case u'n': decoded.append(u'\n'); ++index; break;
+        case u'r': decoded.append(u'\r'); ++index; break;
+        case u't': decoded.append(u'\t'); ++index; break;
+        case u'u': {
+            if (index + 5 >= source.size()) { decoded.append(current); break; }
+            int number = 0;
+            bool valid = true;
+            for (int offset = 2; offset <= 5; ++offset) {
+                const int digit = hexDigit(source.at(index + offset));
+                if (digit < 0) { valid = false; break; }
+                number = number * 16 + digit;
+            }
+            if (!valid) { decoded.append(current); break; }
+            decoded.append(QChar(static_cast<ushort>(number)));
+            index += 5;
+            break;
+        }
+        default: decoded.append(current); break;
+        }
+    }
+    return decoded;
+}
+}
+
 QString DiagnosticLog::redactUnlocked(QString value) const {
-    for (const QString &secret : m_secrets) value.replace(secret, QStringLiteral("[redacted]"));
+    for (const QString &secret : m_secrets) {
+        QStringList variants{secret};
+        QStringList frontier{secret};
+        for (int depth = 0; depth < 4 && !frontier.isEmpty(); ++depth) {
+            QStringList next;
+            for (const QString &source : std::as_const(frontier)) {
+                const QByteArray encoded = QJsonDocument(QJsonArray{source}).toJson(QJsonDocument::Compact);
+                Q_ASSERT(encoded.size() >= 4);
+                const QString escaped = QString::fromUtf8(encoded.mid(2, encoded.size() - 4));
+                QString htmlSafe = escaped;
+                htmlSafe.replace(u'<', QStringLiteral("\\u003c"));
+                htmlSafe.replace(u'>', QStringLiteral("\\u003e"));
+                for (const QString &candidate : {escaped, htmlSafe}) {
+                    if (candidate.size() > 1024 * 1024 || variants.contains(candidate)) continue;
+                    variants.append(candidate);
+                    next.append(candidate);
+                }
+            }
+            frontier = next;
+        }
+        std::sort(variants.begin(), variants.end(), [](const QString &left, const QString &right) { return left.size() > right.size(); });
+        for (const QString &variant : std::as_const(variants)) value.replace(variant, QStringLiteral("[redacted]"));
+    }
     static const QRegularExpression bearer(QStringLiteral("\\b(Bearer\\s+)[A-Za-z0-9._~+/-]+=*"), QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression named(QStringLiteral("(\\b(?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|password|secret)\\b[\\\"']?\\s*[:=]\\s*[\\\"']?)[^\\\"'\\s,}]+"), QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression known(QStringLiteral("(?<![A-Za-z0-9_-])(?:sk-ant-|gsk_|tvly-|sk-)[A-Za-z0-9_-]{12,}"), QRegularExpression::CaseInsensitiveOption);
+    if (value.contains(u'\\')) {
+        constexpr qsizetype maximumScanCharacters = 1024 * 1024;
+        if (value.size() > maximumScanCharacters) return QStringLiteral("[redacted: encoded content exceeds credential scan limit]");
+        QString decoded = value;
+        for (int pass = 0; pass < 8; ++pass) {
+            const QString next = decodeJsonEscapes(decoded);
+            if (next == decoded) break;
+            for (const QString &secret : m_secrets)
+                if (next.contains(secret)) return QStringLiteral("[redacted: encoded credential]");
+            if (bearer.match(next).hasMatch() || named.match(next).hasMatch() || known.match(next).hasMatch())
+                return QStringLiteral("[redacted: encoded credential-like content]");
+            decoded = next;
+        }
+    }
     value.replace(bearer, QStringLiteral("\\1[redacted]"));
     value.replace(named, QStringLiteral("\\1[redacted]"));
     value.replace(known, QStringLiteral("[redacted]"));

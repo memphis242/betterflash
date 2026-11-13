@@ -400,6 +400,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         spacing: 18
+                        ModelCacheNotice { service: ai; Layout.fillWidth: true }
                         ModelSettingsSection {
                             id: aiModelSection
                             title: "Language model"
@@ -458,7 +459,7 @@ Item {
                                 actionKind: "test"
                                 text: ai.testBusy ? "Testing..." : "Test model"
                                 enabled: !ai.testBusy && !voice.modelTestBusy && (ai.provider === "remote" || ai.localModelReady)
-                                hint: enabled ? "Run a short language model validation" : "Download the local model before testing"
+                                hint: enabled ? "Run a short language model validation against the configured backend. Always requests a fresh response." : "Download the local model before testing"
                                 onClicked: if (typeof ai.testModel === "function") ai.testModel()
                             }
                         }

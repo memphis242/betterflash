@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QVariantMap>
+#include <QPointer>
 
 class AppController;
 class Summarizer;
@@ -17,7 +18,7 @@ class CardChecker final : public QObject {
     Q_PROPERTY(QVariantMap errorInfo READ errorInfo NOTIFY changed)
     Q_PROPERTY(QVariantMap result READ result NOTIFY changed)
 public:
-    CardChecker(AppController *app, Summarizer *provider, WebSearch *search, QObject *parent = nullptr);
+    CardChecker(AppController *app, Summarizer *provider, WebSearch *search, QObject *parent = nullptr, QObject *cachePolicyContext = nullptr);
     ~CardChecker() override;
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
@@ -43,6 +44,7 @@ private:
     AppController *const m_app;
     Summarizer *const m_provider;
     WebSearch *const m_search;
+    QPointer<QObject> m_cachePolicyContext{};
     quint64 m_job = 0;
     quint64 m_generation = 0;
     bool m_busy = false;

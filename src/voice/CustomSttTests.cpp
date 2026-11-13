@@ -1009,7 +1009,7 @@ void CustomSttTests::finishCurrent(const quint64 generation, const quint64 worke
             persist();
             notifyEntries();
             QTimer::singleShot(0, this, [this, generation] { if (m_busy && generation == m_generation) startNext(generation); });
-        });
+        }, true);
 }
 
 void CustomSttTests::retireWorker() {

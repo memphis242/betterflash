@@ -176,6 +176,11 @@ Dialog {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
+        ModelCacheControl {
+            operation: deckChecker
+            policyEnabled: !deckChecker.busy
+            Layout.fillWidth: true
+        }
         ProgressBar {
             visible: dialog.started
             from: 0; to: Math.max(1, deckChecker.total); value: deckChecker.completed

@@ -584,6 +584,7 @@ void CardChat::runTool(const QString &name, const QJsonObject &arguments,
         const quint64 generation = m_generation;
         emit changed();
         if (!m_busy || generation != m_generation) return;
+        m_provider->acceptModelResponse(this);
         m_search->search(raw.toString(), this, [this, generation, assistant, toolId](std::expected<QVariantList, struct ProviderError> result) {
             if (generation != m_generation || !m_busy) return;
             if (!result) {
@@ -608,8 +609,11 @@ void CardChat::runTool(const QString &name, const QJsonObject &arguments,
         });
         return;
     }
-    m_status = readCard ? QStringLiteral("Reading a saved card...") : QStringLiteral("Searching saved cards..."); emit changed();
-    if (!m_busy) return;
+    m_status = readCard ? QStringLiteral("Reading a saved card...") : QStringLiteral("Searching saved cards...");
+    const quint64 requestGeneration = m_generation;
+    emit changed();
+    if (!m_busy || requestGeneration != m_generation) return;
+    m_provider->acceptModelResponse(this);
     const QString value = raw.toString().trimmed();
     if (readCard) {
         const QVariantMap card = savedCard(value);
@@ -749,8 +753,9 @@ void CardChat::finish(const QString &answer) {
         emit changed(); return;
     }
     m_threads = updated; m_durableThreads = updated; m_durableThreadId = m_threadId; m_dirty = false; m_errorInfo.clear();
+    m_provider->acceptModelResponse(this);
     if (m_toolCorrections > 0)
         (void)m_provider->logOperationFailure(this, QStringLiteral("CARD_CHAT_TOOL_RECOVERED"),
-            QStringLiteral("The chat completed after correcting an invalid tool request."), m_lastToolDiagnostic);
+            QStringLiteral("The chat completed after correcting an invalid tool request."), m_lastToolDiagnostic, false);
     emit changed();
 }

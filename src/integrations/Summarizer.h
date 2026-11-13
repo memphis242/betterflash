@@ -9,6 +9,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QSettings>
+#include <QSet>
 #include <QThreadPool>
 #include <QVariantMap>
 #include <expected>
@@ -17,6 +18,7 @@
 class AppController;
 class QNetworkReply;
 class ApiKeyRegistry;
+class ModelResponseCache;
 
 struct ProviderError {
     QString code;
@@ -55,8 +57,10 @@ class Summarizer final : public QObject {
     Q_PROPERTY(QString summary READ summary NOTIFY changed)
     Q_PROPERTY(QString summaryDeckId READ summaryDeckId NOTIFY changed)
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY changed)
+    Q_PROPERTY(QVariantMap cacheErrorInfo READ cacheErrorInfo NOTIFY cacheChanged)
 public:
-    explicit Summarizer(AppController *app, QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr);
+    explicit Summarizer(AppController *app, QObject *parent = nullptr, ApiKeyRegistry *registry = nullptr,
+                        const QString &dataDirectory = {});
     ~Summarizer() override;
     QString endpoint() const { return m_endpoint; }
     QString model() const { return m_model; }
@@ -88,6 +92,11 @@ public:
     QString summary() const { return m_summary; }
     QString summaryDeckId() const { return m_summaryDeckId; }
     int pendingCount() const { return m_pendingCount; }
+    [[nodiscard]] QVariantMap cacheErrorInfo() const { return m_cacheErrorInfo; }
+    Q_INVOKABLE bool operationFresh(QObject *context) const;
+    Q_INVOKABLE void setOperationFresh(QObject *context, bool fresh);
+    Q_INVOKABLE QVariantMap operationCacheInfo(QObject *context) const;
+    Q_INVOKABLE void acknowledgeCacheError();
     void setEndpoint(const QString &endpoint);
     void setModel(const QString &model);
     void setProvider(const QString &provider);
@@ -104,8 +113,11 @@ public:
     [[nodiscard]] quint64 complete(const QJsonObject &payload, QObject *context, Completion callback);
     [[nodiscard]] quint64 completeMessage(const QJsonObject &payload, QObject *context, MessageCompletion callback);
     void cancelCompletion(quint64 id);
-    void beginDiagnosticOperation(QObject *context);
-    QString logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail = {});
+    void acceptModelResponse(QObject *context);
+    void beginDiagnosticOperation(QObject *context, QObject *policyContext = nullptr, bool aggregateCache = false,
+                                  bool disableCache = false);
+    QString logOperationFailure(QObject *context, const QString &code, const QString &message, const QString &detail = {},
+                                bool responseRejected = true);
     std::expected<QNetworkRequest, struct ProviderError> configuredRequest() const;
     Q_INVOKABLE void setApiKey(const QString &key);
     Q_INVOKABLE void clearApiKey();
@@ -119,6 +131,8 @@ signals:
     void changed();
     void localChanged();
     void testChanged();
+    void cachePolicyChanged();
+    void cacheChanged();
 private:
     void fail(const QString &code, const QString &message);
     void summarizePending(const QVariantList &pending, const QString &scopeDeckId, const QString &scopeName);
@@ -127,11 +141,24 @@ private:
     void finishCompletion(quint64 id, std::expected<QJsonObject, struct ProviderError> result);
     void cancelAllCompletions();
     void resetTestReport();
+    void ensureCacheContext(QObject *context);
+    void reportCacheError(const QVariantMap &error);
+    void discardCachedResponse(const QByteArray &key, const QByteArray &token);
+    void storeCachedResponse(const QByteArray &key, const QJsonObject &message);
+    [[nodiscard]] QByteArray completionCacheKey(const QJsonObject &effectivePayload, const QByteArray &assetDigest) const;
+    struct CacheStats {
+        bool forceFresh = false;
+        int requests = 0;
+        int hits = 0;
+    };
     struct DiagnosticJournal {
         QString operationId{};
         QJsonArray entries{};
         qsizetype bytes = 0;
         bool truncated = false;
+        bool disableCache = false;
+        quint64 failureCount = 0;
+        std::shared_ptr<struct CacheStats> cacheStats{};
     };
     void appendDiagnostic(const std::shared_ptr<struct DiagnosticJournal> &journal, const QJsonObject &entry);
     QString logDiagnosticJournal(const std::shared_ptr<struct DiagnosticJournal> &journal,
@@ -149,6 +176,19 @@ private:
         bool waitingForDownload = false;
         bool timedOut = false;
         bool anthropic = false;
+        bool cacheChecked = false;
+        bool cacheLookupPending = false;
+        bool cacheHit = false;
+        bool responseCacheable = false;
+        bool acceptedByConsumer = false;
+        bool assetFingerprintPending = false;
+        bool cacheDisabledForJob = false;
+        int assetChanges = 0;
+        QByteArray assetIdentity{};
+        QByteArray assetDigest{};
+        QString assetPath{};
+        QByteArray cacheKey{};
+        QByteArray cacheToken{};
     };
     AppController *const m_app;
     ApiKeyBinding *m_credentials = nullptr;
@@ -157,8 +197,16 @@ private:
     QSettings m_settings;
     ModelDownload m_localDownload;
     QThreadPool m_inferencePool{};
+    QThreadPool m_cachePool{};
+    std::shared_ptr<ModelResponseCache> m_responseCache{};
+    QHash<QObject *, bool> m_freshPreferences{};
+    QSet<QObject *> m_cacheContexts{};
+    QVariantMap m_cacheErrorInfo{};
+    QList<QVariantMap> m_pendingCacheErrors{};
     QHash<quint64, std::shared_ptr<struct CompletionJob>> m_jobs{};
+    QHash<QObject *, QList<std::shared_ptr<struct CompletionJob>>> m_responseCallbacks{};
     QHash<QObject *, std::shared_ptr<struct DiagnosticJournal>> m_diagnosticJournals{};
+    QHash<QObject *, std::shared_ptr<struct DiagnosticJournal>> m_visibleCacheJournals{};
     QObject m_testContext{};
     QObject m_summaryContext{};
     quint64 m_jobSequence = 0;

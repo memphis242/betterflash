@@ -76,8 +76,8 @@ bool textField(const QJsonObject &object, const QString &name, const int limit, 
 }
 }
 
-CardChecker::CardChecker(AppController *app, Summarizer *provider, WebSearch *search, QObject *parent)
-    : QObject(parent), m_app(app), m_provider(provider), m_search(search) {
+CardChecker::CardChecker(AppController *app, Summarizer *provider, WebSearch *search, QObject *parent, QObject *cachePolicyContext)
+    : QObject(parent), m_app(app), m_provider(provider), m_search(search), m_cachePolicyContext(cachePolicyContext) {
     Q_ASSERT(m_app && m_provider && m_search);
     connect(m_provider, &Summarizer::configurationChanged, this, [this] { if (m_busy) cancel(); });
     connect(m_provider, &Summarizer::actualCredentialChanged, this, [this] { if (m_busy) cancel(); });
@@ -136,7 +136,7 @@ void CardChecker::check(const QString &mode, const QString &front, const QString
                         const bool allowWebSearch, const QString &cardId, const QVariantMap &expectedSavedCard) {
     if (m_busy) return;
     clear(); m_mode = mode;
-    m_provider->beginDiagnosticOperation(this);
+    m_provider->beginDiagnosticOperation(this, m_cachePolicyContext ? m_cachePolicyContext.data() : this, !m_cachePolicyContext.isNull());
     if (mode != QStringLiteral("correctness") && mode != QStringLiteral("completeness")) {
         fail(QStringLiteral("CARD_CHECK_MODE"), QStringLiteral("The requested card check is unavailable."), QStringLiteral("Choose correctness or completeness and try again.")); return;
     }
@@ -452,6 +452,7 @@ void CardChecker::search(const QString &query, const QJsonObject &assistant, con
     const quint64 generation = m_generation;
     emit changed();
     if (!m_busy || generation != m_generation) return;
+    m_provider->acceptModelResponse(this);
     m_search->search(query, this, [this, generation, assistant, toolId](std::expected<QVariantList, struct ProviderError> response) {
         if (generation != m_generation || !m_busy) return;
         if (!response) {
@@ -544,9 +545,10 @@ void CardChecker::finish(const QJsonObject &object) {
             {QStringLiteral("suggestion"), finding.value(QStringLiteral("suggestion")).toString()}, {QStringLiteral("sourceIds"), cited}});
     }
     if (verdict == QStringLiteral("no_issues") && !findings.isEmpty()) verdict = QStringLiteral("issues");
+    m_provider->acceptModelResponse(this);
     if (m_toolCorrections > 0)
         (void)m_provider->logOperationFailure(this, QStringLiteral("CARD_CHECK_TOOL_RECOVERED"),
-            QStringLiteral("The card check completed after correcting an invalid tool request."), m_lastToolDiagnostic);
+            QStringLiteral("The card check completed after correcting an invalid tool request."), m_lastToolDiagnostic, false);
     m_result = {{QStringLiteral("mode"), m_mode}, {QStringLiteral("verdict"), verdict},
         {QStringLiteral("summary"), object.value(QStringLiteral("summary")).toString()}, {QStringLiteral("findings"), findings},
         {QStringLiteral("sources"), m_sources}, {QStringLiteral("searchCount"), m_searchCount}, {QStringLiteral("searchEnabled"), m_searchEnabled},

@@ -312,6 +312,7 @@ void StudyAssistant::requestHelp(const QString &cardId, const QString &variantId
                      QStringLiteral("The model did not return the expected study guidance sections. Try again with the selected model."));
                 return;
             }
+            m_summarizer->acceptModelResponse(this);
             m_result = text;
             m_error.clear();
             m_busy = false;

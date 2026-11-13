@@ -178,6 +178,7 @@ scope for the initial client work.
 - [Library card sorting](docs/library-sorting.md): ordered date keys, directions, and [stored card dates](docs/card-dates.md).
 - [Card checks](docs/card-checks.md): correctness, completeness, and optional web search.
 - [Diagnostic logging](docs/logging.md): local rotating logs, verbosity, and model/tool failure traces.
+- [Model response caching](docs/model-response-cache.md): matching requests, cache limits, and fresh responses.
 - [Deck tag vocabularies and suggested tags](docs/tags.md): manual vocabularies, model scans, and reviewable card assignments.
 - [Ask AI](docs/card-chat.md): separate card chats with read-only information retrieval.
 - [Roadmap](docs/roadmap.md): deferred desktop and platform work.

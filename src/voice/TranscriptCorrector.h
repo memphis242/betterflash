@@ -36,7 +36,7 @@ public:
     void attachSummarizer(Summarizer *summarizer);
 
     using Completion = std::function<void(std::expected<QString, struct ProviderError>)>;
-    [[nodiscard]] quint64 correct(const QString &raw, QObject *context, Completion callback);
+    [[nodiscard]] quint64 correct(const QString &raw, QObject *context, Completion callback, bool requireLive = false);
     void cancel(quint64 id);
     void cancelAll();
 
@@ -51,6 +51,7 @@ private:
         quint64 summarizerId = 0;
         QString raw;
         QPointer<QObject> context;
+        QPointer<QObject> modelContext;
         Completion callback;
         QMetaObject::Connection contextConnection;
     };

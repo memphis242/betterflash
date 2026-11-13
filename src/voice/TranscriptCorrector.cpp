@@ -142,7 +142,7 @@ void TranscriptCorrector::attachSummarizer(Summarizer *summarizer) {
     emit readyChanged();
 }
 
-quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Completion callback) {
+quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Completion callback, const bool requireLive) {
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
     const quint64 id = ++m_sequence;
     Job job{};
@@ -197,14 +197,25 @@ quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Compl
     m_error.clear();
     emit changed();
 
+    if (!m_jobs.contains(id) || !m_summarizer) return id;
+    auto *const modelContext = new QObject(this);
+    m_jobs[id].modelContext = modelContext;
+    m_summarizer->beginDiagnosticOperation(modelContext, this, false, requireLive);
+    if (!m_jobs.contains(id) || !m_summarizer) { modelContext->deleteLater(); return id; }
     const QJsonObject payload = buildPayload(value);
-    const quint64 summarizerId = m_summarizer->complete(payload, this,
-        [this, id, value](std::expected<QString, ProviderError> result) {
+    const quint64 summarizerId = m_summarizer->complete(payload, modelContext,
+        [this, id, value, guardedModelContext = QPointer<QObject>(modelContext)](std::expected<QString, ProviderError> result) {
             if (!result) {
                 finish(id, std::unexpected(result.error()));
                 return;
             }
-            finish(id, validateOutput(value, *result));
+            auto validated = validateOutput(value, *result);
+            if (m_summarizer && guardedModelContext) {
+                if (validated) m_summarizer->acceptModelResponse(guardedModelContext);
+                else (void)m_summarizer->logOperationFailure(guardedModelContext, validated.error().code,
+                                                              validated.error().message, validated.error().detail);
+            }
+            finish(id, std::move(validated));
         });
     auto found = m_jobs.find(id);
     if (found != m_jobs.end()) found->summarizerId = summarizerId;
@@ -245,6 +256,7 @@ void TranscriptCorrector::finish(quint64 id, std::expected<QString, struct Provi
     Job job = std::move(found.value());
     m_jobs.erase(found);
     disconnect(job.contextConnection);
+    if (job.modelContext) job.modelContext->deleteLater();
     if (!result) {
         m_error = result.error().code + QStringLiteral(": ") + result.error().message;
         m_status = QStringLiteral("Transcript correction unavailable");

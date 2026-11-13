@@ -170,6 +170,7 @@ Dialog {
                         comboHint: "Requested challenge relative to the source card. Review scheduling is unchanged."
                     }
                 }
+                ModelCacheControl { operation: cardGenerator; Layout.fillWidth: true }
                 Label { text: dialog.deckGeneration ? "What would you like to learn?" : "Generation instructions (optional)"; color: Theme.ink; font.bold: true }
                 ScrollView {
                     id: instructionsViewport

@@ -270,6 +270,7 @@ Item {
             saveExternally: true
             summaryText: overview.summaryResult.text || ""
             summaryCaption: "Deck summary"
+            summaryOperation: ai
             summaryBusy: overview.pendingSummaryKey === overview.summaryKey
                 && (ai.busy || ai.provider === "local" && ai.localDownloading)
             summaryError: overview.summaryResult.error || (ai.provider === "local" ? ai.localError : "")

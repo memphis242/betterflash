@@ -347,6 +347,7 @@ void Atomicizer::receiveContent(const QString &response) {
         }
         cards = *valid;
     }
+    m_provider->acceptModelResponse(this);
     m_decision = decision; m_reason = reason; m_proposals = cards; m_busy = false;
     m_status = decision == QStringLiteral("keep")
         ? cards.isEmpty() ? QStringLiteral("Keep this card together.")

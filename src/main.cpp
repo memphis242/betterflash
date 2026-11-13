@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
     MediaStore media(dataDirectory);
     ShortcutManager shortcuts;
     ApiKeyRegistry apiKeys;
-    Summarizer ai(&app, nullptr, &apiKeys);
+    Summarizer ai(&app, nullptr, &apiKeys, dataDirectory);
     SearchController librarySearch(&app, &ai, dataDirectory, nullptr, &apiKeys);
     Atomicizer atomic(&app, &ai);
     CardGenerator cardGenerator(&app, &ai);

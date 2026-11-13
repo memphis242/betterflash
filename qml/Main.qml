@@ -148,7 +148,7 @@ ApplicationWindow {
     readonly property string currentQueue: JSON.stringify(app.pendingCards.map(card => card.variantId || card.id))
     property bool restoringDeck: false
     property bool deckSelectionRestored: false
-    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || tagAssistantDialog.visible || errorDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || detailDialog.chatConfirmationOpen || settings.modalDialogOpen
+    readonly property bool historyBlockingModalOpen: startupReviewDialog.visible || cardPreviewDialog.visible || generateCardDialog.visible || studyGuidanceDialog.visible || checkpointDialog.visible || deckDialog.visible || cardDialog.visible || moveCardDialog.visible || partialDialog.visible || postponeDialog.visible || commandPalette.visible || deckPicker.visible || rebindDialog.visible || credentialDialog.visible || voiceConfigDialog.visible || aiConfigDialog.visible || syncConfigDialog.visible || aiDialog.visible || atomicDialog.visible || cardCheckDialog.visible || deckCheckDialog.visible || tagAssistantDialog.visible || errorDialog.visible || cacheWarningDialog.visible || deleteDialog.visible || resetDialog.visible || narrationDialog.visible || deckHeatmapDialog.visible || imageDialog.visible || exportDialog.visible || importDialog.visible || review.correctionDialogVisible || detailDialog.chatConfirmationOpen || settings.modalDialogOpen
     readonly property bool modalOpen: historyBlockingModalOpen || detailDialog.visible
     readonly property bool typing: activeFocusItem !== null && activeFocusItem.text !== undefined && activeFocusItem.cursorPosition !== undefined
     onHistoryBlockingModalOpenChanged: {
@@ -1263,6 +1263,15 @@ ApplicationWindow {
                 elide: Text.ElideRight
                 Layout.maximumWidth: Math.min(360, window.width * (microphoneStatus.visible ? 0.18 : 0.3))
             }
+            AppButton {
+                objectName: "modelCacheWarningButton"
+                visible: !!ai.cacheErrorInfo.message
+                text: window.compactLayout ? "Cache" : "Cache warning"
+                foreground: Theme.warning
+                outline: Theme.warning
+                hint: "Model response cache warning. A model response may still be available. Open details or dismiss the notice."
+                onClicked: cacheWarningDialog.open()
+            }
             MicrophoneStatus {
                 id: microphoneStatus
                 objectName: "microphoneStatus"
@@ -2279,6 +2288,11 @@ ApplicationWindow {
                             }
                         }
                     }
+                    ModelCacheControl {
+                        operation: cardGenerator
+                        policyEnabled: !window.editorSavePending
+                        Layout.fillWidth: true
+                    }
                     Flow {
                         Layout.fillWidth: true
                         spacing: 12
@@ -2902,6 +2916,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            ModelCacheControl { operation: ai; Layout.fillWidth: true }
             ErrorBlock {
                 message: ai.error
                 Layout.fillWidth: true
@@ -2955,6 +2970,26 @@ ApplicationWindow {
                     window.summarizedQueue = window.currentQueue
                     ai.summarizeRemaining()
                 }
+            }
+        }
+    }
+    Sheet {
+        id: cacheWarningDialog
+        objectName: "modelCacheWarningDialog"
+        title: "Model response cache warning"
+        height: Math.min(500, window.height - 2 * window.gutter)
+        standardButtons: Dialog.Close
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: ai.acknowledgeCacheError()
+        contentItem: ScrollView {
+            id: cacheNoticeViewport
+            contentWidth: availableWidth
+            clip: true
+            ModelCacheNotice {
+                service: ai
+                width: cacheNoticeViewport.availableWidth
+                acknowledgeOnDismiss: false
+                onDismissRequested: cacheWarningDialog.close()
             }
         }
     }

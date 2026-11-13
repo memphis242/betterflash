@@ -296,6 +296,11 @@ Dialog {
             Layout.fillWidth: true
             onClicked: atomic.cancel()
         }
+        ModelCacheControl {
+            operation: atomic
+            visible: !dialog.editingSet
+            Layout.fillWidth: true
+        }
         Rectangle {
             id: resultPanel
             visible: !atomic.busy && !dialog.hasFailure && (atomic.decision === "keep" || atomic.decision === "split")

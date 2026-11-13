@@ -457,6 +457,11 @@ Dialog {
                         }
                     }
                 }
+                ModelCacheControl {
+                    operation: checkpointSummary
+                    policyEnabled: !dialog.loading && !dialog.submitting
+                    Layout.fillWidth: true
+                }
                 GridLayout {
                     columns: dialog.narrow ? 1 : 2
                     Layout.fillWidth: true

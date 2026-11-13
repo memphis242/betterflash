@@ -8,6 +8,11 @@ GridLayout {
     columns: width < 360 ? 1 : 2
     columnSpacing: 10
     rowSpacing: 8
+    ModelCacheControl {
+        operation: cardChecker
+        Layout.fillWidth: true
+        Layout.columnSpan: actions.columns
+    }
     AppButton {
         fill: Theme.checkActionFill
         hoverFill: Theme.checkActionHover

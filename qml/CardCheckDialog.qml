@@ -85,6 +85,7 @@ Dialog {
     }
     contentItem: ColumnLayout {
         spacing: 12
+        ModelCacheControl { id: checkCache; operation: cardChecker; Layout.fillWidth: true }
         Label {
             text: "LLMs can be wrong. Their knowledge may have a cutoff date and miss recent changes. Web search can help, but does not guarantee correctness or completeness."
             textFormat: Text.PlainText
@@ -297,15 +298,22 @@ Dialog {
             }
         }
     }
-    footer: RowLayout {
+    footer: Flow {
+        padding: 12
         spacing: 10
+        AppButton {
+            text: "Run fresh"
+            visible: !cardChecker.busy
+            enabled: !dialog.contextFailure.message
+            hint: "Run this card check again without using cached model responses. May use provider quota."
+            onClicked: { checkCache.requestFresh(); dialog.runCheck(dialog.searchAllowed) }
+        }
         AppButton {
             text: "Run again"
             visible: !cardChecker.busy
             hint: "Run the same check on this card snapshot again"
             onClicked: dialog.runCheck(dialog.searchAllowed)
         }
-        Item { Layout.fillWidth: true }
         AppButton {
             text: "Back to card"
             onClicked: dialog.close()

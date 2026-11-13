@@ -252,6 +252,11 @@ ColumnLayout {
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
                 }
             }
+            ModelCacheControl {
+                operation: voice.transcriptCorrector
+                visible: voice.transcriptCorrector.enabled
+                Layout.fillWidth: true
+            }
             ModelStatus {
                 Layout.fillWidth: true
                 visible: voice.transcriptCorrector.enabled

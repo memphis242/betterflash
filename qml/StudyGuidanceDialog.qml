@@ -267,6 +267,7 @@ Dialog {
                     wrapMode: Text.Wrap
                     font.pixelSize: 14
                 }
+                ModelCacheControl { operation: studyAssistant; Layout.fillWidth: true }
                 RowLayout {
                     Layout.fillWidth: true
                     AppButton {
