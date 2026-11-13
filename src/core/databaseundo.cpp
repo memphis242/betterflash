@@ -432,6 +432,9 @@ bool DatabaseWorker::applyHistoryChanges(const QVariantList &changes, bool remot
                 const auto current = card(id);
                 if (!m_sqlDetail.isEmpty()) return false;
                 if (remote) {
+                    if (current && !current->createdAt.isEmpty() && !record->createdAt.isEmpty() && current->createdAt!=record->createdAt) {
+                        m_sqlDetail=QStringLiteral("Card %1 has conflicting creation times: local %2, incoming %3. Preserve the collection and resolve the conflicting card before syncing.").arg(id,current->createdAt,record->createdAt); return false;
+                    }
                     if (current && !current->createdAt.isEmpty()) record->createdAt=current->createdAt;
                     if (current && (!after.contains("modifiedAt") || record->modifiedAt.isEmpty())) {
                         const auto instant=model::utcInstant(eventTime);

@@ -2782,6 +2782,7 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
                     record.narrationFingerprints.insert(it.key(),it.value());
             }
         }
+        const QString incomingCreatedAt=record.createdAt;
         if (stored) {
             if (!stored->createdAt.isEmpty()) record.createdAt=stored->createdAt;
             if (!incomingCardMap.contains(QStringLiteral("modifiedAt")) || record.modifiedAt.isEmpty()) {
@@ -2827,6 +2828,9 @@ bool DatabaseWorker::eventEffects(const QVariantMap &event,qint64 seq,bool execu
         if (!deck(record.deckId)) {applied=false;return m_sqlDetail.isEmpty();}
         const bool newer=seq>entitySequence("card",record.id);
         if (newer) {
+            if (stored && !stored->createdAt.isEmpty() && !incomingCreatedAt.isEmpty() && stored->createdAt!=incomingCreatedAt) {
+                m_sqlDetail=QStringLiteral("Card %1 has conflicting creation times: local %2, incoming %3. Preserve the collection and resolve the conflicting card before syncing.").arg(record.id,stored->createdAt,incomingCreatedAt); return false;
+            }
             if (!upsertCard(record)
                 || (restore && !execute("DELETE FROM tombstones WHERE entity_type='card' AND entity_id=?",{record.id}))
                 || (restore && !recordSequence("restore-card",record.id,seq))
