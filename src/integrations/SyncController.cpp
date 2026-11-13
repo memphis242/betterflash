@@ -1,3 +1,4 @@
+#include "core/DiagnosticLog.h"
 #include "SyncController.h"
 #include "MediaStore.h"
 #include "core/appcontroller.h"
@@ -204,10 +205,32 @@ void SyncController::resetPending() {
     m_downloads.clear();
     m_downloadedBytes = 0;
 }
-void SyncController::fail(const QString &code, const QString &message) {
+QString SyncController::responseDetail(const QNetworkReply *reply, const QByteArray &body) const {
+    Q_ASSERT(reply);
+    QString response = QString::fromUtf8(body);
+    QString network = reply->errorString();
+    const QString credential = m_credentials->key();
+    if (!credential.isEmpty()) {
+        response.replace(credential, QStringLiteral("[redacted]"));
+        network.replace(credential, QStringLiteral("[redacted]"));
+    }
+    if (auto *const log = DiagnosticLog::instance()) {
+        response = log->redact(response);
+        network = log->redact(network);
+    }
+    const bool truncated = response.size() > 16000 || body.size() > 16000;
+    if (truncated) response = QStringLiteral("(omitted because the response exceeds the display limit)");
+    return QStringLiteral("Endpoint: %1\nHTTP status: %2\nNetwork: %3\nResponse body%4:\n%5")
+        .arg(reply->url().toString(QUrl::RemoveUserInfo | QUrl::RemoveQuery | QUrl::RemoveFragment))
+        .arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt())
+        .arg(network.left(1000), truncated ? QStringLiteral(" (truncated)") : QString(),
+             response.isEmpty() ? QStringLiteral("(empty)") : response.left(16000));
+}
+void SyncController::fail(const QString &code, const QString &message, const QString &detail) {
     resetPending();
     m_status = QStringLiteral("Sync interrupted. Your local changes are saved.");
     m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail = detail;
     emit changed();
 }
 void SyncController::cancel() {
@@ -215,7 +238,7 @@ void SyncController::cancel() {
         if (m_cancelRequested) return;
         m_cancelRequested = true;
         m_status = QStringLiteral("Finalizing saved sync changes before stopping.");
-        m_error.clear();
+        m_error.clear(); m_errorDetail.clear();
         emit changed();
         return;
     }
@@ -223,13 +246,13 @@ void SyncController::cancel() {
     resetPending();
     if (wasBusy) {
         m_status = QStringLiteral("Sync canceled. Your local changes are saved.");
-        m_error.clear();
+        m_error.clear(); m_errorDetail.clear();
         emit changed();
     }
 }
 void SyncController::synchronize() {
     if (m_busy) return;
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     const QUrl url(m_endpoint);
     const bool local = url.host() == QStringLiteral("127.0.0.1") || url.host() == QStringLiteral("localhost");
     if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()
@@ -291,7 +314,7 @@ void SyncController::identifyCollection() {
         if (!success) {
             fail(QStringLiteral("SYNC_IDENTITY"), status == 401 || status == 403
                 ? QStringLiteral("Check your sync access token.")
-                : QStringLiteral("Cannot identify this sync collection. Check the connection and upgrade the server to protocol 5."));
+                : QStringLiteral("Cannot identify this sync collection. Check the connection and server response, then retry."), responseDetail(reply, body));
             return;
         }
         const QJsonDocument document = QJsonDocument::fromJson(body);
@@ -353,8 +376,12 @@ void SyncController::uploadNext() {
         m_reply = nullptr;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool success = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
+        const QByteArray body = success ? QByteArray() : reply->read(16385);
         reply->deleteLater();
-        if (!success) { fail(QStringLiteral("SYNC_IMAGE_UPLOAD_%1").arg(status), QStringLiteral("The server rejected an image. Check the server token and connection.")); return; }
+        if (!success) { fail(QStringLiteral("SYNC_IMAGE_UPLOAD_%1").arg(status),
+            status == 401 || status == 403 ? QStringLiteral("The sync server denied image upload. Check your sync access token.")
+                                         : QStringLiteral("The sync server could not accept an image. Check the server response and retry."),
+            responseDetail(reply, body)); return; }
         uploadNext();
     });
     m_status = QStringLiteral("Uploading an attached image.");
@@ -384,13 +411,10 @@ void SyncController::postBatch() {
         const bool success = reply->error() == QNetworkReply::NoError && httpStatus >= 200 && httpStatus < 300;
         reply->deleteLater();
         if (!success) {
-            const QVariantMap serverError = QJsonDocument::fromJson(body).object().value(QStringLiteral("error")).toObject().toVariantMap();
-            const QString code = serverError.value(QStringLiteral("code")).toString();
-            const QString detail = serverError.value(QStringLiteral("message")).toString();
-            const QString message = httpStatus == 401 || httpStatus == 403 ? QStringLiteral("Check your sync access token.")
-                : (!detail.isEmpty() && detail.size() <= 1024 ? detail
-                   : QStringLiteral("Check the server URL and connection, then try again."));
-            fail(code.isEmpty() || code.size() > 64 ? QStringLiteral("SYNC_HTTP_%1").arg(httpStatus) : code, message); return;
+            const QString message = httpStatus == 401 || httpStatus == 403
+                ? QStringLiteral("The sync server denied access. Check your sync access token.")
+                : QStringLiteral("The sync server could not complete the request. Check the server response, then try again.");
+            fail(QStringLiteral("SYNC_HTTP_%1").arg(httpStatus), message, responseDetail(reply, body)); return;
         }
         if (body.size() > maxResponseBytes) {
             fail(QStringLiteral("SYNC_RESPONSE_LIMIT"), QStringLiteral("The server returned an oversized sync page. Update the server or try again.")); return;
@@ -478,8 +502,14 @@ void SyncController::downloadNext() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool success = reply->error() == QNetworkReply::NoError && status == 200;
         reply->deleteLater();
-        if (!success || bytes.isEmpty() || bytes.size() > betterflash::model::maxImageBytes) {
-            fail(QStringLiteral("SYNC_IMAGE_DOWNLOAD"), QStringLiteral("An image is missing or exceeds the 20 MiB limit. Sync the originating device, then try again.")); return;
+        if (!success) {
+            fail(QStringLiteral("SYNC_IMAGE_DOWNLOAD_%1").arg(status),
+                status == 401 || status == 403 ? QStringLiteral("The sync server denied image download. Check your sync access token.")
+                    : QStringLiteral("The sync server could not provide an image. Check the server response and retry."),
+                responseDetail(reply, bytes.left(16385))); return;
+        }
+        if (bytes.isEmpty() || bytes.size() > betterflash::model::maxImageBytes) {
+            fail(QStringLiteral("SYNC_IMAGE_DOWNLOAD"), QStringLiteral("An image is empty or exceeds the 20 MiB limit. Sync the originating device, then try again.")); return;
         }
         if (bytes.size() > betterflash::model::maxMediaBytes - m_downloadedBytes) {
             fail(QStringLiteral("SYNC_IMAGE_LIMIT"), QStringLiteral("The sync page exceeds the 64 MiB image download limit. Update the server and sync again.")); return;
@@ -512,13 +542,13 @@ void SyncController::finishApply(const QString &requestId, const bool success, c
     if (m_cancelRequested) {
         resetPending();
         m_status = QStringLiteral("Sync stopped after saving received changes. Sync again to continue.");
-        m_error.clear();
+        m_error.clear(); m_errorDetail.clear();
         emit changed();
         return;
     }
     if (hasMore || m_batchWasFull) { beginBatch(); return; }
     resetPending();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_lastSync = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     m_settings.setValue(QStringLiteral("sync/lastSync"), m_lastSync);
     if (m_contentConflicts > 0) m_status = QStringLiteral("Collection synced with content conflicts.");

@@ -38,6 +38,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString lastRawTranscript READ lastRawTranscript NOTIFY lastRawTranscriptChanged)
     Q_PROPERTY(QObject *transcriptCorrector READ transcriptCorrector CONSTANT)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(QString lastErrorDetail READ lastErrorDetail NOTIFY lastErrorChanged)
     Q_PROPERTY(QString modelPath READ modelPath WRITE setModelPath NOTIFY modelPathChanged)
     Q_PROPERTY(bool hasApiKey READ hasApiKey NOTIFY hasApiKeyChanged)
     Q_PROPERTY(QString sttProvider READ sttProvider WRITE setSttProvider NOTIFY sttProviderChanged)
@@ -47,6 +48,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(QString sttAcceleration READ sttAcceleration WRITE setSttAcceleration NOTIFY sttAccelerationChanged)
     Q_PROPERTY(bool sttModelReady READ sttModelReady NOTIFY modelReadinessChanged)
     Q_PROPERTY(bool sttModelDownloading READ sttModelDownloading NOTIFY modelReadinessChanged)
+    Q_PROPERTY(QString sttModelErrorDetail READ sttModelErrorDetail NOTIFY modelReadinessChanged)
     Q_PROPERTY(QString sttModelStatus READ sttModelStatus NOTIFY modelReadinessChanged)
     Q_PROPERTY(double sttModelProgress READ sttModelProgress NOTIFY modelReadinessChanged)
     Q_PROPERTY(QString ttsProvider READ ttsProvider WRITE setTtsProvider NOTIFY ttsProviderChanged)
@@ -54,6 +56,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(bool ttsReady READ ttsReady NOTIFY modelReadinessChanged)
     Q_PROPERTY(QString ttsStatus READ ttsStatus NOTIFY modelReadinessChanged)
     Q_PROPERTY(bool ttsModelDownloading READ ttsModelDownloading NOTIFY modelReadinessChanged)
+    Q_PROPERTY(QString ttsModelErrorDetail READ ttsModelErrorDetail NOTIFY modelReadinessChanged)
     Q_PROPERTY(double ttsModelProgress READ ttsModelProgress NOTIFY modelReadinessChanged)
     Q_PROPERTY(bool sttTestBusy READ sttTestBusy NOTIFY modelTestChanged)
     Q_PROPERTY(QString sttTestStatus READ sttTestStatus NOTIFY modelTestChanged)
@@ -86,6 +89,7 @@ public:
     [[nodiscard]] QString lastRawTranscript() const { return m_lastRawTranscript; }
     [[nodiscard]] QObject *transcriptCorrector() const;
     [[nodiscard]] QString lastError() const { return m_lastError; }
+    [[nodiscard]] QString lastErrorDetail() const { return m_lastErrorDetail; }
     [[nodiscard]] QString modelPath() const { return m_modelPath; }
     [[nodiscard]] bool hasApiKey() const;
     [[nodiscard]] QString sttProvider() const { return m_sttProvider; }
@@ -95,6 +99,7 @@ public:
     [[nodiscard]] QString sttAcceleration() const { return m_sttAcceleration; }
     [[nodiscard]] bool sttModelReady() const;
     [[nodiscard]] bool sttModelDownloading() const;
+    [[nodiscard]] QString sttModelErrorDetail() const;
     [[nodiscard]] double sttModelProgress() const;
     [[nodiscard]] QString sttModelStatus() const;
     [[nodiscard]] QString ttsProvider() const { return m_ttsProvider; }
@@ -102,6 +107,7 @@ public:
     [[nodiscard]] bool ttsReady() const;
     [[nodiscard]] QString ttsStatus() const;
     [[nodiscard]] bool ttsModelDownloading() const;
+    [[nodiscard]] QString ttsModelErrorDetail() const;
     [[nodiscard]] double ttsModelProgress() const;
     [[nodiscard]] bool sttTestBusy() const { return m_sttTestBusy; }
     [[nodiscard]] QString sttTestStatus() const { return m_sttTestStatus; }
@@ -189,7 +195,7 @@ private:
     void updateCapture();
     void beginSpeech();
     void finishSpeech();
-    void speechError(const QString &message);
+    void speechError(const QString &message, const QString &detail = {});
     void onSpeechStateChanged();
     void setReady(bool ready);
     void setListeningState(bool listening);
@@ -237,6 +243,7 @@ private:
     QString m_lastTranscript;
     QString m_lastRawTranscript;
     QString m_lastError;
+    QString m_lastErrorDetail;
     QString m_modelPath;
     QString m_sttProvider = QStringLiteral("local");
     QString m_sttModel = QStringLiteral("whisper-large-v3-turbo");

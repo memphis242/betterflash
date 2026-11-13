@@ -287,11 +287,16 @@ Dialog {
             }
         }
         Label {
-            visible: narration.status || narration.error
+            visible: !!narration.status && !narration.error
             Layout.fillWidth: true
-            text: narration.error || narration.status
-            color: narration.error ? Theme.error : Theme.inkMuted
+            text: narration.status
+            color: Theme.inkMuted
             wrapMode: Text.Wrap
+        }
+        ErrorBlock {
+            message: narration.error || ""
+            textSize: 14
+            Layout.fillWidth: true
         }
     }
 

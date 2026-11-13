@@ -1894,6 +1894,7 @@ ApplicationWindow {
             GenerationErrorNotice {
                 objectName: "generatedCardErrorNotice"
                 message: window.editingGeneratedCard ? cardGenerator.error : ""
+                details: cardGenerator.errorDetail
                 operation: window.generatedErrorOperation
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(implicitHeight, cardDialog.availableHeight * 0.35)
@@ -2971,6 +2972,7 @@ ApplicationWindow {
             ModelCacheControl { operation: ai; Layout.fillWidth: true }
             ErrorBlock {
                 message: ai.error
+                details: ai.errorDetail
                 Layout.fillWidth: true
             }
             BusyIndicator {

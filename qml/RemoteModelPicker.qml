@@ -144,11 +144,17 @@ ColumnLayout {
         }
     }
 
+    ErrorBlock {
+        message: catalog.error
+        details: catalog.errorDetail
+        textSize: 14
+        Layout.fillWidth: true
+    }
     Label {
-        visible: catalog.error.length > 0 || catalog.status.length > 0
-        text: catalog.error.length > 0 ? catalog.error
-            : catalog.status.length > 0 ? catalog.status : ""
-        color: catalog.error.length > 0 ? Theme.error : Theme.inkMuted
+        visible: !catalog.error && catalog.status.length > 0
+        text: catalog.status
+        textFormat: Text.PlainText
+        color: Theme.inkMuted
         font.pixelSize: 14
         wrapMode: Text.Wrap
         Layout.fillWidth: true

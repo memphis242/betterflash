@@ -14,6 +14,7 @@ class CardGenerator final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY changed)
     Q_PROPERTY(QVariantMap sourceCard READ sourceCard NOTIFY changed)
     Q_PROPERTY(bool deckGeneration READ deckGeneration NOTIFY changed)
@@ -25,6 +26,7 @@ public:
 
     [[nodiscard]] bool busy() const { return m_busy; }
     [[nodiscard]] QString error() const { return m_error; }
+    [[nodiscard]] QString errorDetail() const { return m_errorDetail; }
     [[nodiscard]] QVariantMap draft() const { return m_draft; }
     [[nodiscard]] QVariantMap sourceCard() const { return m_source; }
     [[nodiscard]] bool deckGeneration() const { return m_deckGeneration; }
@@ -46,7 +48,7 @@ signals:
     void generated();
 
 private:
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &detail = {});
     void invalidate(const QString &code, const QString &message);
     void configurationChanged();
     [[nodiscard]] QVariantMap findCard(const QString &id) const;
@@ -66,6 +68,7 @@ private:
     quint64 m_generation = 0;
     bool m_busy = false;
     QString m_error{};
+    QString m_errorDetail{};
     QVariantMap m_source{};
     QVariantMap m_draft{};
     QVariantMap m_requestDraft{};

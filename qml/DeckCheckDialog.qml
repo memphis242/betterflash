@@ -212,7 +212,8 @@ Dialog {
             visible: !!deckChecker.errorInfo.message
             Layout.fillWidth: true
             code: deckChecker.errorInfo.code || ""
-            message: (deckChecker.errorInfo.message || "") + "\n" + (deckChecker.errorInfo.action || "")
+            message: deckChecker.errorInfo.message || ""
+            action: deckChecker.errorInfo.action || ""
             details: deckChecker.errorInfo.detail || ""
         }
         Label {
@@ -286,7 +287,7 @@ Dialog {
                     Label { text: ui.deckPath(dialog.current.deckId || ""); textFormat: Text.PlainText; color: Theme.inkMuted; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { text: ui.compactText(dialog.current.front || ""); textFormat: Text.PlainText; color: Theme.ink; font.bold: true; font.pixelSize: 18; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { visible: !!dialog.current.stale; text: "This card changed or was deleted after the check began. Check its current content again before marking it."; color: Theme.warning; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    ErrorBlock { visible: !!dialog.failure.message; Layout.fillWidth: true; code: dialog.failure.code || ""; message: (dialog.failure.message || "") + "\n" + (dialog.failure.action || ""); details: dialog.failure.detail || "" }
+                    ErrorBlock { visible: !!dialog.failure.message; Layout.fillWidth: true; code: dialog.failure.code || ""; message: dialog.failure.message || ""; action: dialog.failure.action || ""; details: dialog.failure.detail || "" }
                     TextEdit { text: dialog.report.summary || ""; textFormat: TextEdit.PlainText; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; font.family: Theme.uiFont; font.pixelSize: 17; color: Theme.warning; Layout.fillWidth: true }
                     Repeater {
                         model: dialog.report.findings || []

@@ -303,7 +303,8 @@ void Atomicizer::propose(const QString &cardId, const QString &userInstructions)
             const struct ProviderError providerError = result.error();
             fail(providerError.code, QStringLiteral("The language model could not generate a proposal."),
                 providerError.message,
-                QStringLiteral("Provider error %1: %2").arg(providerError.code, providerError.message));
+                QStringLiteral("Provider error %1: %2").arg(providerError.code, providerError.message)
+                    + (providerError.detail.isEmpty() ? QString() : QLatin1Char('\n') + providerError.detail));
             return;
         }
         receiveContent(*result);

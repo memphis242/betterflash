@@ -14,6 +14,7 @@ class CheckpointSummary final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QString summary READ summary NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
 public:
@@ -22,6 +23,7 @@ public:
 
     [[nodiscard]] bool busy() const { return m_busy; }
     [[nodiscard]] QString error() const { return m_error; }
+    [[nodiscard]] QString errorDetail() const { return m_errorDetail; }
     [[nodiscard]] QString summary() const { return m_summary; }
     [[nodiscard]] QString status() const { return m_status; }
 
@@ -33,7 +35,7 @@ signals:
     void changed();
 
 private:
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &detail = {});
     void configurationChanged();
     [[nodiscard]] bool prepareBatches(const QJsonArray &items, bool merging);
     void startNextBatch(quint64 generation);
@@ -44,6 +46,7 @@ private:
     quint64 m_generation = 0;
     bool m_busy = false;
     QString m_error{};
+    QString m_errorDetail{};
     QString m_summary{};
     QString m_status{};
     QStringList m_batches{};

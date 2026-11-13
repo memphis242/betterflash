@@ -5,6 +5,7 @@ import QtQuick.Layouts
 Rectangle {
     id: notice
     property string message: ""
+    property string details: ""
     property string operation: "generation"
     property bool expanded: false
     readonly property var parsed: /^([A-Z][A-Z0-9_]{1,80}):\s*([\s\S]*)$/.exec(message)
@@ -105,7 +106,8 @@ Rectangle {
             ErrorBlock {
                 id: errorDetails
                 width: detailViewport.availableWidth
-                message: notice.errorCode ? "Error code: " + notice.errorCode : "No error code was supplied."
+                message: (notice.errorCode ? "Error code: " + notice.errorCode : "No error code was supplied.")
+                    + (notice.details ? "\n\n" + notice.details : "")
                 details: ""
                 textSize: 13
             }

@@ -82,8 +82,10 @@ private:
         QString correctedTranscript;
         QString correctionStatus;
         QString correctionError;
+        QString correctionErrorDetail;
         QString status = QStringLiteral("Need recording");
         QString error;
+        QString errorDetail;
         double duration = 0.0;
         double wordErrorRate = -1.0;
         int substitutions = 0;

@@ -112,6 +112,18 @@ ColumnLayout {
                         ColumnLayout {
                             id: row
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 9; spacing: 10
+                            ErrorBlock {
+                                message: modelData.error || ""
+                                details: modelData.errorDetail || ""
+                                textSize: 14
+                                Layout.fillWidth: true
+                            }
+                            ErrorBlock {
+                                message: modelData.correctionError || ""
+                                details: modelData.correctionErrorDetail || ""
+                                textSize: 14
+                                Layout.fillWidth: true
+                            }
                             RowLayout {
                                 id: fields
                                 readonly property real sideWidth: Math.min(220, Math.max(0, (width - spacing * 2) / 3))
@@ -266,7 +278,6 @@ ColumnLayout {
                                 Label { visible: Boolean(modelData.correctionStatus); text: "Correction " + modelData.correctionStatus; color: modelData.correctionStatus === "Applied" ? Theme.success : Theme.inkMuted; font.pixelSize: 12 }
                                 Label { visible: Number(modelData.wordErrorRate) >= 0; text: Number(modelData.wordErrorRate) >= 0 ? "Raw accuracy " + Math.round(Number(modelData.accuracy) * 100) + "%  WER " + Math.round(Number(modelData.wordErrorRate) * 100) + "%" : ""; color: Theme.inkMuted; font.family: Theme.monoFont; font.pixelSize: 12 }
                                 Label { visible: Number(modelData.correctedWordErrorRate) >= 0; text: Number(modelData.correctedWordErrorRate) >= 0 ? "Corrected accuracy " + Math.round(Number(modelData.correctedAccuracy) * 100) + "%  WER " + Math.round(Number(modelData.correctedWordErrorRate) * 100) + "%" : ""; color: Theme.success; font.family: Theme.monoFont; font.pixelSize: 12 }
-                                Label { visible: Boolean(modelData.correctionError); text: "Correction: " + modelData.correctionError; color: Theme.warning; wrapMode: Text.Wrap; font.pixelSize: 12; Layout.fillWidth: true }
                             }
                         }
                     }
@@ -285,7 +296,7 @@ ColumnLayout {
                 }
             }
             Label { visible: Boolean(tests.status) || tests.busy; Layout.fillWidth: true; text: tests.busy ? (tests.status || "Testing custom recordings...") : (tests.status || ""); color: Theme.inkMuted; wrapMode: Text.Wrap; font.pixelSize: 14 }
-            Label { visible: Boolean(tests.error); Layout.fillWidth: true; text: tests.error || ""; color: Theme.error; wrapMode: Text.Wrap; font.pixelSize: 14 }
+            ErrorBlock { message: tests.error || ""; textSize: 14; Layout.fillWidth: true }
         }
     }
 }

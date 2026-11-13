@@ -76,7 +76,7 @@ void TranscriptCorrector::setEnabled(bool enabled) {
     cancelAll();
     m_enabled = enabled;
     m_settings.setValue(QStringLiteral("voice/transcriptCorrection"), enabled);
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_status = enabled ? QStringLiteral("Transcript correction enabled")
                        : QStringLiteral("Transcript correction disabled");
     emit configurationChanged();
@@ -90,7 +90,7 @@ void TranscriptCorrector::setVocabulary(const QString &vocabulary) {
     cancelAll();
     m_vocabulary = value;
     m_settings.setValue(QStringLiteral("voice/recognitionVocabulary"), value);
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit configurationChanged();
     emit changed();
 }
@@ -105,14 +105,14 @@ void TranscriptCorrector::attachSummarizer(Summarizer *summarizer) {
         m_summarizerConnections.append(connect(m_summarizer, &QObject::destroyed, this, [this] {
             cancelAll();
             m_summarizer = nullptr;
-            m_error.clear();
+            m_error.clear(); m_errorDetail.clear();
             emit configurationChanged();
             emit readyChanged();
             emit changed();
         }));
         m_summarizerConnections.append(connect(m_summarizer, &Summarizer::configurationChanged, this, [this] {
             cancelAll();
-            m_error.clear();
+            m_error.clear(); m_errorDetail.clear();
             emit configurationChanged();
             emit readyChanged();
             emit changed();
@@ -128,7 +128,7 @@ void TranscriptCorrector::attachSummarizer(Summarizer *summarizer) {
         m_summarizerConnections.append(connect(m_summarizer, &Summarizer::actualCredentialChanged, this, [this] {
             m_credentialVersion = QUuid::createUuid().toString(QUuid::WithoutBraces);
             cancelAll();
-            m_error.clear();
+            m_error.clear(); m_errorDetail.clear();
             emit configurationChanged();
             emit readyChanged();
             emit changed();
@@ -194,7 +194,7 @@ quint64 TranscriptCorrector::correct(const QString &raw, QObject *context, Compl
     Q_ASSERT(foundJob != m_jobs.end());
     foundJob->raw = value;
     m_status = QStringLiteral("Correcting transcript");
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit changed();
 
     if (!m_jobs.contains(id) || !m_summarizer) return id;
@@ -245,7 +245,7 @@ void TranscriptCorrector::cancelAll() {
 void TranscriptCorrector::clearErrorIfReady() {
     if (!ready()) return;
     if (m_error.isEmpty() && (busy() || m_status == QStringLiteral("Ready"))) return;
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     if (!busy()) m_status = QStringLiteral("Ready");
     emit changed();
 }
@@ -259,6 +259,7 @@ void TranscriptCorrector::finish(quint64 id, std::expected<QString, struct Provi
     if (job.modelContext) job.modelContext->deleteLater();
     if (!result) {
         m_error = result.error().code + QStringLiteral(": ") + result.error().message;
+        m_errorDetail = result.error().detail;
         m_status = QStringLiteral("Transcript correction unavailable");
     }
     const bool succeeded = result.has_value();
@@ -274,6 +275,7 @@ void TranscriptCorrector::failImmediate(quint64 id, const ProviderError &error) 
         finish(id, std::unexpected(error));
     });
     m_error = error.code + QStringLiteral(": ") + error.message;
+    m_errorDetail = error.detail;
     m_status = QStringLiteral("Transcript correction unavailable");
     emit changed();
 }

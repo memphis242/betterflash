@@ -115,6 +115,7 @@ Dialog {
         GenerationErrorNotice {
             objectName: "cardGenerationErrorNotice"
             message: cardGenerator.error
+            details: cardGenerator.errorDetail
             operation: "generation"
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(implicitHeight, dialog.availableHeight * 0.35)

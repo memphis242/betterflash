@@ -1,3 +1,4 @@
+#include "core/DiagnosticLog.h"
 #include "ModelDownload.h"
 
 #include <QDir>
@@ -202,7 +203,7 @@ void ModelDownload::configure(const QList<struct ModelDownloadAsset> &assets) {
         Q_ASSERT(asset.extractDirectory.isEmpty() || safeRelative(asset.extractDirectory));
     }
     m_status = ready() ? QStringLiteral("Ready for offline use") : QStringLiteral("Downloads on first use");
-    m_error.clear(); m_progress = 0;
+    m_error.clear(); m_errorDetail.clear(); m_progress = 0;
     emit changed();
 }
 bool ModelDownload::ready() const {
@@ -212,12 +213,13 @@ bool ModelDownload::ready() const {
 }
 void ModelDownload::start() {
     if (m_downloading) return;
+    m_error.clear(); m_errorDetail.clear();
     if (ready()) { m_status = QStringLiteral("Ready for offline use"); emit changed(); emit finished(true); return; }
     if (m_assets.isEmpty()) { fail(QStringLiteral("MODEL_PLATFORM: No local model package is available for this platform.")); return; }
     if (!QDir().mkpath(m_directory) || QFileInfo(m_directory).isSymLink()) { fail(QStringLiteral("MODEL_STORAGE: Choose a writable model directory without symbolic links.")); return; }
     ++m_generation;
     m_cancel = std::make_shared<std::atomic_bool>(false);
-    m_downloading = true; m_error.clear(); m_progress = 0; m_index = 0; m_completedBytes = 0; m_totalBytes = 0;
+    m_downloading = true; m_error.clear(); m_errorDetail.clear(); m_progress = 0; m_index = 0; m_completedBytes = 0; m_totalBytes = 0;
     for (const struct ModelDownloadAsset &asset : m_assets) m_totalBytes += asset.bytes;
     next();
 }
@@ -238,6 +240,7 @@ void ModelDownload::next() {
     if (!m_file->open(QIODevice::WriteOnly)) { fail(QStringLiteral("MODEL_STORAGE: Cannot write the model download. Check free space and permissions.")); return; }
     m_hash = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
     m_received = 0;
+    m_errorBody.clear(); m_errorBodyTruncated = false;
     m_status = QStringLiteral("Downloading %1").arg(asset.filename); emit changed();
     QNetworkRequest request(asset.url);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -250,6 +253,14 @@ void ModelDownload::next() {
         if (m_reply != reply || !m_downloading) return;
         while (reply->bytesAvailable()) {
             const QByteArray chunk = reply->read(64 * 1024);
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (httpStatus >= 300) {
+                const qsizetype remaining = qMax(qsizetype(0), qsizetype(16001) - m_errorBody.size());
+                m_errorBody.append(chunk.left(remaining));
+                m_errorBodyTruncated = m_errorBodyTruncated || chunk.size() > remaining;
+                if (m_errorBodyTruncated) { reply->abort(); return; }
+                continue;
+            }
             m_received += chunk.size();
             if (m_received > asset.bytes || m_file->write(chunk) != chunk.size()) {
                 fail(QStringLiteral("MODEL_DOWNLOAD_LIMIT: Model data exceeded its limit or could not be written. Check free space and retry.")); return;
@@ -264,7 +275,21 @@ void ModelDownload::next() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool okay = reply->error() == QNetworkReply::NoError && status == 200;
         reply->deleteLater();
-        if (!okay) { fail(QStringLiteral("MODEL_HTTP_%1: Model download failed. Check the connection and try again.").arg(status)); return; }
+        if (!okay) {
+            QString response = QString::fromUtf8(m_errorBody);
+            QString network = reply->errorString();
+            if (auto *const log = DiagnosticLog::instance()) {
+                response = log->redact(response);
+                network = log->redact(network);
+            }
+            const bool truncated = m_errorBodyTruncated || response.size() > 16000;
+            if (truncated) response = QStringLiteral("(omitted because the response exceeds the display limit)");
+            m_errorDetail = QStringLiteral("Endpoint: %1\nHTTP status: %2\nNetwork: %3\nResponse body%4:\n%5")
+                .arg(reply->url().toString(QUrl::RemoveUserInfo | QUrl::RemoveQuery | QUrl::RemoveFragment))
+                .arg(status).arg(network.left(1000), truncated ? QStringLiteral(" (truncated)") : QString(),
+                                 response.isEmpty() ? QStringLiteral("(empty)") : response.left(16000));
+            fail(QStringLiteral("MODEL_HTTP_%1: The model download failed. Check the provider response and connection, then retry.").arg(status)); return;
+        }
         if (m_received != asset.bytes || m_hash->result().toHex() != asset.sha256) {
             fail(QStringLiteral("MODEL_CHECKSUM: Downloaded model did not match its published checksum. Try downloading again.")); return;
         }

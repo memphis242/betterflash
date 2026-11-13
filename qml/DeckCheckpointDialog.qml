@@ -492,7 +492,7 @@ Dialog {
                 }
             }
             Label { id: loadingLabel; visible: dialog.loading; text: "Loading checkpoint changes"; color: Theme.inkMuted; Layout.fillWidth: true; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter }
-            ErrorBlock { id: checkpointError; visible: !!dialog.error || !!checkpointSummary.error; message: dialog.error || checkpointSummary.error; Layout.fillWidth: true }
+            ErrorBlock { id: checkpointError; visible: !!dialog.error || !!checkpointSummary.error; message: dialog.error || checkpointSummary.error; details: dialog.error ? "" : checkpointSummary.errorDetail; Layout.fillWidth: true }
             Rectangle {
                 id: confirmationPanel
                 visible: dialog.confirming

@@ -478,6 +478,7 @@ Item {
                         SettingsError {
                             visible: aiProvider.currentIndex === 0
                             message: ai.localError
+                            details: ai.localErrorDetail
                             Layout.fillWidth: true
                         }
                         Label { visible: aiProvider.currentIndex === 1; text: "Remote API"; color: Theme.inkMuted; font.pixelSize: 15 }
@@ -561,6 +562,7 @@ Item {
                         }
                         SettingsError {
                             message: ai.error
+                            details: ai.errorDetail
                             Layout.fillWidth: true
                         }
                         }
@@ -662,6 +664,7 @@ Item {
                         }
                         SettingsError {
                             message: sync.error
+                            details: sync.errorDetail
                             Layout.fillWidth: true
                         }
                         SettingsButton {

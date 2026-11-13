@@ -103,7 +103,7 @@ void CheckpointSummary::cancel() {
 void CheckpointSummary::clear() {
     cancel();
     if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_summary.clear();
     m_status.clear();
     m_instructions.clear();
@@ -115,11 +115,11 @@ void CheckpointSummary::clear() {
     emit changed();
 }
 
-void CheckpointSummary::fail(const QString &code, const QString &message) {
-    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message) : QString();
+void CheckpointSummary::fail(const QString &code, const QString &message, const QString &detail) {
+    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message, detail) : QString();
     m_busy = false;
-    m_error = code + QStringLiteral(": ") + message
-        + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
+    m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail = detail + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     m_status = QStringLiteral("Summary unavailable.");
     m_batches.clear();
     m_results.clear();
@@ -226,7 +226,7 @@ void CheckpointSummary::startNextBatch(quint64 generation) {
             if (generation != m_generation || !m_busy) return;
             m_job = 0;
             if (!result) {
-                fail(result.error().code, result.error().message);
+                fail(result.error().code, result.error().message, result.error().detail);
                 return;
             }
             QString text = result->trimmed();
@@ -245,7 +245,7 @@ void CheckpointSummary::startNextBatch(quint64 generation) {
             }
             if (m_results.size() == 1) {
                 m_summary = m_results.first();
-                m_error.clear();
+                m_error.clear(); m_errorDetail.clear();
                 m_busy = false;
                 m_status = QStringLiteral("Summary generated from all checkpoint changes.");
                 m_batches.clear();

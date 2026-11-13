@@ -221,11 +221,11 @@ VoiceController::VoiceController(QObject *parent, ApiKeyRegistry *registry)
             if (success) { continuePendingOperations(); return; }
             const QString message = download->error().isEmpty() ? QStringLiteral("The model download was canceled. Start it again when ready.") : download->error();
             if (download == m_sttDownload || download == m_fixtureDownload) {
-                if (m_sttTestBusy) finishSttTest(false, QStringLiteral("Speech recognition validation failed"), message);
+                if (m_sttTestBusy) { m_sttTestReport.insert(QStringLiteral("details"), download->errorDetail()); finishSttTest(false, QStringLiteral("Speech recognition validation failed"), message); }
                 if (download == m_sttDownload && m_enabled) { setEnabled(false); setError(QStringLiteral("VOICE_MODEL_DOWNLOAD"), message); }
             }
             if (download == m_ttsDownload) {
-                if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Speech output validation failed"), message);
+                if (m_ttsTestBusy) { m_ttsTestReport.insert(QStringLiteral("details"), download->errorDetail()); finishTtsTest(false, QStringLiteral("Speech output validation failed"), message); }
                 if (m_speaking) speechError(message);
             }
         });
@@ -293,8 +293,8 @@ VoiceController::VoiceController(QObject *parent, ApiKeyRegistry *registry)
         m_playbackFormat = format;
         startLocalPlayback(pcm, request, seconds);
     });
-    connect(m_remoteTts, &RemoteTts::failed, this, [this](const QString &message, const quint64 request) {
-        if (request == m_speechGeneration && m_speaking) speechError(message);
+    connect(m_remoteTts, &RemoteTts::failed, this, [this](const QString &message, const quint64 request, const QString &detail) {
+        if (request == m_speechGeneration && m_speaking) speechError(message, detail);
     });
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] { setEnabled(false); });
 }
@@ -613,6 +613,8 @@ QString VoiceController::sttModelStatus() const {
 #endif
 }
 
+QString VoiceController::sttModelErrorDetail() const { return !m_sttDownload->errorDetail().isEmpty() ? m_sttDownload->errorDetail() : m_fixtureDownload->errorDetail(); }
+QString VoiceController::ttsModelErrorDetail() const { return m_ttsDownload->errorDetail(); }
 bool VoiceController::sttModelDownloading() const { return m_sttDownload->downloading() || m_fixtureDownload->downloading(); }
 double VoiceController::sttModelProgress() const { return m_sttDownload->downloading() ? m_sttDownload->progress() : m_fixtureDownload->progress(); }
 
@@ -746,6 +748,9 @@ void VoiceController::beginSttTest() {
         setModelTestState(true, m_sttTestStatus);
         QMetaObject::invokeMethod(worker, [worker, wav] { worker->testAudio(wav); }, Qt::QueuedConnection);
     });
+    connect(worker, &VoiceWorker::testErrorDetail, this, [this, generation](const QString &detail) {
+        if (generation == m_testGeneration && m_sttTestBusy) m_sttTestReport.insert(QStringLiteral("details"), detail);
+    });
     connect(worker, &VoiceWorker::testFinished, this, [this, generation](const QString &transcript, const bool passed, const QString &error) {
         if (generation != m_testGeneration || !m_sttTestBusy) return;
         m_sttTestReport.insert(QStringLiteral("output"), transcript);
@@ -789,7 +794,7 @@ void VoiceController::finishSttTest(const bool passed, const QString &message, c
     m_sttTestStatus = message;
     m_sttTestError = error;
     m_sttTestReport.insert(QStringLiteral("outcome"), message.startsWith(QStringLiteral("Validation canceled")) ? QStringLiteral("canceled") : passed ? QStringLiteral("passed") : QStringLiteral("failed"));
-    if (!error.isEmpty()) m_sttTestReport.insert(QStringLiteral("details"), error);
+    if (!error.isEmpty() && !m_sttTestReport.contains(QStringLiteral("details"))) m_sttTestReport.insert(QStringLiteral("details"), error);
     const QPointer<VoiceWorker> worker = m_testWorker;
     const QPointer<QThread> thread = m_testThread;
     m_testWorker = nullptr; m_testThread = nullptr;
@@ -827,7 +832,7 @@ void VoiceController::finishTtsTest(const bool passed, const QString &message, c
     m_ttsTestStatus = message;
     m_ttsTestError = error;
     m_ttsTestReport.insert(QStringLiteral("outcome"), message.startsWith(QStringLiteral("Validation canceled")) ? QStringLiteral("canceled") : passed ? QStringLiteral("passed") : QStringLiteral("failed"));
-    if (!error.isEmpty()) m_ttsTestReport.insert(QStringLiteral("details"), error);
+    if (!error.isEmpty() && !m_ttsTestReport.contains(QStringLiteral("details"))) m_ttsTestReport.insert(QStringLiteral("details"), error);
     setModelTestState(m_sttTestBusy, message, error);
     if (m_enabled) { m_wantsListening = m_testSavedWantsListening; setMicrophoneArmed(m_wantsListening); updateCapture(); }
 }
@@ -909,7 +914,7 @@ void VoiceController::setEnabled(const bool enabled) {
     m_wantsListening = m_reviewMode == QStringLiteral("always-on");
     setMicrophoneArmed(m_wantsListening);
     if (m_retiringWorkerThread) m_workerRestartPending = true;
-    if (!m_lastError.isEmpty()) { m_lastError.clear(); emit lastErrorChanged(); }
+    if (!m_lastError.isEmpty()) { m_lastError.clear(); m_lastErrorDetail.clear(); emit lastErrorChanged(); }
 #ifdef Q_OS_ANDROID
     const QMicrophonePermission permission;
     auto *const application = QCoreApplication::instance();
@@ -1003,7 +1008,7 @@ void VoiceController::beginWorker() {
         setError(code, message);
     });
     connect(worker, &VoiceWorker::captureError, this, [this, generation](const QString &code, const QString &message,
-        const bool fatal, const quint64 epoch) {
+        const bool fatal, const quint64 epoch, const QString &detail) {
         if (!m_enabled || generation != m_workerGeneration || epoch != m_captureEpoch) return;
         if (m_reviewMode == QStringLiteral("trigger")) {
             m_wantsListening = false;
@@ -1011,6 +1016,8 @@ void VoiceController::beginWorker() {
         }
         if (fatal) setEnabled(false);
         setError(code, message);
+        m_lastErrorDetail = detail;
+        emit lastErrorChanged();
     });
     setStatus(m_sttProvider == QStringLiteral("groq") ? QStringLiteral("Preparing microphone") : QStringLiteral("Loading local speech recognition"));
     thread->start();
@@ -1171,6 +1178,8 @@ void VoiceController::processTranscript(const QString &transcript) {
                 emit answerRecognized(*result);
             } else if (result.error().code != QStringLiteral("TRANSCRIPT_CORRECTION_CANCELED")) {
                 setError(result.error().code, result.error().message);
+                m_lastErrorDetail = result.error().detail;
+                emit lastErrorChanged();
                 emit answerRecognized(text);
             }
             updateCapture();
@@ -1534,8 +1543,9 @@ void VoiceController::stopSpeaking() {
     }
 }
 
-void VoiceController::speechError(const QString &message) {
+void VoiceController::speechError(const QString &message, const QString &providerDetail) {
     stopSpeaking();
+    if (m_ttsTestBusy && !providerDetail.isEmpty()) m_ttsTestReport.insert(QStringLiteral("details"), providerDetail);
     if (m_ttsTestBusy) finishTtsTest(false, QStringLiteral("Speech output validation failed"), message);
     const QString detail = message.trimmed();
     const bool remoteFailure = m_ttsProvider == QStringLiteral("remote")
@@ -1545,6 +1555,7 @@ void VoiceController::speechError(const QString &message) {
         ? QStringLiteral("Speech output is unavailable. Choose a local voice in Settings > Voice and check the audio output.")
         : remoteFailure ? detail
         : QStringLiteral("Speech output failed: %1 Check the selected voice and audio output.").arg(detail));
+    if (!providerDetail.isEmpty()) { m_lastErrorDetail = providerDetail; emit lastErrorChanged(); }
 }
 
 void VoiceController::setReady(const bool value) {
@@ -1568,6 +1579,7 @@ void VoiceController::setStatus(const QString &value) {
     emit statusChanged();
 }
 void VoiceController::setError(const QString &code, const QString &message) {
+    m_lastErrorDetail.clear();
     m_lastError = code + QStringLiteral(": ") + message;
     emit lastErrorChanged();
     setStatus(code + QStringLiteral(": ") + message);

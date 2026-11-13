@@ -959,6 +959,7 @@ Item {
                 ErrorBlock {
                     visible: library.searchingDeckContent && library.searchEngine.deckError.length > 0
                     message: library.searchEngine.deckError
+                    details: library.searchEngine.deckErrorDetail
                     Layout.fillWidth: true
                     AppButton { text: "Retry search"; onClicked: library.searchEngine.retryDeckSearch() }
                 }
@@ -1350,6 +1351,7 @@ Item {
                 ErrorBlock {
                     visible: library.searchingCards && library.searchEngine.error.length > 0
                     message: library.searchEngine.error
+                    details: library.searchEngine.errorDetail
                     Layout.fillWidth: true
                     AppButton { text: "Retry search"; onClicked: library.searchEngine.retry() }
                 }

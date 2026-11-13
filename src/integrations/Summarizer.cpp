@@ -185,7 +185,7 @@ Summarizer::Summarizer(AppController *app, QObject *parent, ApiKeyRegistry *regi
             job->waitingForDownload = false;
             if (success) startCompletion(id);
             else finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_DOWNLOAD"),
-                m_localDownload.error().isEmpty() ? QStringLiteral("Model download canceled. Prepare the model in Settings and try again.") : m_localDownload.error()}));
+                m_localDownload.error().isEmpty() ? QStringLiteral("Model download canceled. Prepare the model in Settings and try again.") : m_localDownload.error(), m_localDownload.errorDetail()}));
         }
     });
     configureCredentials();
@@ -252,9 +252,7 @@ quint64 Summarizer::complete(const QJsonObject &payload, QObject *context, Compl
     Q_ASSERT(context && callback && QThread::currentThread() == thread());
     return completeMessage(payload, context, [this, guardedContext = QPointer<QObject>(context), callback = std::move(callback)](std::expected<QJsonObject, struct ProviderError> result) {
         if (!result) {
-            struct ProviderError error = result.error();
-            if (!error.detail.isEmpty()) error.message += QStringLiteral(" Details: ") + error.detail;
-            callback(std::unexpected(error)); return;
+            callback(std::unexpected(result.error())); return;
         }
         const QJsonValue calls = result->value(QStringLiteral("tool_calls"));
         if (!calls.isUndefined() && !calls.isNull() && (!calls.isArray() || !calls.toArray().isEmpty())) {
@@ -735,6 +733,13 @@ void Summarizer::startCompletion(quint64 id) {
         if (!credential.isEmpty()) networkDetail.replace(credential, QStringLiteral("[redacted]"));
         networkDetail = networkDetail.left(256);
         current->reply = nullptr; reply->deleteLater();
+        const auto responseEvidence = [&body, status, &networkDetail] {
+            QString response = QString::fromUtf8(body);
+            if (const auto *const log = DiagnosticLog::instance()) response = log->redact(response);
+            return QStringLiteral("HTTP status: %1\nNetwork: %2\nHTTP response body:\n%3%4")
+                .arg(status).arg(networkDetail, response.left(16384), response.size() > 16384
+                    ? QStringLiteral("\n[Response body truncated at 16384 characters]") : QString());
+        };
         if (body.size() > 512 * 1024) {
             finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE_LIMIT"), QStringLiteral("The provider response exceeded its size limit. Choose a smaller response or another model.")})); return;
         }
@@ -771,16 +776,23 @@ void Summarizer::startCompletion(quint64 id) {
             appendDetail(QStringLiteral("Provider type"), error.value(QStringLiteral("type")).toString());
             if (details.isEmpty())
                 details.append(QStringLiteral("The provider did not return a structured error message."));
+            QString responseBody = QString::fromUtf8(body);
+            if (!credential.isEmpty()) responseBody.replace(credential, QStringLiteral("[redacted]"));
+            if (const auto *const log = DiagnosticLog::instance()) responseBody = log->redact(responseBody);
+            const bool truncated = responseBody.size() > 16384;
+            details.prepend(QStringLiteral("HTTP status: %1\nNetwork error: %2 (%3)").arg(status).arg(networkDetail).arg(static_cast<int>(networkError)));
+            details.append(QStringLiteral("HTTP response body:\n") + responseBody.left(16384)
+                + (truncated ? QStringLiteral("\n[Response body truncated at 16384 characters]") : QString()));
             finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_HTTP_%1").arg(status),
                 QStringLiteral("The language model endpoint returned HTTP %1. %2").arg(status).arg(fix),
-                details.join(QLatin1Char('\n'))})); return;
+                DiagnosticLog::instance() ? DiagnosticLog::instance()->redact(details.join(QLatin1Char('\n'))) : details.join(QLatin1Char('\n'))})); return;
         }
         QJsonParseError parseError{};
         const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);
         if (current->anthropic) {
             if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
                 finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_ANTHROPIC_RESPONSE"),
-                    QStringLiteral("Claude returned an unreadable response. Retry or check the configured endpoint."), parseError.errorString()})); return;
+                    QStringLiteral("Claude returned an unreadable response. Retry or check the configured endpoint."), parseError.errorString() + QStringLiteral("\n") + responseEvidence()})); return;
             }
             const QString stopReason = document.object().value(QStringLiteral("stop_reason")).toString();
             current->responseCacheable = stopReason == QStringLiteral("end_turn") || stopReason == QStringLiteral("tool_use");
@@ -805,7 +817,7 @@ void Summarizer::startCompletion(quint64 id) {
         if (parseError.error != QJsonParseError::NoError || !document.isObject() || invalidContent || invalidCalls || invalidRole
             || (!hasText && !hasCalls) || (!role.isEmpty() && role != QStringLiteral("assistant"))
             || (hasText && content.toString().trimmed().size() > 110000)) {
-            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"), QStringLiteral("The provider returned no usable assistant message. Check chat-completion model and tool-call compatibility.")})); return;
+            finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_RESPONSE"), QStringLiteral("The provider returned no usable assistant message. Check chat-completion model and tool-call compatibility."), responseEvidence()})); return;
         }
         if (role.isEmpty()) message.insert(QStringLiteral("role"), QStringLiteral("assistant"));
         if (hasText) message.insert(QStringLiteral("content"), content.toString().trimmed());
@@ -928,7 +940,9 @@ void Summarizer::testModel() {
         if (!result) {
             m_testStatus.clear(); m_testError = result.error().code + QStringLiteral(": ") + result.error().message;
             m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
-            m_testReport.insert(QStringLiteral("details"), m_testError);
+            m_testReport.insert(QStringLiteral("errorCode"), result.error().code);
+            m_testReport.insert(QStringLiteral("errorMessage"), result.error().message);
+            m_testReport.insert(QStringLiteral("details"), result.error().detail);
         } else {
             m_testReport.insert(QStringLiteral("output"), *result);
             QJsonParseError error{};
@@ -1032,9 +1046,10 @@ std::expected<QNetworkRequest, struct ProviderError> Summarizer::configuredReque
     request.setTransferTimeout(m_remoteApi == QStringLiteral("anthropic") ? 120000 : 45000);
     return request;
 }
-void Summarizer::fail(const QString &code, const QString &message) {
+void Summarizer::fail(const QString &code, const QString &message, const QString &detail) {
     m_busy = false;
     m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail = detail;
     m_status = QStringLiteral("Summary unavailable.");
     emit changed();
 }
@@ -1047,6 +1062,7 @@ void Summarizer::summarizeRemaining() {
     if (m_busy) return;
     m_summaryDeckId.clear();
     m_error.clear();
+    m_errorDetail.clear();
     m_summary.clear();
     m_pendingCount = 0;
     summarizePending(m_app->pendingCards(), QString(), QStringLiteral("the review queue"));
@@ -1057,6 +1073,7 @@ void Summarizer::summarizeDeck(const QString &deckId) {
     const QString requestedId = deckId.trimmed();
     m_summaryDeckId = requestedId;
     m_error.clear();
+    m_errorDetail.clear();
     m_summary.clear();
     m_pendingCount = 0;
 
@@ -1176,7 +1193,7 @@ void Summarizer::summarizePending(const QVariantList &pending, const QString &sc
     beginDiagnosticOperation(&m_summaryContext, this);
     m_summaryJob = complete(payload, &m_summaryContext, [this](std::expected<QString, struct ProviderError> result) {
         m_summaryJob = 0;
-        if (!result) { fail(result.error().code, result.error().message); return; }
+        if (!result) { fail(result.error().code, result.error().message, result.error().detail); return; }
         if (result->isEmpty() || result->size() > 32000) {
             (void)logOperationFailure(&m_summaryContext, QStringLiteral("LLM_RESPONSE"),
                 QStringLiteral("The model returned no usable summary. Choose another model."));

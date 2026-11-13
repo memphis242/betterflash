@@ -322,15 +322,10 @@ ColumnLayout {
         clearAction: editor.clearAction
     }
 
-    Label {
+    ErrorBlock {
         id: errorLabel
-        visible: text.length > 0
-        text: editor.binding && editor.binding.error ? editor.binding.error : editor.transientError
-        textFormat: Text.PlainText
-        color: Theme.error
-        font.family: Theme.contentFont
-        font.pixelSize: 14
-        wrapMode: Text.Wrap
+        message: editor.binding && editor.binding.error ? editor.binding.error : editor.transientError
+        textSize: 14
         Layout.fillWidth: true
     }
 

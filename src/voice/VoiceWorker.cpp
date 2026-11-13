@@ -154,8 +154,8 @@ void VoiceWorker::initialize() {
         connect(m_transcriber, &VoiceTranscriber::transcriptReady, this, [this](const QString &text, const quint64 epoch) {
             if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) emit transcriptReady(text, epoch);
         });
-        connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
-            if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportCaptureError(code, message, fatal, epoch);
+        connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool fatal, const quint64 epoch, const QString &detail) {
+            if (epoch == m_captureEpoch && m_requestedListening && !m_shuttingDown) reportCaptureError(code, message, fatal, epoch, detail);
         });
         connect(m_transcriber, &VoiceTranscriber::finished, this, [this](const quint64 epoch) {
             if (epoch != m_captureEpoch || !m_requestedListening || m_shuttingDown) return;
@@ -262,9 +262,10 @@ void VoiceWorker::initializeForTest() {
             const bool passed = digits == QStringLiteral("100019021001803");
             emit testFinished(text, passed, passed ? QString() : QStringLiteral("The response did not match the known spoken digits. Try another transcription model."));
         });
-        connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool, const quint64) {
+        connect(m_transcriber, &VoiceTranscriber::errorOccurred, this, [this](const QString &code, const QString &message, const bool, const quint64, const QString &detail) {
             if (m_shuttingDown || m_testAnswered) return;
             m_testAnswered = true;
+            emit testErrorDetail(detail);
             emit testFinished({}, false, code + QStringLiteral(": ") + message);
         });
         connect(m_transcriber, &VoiceTranscriber::finished, this, [this](const quint64) {
@@ -474,14 +475,14 @@ void VoiceWorker::reportError(const QString &code, const QString &message, const
     emit errorOccurred(code, message, fatal);
 }
 
-void VoiceWorker::reportCaptureError(const QString &code, const QString &message, const bool fatal, const quint64 epoch) {
+void VoiceWorker::reportCaptureError(const QString &code, const QString &message, const bool fatal, const quint64 epoch, const QString &detail) {
     if (fatal) {
         m_requestedListening = false;
         m_initialized = false;
         cancelRequest();
         stopCapture();
     }
-    emit captureError(code, message, fatal, epoch);
+    emit captureError(code, message, fatal, epoch, detail);
 }
 
 void VoiceWorker::shutdown() {

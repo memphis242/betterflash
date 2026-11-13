@@ -48,6 +48,12 @@ ColumnLayout {
         : voice.ttsProvider === "system" ? (voice.ttsReady ? voice.ttsTestError ? "degraded" : "ready" : "missing")
         : !voice.ttsReady ? "missing" : voice.ttsTestError ? "degraded" : "ready"
 
+    SettingsError {
+        message: voice.lastError
+        details: voice.lastErrorDetail
+        Layout.fillWidth: true
+    }
+
     ColumnLayout {
         Layout.fillWidth: true
 
@@ -123,10 +129,17 @@ ColumnLayout {
                 ToolTip.text: "Automatic uses a Vulkan GPU when the desktop helper supports it and retries on CPU if GPU inference cannot run"
             }
             ModelStatus {
-                visible: sttProvider.currentIndex === 0
+                visible: sttProvider.currentIndex === 0 && !voice.sttModelErrorDetail
                 Layout.fillWidth: true
                 text: voice.sttModelStatus
                 state: root.sttState
+            }
+            ErrorBlock {
+                visible: sttProvider.currentIndex === 0 && !!voice.sttModelErrorDetail
+                message: voice.sttModelStatus
+                details: voice.sttModelErrorDetail
+                textSize: 15
+                Layout.fillWidth: true
             }
             ProgressBar {
                 visible: sttProvider.currentIndex === 0 && voice.sttModelDownloading
@@ -259,7 +272,7 @@ ColumnLayout {
             }
             ModelStatus {
                 Layout.fillWidth: true
-                visible: voice.transcriptCorrector.enabled
+                visible: voice.transcriptCorrector.enabled && !voice.transcriptCorrector.error
                 state: voice.transcriptCorrector.error ? "degraded" : voice.transcriptCorrector.ready ? "ready" : "missing"
                 text: voice.transcriptCorrector.error
                     ? voice.transcriptCorrector.error
@@ -268,6 +281,13 @@ ColumnLayout {
                     : root.ai && root.ai.provider === "remote"
                     ? "Configure the provider key, endpoint, and model in Language model settings"
                     : "Download the selected language model in Language model settings"
+            }
+            ErrorBlock {
+                visible: voice.transcriptCorrector.enabled && !!voice.transcriptCorrector.error
+                message: voice.transcriptCorrector.error
+                details: voice.transcriptCorrector.errorDetail
+                textSize: 15
+                Layout.fillWidth: true
             }
             CustomSttTests {
                 id: customSttTestsControl
@@ -374,6 +394,13 @@ ColumnLayout {
                 text: voice.ttsStatus
                 state: root.ttsState
             }
+            ErrorBlock {
+                visible: voice.ttsProvider === "local" && !!voice.ttsModelErrorDetail
+                message: voice.ttsStatus
+                details: voice.ttsModelErrorDetail
+                textSize: 15
+                Layout.fillWidth: true
+            }
             ProgressBar {
                 visible: voice.ttsProvider === "local" && voice.ttsModelDownloading
                 value: voice.ttsModelProgress
@@ -415,7 +442,6 @@ ColumnLayout {
         text: voice.status
         Layout.fillWidth: true
     }
-    SettingsError { message: voice.lastError; Layout.fillWidth: true }
     Label {
         textFormat: Text.PlainText
         text: "Say 'start review', 'show answer', 'good', 'next card', 'previous card', 'defer', 'pause', or 'resume'. Partial recall accepts 'two of three points'."

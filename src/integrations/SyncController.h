@@ -17,6 +17,7 @@ class SyncController final : public QObject {
     Q_PROPERTY(QString keyStorageState READ keyStorageState NOTIFY keyChanged)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QVariantMap syncNotices READ syncNotices NOTIFY changed)
     Q_PROPERTY(QString lastSync READ lastSync NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
@@ -28,6 +29,7 @@ public:
     QString keyStorageState() const { return m_credentials->storageState(); }
     QString status() const { return m_status; }
     QString error() const { return m_error.isEmpty() ? m_notice : m_error + (m_notice.isEmpty() ? QString() : QLatin1Char(' ') + m_notice); }
+    QString errorDetail() const { return m_errorDetail; }
     QVariantMap syncNotices() const { return m_syncNotices; }
     QString lastSync() const { return m_lastSync; }
     bool busy() const { return m_busy; }
@@ -51,7 +53,8 @@ private:
     void postBatch();
     void downloadNext();
     void finishApply(const QString &requestId, bool success, bool hasMore);
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &detail = {});
+    QString responseDetail(const QNetworkReply *reply, const QByteArray &body) const;
     void configureCredentials();
     bool rejectAccountChangeDuringApply();
     void reportAccountChangeBlocked(const QString &error);
@@ -67,6 +70,7 @@ private:
     QString m_endpoint;
     QString m_status = QStringLiteral("Stored on this device.");
     QString m_error;
+    QString m_errorDetail;
     QString m_notice;
     QString m_lastSync;
     QString m_requestId;

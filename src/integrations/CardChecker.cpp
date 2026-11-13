@@ -277,7 +277,7 @@ void CardChecker::requestTurn() {
             fail(result.error().code,
                 m_formatting ? QStringLiteral("The card check result could not be formatted.")
                              : QStringLiteral("The card check could not be completed."),
-                result.error().message + (m_searchEnabled && !m_formatting
+                result.error().message + (m_searchEnabled && !m_formatting && result.error().code == QStringLiteral("LLM_HTTP_400")
                     ? QStringLiteral(" You can retry without web search if this model does not support tool calls.") : QString()), detail); return;
         }
         receiveTurn(*result);
@@ -457,7 +457,8 @@ void CardChecker::search(const QString &query, const QJsonObject &assistant, con
         if (generation != m_generation || !m_busy) return;
         if (!response) {
             fail(response.error().code, QStringLiteral("The web search for this card check failed."), response.error().message + QStringLiteral(" Retry without web search to use the model's knowledge."),
-                QStringLiteral("Search error: %1").arg(response.error().code)); return;
+                QStringLiteral("Search error: %1").arg(response.error().code)
+                    + (response.error().detail.isEmpty() ? QString() : QLatin1Char('\n') + response.error().detail)); return;
         }
         m_messages.append(assistant);
         const bool local = m_provider->provider() == QStringLiteral("local");

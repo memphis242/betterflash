@@ -29,9 +29,11 @@ class SearchController final : public QObject {
     Q_PROPERTY(bool deckBusy READ deckBusy NOTIFY deckChanged)
     Q_PROPERTY(QString deckStatus READ deckStatus NOTIFY deckChanged)
     Q_PROPERTY(QString deckError READ deckError NOTIFY deckChanged)
+    Q_PROPERTY(QString deckErrorDetail READ deckErrorDetail NOTIFY deckChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(bool semanticEnabled READ semanticEnabled WRITE setSemanticEnabled NOTIFY changed)
     Q_PROPERTY(QString provider READ provider WRITE setProvider NOTIFY changed)
     Q_PROPERTY(QString localProfile READ localProfile WRITE setLocalProfile NOTIFY changed)
@@ -57,10 +59,12 @@ public:
     bool busy() const { return m_channels[0].busy; }
     QString status() const { return m_channels[0].status; }
     QString error() const { return m_channels[0].error; }
+    QString errorDetail() const { return m_channels[0].errorDetail; }
     QVariantList deckResults() const { return m_channels[1].results; }
     bool deckBusy() const { return m_channels[1].busy; }
     QString deckStatus() const { return m_channels[1].status; }
     QString deckError() const { return m_channels[1].error; }
+    QString deckErrorDetail() const { return m_channels[1].errorDetail; }
     bool semanticEnabled() const { return m_enabled; }
     QString provider() const { return m_provider; }
     QString localProfile() const { return m_profile; }
@@ -128,6 +132,7 @@ private:
         bool preserveContext = false;
         QString status;
         QString error;
+        QString errorDetail;
     };
     struct QueryState &state(int channel);
     void notify(int channel);
@@ -137,7 +142,7 @@ private:
     void runSearch(int channel);
     void runSemantic(int channel);
     void publish(int channel);
-    void setFailure(const QString &message, int channel = 0);
+    void setFailure(const QString &message, int channel = 0, const QString &detail = {});
     void setSharedFailure(const QString &message);
     void setDownloadStatus(const QString &message);
     void abortRemote(int channel);

@@ -195,17 +195,16 @@ void WebSearch::startSearch(const QString &query, QObject *context, Completion c
             else if (status == 434) advice = QStringLiteral("Tavily's real-time search capacity is temporarily unavailable. Wait and try again.");
             else if (status >= 300 && status < 400) advice = QStringLiteral("Tavily returned a redirect, which was not followed. Check the service status.");
             else advice = QStringLiteral("Check the Tavily service and network connection, then try again.");
-            const QJsonObject failure = QJsonDocument::fromJson(body).object();
-            const QJsonValue detail = failure.value(QStringLiteral("detail"));
-            QString providerMessage = detail.isString() ? detail.toString()
-                : detail.toObject().value(QStringLiteral("error")).toString();
-            if (providerMessage.isEmpty()) providerMessage = failure.value(QStringLiteral("message")).toString();
-            if (!credential.isEmpty()) providerMessage.replace(credential, QStringLiteral("[redacted]"));
-            providerMessage = providerMessage.simplified().left(512);
-            const QString observed = QStringLiteral("Tavily search failed (HTTP %1, network error %2: %3). %4")
-                .arg(status).arg(static_cast<int>(networkError)).arg(networkMessage, advice);
-            callback(std::unexpected(ProviderError{code, observed
-                + (providerMessage.isEmpty() ? QString() : QStringLiteral(" Provider detail: ") + providerMessage)}));
+            QString responseBody = QString::fromUtf8(body);
+            if (!credential.isEmpty()) responseBody.replace(credential, QStringLiteral("[redacted]"));
+            if (const auto *const log = DiagnosticLog::instance()) responseBody = log->redact(responseBody);
+            const QString detail = QStringLiteral("Endpoint: %1\nHTTP status: %2\nNetwork error: %3 (%4)\nHTTP response body:\n%5%6")
+                .arg(endpoint).arg(status).arg(networkMessage).arg(static_cast<int>(networkError))
+                .arg(responseBody.left(16384), responseBody.size() > 16384
+                    ? QStringLiteral("\n[Response body truncated at 16384 characters]") : QString());
+            const QString observed = status ? QStringLiteral("Tavily search failed (HTTP %1). %2").arg(status).arg(advice)
+                : QStringLiteral("Tavily search could not connect. %1").arg(advice);
+            callback(std::unexpected(ProviderError{code, observed, detail}));
             return;
         }
         QJsonParseError parseError{};

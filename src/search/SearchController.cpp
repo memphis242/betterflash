@@ -1,6 +1,7 @@
 #include "SearchController.h"
 #include "SearchWorker.h"
 #include "core/appcontroller.h"
+#include "core/DiagnosticLog.h"
 #include "integrations/ApiKeyBinding.h"
 #include "integrations/ApiKeyRegistry.h"
 #include "integrations/Summarizer.h"
@@ -18,6 +19,33 @@
 namespace {
 QString digest(const QString &value) {
     return QString::fromLatin1(QCryptographicHash::hash(value.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+QString remoteFailureDetail(const QNetworkReply *reply, const QByteArray &body, const QString &credential) {
+    QString response = QString::fromUtf8(body);
+    QString network = reply->errorString();
+    if (!credential.isEmpty()) {
+        response.replace(credential, QStringLiteral("[redacted]"));
+        network.replace(credential, QStringLiteral("[redacted]"));
+    }
+    if (auto *const log = DiagnosticLog::instance()) {
+        response = log->redact(response);
+        network = log->redact(network);
+    }
+    const bool truncated = response.size() > 16000;
+    response = response.left(16000);
+    return QStringLiteral("Endpoint: %1\nHTTP status: %2\nNetwork: %3\nResponse body%4:\n%5")
+        .arg(reply->url().toString(QUrl::RemoveUserInfo | QUrl::RemoveQuery | QUrl::RemoveFragment))
+        .arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt())
+        .arg(network.left(1000), truncated ? QStringLiteral(" (truncated)") : QString(),
+             response.isEmpty() ? QStringLiteral("(empty)") : response);
+}
+QString remoteFailureMessage(const int code) {
+    if (code == 401) return QStringLiteral("The embedding provider rejected the API key (HTTP 401). Replace the key in Search settings.");
+    if (code == 403) return QStringLiteral("The embedding provider denied access (HTTP 403). Check the key's permissions and model access.");
+    if (code == 429) return QStringLiteral("The embedding provider rate limit was reached (HTTP 429). Wait and retry.");
+    if (code >= 500) return QStringLiteral("The embedding provider returned HTTP %1. Try again or check its service status.").arg(code);
+    if (code > 0) return QStringLiteral("The embedding provider returned HTTP %1. Check the endpoint and model compatibility.").arg(code);
+    return QStringLiteral("The embedding provider could not be reached. Check the endpoint and connection, then retry.");
 }
 bool validEndpoint(const QUrl &url) {
     const bool loopback = url.host() == QStringLiteral("localhost") || url.host() == QStringLiteral("127.0.0.1") || url.host() == QStringLiteral("::1");
@@ -279,8 +307,18 @@ void SearchController::testModel() {
             m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
             m_testReport.insert(QStringLiteral("details"), message); emit testChanged();
         };
-        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300 || body.size() > 1024 * 1024) {
-            fail(QStringLiteral("SEARCH_TEST_HTTP_%1: Check the endpoint, API key and model identifier.").arg(code)); return;
+        if (body.size() > 1024 * 1024) {
+            fail(QStringLiteral("SEARCH_TEST_RESPONSE_LIMIT: The embedding test response exceeded 1 MiB. Check the endpoint and model.")); return;
+        }
+        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300) {
+            const QString message = remoteFailureMessage(code);
+            m_testBusy = false; m_testStatus.clear();
+            m_testError = QStringLiteral("SEARCH_TEST_HTTP_%1: %2").arg(code).arg(message);
+            m_testReport.insert(QStringLiteral("outcome"), QStringLiteral("failed"));
+            m_testReport.insert(QStringLiteral("errorCode"), QStringLiteral("SEARCH_TEST_HTTP_%1").arg(code));
+            m_testReport.insert(QStringLiteral("errorMessage"), message);
+            m_testReport.insert(QStringLiteral("details"), remoteFailureDetail(reply, body, m_credentials->key()));
+            emit testChanged(); return;
         }
         QJsonParseError parse;
         const QJsonArray data = QJsonDocument::fromJson(body, &parse).object().value(QStringLiteral("data")).toArray();
@@ -428,7 +466,7 @@ void SearchController::restart(int channel, bool clearResults, bool preserveCont
     search.preserveContext = preserveContext;
     ++*search.epoch; search.debounce.stop(); search.semanticDelay.stop(); abortRemote(channel);
     search.busy = false; search.lexicalComplete = false; search.semanticStarted = false;
-    search.error.clear(); search.status.clear();
+    search.error.clear(); search.errorDetail.clear(); search.status.clear();
     if (!preserveContext) { search.literal.clear(); search.fuzzy.clear(); search.semantic.clear(); }
     if (clearResults) {
         if (channel == 0) emit resultsAboutToChange();
@@ -533,9 +571,9 @@ void SearchController::runSemantic(int channel) {
         worker->semantic(channel, epoch, profile, directory, scope, remote);
     }, Qt::QueuedConnection);
 }
-void SearchController::setFailure(const QString &message, int channel) {
+void SearchController::setFailure(const QString &message, int channel, const QString &detail) {
     struct QueryState &search = state(channel);
-    search.error = message; search.busy = false; search.status = QStringLiteral("Text matches remain available"); notify(channel);
+    search.error = message; search.errorDetail = detail; search.busy = false; search.status = QStringLiteral("Text matches remain available"); notify(channel);
 }
 void SearchController::setSharedFailure(const QString &message) {
     for (int channel = 0; channel < int(m_channels.size()); ++channel) setFailure(message, channel);
@@ -589,10 +627,12 @@ void SearchController::requestRemote(int channel, quint64 epoch, const QStringLi
         search.remoteReply = nullptr; reply->deleteLater();
         if (epoch != search.epoch->load()) return;
         const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300 || body.size() > 8 * 1024 * 1024) {
-            setFailure(QStringLiteral("SEARCH_HTTP_%1: %2").arg(code).arg(code == 401 || code == 403
-                ? QStringLiteral("Check the embedding provider key and model access.") : code == 429
-                ? QStringLiteral("Provider rate limit reached. Wait and retry.") : QStringLiteral("Check the embedding endpoint, model and connection, then retry.")), channel); return;
+        if (body.size() > 8 * 1024 * 1024) {
+            setFailure(QStringLiteral("SEARCH_RESPONSE_LIMIT: The embedding response exceeded 8 MiB. Check the endpoint and model."), channel); return;
+        }
+        if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300) {
+            setFailure(QStringLiteral("SEARCH_HTTP_%1: %2").arg(code).arg(remoteFailureMessage(code)), channel,
+                       remoteFailureDetail(reply, body, m_credentials->key())); return;
         }
         QJsonParseError parse;
         const QJsonDocument document = QJsonDocument::fromJson(body, &parse);
@@ -613,7 +653,7 @@ void SearchController::requestRemote(int channel, quint64 epoch, const QStringLi
 void SearchController::prepareModel() {
     if (m_downloading) return;
     m_downloadCanceled = false;
-    for (struct QueryState &search : m_channels) search.error.clear();
+    for (struct QueryState &search : m_channels) { search.error.clear(); search.errorDetail.clear(); }
     m_downloadDirectory = modelDirectory();
     if (!QDir().mkpath(m_downloadDirectory)) { setSharedFailure(QStringLiteral("SEARCH_MODEL_DIRECTORY: Cannot create the model directory. Check storage permissions.")); return; }
     m_downloadAssets = LocalEmbedder::spec(resolvedProfile()).assets;

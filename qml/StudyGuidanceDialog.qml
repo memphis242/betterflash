@@ -290,23 +290,12 @@ Dialog {
                         Layout.fillWidth: true
                     }
                 }
-                TextArea {
-                    visible: guidance.errorText.length > 0
+                ErrorBlock {
+                    message: guidance.errorText
+                    details: typeof studyAssistant !== "undefined" && studyAssistant.error
+                        ? studyAssistant.error.detail || "" : ""
+                    textSize: 15
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.max(58, implicitHeight)
-                    readOnly: true
-                    text: guidance.errorText
-                    color: Theme.error
-                    wrapMode: Text.Wrap
-                    selectByMouse: true
-                    font.family: Theme.monoFont
-                    font.pixelSize: 13
-                    padding: 12
-                    background: Rectangle {
-                        color: Theme.ledgerSurface
-                        border.color: Theme.error
-                        radius: 6
-                    }
                 }
                 Label {
                     visible: guidance.stale

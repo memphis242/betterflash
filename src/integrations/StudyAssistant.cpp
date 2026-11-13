@@ -299,7 +299,7 @@ void StudyAssistant::requestHelp(const QString &cardId, const QString &variantId
             if (generation != m_generation || !m_busy) return;
             m_job = 0;
             if (!response) {
-                fail(response.error().code, response.error().message);
+                fail(response.error().code, response.error().message, response.error().detail);
                 return;
             }
             const QString text = response->trimmed();

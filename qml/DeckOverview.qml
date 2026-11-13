@@ -97,7 +97,7 @@ Item {
             if (!ai.busy && overview.pendingSummaryKey) {
                 if (ai.summaryDeckId === overview.pendingSummaryDeck && (ai.summary || ai.error)) {
                     const cache = Object.assign({}, overview.summaryCache);
-                    cache[overview.pendingSummaryKey] = {text: ai.summary, error: ai.error, status: ai.status};
+                    cache[overview.pendingSummaryKey] = {text: ai.summary, error: ai.error, errorDetail: ai.errorDetail, status: ai.status};
                     const keys = Object.keys(cache);
                     keys.slice(0, Math.max(0, keys.length - 12)).forEach(key => delete cache[key]);
                     overview.summaryCache = cache;
@@ -274,6 +274,7 @@ Item {
             summaryBusy: overview.pendingSummaryKey === overview.summaryKey
                 && (ai.busy || ai.provider === "local" && ai.localDownloading)
             summaryError: overview.summaryResult.error || (ai.provider === "local" ? ai.localError : "")
+            summaryErrorDetail: overview.summaryResult.errorDetail || (ai.provider === "local" ? ai.localErrorDetail : "")
             summaryRetryVisible: overview.canSummarize
             summaryRetryText: overview.summaryResult.text ? "Regenerate summary" : "Generate summary"
             onSummaryRetryRequested: overview.generateSummary()

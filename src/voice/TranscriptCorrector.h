@@ -16,6 +16,7 @@ class TranscriptCorrector final : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QString configuration READ configuration NOTIFY configurationChanged)
 
 public:
@@ -29,6 +30,7 @@ public:
     bool busy() const { return !m_jobs.isEmpty(); }
     QString status() const { return m_status; }
     QString error() const { return m_error; }
+    QString errorDetail() const { return m_errorDetail; }
     QString configuration() const;
 
     void setEnabled(bool enabled);
@@ -74,5 +76,6 @@ private:
     QString m_vocabulary;
     QString m_status;
     QString m_error;
+    QString m_errorDetail;
     QString m_credentialVersion;
 };

@@ -17,6 +17,7 @@ Rectangle {
     property string summaryText: String(deck && deck.summary !== undefined ? deck.summary : "")
     property string summaryCaption: "Automatic summary"
     property string summaryError: ""
+    property string summaryErrorDetail: ""
     property bool summaryRetryVisible: false
     property string summaryRetryText: "Retry summary"
     property bool summaryBusy: false
@@ -454,15 +455,11 @@ Rectangle {
                         font.family: Theme.monoFont
                         font.pixelSize: 10
                     }
-                    Label {
-                        visible: pane.summaryError.length > 0
+                    ErrorBlock {
+                        message: pane.summaryError
+                        details: pane.summaryErrorDetail
+                        textSize: 14
                         Layout.fillWidth: true
-                        textFormat: Text.PlainText
-                        text: pane.summaryError
-                        color: Theme.error
-                        font.family: Theme.monoFont
-                        font.pixelSize: 10
-                        wrapMode: Text.Wrap
                     }
                     ModelCacheControl {
                         operation: pane.summaryOperation

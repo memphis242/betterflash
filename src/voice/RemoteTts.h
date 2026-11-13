@@ -60,7 +60,7 @@ signals:
     void credentialChanged();
     void audioReady(const QByteArray &pcm, const QAudioFormat &format, double seconds,
         quint64 request);
-    void failed(const QString &message, quint64 request);
+    void failed(const QString &message, quint64 request, const QString &detail = {});
 
 private:
     struct Chunk { QString text; };

@@ -52,8 +52,9 @@ signals:
     void transcriptReady(const QString &transcript, quint64 epoch);
     void oneShotFinished(quint64 epoch);
     void errorOccurred(const QString &code, const QString &message, bool fatal);
-    void captureError(const QString &code, const QString &message, bool fatal, quint64 epoch);
+    void captureError(const QString &code, const QString &message, bool fatal, quint64 epoch, const QString &detail);
     void testFinished(const QString &transcript, bool passed, const QString &error);
+    void testErrorDetail(const QString &detail);
 
 private:
     bool loadLibrary();
@@ -69,7 +70,7 @@ private:
     void processLocalResult(const QByteArray &json);
     [[nodiscard]] bool usesWhisper() const;
     void reportError(const QString &code, const QString &message, bool fatal);
-    void reportCaptureError(const QString &code, const QString &message, bool fatal, quint64 epoch);
+    void reportCaptureError(const QString &code, const QString &message, bool fatal, quint64 epoch, const QString &detail = {});
 
     QString m_modelPath;
     QString m_runtimePath;

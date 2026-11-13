@@ -41,6 +41,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(double localDownloadProgress READ localDownloadProgress NOTIFY localChanged)
     Q_PROPERTY(QString localStatus READ localStatus NOTIFY localChanged)
     Q_PROPERTY(QString localError READ localError NOTIFY localChanged)
+    Q_PROPERTY(QString localErrorDetail READ localErrorDetail NOTIFY localChanged)
     Q_PROPERTY(QString acceleration READ acceleration WRITE setAcceleration NOTIFY configurationChanged)
     Q_PROPERTY(QString acceleratorStatus READ acceleratorStatus NOTIFY localChanged)
     Q_PROPERTY(bool testBusy READ testBusy NOTIFY testChanged)
@@ -54,6 +55,7 @@ class Summarizer final : public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QString summary READ summary NOTIFY changed)
     Q_PROPERTY(QString summaryDeckId READ summaryDeckId NOTIFY changed)
     Q_PROPERTY(int pendingCount READ pendingCount NOTIFY changed)
@@ -75,6 +77,7 @@ public:
     double localDownloadProgress() const { return m_localDownload.progress(); }
     QString localStatus() const { return m_localDownload.status(); }
     QString localError() const { return m_localDownload.error(); }
+    QString localErrorDetail() const { return m_localDownload.errorDetail(); }
     QString acceleration() const { return m_acceleration; }
     QString acceleratorStatus() const { return m_acceleratorStatus; }
     bool testBusy() const { return m_testBusy; }
@@ -89,6 +92,7 @@ public:
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
     QString error() const { return m_error; }
+    QString errorDetail() const { return m_errorDetail; }
     QString summary() const { return m_summary; }
     QString summaryDeckId() const { return m_summaryDeckId; }
     int pendingCount() const { return m_pendingCount; }
@@ -134,7 +138,7 @@ signals:
     void cachePolicyChanged();
     void cacheChanged();
 private:
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &detail = {});
     void summarizePending(const QVariantList &pending, const QString &scopeDeckId, const QString &scopeName);
     void configureCredentials();
     void startCompletion(quint64 id);
@@ -226,6 +230,7 @@ private:
     QString m_model;
     QString m_status;
     QString m_error;
+    QString m_errorDetail{};
     QString m_lastKey;
     QString m_lastCredentialId;
     QString m_summary;

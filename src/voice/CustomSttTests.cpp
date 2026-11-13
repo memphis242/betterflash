@@ -176,6 +176,7 @@ QVariantList CustomSttTests::entries() const {
             {QStringLiteral("rawTranscript"), entry.rawTranscript}, {QStringLiteral("correctedTranscript"), entry.correctedTranscript},
             {QStringLiteral("correctionStatus"), entry.correctionStatus}, {QStringLiteral("correctionError"), entry.correctionError},
             {QStringLiteral("status"), entry.status}, {QStringLiteral("error"), entry.error},
+            {QStringLiteral("errorDetail"), entry.errorDetail}, {QStringLiteral("correctionErrorDetail"), entry.correctionErrorDetail},
             {QStringLiteral("duration"), entry.duration}, {QStringLiteral("wordErrorRate"), entry.wordErrorRate},
             {QStringLiteral("accuracy"), entry.wordErrorRate < 0.0 ? -1.0 : std::max(0.0, 1.0 - entry.wordErrorRate)},
             {QStringLiteral("substitutions"), entry.substitutions}, {QStringLiteral("deletions"), entry.deletions},
@@ -552,7 +553,7 @@ void CustomSttTests::runTest(const QString &id) {
     m_busy = true;
     m_current = -1;
     for (const QString &queuedId : std::as_const(m_queue)) if (struct Entry *const entry = find(queuedId)) {
-        entry->transcript.clear(); entry->rawTranscript.clear(); entry->correctedTranscript.clear(); entry->correctionStatus.clear(); entry->correctionError.clear(); entry->error.clear(); entry->status = QStringLiteral("Queued"); entry->wordErrorRate = -1.0; entry->substitutions = entry->deletions = entry->insertions = 0; entry->correctedWordErrorRate = -1.0; entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0; entry->resultConfiguration.clear(); entry->resultCredentialHash.clear(); }
+        entry->transcript.clear(); entry->rawTranscript.clear(); entry->correctedTranscript.clear(); entry->correctionStatus.clear(); entry->correctionError.clear(); entry->correctionErrorDetail.clear(); entry->error.clear(); entry->errorDetail.clear(); entry->status = QStringLiteral("Queued"); entry->wordErrorRate = -1.0; entry->substitutions = entry->deletions = entry->insertions = 0; entry->correctedWordErrorRate = -1.0; entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0; entry->resultConfiguration.clear(); entry->resultCredentialHash.clear(); }
     if (!persist()) {
         m_entries = savedEntries;
         m_busy = false;
@@ -943,6 +944,10 @@ void CustomSttTests::startNext(const quint64 generation) {
         if (!file.open(QIODevice::ReadOnly)) { emit worker->testFinished({}, false, QStringLiteral("The recording could not be opened.")); return; }
         worker->testAudio(file.readAll());
     });
+    connect(worker, &VoiceWorker::testErrorDetail, this, [this, generation, workerEpoch, id](const QString &detail) {
+        if (!m_busy || generation != m_generation || workerEpoch != m_workerGeneration) return;
+        if (struct Entry *const entry = find(id)) entry->errorDetail = detail;
+    });
     connect(worker, &VoiceWorker::testFinished, this, [this, generation, workerEpoch, id](const QString &transcript, const bool, const QString &workerError) { finishCurrent(generation, workerEpoch, id, transcript, workerError); });
     connect(worker, &VoiceWorker::errorOccurred, this, [this, generation, workerEpoch, id](const QString &code, const QString &message, const bool) { finishCurrent(generation, workerEpoch, id, {}, code + QStringLiteral(": ") + message); });
     connect(thread, &QThread::finished, worker, &QObject::deleteLater);
@@ -966,6 +971,7 @@ void CustomSttTests::finishCurrent(const quint64 generation, const quint64 worke
     entry->correctedTranscript.clear();
     entry->correctionStatus.clear();
     entry->correctionError.clear();
+    entry->correctionErrorDetail.clear();
     entry->error = workerError;
     entry->correctedWordErrorRate = -1.0;
     entry->correctedSubstitutions = entry->correctedDeletions = entry->correctedInsertions = 0;
@@ -1005,6 +1011,7 @@ void CustomSttTests::finishCurrent(const quint64 generation, const quint64 worke
             } else {
                 current->correctionStatus = QStringLiteral("Failed");
                 current->correctionError = result.error().code + QStringLiteral(": ") + result.error().message;
+                current->correctionErrorDetail = result.error().detail;
             }
             persist();
             notifyEntries();

@@ -22,7 +22,7 @@ public:
     void cancel();
 signals:
     void transcriptReady(const QString &text, quint64 epoch);
-    void errorOccurred(const QString &code, const QString &message, bool fatal, quint64 epoch);
+    void errorOccurred(const QString &code, const QString &message, bool fatal, quint64 epoch, const QString &detail);
     void finished(quint64 epoch);
 private:
     const QString m_apiKey;

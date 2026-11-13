@@ -1,5 +1,6 @@
 #include "RemoteTts.h"
 #include "VoiceAudio.h"
+#include "core/DiagnosticLog.h"
 #include "integrations/ApiKeyBinding.h"
 #include "integrations/ApiKeyRegistry.h"
 
@@ -401,10 +402,16 @@ void RemoteTts::handleReply(QNetworkReply *const reply, const QByteArray &payloa
             : httpStatus == 429
             ? QStringLiteral("Check the provider rate limit or spend limit, then try again.")
             : QStringLiteral("Check the selected model, voice, and API key.");
+        QString detail = QStringLiteral("HTTP status: %1\nNetwork error: %2\nResponse body: ").arg(httpStatus).arg(networkError)
+            + QString::fromUtf8(payload.left(16384))
+            + (payload.size() > 16384 ? QStringLiteral("\n[Response truncated]") : QString());
+        const QString credential = m_secret->key();
+        if (!credential.isEmpty()) detail.replace(credential, QStringLiteral("[redacted]"));
+        if (const auto *const log = DiagnosticLog::instance()) detail = log->redact(detail);
         m_overallTimeout->stop();
         emit failed(providerError.isEmpty()
                 ? QStringLiteral("Remote speech service rejected the request (HTTP %1). %2").arg(httpStatus).arg(recovery)
-                : QStringLiteral("Remote speech service rejected the request: %1").arg(providerError), m_request);
+                : QStringLiteral("Remote speech service rejected the request: %1").arg(providerError), m_request, detail);
         return;
     }
     if (!networkError.isEmpty()) {

@@ -227,7 +227,8 @@ Dialog {
                     id: errorBlock
                     width: errorScroll.availableWidth
                     code: dialog.failure.code || ""
-                    message: (dialog.failure.message || "") + "\n" + (dialog.failure.action || "")
+                    message: dialog.failure.message || ""
+                    action: dialog.failure.action || ""
                     details: dialog.failure.detail || ""
                     textSize: 15
                 }
@@ -411,19 +412,30 @@ Dialog {
                         Layout.fillHeight: true
                         Layout.preferredWidth: 540
                         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                        TextEdit {
+                        ColumnLayout {
                             width: detailScroll.availableWidth
-                            text: dialog.current.snapshot ? (dialog.current.snapshot.front || "") + "\n\n" + (dialog.current.snapshot.back || "")
-                                + "\n\nSuggested tags: " + ((dialog.current.tags || []).join(", ") || "None")
-                                + "\n\n" + (dialog.current.reason || "")
-                                + (dialog.current.errorInfo?.message ? "\n\n" + dialog.current.errorInfo.message + "\n" + (dialog.current.errorInfo.action || "") + "\n" + (dialog.current.errorInfo.detail || "") : "") : "Suggested tags and their reasons will appear here."
-                            textFormat: TextEdit.PlainText
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.Wrap
-                            font.family: Theme.uiFont
-                            font.pixelSize: 16
-                            color: Theme.ink
+                            spacing: 12
+                            ErrorBlock {
+                                message: dialog.current.errorInfo?.message || ""
+                                code: dialog.current.errorInfo?.code || ""
+                                action: dialog.current.errorInfo?.action || ""
+                                details: dialog.current.errorInfo?.detail || ""
+                                textSize: 15
+                                Layout.fillWidth: true
+                            }
+                            TextEdit {
+                                Layout.fillWidth: true
+                                text: dialog.current.snapshot ? (dialog.current.snapshot.front || "") + "\n\n" + (dialog.current.snapshot.back || "")
+                                    + "\n\nSuggested tags: " + ((dialog.current.tags || []).join(", ") || "None")
+                                    + "\n\n" + (dialog.current.reason || "") : "Suggested tags and their reasons will appear here."
+                                textFormat: TextEdit.PlainText
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextEdit.Wrap
+                                font.family: Theme.uiFont
+                                font.pixelSize: 16
+                                color: Theme.ink
+                            }
                         }
                     }
                 }

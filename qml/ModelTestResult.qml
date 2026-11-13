@@ -11,6 +11,9 @@ Rectangle {
     property string status: ""
     property string title: "Model validation"
     readonly property string outcome: busy ? "running" : report.outcome || (error ? "failed" : "")
+    readonly property bool hasFailure: error.length > 0
+    readonly property string failureCode: report.errorCode || (/^[A-Z][A-Z0-9_]+:/.test(error) ? error.slice(0, error.indexOf(":")) : "")
+    readonly property string failureMessage: report.errorMessage || (failureCode ? error.slice(error.indexOf(":") + 1).trim() : error)
     readonly property bool hasWordScore: report.wordErrorRate !== undefined
         && Number.isFinite(Number(report.wordErrorRate)) && Number(report.wordErrorRate) >= 0
     readonly property color resultColor: outcome === "passed" ? Theme.success
@@ -54,11 +57,19 @@ Rectangle {
                 font.bold: true
             }
         }
+        ErrorBlock {
+            message: control.hasFailure ? control.failureMessage : ""
+            code: control.failureCode
+            action: control.report.errorAction || ""
+            details: control.report.details || ""
+            textSize: 16
+            Layout.fillWidth: true
+        }
         Repeater {
             model: [
                 {label: "Input", value: control.report.input || ""},
                 {label: "Expected output", value: control.report.expected || ""},
-                {label: "Model output", value: control.report.output || (control.busy ? "Waiting for the model..." : "No model output returned.")}
+                {label: "Model output", value: control.report.output || (control.busy ? "Waiting for the model..." : control.hasFailure ? "" : "No model output returned.")}
             ]
             delegate: ColumnLayout {
                 required property var modelData
@@ -102,7 +113,7 @@ Rectangle {
             HoverHandler { id: wordScoreHover }
         }
         ColumnLayout {
-            visible: control.report.scoringMode === "numeric-equivalent"
+            visible: (!control.hasFailure || !!control.report.output) && control.report.scoringMode === "numeric-equivalent"
             Layout.fillWidth: true
             spacing: 5
             Label { text: "Normalized scoring"; color: Theme.inkMuted; font.pixelSize: 15; font.bold: true }
@@ -164,7 +175,7 @@ Rectangle {
             }
         }
         Label {
-            visible: !!control.report.details && (control.hasWordScore || control.report.details !== control.error)
+            visible: !control.hasFailure && !!control.report.details
             text: control.report.details || ""
             textFormat: Text.PlainText
             color: Theme.inkMuted
@@ -180,12 +191,6 @@ Rectangle {
             font.pixelSize: 16
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-        }
-        ErrorBlock {
-            visible: !control.hasWordScore
-            message: control.error
-            textSize: 16
-            Layout.fillWidth: true
         }
     }
 }

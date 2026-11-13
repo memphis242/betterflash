@@ -32,6 +32,7 @@ public:
     [[nodiscard]] double progress() const { return m_progress; }
     [[nodiscard]] QString status() const { return m_status; }
     [[nodiscard]] QString error() const { return m_error; }
+    [[nodiscard]] QString errorDetail() const { return m_errorDetail; }
     [[nodiscard]] QString directory() const { return m_directory; }
     void start();
     void cancel();
@@ -59,4 +60,7 @@ private:
     double m_progress = 0;
     QString m_status{};
     QString m_error{};
+    QString m_errorDetail{};
+    QByteArray m_errorBody{};
+    bool m_errorBodyTruncated = false;
 };

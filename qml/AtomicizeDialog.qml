@@ -269,7 +269,9 @@ Dialog {
                         id: atomicError
                         objectName: "atomicError"
                         textSize: 17
-                        message: dialog.failure.action || ""
+                        message: ""
+                        action: dialog.failure.action || ""
+                        visible: !!action || !!details
                         details: (dialog.failure.code || "") + (dialog.failure.detail ? "\n\n" + dialog.failure.detail : "")
                         Layout.fillWidth: true
                     }

@@ -191,6 +191,7 @@ ColumnLayout {
     }
     SettingsError {
         message: settings.search.error
+        details: settings.search.errorDetail
         Layout.fillWidth: true
     }
 

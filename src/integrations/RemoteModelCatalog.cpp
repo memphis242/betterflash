@@ -2,6 +2,7 @@
 
 #include "ApiKeyBinding.h"
 #include "ApiKeyRegistry.h"
+#include "core/DiagnosticLog.h"
 
 #include <QCryptographicHash>
 #include <QJsonArray>
@@ -147,7 +148,7 @@ void RemoteModelCatalog::setApiKey(QObject *const bindingObject) {
     m_categoryHint.clear();
     cancelRequest();
     m_status.clear();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     if (m_binding) {
         m_bindingChangedConnection = connect(m_binding, &ApiKeyBinding::changed, this, [this] {
             const QString id = m_binding ? m_binding->selectedKeyId() : QString();
@@ -159,7 +160,7 @@ void RemoteModelCatalog::setApiKey(QObject *const bindingObject) {
                 m_categoryHint.clear();
                 cancelRequest();
                 m_status.clear();
-                m_error.clear();
+                m_error.clear(); m_errorDetail.clear();
                 emit changed();
             }
         });
@@ -185,7 +186,7 @@ void RemoteModelCatalog::setEndpoint(const QString &endpoint) {
     m_categoryHint.clear();
     cancelRequest();
     m_status.clear();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit configurationChanged();
     emit changed();
 }
@@ -197,7 +198,7 @@ void RemoteModelCatalog::setCategory(const QString &category) {
     m_categoryHint.clear();
     cancelRequest();
     m_status.clear();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit configurationChanged();
     emit changed();
 }
@@ -206,14 +207,14 @@ void RemoteModelCatalog::setRemoteApi(const QString &remoteApi) {
     if (remoteApi != QStringLiteral("openai") && remoteApi != QStringLiteral("anthropic")) return;
     if (m_remoteApi == remoteApi) return;
     m_remoteApi = remoteApi;
-    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear();
+    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear(); m_errorDetail.clear();
     emit configurationChanged(); emit changed();
 }
 
 void RemoteModelCatalog::setWorkspaceId(const QString &workspaceId) {
     if (m_workspaceId == workspaceId) return;
     m_workspaceId = workspaceId;
-    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear();
+    m_models.clear(); m_categoryHint.clear(); cancelRequest(); m_status.clear(); m_error.clear(); m_errorDetail.clear();
     emit configurationChanged(); emit changed();
 }
 
@@ -250,14 +251,15 @@ void RemoteModelCatalog::cancelRequest() {
 void RemoteModelCatalog::cancel() {
     cancelRequest();
     m_status.clear();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit changed();
 }
 
-void RemoteModelCatalog::fail(const QString &code, const QString &message) {
+void RemoteModelCatalog::fail(const QString &code, const QString &message, const QString &detail) {
     m_busy = false;
     m_status.clear();
     m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail = detail;
     emit changed();
 }
 
@@ -314,7 +316,7 @@ bool RemoteModelCatalog::prepareRequest(QUrl *const modelsUrl, QByteArray *const
 void RemoteModelCatalog::fetch() {
     if (!m_active) { fail(QStringLiteral("MODELS_INACTIVE"), QStringLiteral("Model discovery is available only for a remote model configuration.")); return; }
     cancelRequest();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_status = QStringLiteral("Fetching available models...");
     m_busy = true;
     fetchPage({});
@@ -408,39 +410,39 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         fail(QStringLiteral("MODELS_TIMEOUT"), QStringLiteral("The provider did not return its model list within 15 seconds. Check the endpoint and connection, then retry."));
         return;
     }
-    if (!okay) {
+    const auto responseDetail = [&]() {
         QString networkDetail = reply->errorString();
-        reply->deleteLater();
+        const QUrl requestUrl = reply->url();
         const QString credential = m_binding ? m_binding->key() : QString();
-        const QJsonObject root = QJsonDocument::fromJson(body).object();
-        const QJsonObject providerError = root.value(QStringLiteral("error")).toObject();
-        QString providerMessage = providerError.value(QStringLiteral("message")).toString();
-        QString providerType = providerError.value(QStringLiteral("type")).toString();
-        QString providerCode = providerError.value(QStringLiteral("code")).toString();
-        if (providerMessage.isEmpty()) providerMessage = root.value(QStringLiteral("message")).toString();
+        QString response = QString::fromUtf8(body);
         if (!credential.isEmpty()) {
-            providerMessage.replace(credential, QStringLiteral("[redacted]"));
-            providerType.replace(credential, QStringLiteral("[redacted]"));
-            providerCode.replace(credential, QStringLiteral("[redacted]"));
+            response.replace(credential, QStringLiteral("[redacted]"));
             networkDetail.replace(credential, QStringLiteral("[redacted]"));
         }
-        networkDetail = networkDetail.simplified().left(256);
-        providerMessage = providerMessage.simplified().left(700);
-        providerType = providerType.simplified().left(100);
-        providerCode = providerCode.simplified().left(100);
-        const QString detail = (providerMessage.isEmpty() ? QString() : QStringLiteral(" Provider: ") + providerMessage)
-            + (providerType.isEmpty() ? QString() : QStringLiteral(" Type: ") + providerType)
-            + (providerCode.isEmpty() ? QString() : QStringLiteral(" Code: ") + providerCode);
+        if (auto *const log = DiagnosticLog::instance()) {
+            response = log->redact(response);
+            networkDetail = log->redact(networkDetail);
+        }
+        const bool truncated = response.size() > 16000;
+        response = response.left(16000);
+        return QStringLiteral("Endpoint: %1\nHTTP status: %2\nNetwork: %3\nResponse body%4:\n%5")
+            .arg(requestUrl.toString(QUrl::RemoveUserInfo | QUrl::RemoveQuery | QUrl::RemoveFragment))
+            .arg(httpStatus).arg(networkDetail.left(1000), truncated ? QStringLiteral(" (truncated)") : QString(),
+                                  response.isEmpty() ? QStringLiteral("(empty)") : response);
+    };
+    if (!okay) {
+        const QString detail = responseDetail();
+        reply->deleteLater();
         if (httpStatus == 401) {
-            fail(QStringLiteral("MODELS_HTTP_401"), QStringLiteral("The provider rejected the API key (HTTP 401). Select or save a valid key for this provider.") + detail);
+            fail(QStringLiteral("MODELS_HTTP_401"), QStringLiteral("The provider rejected the API key (HTTP 401). Select or save a valid key for this provider."), detail);
         } else if (httpStatus == 403) {
-            fail(QStringLiteral("MODELS_HTTP_403"), QStringLiteral("The provider denied model-list access (HTTP 403). Check the key's permissions and workspace.") + detail);
+            fail(QStringLiteral("MODELS_HTTP_403"), QStringLiteral("The provider denied model-list access (HTTP 403). Check the key's permissions and workspace."), detail);
         } else if (httpStatus == 429) {
-            fail(QStringLiteral("MODELS_HTTP_429"), QStringLiteral("The provider declined the model-list request (HTTP 429). Check its rate or credit limits, then retry.") + detail);
+            fail(QStringLiteral("MODELS_HTTP_429"), QStringLiteral("The provider declined the model-list request (HTTP 429). Check its rate or credit limits, then retry."), detail);
         } else if (httpStatus <= 0) {
-            fail(QStringLiteral("MODELS_NETWORK"), QStringLiteral("The model list could not be reached: %1. Check the endpoint and connection, then retry.").arg(networkDetail));
+            fail(QStringLiteral("MODELS_NETWORK"), QStringLiteral("The model list could not be reached. Check the endpoint and connection, then retry."), detail);
         } else {
-            fail(QStringLiteral("MODELS_HTTP_%1").arg(httpStatus), QStringLiteral("The provider did not return its model list (HTTP %1). Check the endpoint and provider response, then retry.").arg(httpStatus) + detail);
+            fail(QStringLiteral("MODELS_HTTP_%1").arg(httpStatus), QStringLiteral("The provider did not return its model list (HTTP %1). Check the endpoint and provider response, then retry.").arg(httpStatus), detail);
         }
         return;
     }
@@ -450,12 +452,13 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
     const QJsonArray data = dataValue.toArray();
     if (parseError.error != QJsonParseError::NoError || !document.isObject() || !dataValue.isArray() || data.size() > kMaximumModels) {
         reply->deleteLater();
-        fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The provider returned an invalid or empty model list."));
+        fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The provider returned an invalid model list. Check the response or enter a model identifier manually."),
+             QStringLiteral("JSON parse status: %1\n%2").arg(parseError.errorString(), responseDetail()));
         return;
     }
     if (data.isEmpty() && m_pendingModels.isEmpty()) {
         reply->deleteLater();
-        fail(QStringLiteral("MODELS_EMPTY"), QStringLiteral("The provider returned no models. You can still enter a model identifier manually."));
+        fail(QStringLiteral("MODELS_EMPTY"), QStringLiteral("The provider returned no models. You can still enter a model identifier manually."), responseDetail());
         return;
     }
     const QUrl endpoint(m_endpoint.trimmed());
@@ -479,14 +482,14 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
     const QJsonValue more = root.value(QStringLiteral("has_more"));
     if (m_remoteApi == QStringLiteral("anthropic") && !more.isBool()) {
         reply->deleteLater();
-        fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The Anthropic model response did not contain a valid pagination state. Try again or enter a model identifier manually."));
+        fail(QStringLiteral("MODELS_RESPONSE"), QStringLiteral("The Anthropic model response did not contain a valid pagination state. Try again or enter a model identifier manually."), responseDetail());
         return;
     }
     const bool hasMore = m_remoteApi == QStringLiteral("anthropic") && more.toBool();
     const QString cursor = root.value(QStringLiteral("last_id")).toString();
     if (hasMore && (data.isEmpty() || !isAllowedModelId(cursor) || m_seenCursors.contains(cursor))) {
         reply->deleteLater();
-        fail(QStringLiteral("MODELS_PAGINATION"), QStringLiteral("The Anthropic model list returned an invalid or repeated page cursor. Try again or enter a model identifier manually."));
+        fail(QStringLiteral("MODELS_PAGINATION"), QStringLiteral("The Anthropic model list returned an invalid or repeated page cursor. Try again or enter a model identifier manually."), responseDetail());
         return;
     }
     if (hasMore && m_pageCount < kMaximumPages && !modelLimitReached && discovered.size() < kMaximumModels) {
@@ -502,7 +505,7 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
     });
     reply->deleteLater();
     if (discovered.isEmpty()) {
-        fail(QStringLiteral("MODELS_CATEGORY"), QStringLiteral("The provider returned no models recognized for this category. You can still enter a model identifier manually."));
+        fail(QStringLiteral("MODELS_CATEGORY"), QStringLiteral("The provider returned no models recognized for this category. You can still enter a model identifier manually."), responseDetail());
         m_categoryHint = modelHint(endpoint, m_category);
         emit changed();
         return;
@@ -517,6 +520,6 @@ void RemoteModelCatalog::finishReply(QNetworkReply *const reply, const quint64 g
         ? QStringLiteral("The model list reached its %1-model limit. Enter a model identifier manually if it is missing.").arg(kMaximumModels)
         : hasMore ? QStringLiteral("Only the first %1 pages of models are shown. Enter a model identifier manually if it is missing.").arg(kMaximumPages)
                   : QStringLiteral("Available models updated.");
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit changed();
 }

@@ -23,6 +23,7 @@ class RemoteModelCatalog : public QObject {
     Q_PROPERTY(QStringList models READ models NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString errorDetail READ errorDetail NOTIFY changed)
     Q_PROPERTY(QString categoryHint READ categoryHint NOTIFY changed)
 
 public:
@@ -39,6 +40,7 @@ public:
     QStringList models() const;
     QString status() const;
     QString error() const;
+    QString errorDetail() const { return m_errorDetail; }
     QString categoryHint() const;
 
     void setApiKey(QObject *binding);
@@ -58,7 +60,7 @@ signals:
 private:
     void cancelRequest();
     void refreshCredentialSnapshot();
-    void fail(const QString &code, const QString &message);
+    void fail(const QString &code, const QString &message, const QString &detail = {});
     bool prepareRequest(QUrl *modelsUrl, QByteArray *authorization);
     void finishReply(QNetworkReply *reply, quint64 generation);
     void fetchPage(const QString &afterId);
@@ -78,6 +80,7 @@ private:
     QStringList m_models;
     QString m_status;
     QString m_error;
+    QString m_errorDetail;
     QString m_categoryHint;
     QByteArray m_credentialDigest;
     QString m_credentialId;

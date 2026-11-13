@@ -216,16 +216,16 @@ QString CardGenerator::systemInstructions() const
         "Use no emoji or em dash.");
 }
 
-void CardGenerator::fail(const QString &code, const QString &message)
+void CardGenerator::fail(const QString &code, const QString &message, const QString &detail)
 {
-    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message) : QString();
+    const QString diagnosticPath = m_summarizer ? m_summarizer->logOperationFailure(this, code, message, detail) : QString();
     m_busy = false;
     if (m_verifying) {
         m_verifying = false;
         clearVerification();
     }
-    m_error = code + QStringLiteral(": ") + message
-        + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
+    m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail = detail + (diagnosticPath.isEmpty() ? QString() : QStringLiteral("\nDiagnostic log: ") + diagnosticPath);
     emit changed();
 }
 
@@ -238,6 +238,7 @@ void CardGenerator::invalidate(const QString &code, const QString &message)
     m_verifying = false;
     clearVerification();
     m_error = code + QStringLiteral(": ") + message;
+    m_errorDetail.clear();
     emit changed();
 }
 
@@ -269,6 +270,7 @@ void CardGenerator::cancel()
         return;
     }
     m_busy = false;
+    m_errorDetail.clear();
     m_error = wasVerifying
         ? QStringLiteral("CARD_VERIFICATION_CANCELED: The answer check was canceled. The draft was not changed.")
         : QStringLiteral("CARD_GENERATION_CANCELED: Card generation was canceled. The collection was not changed.");
@@ -279,7 +281,7 @@ void CardGenerator::clear()
 {
     cancel();
     if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_source.clear();
     m_draft.clear();
     m_requestDraft.clear();
@@ -597,13 +599,13 @@ void CardGenerator::requestCompletion(const QString &instructions, const bool re
                               {QStringLiteral("response_format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_object")}}},
                               {QStringLiteral("messages"), messages(system, user)}};
     m_busy = true;
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_job = m_summarizer->complete(payload, this,
         [this, generation](std::expected<QString, struct ProviderError> response) {
             if (generation != m_generation || !m_busy) return;
             m_job = 0;
             if (!response) {
-                fail(response.error().code, response.error().message);
+                fail(response.error().code, response.error().message, response.error().detail);
                 return;
             }
             receiveContent(*response, generation);
@@ -735,7 +737,7 @@ void CardGenerator::receiveContent(const QString &response, quint64 generation)
     acceptedDraft.insert(QStringLiteral("pointCount"), static_cast<int>(points));
     acceptedDraft.insert(QStringLiteral("kind"), candidate.kind);
     m_draft = std::move(acceptedDraft);
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     m_busy = false;
     emit changed();
     emit generated();
@@ -783,7 +785,7 @@ void CardGenerator::verify(const QVariantMap &draft)
     if (m_busy) return;
     if (m_summarizer) m_summarizer->beginDiagnosticOperation(this);
     clearVerification();
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     if (!m_app || !m_summarizer || m_source.isEmpty() || m_draft.isEmpty()) {
         fail(QStringLiteral("CARD_VERIFICATION_UNAVAILABLE"),
              QStringLiteral("The generated draft or language model is unavailable. Generate a card before checking its answer."));
@@ -888,7 +890,7 @@ void CardGenerator::requestVerification(const QString &system, const QJsonObject
                 fail(response.error().code,
                      QStringLiteral("Answer check failed during %1: %2")
                          .arg(comparison ? QStringLiteral("answer comparison") : QStringLiteral("independent solution"),
-                              response.error().message));
+                              response.error().message), response.error().detail);
                 return;
             }
             receiveVerification(*response, generation, comparison);
@@ -982,6 +984,6 @@ void CardGenerator::receiveVerification(const QString &response, const quint64 g
     Q_ASSERT(!m_verifiedFingerprint.isEmpty());
     m_verifying = false;
     m_busy = false;
-    m_error.clear();
+    m_error.clear(); m_errorDetail.clear();
     emit changed();
 }

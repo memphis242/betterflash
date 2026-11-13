@@ -169,7 +169,8 @@ Item {
                     id: chatError
                     width: alerts.availableWidth
                     code: pane.failure.code || ""
-                    message: (pane.failure.message || "") + (pane.failure.action ? "\n" + pane.failure.action : "")
+                    message: pane.failure.message || ""
+                    action: pane.failure.action || ""
                     details: pane.failure.detail || ""
                     textSize: 14
                 }

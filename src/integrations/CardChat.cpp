@@ -589,7 +589,7 @@ void CardChat::runTool(const QString &name, const QJsonObject &arguments,
             if (generation != m_generation || !m_busy) return;
             if (!result) {
                 fail(result.error().code, QStringLiteral("The web search for this chat failed."), result.error().message,
-                     QStringLiteral("Search error: %1").arg(result.error().code)); return;
+                     QStringLiteral("Search error: %1\n%2").arg(result.error().code, result.error().detail)); return;
             }
             QJsonArray items; QVariantList sources; bool truncated = false;
             for (const QVariant &value : *result) {
