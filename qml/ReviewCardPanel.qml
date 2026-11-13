@@ -113,7 +113,7 @@ ColumnLayout {
                 objectName: "revealAnswer"
                 visible: !app.answerRevealed
                 text: "Reveal answer"
-                hint: shortcuts.bindings.review
+                hint: app.startupReviewActive ? "Reveal this answer. Q, Space, or Esc dismisses Review Pit Stop." : shortcuts.bindings.review
                 primary: false
                 Layout.fillWidth: true
                 Layout.preferredHeight: panel.viewportWidth < 600 ? 148 : 188

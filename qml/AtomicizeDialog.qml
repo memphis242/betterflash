@@ -75,6 +75,24 @@ Dialog {
         color: Theme.scrim
     }
 
+    function draftKeyboardContext() {
+        return visible && ui.popupOwnsKeyboardFocus(dialog) && draftIndex >= 0 && !applying && !atomic.busy
+            && !instructionsDialog.visible
+    }
+    function navigateDraftPreview() {
+        if (!draftKeyboardContext()) return
+        preview = !preview
+        if (preview) atomicPreview.forceActiveFocus()
+        else draftSource.forceActiveFocus()
+    }
+    Shortcut {
+        sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: dialog.draftKeyboardContext()
+        onActivated: dialog.navigateDraftPreview()
+    }
+
     function openFor(cardId) {
         if (applying)
             return
@@ -513,8 +531,9 @@ Dialog {
             AppButton {
                 objectName: "atomicPreviewToggle"
                 text: dialog.preview ? "Edit Markdown" : "Preview"
-                enabled: !dialog.applying
-                onClicked: dialog.preview = !dialog.preview
+                enabled: !dialog.applying && !atomic.busy
+                hint: "Switch Markdown source and preview (Ctrl+Tab / Ctrl+Shift+Tab)"
+                onClicked: dialog.navigateDraftPreview()
             }
             Item {
                 Layout.fillWidth: true
@@ -605,6 +624,16 @@ Dialog {
                 TextArea {
                     id: draftSource
                     objectName: "atomicDraftSource"
+                    Keys.priority: Keys.BeforeItem
+                    Keys.onShortcutOverride: function(event) {
+                        if (dialog.draftKeyboardContext() && dialog.ui.isEditorTabNavigationKey(event))
+                            event.accepted = true
+                    }
+                    Keys.onPressed: function(event) {
+                        if (!dialog.draftKeyboardContext() || !dialog.ui.isEditorTabNavigationKey(event)) return
+                        event.accepted = true
+                        if (!event.isAutoRepeat) dialog.navigateDraftPreview()
+                    }
                     font.family: Theme.monoFont
                     font.pixelSize: 14
                     wrapMode: TextEdit.Wrap

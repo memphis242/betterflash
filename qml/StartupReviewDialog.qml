@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Effects
 import QtQuick.Layouts
 import QtQml
+import BetterFlash.Native
 import "ReviewPresentation.js" as ReviewPresentation
 
 Dialog {
@@ -97,7 +98,7 @@ Dialog {
                 GlyphButton {
                     id: pitStopClose
                     glyph: "close"
-                    hint: "Close Review Pit Stop"
+                    hint: "Close Review Pit Stop (Q, Space, Esc)"
                     enabled: !app.busy && !dialog.ui.pitStopToolOpen
                     onClicked: dialog.requestClose()
                 }
@@ -173,6 +174,10 @@ Dialog {
             return
         startRequested = true
         app.startStartupReview()
+    }
+    function isDismissSequence(sequence) {
+        const key = String(sequence).replace(/\s/g, "").toLowerCase()
+        return key === "q" || key === "space" || key === "esc" || key === "escape"
     }
     function requestClose() {
         if (app.busy || ui.pitStopToolOpen)
@@ -282,11 +287,10 @@ Dialog {
     }
     contentItem: ColumnLayout {
         spacing: 12
-        Shortcut {
-            sequence: "Escape"
+        PitStopDismissKeys {
+            scope: dialog.contentItem.parent
             enabled: dialog.visible && dialog.activeFocus && !app.busy && !dialog.ui.pitStopToolOpen
-            autoRepeat: false
-            onActivated: dialog.requestClose()
+            onDismissRequested: dialog.requestClose()
         }
         Instantiator {
             model: ["review", "gradeMissed", "gradePartial", "gradeHard", "gradeGood", "gradeEasy", "pause"]
@@ -296,6 +300,7 @@ Dialog {
                 autoRepeat: false
                 enabled: dialog.visible && dialog.activeFocus && dialog.inReview && !app.busy
                     && !dialog.ui.pitStopToolOpen && (!app.paused || modelData === "pause")
+                    && !dialog.isDismissSequence(shortcuts.bindings[modelData] || "")
                     && (modelData !== "review" || !(pitStopPause.activeFocus || pitStopClose.activeFocus
                         || pitStopHelp.activeFocus || pitStopGenerate.activeFocus || pitStopStudy.activeFocus || leaveButton.activeFocus))
                 onActivated: {

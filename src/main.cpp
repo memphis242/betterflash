@@ -24,6 +24,7 @@
 #include "voice/CardNarration.h"
 #include "voice/CustomSttTests.h"
 #include "ui/TextFocusDismissal.h"
+#include "ui/PitStopDismissKeys.h"
 #include "ui/LocalFilePaths.h"
 #include "ui/Clipboard.h"
 
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
     application.setWindowIcon(applicationIcon);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QSettings::setDefaultFormat(QSettings::IniFormat);
+    qmlRegisterType<PitStopDismissKeys>("BetterFlash.Native", 1, 0, "PitStopDismissKeys");
     qmlRegisterType<RemoteModelCatalog>("BetterFlash.Native", 1, 0, "RemoteModelCatalog");
     qmlRegisterSingletonType<LocalFilePaths>("BetterFlash.Native", 1, 0, "LocalFilePaths",
         [](QQmlEngine *, QJSEngine *) -> QObject * { return new LocalFilePaths; });

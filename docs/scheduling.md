@@ -121,6 +121,11 @@ another Pit Stop for 24 hours on this device, even if dismissed. The cooldown
 covers every direction and cloze group of the card and does not affect normal
 review sessions. If all due cards are cooling down, no Pit Stop appears.
 
+Press **Q**, **Space**, or **Escape** to dismiss the Pit Stop without grading.
+These keys apply only to the Pit Stop itself; dialogs opened from it retain
+their own input controls. Space retains its normal review binding outside
+the Pit Stop.
+
 The popup shares the normal review card panel: the question remains visible,
 the large **Reveal answer** control reveals the answer below it, and the timer,
 rating buttons, and partial-recall adjustment use the normal presentation.

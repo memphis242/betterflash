@@ -111,6 +111,7 @@ ApplicationWindow {
     property bool cardInverted: false
     property bool initializingDeckParent: false
     property string localCardError: ""
+    property string editorExitHint: ""
     property string localDeckError: ""
     property string pendingDeckName: ""
     property var knownDeckIds: []
@@ -127,6 +128,15 @@ ApplicationWindow {
     property int editorSaveSerial: 0
     readonly property bool editorDraftDirty: editingCardId.length > 0 && cardDialog.visible
                                            && !cardFieldsMatch(editingCard(), currentCardDraft())
+    readonly property bool editorEscapeDirty: {
+        if (!editingCardId || !cardDialog.visible) return false
+        const saved = editingCard()
+        const draft = currentCardDraft()
+        const savedSource = (saved.front || "") + (saved.back ? "\n\n---\n\n" + saved.back : "")
+        return editorSource.text !== savedSource || draft.deckId !== saved.deckId || draft.kind !== saved.kind
+            || draft.tags !== (saved.tags || "") || Number(draft.points) !== Number(saved.pointCount || 1)
+    }
+    onEditorEscapeDirtyChanged: if (!editorEscapeDirty) editorExitHint = ""
     readonly property var editorNarrationWarnings: {
         if (!editingCardId || !cardDialog.visible || !cardNarrationController)
             return {hasStale: false, front: false, back: false, count: 0}
@@ -777,21 +787,41 @@ ApplicationWindow {
             after: end + (text.charAt(end) === "\n" ? 1 : 0)
         }
     }
-    function isCardSideNavigationKey(event) {
+    function isEditorTabNavigationKey(event) {
         return (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
             && (event.modifiers & Qt.ControlModifier) !== 0
             && (event.modifiers & (Qt.AltModifier | Qt.MetaModifier)) === 0
     }
-    function navigateEditorSide() {
-        if (editorTabs.currentIndex === 0) {
-            splitOrMove()
+    function popupOwnsKeyboardFocus(popup) {
+        if (!popup || !popup.visible || !popup.contentItem) return false
+        let item = activeFocusItem
+        while (item) {
+            if (item === popup.contentItem || item === popup.header || item === popup.footer) return true
+            item = item.parent
+        }
+        return popup.activeFocus && activeFocusItem === popup.contentItem.parent
+    }
+    function editorKeyboardContext() {
+        return cardDialog.visible && popupOwnsKeyboardFocus(cardDialog) && !editorSavePending && !editorModelBusy
+            && !cardDeck.popup.visible && !cardKind.popup.visible
+            && !narrationDialog.visible && !imageDialog.visible && !errorDialog.visible
+            && !cardCheckDialog.visible && !deckCheckDialog.visible && !tagAssistantDialog.visible
+    }
+    function navigateEditorTab(step) {
+        if (!editorKeyboardContext() || editorTabs.count < 1) return
+        editorTabs.currentIndex = (editorTabs.currentIndex + step + editorTabs.count) % editorTabs.count
+        if (editorTabs.currentIndex === 0) editorSource.forceActiveFocus()
+        else editorPreviewScroll.forceActiveFocus()
+    }
+    function escapeCardEditor() {
+        if (!editorKeyboardContext() || !editingCardId || editingGeneratedCard || app.busy || media.busy) return
+        if (editorEscapeDirty) {
+            editorExitHint = "Unsaved changes. Press " + (shortcuts.bindings.saveCard || "Ctrl+S")
+                + " to save and return to the card."
             return
         }
-        const viewport = editorPreviewScroll.contentItem
-        const maximum = Math.max(0, viewport.contentHeight - viewport.height)
-        const backPosition = Math.min(editorBackPreviewHeading.y, maximum)
-        viewport.contentY = viewport.contentY > 0 && viewport.contentY >= backPosition - 1
-            ? 0 : backPosition
+        if (editorReturnToPreview) cardDialog.close()
+        else returnEditorToDetail()
     }
     function splitOrMove() {
         const parts = splitSource(editorSource.text)
@@ -1001,7 +1031,7 @@ ApplicationWindow {
         if (action === "undo" || action === "redo" || action === "redoAlternate")
             return historyActionAllowed(action)
         if (action === "editorSplit" || action === "editorCloze" || action === "editorImage" || action === "saveCard")
-            return cardDialog.visible && !editorSavePending && !editorModelBusy && !narrationDialog.visible
+            return editorKeyboardContext() && !narrationDialog.visible
                     && !imageDialog.visible && !errorDialog.visible && !cardCheckDialog.visible && !deckCheckDialog.visible && !tagAssistantDialog.visible
                     && (action === "saveCard" || editorTabs.currentIndex === 0)
         if (action === "microphone") {
@@ -1774,6 +1804,7 @@ ApplicationWindow {
             refinementPending = false
             refinementInstructions.text = ""
             localCardError = ""
+            editorExitHint = ""
             editorDestinationDeckId = c.deckId || app.selectedDeckId
             cardDeck.currentIndex = cardDeck.indexOfValue(editorDestinationDeckId)
             cardKind.currentIndex = c.kind === "cloze" ? 1 : 0
@@ -1829,12 +1860,26 @@ ApplicationWindow {
             enabled: !editorSavePending
             spacing: 10
             Shortcut {
-                sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
+                sequence: "Ctrl+Tab"
                 context: Qt.WindowShortcut
                 autoRepeat: false
-                enabled: cardDialog.visible && cardDialog.activeFocus && !cardCheckDialog.visible && !deckCheckDialog.visible && !tagAssistantDialog.visible
-                    && !window.editorSavePending && !window.editorModelBusy
-                onActivated: window.navigateEditorSide()
+                enabled: window.editorKeyboardContext()
+                onActivated: window.navigateEditorTab(1)
+            }
+            Shortcut {
+                sequence: "Ctrl+Shift+Tab"
+                context: Qt.WindowShortcut
+                autoRepeat: false
+                enabled: window.editorKeyboardContext()
+                onActivated: window.navigateEditorTab(-1)
+            }
+            Shortcut {
+                sequence: "Escape"
+                context: Qt.WindowShortcut
+                autoRepeat: false
+                enabled: window.editorKeyboardContext() && !!window.editingCardId && !window.editingGeneratedCard
+                    && !app.busy && !media.busy
+                onActivated: window.escapeCardEditor()
             }
             Instantiator {
                 model: ["editorSplit", "editorCloze", "editorImage", "saveCard"]
@@ -2023,17 +2068,15 @@ ApplicationWindow {
                         objectName: "editorSource"
                         Keys.priority: Keys.BeforeItem
                         Keys.onShortcutOverride: function(event) {
-                            if (!window.editorSavePending && !window.editorModelBusy
-                                && window.isCardSideNavigationKey(event))
+                            if (window.editorKeyboardContext() && window.isEditorTabNavigationKey(event))
                                 event.accepted = true
                         }
                         Keys.onPressed: function(event) {
-                            if (window.editorSavePending || window.editorModelBusy
-                                || !window.isCardSideNavigationKey(event))
+                            if (!window.editorKeyboardContext() || !window.isEditorTabNavigationKey(event))
                                 return
                             event.accepted = true
                             if (!event.isAutoRepeat)
-                                window.navigateEditorSide()
+                                window.navigateEditorTab(event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) !== 0 ? -1 : 1)
                         }
                         font.family: Theme.monoFont
                         font.pixelSize: 17
@@ -2158,7 +2201,7 @@ ApplicationWindow {
             }
             Label {
                 textFormat: Text.PlainText
-                text: "Ctrl+Tab / Ctrl+Shift+Tab moves between front and back. " + shortcuts.bindings.editorSplit + " separates front and back or moves between them. " + shortcuts.bindings.editorCloze + " hides a selection."
+                text: "Ctrl+Tab / Ctrl+Shift+Tab switches Source and Preview. " + shortcuts.bindings.editorSplit + " separates front and back or moves between them. " + shortcuts.bindings.editorCloze + " hides a selection."
                 color: Theme.inkMuted
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
@@ -2391,6 +2434,15 @@ ApplicationWindow {
                     const draft = window.currentCardDraft()
                     window.openCardCheck(mode, draft.front, draft.back, draft.kind, false, window.editingCardId)
                 }
+            }
+            Label {
+                text: window.editorExitHint
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                color: Theme.warning
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Accessible.role: Accessible.AlertMessage
             }
             GridLayout {
                 Layout.fillWidth: true

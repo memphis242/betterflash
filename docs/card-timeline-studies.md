@@ -14,14 +14,23 @@ and width settings. The card pane is closed on first use.
   code and math. Each side has its own scroll position and selectable text.
   Editing, atomicizing, resetting and deleting remain available there.
 
-## Front and back keyboard navigation
+## Card keyboard navigation
 
-Ctrl+Tab and Ctrl+Shift+Tab cycle between Front and Back in New card, Edit card,
-and Card detail. In the editor's Source view, they move the caret between the
-two sections, inserting the separator if it is absent. In Preview, they scroll
-between the Front and Back sections. Card detail switches its selected side tab.
-These shortcuts apply only while the card modal has focus; a dialog opened above
-it keeps its own keyboard controls.
+Ctrl+Tab and Ctrl+Shift+Tab cycle forward and backward through Source and Preview
+in New card and Edit card. Switching tabs preserves the draft, caret, selection,
+and each tab's scroll position. The separate front/back editing shortcut shown
+below the editor still inserts the separator or moves between the two sections.
+Card detail uses Ctrl+Tab and Ctrl+Shift+Tab for its Front and Back tabs.
+These shortcuts apply only while the card modal owns keyboard focus; a dialog
+opened above it keeps its own keyboard controls.
+
+In Card detail, E opens the editor and Escape returns to the previous context
+when the Ask AI pane is closed.
+Typing in an Ask AI text field keeps its normal text input. In an existing-card
+editor, Escape returns to detail or the originating preview only if the draft
+is unchanged. If it has changes, a visible reminder keeps the draft open;
+Ctrl+S saves it and returns after storage confirms success. New-card forms still
+require their explicit Close or Save controls.
 
 ## Card detail layout
 

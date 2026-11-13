@@ -77,6 +77,10 @@ point count. Related multi-point answers can stay grouped and retain partial
 grading. Images must use the original card's collection references; proposals
 cannot invent attachments or omit the existing ones.
 
+For a selected replacement draft, Ctrl+Tab or Ctrl+Shift+Tab switches between its
+Markdown editor and rendered preview without changing its text or caret. These
+shortcuts stay within the active dialog and do not affect a modal above it.
+
 Only the named Replace action changes the collection. It creates fresh, due
 review items for every direction or cloze group of the new cards and deletes
 the original source note in one SQLite transaction with its outgoing sync

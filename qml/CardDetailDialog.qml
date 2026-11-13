@@ -112,7 +112,7 @@ Dialog {
     padding: width < 650 ? 14 : 24
     modal: true
     focus: true
-    closePolicy: chatOpen ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: chatOpen ? Popup.NoAutoClose : Popup.CloseOnPressOutside
     background: Rectangle { radius: 16; color: Theme.surface; border.color: Theme.ledgerRule }
     Overlay.modal: Rectangle { color: Theme.scrim }
 
@@ -128,11 +128,48 @@ Dialog {
         }
     }
 
+    function keyboardContext() {
+        return visible && ui.popupOwnsKeyboardFocus(detail) && !actionMenuOpen && !chatConfirmationOpen && !ui.historyBlockingModalOpen
+    }
+    readonly property bool writableTextFocus: {
+        const item = ui.activeFocusItem
+        return !!item && item.text !== undefined && item.cursorPosition !== undefined && item.readOnly !== true
+    }
+    function requestEdit() {
+        if (!card.id || app.busy || actionMenuOpen || chatConfirmationOpen) return
+        if (chatOpen && cardChat.busy) {
+            ui.showError("CARD_CHAT_BUSY", "A chat request is running. Wait for it or cancel it in Ask AI before editing this card.", "Card: " + cardId)
+            return
+        }
+        if (chatOpen && cardChat.dirty) {
+            ui.showError("CARD_CHAT_UNSAVED", "The chat has an unsaved reply. Retry saving it or explicitly discard it in Ask AI before editing this card.", "Card: " + cardId)
+            return
+        }
+        const id = cardId
+        ui.selectedCardId = id
+        close()
+        ui.openCardEditor(id)
+    }
+    Shortcut {
+        sequence: "E"
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: detail.keyboardContext() && !detail.writableTextFocus && !!detail.card.id && !app.busy
+        onActivated: detail.requestEdit()
+    }
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: detail.keyboardContext() && !detail.chatOpen
+        onActivated: detail.close()
+    }
+
     Shortcut {
         sequences: ["Ctrl+Tab", "Ctrl+Shift+Tab"]
         context: Qt.WindowShortcut
         autoRepeat: false
-        enabled: detail.visible && detail.activeFocus && !detail.actionMenuOpen && !detail.chatConfirmationOpen
+        enabled: detail.keyboardContext() && !detail.writableTextFocus
         onActivated: detail.activeSide = (detail.activeSide + 1) % sideTabs.count
     }
 
@@ -281,7 +318,8 @@ Dialog {
                             glyph: "edit"
                             primary: true
                             enabled: !!detail.card.id
-                            onClicked: { detail.close(); detail.ui.openCardEditor(detail.cardId) }
+                            hint: "Edit this card (E)"
+                            onClicked: detail.requestEdit()
                         }
                         AppButton {
                             text: "Ask AI"
