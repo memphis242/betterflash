@@ -10,6 +10,7 @@ Rectangle {
     property string action: ""
     property string code: ""
     property string details: ""
+    property bool showCopyAction: true
     readonly property var parsedMessage: /^([A-Z][A-Z0-9_]{1,80}):\s*([\s\S]*)$/.exec(message)
     readonly property string displayCode: code || (parsedMessage ? parsedMessage[1] : "")
     readonly property string plainMessage: parsedMessage ? parsedMessage[2] : message
@@ -18,6 +19,9 @@ Rectangle {
         ? plainMessage.slice(0, remedyStart + 1).trim() : plainMessage
     readonly property string displayAction: action || (remedyStart > 0 ? plainMessage.slice(remedyStart + 1).trim() : "")
     property bool expanded: false
+    readonly property string copyReport: [displayCode, displayMessage, displayAction,
+        expanded && details.length > 0 ? "Details:\n" + details : ""]
+        .filter(part => part.length > 0).join("\n\n")
     onMessageChanged: expanded = false
     onDetailsChanged: expanded = false
     visible: message.length > 0
@@ -80,11 +84,20 @@ Rectangle {
             cursorVisible: false
             Layout.preferredHeight: contentHeight
         }
-        AppButton {
-            font.pixelSize: block.textSize
-            text: block.expanded ? "Hide details" : "Show details"
-            visible: block.details.length > 0
-            onClicked: block.expanded = !block.expanded
+        Flow {
+            Layout.fillWidth: true
+            spacing: 8
+            AppButton {
+                font.pixelSize: block.textSize
+                text: block.expanded ? "Hide details" : "Show details"
+                visible: block.details.length > 0
+                onClicked: block.expanded = !block.expanded
+            }
+            ErrorCopyButton {
+                visible: block.showCopyAction
+                report: block.copyReport
+                width: Math.min(implicitWidth, parent.width)
+            }
         }
         TextEdit {
             id: detailsText

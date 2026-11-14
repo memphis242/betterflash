@@ -7,6 +7,10 @@ ColumnLayout {
     required property var voice
     property var ai: null
     property int tabIndex: 0
+    readonly property bool sttStatusError: !!voice.sttModelErrorDetail
+        || /^[A-Z][A-Z0-9_]{1,80}:/.test(voice.sttModelStatus)
+    readonly property bool ttsStatusError: voice.ttsProvider === "local"
+        && (!!voice.ttsModelErrorDetail || /^[A-Z][A-Z0-9_]{1,80}:/.test(voice.ttsStatus))
     onTabIndexChanged: clearSecretDraft()
     readonly property bool dialogOpen: helpDialog.visible || customSttTestsControl.dialogOpen || sttModelPath.dialogOpen
         || sttKeyEditor.dialogOpen || ttsKeyEditor.dialogOpen || sttModelPicker.dialogOpen || ttsModelPicker.dialogOpen
@@ -129,13 +133,13 @@ ColumnLayout {
                 ToolTip.text: "Automatic uses a Vulkan GPU when the desktop helper supports it and retries on CPU if GPU inference cannot run"
             }
             ModelStatus {
-                visible: sttProvider.currentIndex === 0 && !voice.sttModelErrorDetail
+                visible: sttProvider.currentIndex === 0 && !root.sttStatusError
                 Layout.fillWidth: true
                 text: voice.sttModelStatus
                 state: root.sttState
             }
             ErrorBlock {
-                visible: sttProvider.currentIndex === 0 && !!voice.sttModelErrorDetail
+                visible: sttProvider.currentIndex === 0 && root.sttStatusError
                 message: voice.sttModelStatus
                 details: voice.sttModelErrorDetail
                 textSize: 15
@@ -390,12 +394,13 @@ ColumnLayout {
                 }
             }
             ModelStatus {
+                visible: !root.ttsStatusError
                 Layout.fillWidth: true
                 text: voice.ttsStatus
                 state: root.ttsState
             }
             ErrorBlock {
-                visible: voice.ttsProvider === "local" && !!voice.ttsModelErrorDetail
+                visible: root.ttsStatusError
                 message: voice.ttsStatus
                 details: voice.ttsModelErrorDetail
                 textSize: 15

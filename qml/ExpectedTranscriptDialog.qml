@@ -120,13 +120,10 @@ Dialog {
             font.pixelSize: 12
             wrapMode: Text.Wrap
         }
-        Label {
-            visible: dialog.saveError.length > 0
+        ErrorBlock {
+            message: dialog.saveError
+            textSize: 12
             Layout.fillWidth: true
-            text: dialog.saveError
-            color: Theme.error
-            font.pixelSize: 12
-            wrapMode: Text.Wrap
         }
         RowLayout {
             Layout.fillWidth: true

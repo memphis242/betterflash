@@ -24,6 +24,9 @@ struct ProviderError {
     QString code;
     QString message;
     QString detail{};
+    int httpStatus=0;
+    QString providerCode{};
+    QString rejectedGeneration{};
 };
 
 class Summarizer final : public QObject {

@@ -241,7 +241,7 @@ Dialog {
             border.width: 2
             radius: 10
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(errorContents.implicitHeight + 24, Math.max(120, dialog.availableHeight * 0.4))
+            Layout.preferredHeight: Math.min(atomicError.implicitHeight + 24, Math.max(120, dialog.availableHeight * 0.4))
             activeFocusOnTab: true
             Accessible.role: Accessible.AlertMessage
             Accessible.name: (dialog.failure.message || "") + " " + (dialog.failure.action || "")
@@ -251,30 +251,15 @@ Dialog {
                 anchors.margins: 12
                 contentWidth: availableWidth
                 clip: true
-                ColumnLayout {
-                    id: errorContents
+                ErrorBlock {
+                    id: atomicError
+                    objectName: "atomicError"
                     width: errorScroll.availableWidth
-                    spacing: 8
-                    Label {
-                        text: dialog.failure.message || ""
-                        textFormat: Text.PlainText
-                        font.family: Theme.contentFont
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: Theme.error
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                    ErrorBlock {
-                        id: atomicError
-                        objectName: "atomicError"
-                        textSize: 17
-                        message: ""
-                        action: dialog.failure.action || ""
-                        visible: !!action || !!details
-                        details: (dialog.failure.code || "") + (dialog.failure.detail ? "\n\n" + dialog.failure.detail : "")
-                        Layout.fillWidth: true
-                    }
+                    textSize: 17
+                    code: dialog.failure.code || ""
+                    message: dialog.failure.message || ""
+                    action: dialog.failure.action || ""
+                    details: dialog.failure.detail || ""
                 }
             }
         }

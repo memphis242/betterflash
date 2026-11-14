@@ -6,6 +6,11 @@ Explicit action fields take precedence; legacy messages with a recognizable
 remedy sentence display that sentence separately. Provider response bodies must
 never be concatenated into the brief message.
 
+Each inline error provides **Copy error**. It copies the code, brief summary,
+and recommendation as one plain-text report. Expanded details are included;
+collapsed details remain excluded. The copy action shows success or an
+actionable clipboard failure while preserving text selection for manual copying.
+
 Model validation places failures before input/output examples. A failed API
 request has no transcript or answer to score: empty model output and normalized
 scoring are omitted. A returned transcript that differs from the expected phrase

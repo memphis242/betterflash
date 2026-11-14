@@ -33,7 +33,7 @@ public:
 signals:
     void changed();
 private:
-    bool validateContext();
+    bool validateContext(const QJsonArray &messages);
     void requestTurn();
     void receiveTurn(const QJsonObject &message);
     void correctToolCall(const QJsonObject &assistant, const QString &toolId, const QString &problem,

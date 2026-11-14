@@ -25,8 +25,12 @@ questions can be retried or discarded without deleting earlier messages.
 Deleting a chat requires an explicit confirmation.
 
 Provider HTTP failures retain their structured message, error code, and type in
-**Show details**, with the active API key redacted. Raw response bodies and
-provider-generated failed tool-call content are not displayed.
+**Show details**, with credentials redacted. Bounded raw response bodies and
+rejected tool-call content are available there for diagnosis. **Copy error**
+includes the brief message and recommendation, plus details when expanded.
+Provider-rejected tool generations (`HTTP 400`, `tool_use_failed`) use the same
+two-correction budget as malformed returned tool calls. Rejected generations
+remain untrusted data and cannot execute retrievals or writes.
 
 Each conversation retains its original card context. When the saved card's
 front, back, or kind changes, that conversation is marked out of date. Start

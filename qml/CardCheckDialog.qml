@@ -168,43 +168,14 @@ Dialog {
             ColumnLayout {
                 width: resultScroll.availableWidth
                 spacing: 14
-                Rectangle {
+                ErrorBlock {
                     visible: !!dialog.failure.message
                     Layout.fillWidth: true
-                    implicitHeight: checkErrorContent.implicitHeight + 24
-                    color: Theme.surfaceRaised
-                    border.color: Theme.error
-                    radius: 6
-                    ColumnLayout {
-                        id: checkErrorContent
-                        x: 12; y: 12; width: parent.width - 24
-                        spacing: 10
-                        Label {
-                            text: dialog.failure.message || ""
-                            textFormat: Text.PlainText
-                            color: Theme.error
-                            font.pixelSize: 18
-                            font.bold: true
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                            Accessible.role: Accessible.AlertMessage
-                        }
-                        Label {
-                            text: dialog.failure.action || ""
-                            textFormat: Text.PlainText
-                            color: Theme.ink
-                            font.pixelSize: 16
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                        ErrorBlock {
-                            Layout.fillWidth: true
-                            code: dialog.failure.code || ""
-                            message: code.length ? "Check details" : ""
-                            details: dialog.failure.detail || ""
-                            textSize: 14
-                        }
-                    }
+                    code: dialog.failure.code || ""
+                    message: dialog.failure.message || ""
+                    action: dialog.failure.action || ""
+                    details: dialog.failure.detail || ""
+                    textSize: 16
                 }
                 Rectangle {
                     visible: dialog.hasResult

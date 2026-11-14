@@ -520,18 +520,12 @@ Dialog {
                                 visible: !!detail.loadError.code
                                 Layout.fillWidth: true
                                 Layout.maximumHeight: implicitHeight
-                                Label {
-                                    text: (detail.loadError.code || "") + ": " + (detail.loadError.message || "")
-                                    textFormat: Text.PlainText
-                                    color: Theme.error
-                                    wrapMode: Text.Wrap
+                                ErrorBlock {
+                                    code: detail.loadError.code || ""
+                                    message: detail.loadError.message || ""
+                                    details: detail.loadError.detail || ""
                                     Layout.fillWidth: true
                                     Layout.minimumWidth: 0
-                                    maximumLineCount: 4
-                                    elide: Text.ElideRight
-                                    ToolTip.visible: timelineErrorHover.hovered
-                                    ToolTip.text: text
-                                    HoverHandler { id: timelineErrorHover }
                                 }
                                 AppButton { text: "Retry"; onClicked: detail.load(detail.nextOffset > 0) }
                             }

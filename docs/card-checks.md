@@ -107,11 +107,18 @@ The search loop allows at most three searches and a final answer. If a model
 requests an unknown tool, malformed call, or invalid query, the app can request
 up to two corrections without running those calls or using Tavily credits. The
 model may be asked to reconstruct its request when its tool-call envelope cannot
-be paired safely. If a remote web-enabled check returns a report that is not
+be paired safely. A provider rejection with HTTP 400 and `tool_use_failed` also
+uses this correction budget during a tool-enabled turn: the rejected generation
+is supplied as bounded, untrusted diagnostic data, never executed. Authentication,
+rate-limit, and unrelated request errors do not enter tool correction. If a
+remote web-enabled check returns a report that is not
 valid JSON, the app may make one additional model request to format that report
 using the existing evidence; it cannot start another search. These additional
 requests can incur model usage charges. Ask AI similarly permits up to six
-retrievals, two tool corrections, and a final answer. Network requests
+retrievals, two tool corrections, and a final answer. At the search or retrieval
+limit, OpenAI-compatible requests omit tool definitions and explicitly request
+the final answer using the existing evidence. Anthropic retains its native tool
+history and disables further tool use through its tool-choice control. Network requests
 have time and size limits, and evidence is bounded to the selected model's context budget. The
 result indicates shortened evidence. Only source IDs actually supplied to the
 model may be cited by structured findings. Source links come from Tavily, are

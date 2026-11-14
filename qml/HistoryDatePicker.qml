@@ -231,13 +231,9 @@ Popup {
                         }
                     }
                 }
-                Label {
-                    text: picker.validationError
-                    visible: text.length > 0
-                    color: Theme.error
-                    font.family: Theme.uiFont
-                    font.pixelSize: 12
-                    wrapMode: Text.Wrap
+                ErrorBlock {
+                    message: picker.validationError
+                    textSize: 12
                     Layout.fillWidth: true
                 }
             }

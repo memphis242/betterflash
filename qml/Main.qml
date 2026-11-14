@@ -1005,16 +1005,6 @@ ApplicationWindow {
         target: diagnostics
         function onChanged() { Qt.callLater(window.reportLoggingError) }
     }
-    function errorReport() {
-        const lines = []
-        if (globalErrorCode.trim().length > 0)
-            lines.push(globalErrorCode.trim())
-        if (globalErrorMessage.trim().length > 0)
-            lines.push(globalErrorMessage.trim())
-        if (globalErrorDetails.trim().length > 0)
-            lines.push("\nDetails:\n" + globalErrorDetails.trim())
-        return lines.join("\n")
-    }
     function historyActionAllowed(action) {
         if (typing || historyBlockingModalOpen || detailDialog.actionMenuOpen || app.busy || actionHistory.busy)
             return false
@@ -3052,10 +3042,8 @@ ApplicationWindow {
         objectName: "errorDialog"
         onClosed: Qt.callLater(window.reportLoggingError)
         title: "Action could not complete"
-        property string copyFeedback: ""
         height: Math.min(430, window.height - 2 * window.gutter)
         standardButtons: Dialog.Close
-        onOpened: copyFeedback = ""
         header: Item {
             implicitHeight: errorHeaderRow.implicitHeight + 16
             RowLayout {
@@ -3075,38 +3063,23 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                 }
-                Label {
-                    text: errorDialog.copyFeedback
-                    color: Theme.success
-                    font.pixelSize: 12
-                    visible: text.length > 0
-                }
-                AppButton {
+                ErrorCopyButton {
                     objectName: "copyError"
-                    text: "Copy"
-                    onClicked: {
-                        if (Native.Clipboard.copyText(window.errorReport())) {
-                            errorDialog.copyFeedback = "Copied"
-                            copyFeedbackTimer.restart()
-                        }
-                    }
+                    report: globalErrorBody.copyReport
+                    Layout.maximumWidth: errorHeaderRow.width
                 }
             }
-        }
-        Timer {
-            id: copyFeedbackTimer
-            interval: 1800
-            repeat: false
-            onTriggered: errorDialog.copyFeedback = ""
         }
         contentItem: ScrollView {
             clip: true
             contentWidth: availableWidth
             ErrorBlock {
+                id: globalErrorBody
                 width: parent.width
                 code: globalErrorCode
                 message: globalErrorMessage
                 details: globalErrorDetails
+                showCopyAction: false
             }
         }
     }

@@ -66,13 +66,10 @@ ColumnLayout {
         }
     }
 
-    Label {
-        visible: root.error.length > 0
-        text: root.error
-        color: Theme.error
-        wrapMode: Text.Wrap
+    ErrorBlock {
+        message: root.error
+        textSize: 14
         Layout.fillWidth: true
-        font.pixelSize: 14
     }
 
     function openPicker() {

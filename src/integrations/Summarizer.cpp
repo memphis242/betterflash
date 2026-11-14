@@ -783,9 +783,24 @@ void Summarizer::startCompletion(quint64 id) {
             details.prepend(QStringLiteral("HTTP status: %1\nNetwork error: %2 (%3)").arg(status).arg(networkDetail).arg(static_cast<int>(networkError)));
             details.append(QStringLiteral("HTTP response body:\n") + responseBody.left(16384)
                 + (truncated ? QStringLiteral("\n[Response body truncated at 16384 characters]") : QString()));
+            const QString providerCode = error.value(QStringLiteral("code")).toString().left(128);
+            QString rejectedGeneration;
+            if (status == 400 && providerCode == QStringLiteral("tool_use_failed")) {
+                const QJsonValue failedGeneration = error.value(QStringLiteral("failed_generation"));
+                if (failedGeneration.isString()) rejectedGeneration = failedGeneration.toString();
+                else if (failedGeneration.isObject())
+                    rejectedGeneration = QString::fromUtf8(QJsonDocument(failedGeneration.toObject()).toJson(QJsonDocument::Compact));
+                else if (failedGeneration.isArray())
+                    rejectedGeneration = QString::fromUtf8(QJsonDocument(failedGeneration.toArray()).toJson(QJsonDocument::Compact));
+                if (!credential.isEmpty()) rejectedGeneration.replace(credential, QStringLiteral("[redacted]"));
+                if (const auto *const log = DiagnosticLog::instance()) rejectedGeneration = log->redact(rejectedGeneration);
+                if (rejectedGeneration.size() > 4000)
+                    rejectedGeneration = rejectedGeneration.left(4000) + QStringLiteral("\n[Rejected generation truncated]");
+            }
             finishCompletion(id, std::unexpected(ProviderError{QStringLiteral("LLM_HTTP_%1").arg(status),
                 QStringLiteral("The language model endpoint returned HTTP %1. %2").arg(status).arg(fix),
-                DiagnosticLog::instance() ? DiagnosticLog::instance()->redact(details.join(QLatin1Char('\n'))) : details.join(QLatin1Char('\n'))})); return;
+                DiagnosticLog::instance() ? DiagnosticLog::instance()->redact(details.join(QLatin1Char('\n'))) : details.join(QLatin1Char('\n')),
+                status, providerCode, rejectedGeneration})); return;
         }
         QJsonParseError parseError{};
         const QJsonDocument document = QJsonDocument::fromJson(body, &parseError);

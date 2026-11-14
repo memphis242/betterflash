@@ -164,8 +164,13 @@ Dialog {
         RowLayout {
             visible: dialog.vocabularyChanged
             Layout.fillWidth: true
+            ErrorBlock {
+                message: dialog.liveDeck.tagVocabularyError || ""
+                Layout.fillWidth: true
+            }
             Label {
-                text: dialog.liveDeck.tagVocabularyError || "The deck vocabulary changed or the deck was deleted. Reload it before running or applying suggestions."
+                visible: !dialog.liveDeck.tagVocabularyError
+                text: "The deck vocabulary changed or the deck was deleted. Reload it before running or applying suggestions."
                 textFormat: Text.PlainText
                 color: Theme.warning
                 wrapMode: Text.Wrap

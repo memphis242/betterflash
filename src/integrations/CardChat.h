@@ -67,7 +67,8 @@ private:
     void startTurn();
     void requestTurn();
     void receiveTurn(const QJsonObject &message);
-    void correctToolCall(const QJsonObject &assistant, const QString &toolId, const QString &problem, bool preserveNativeCall);
+    void correctToolCall(const QJsonObject &assistant, const QString &toolId, const QString &problem, bool preserveNativeCall,
+                         const QString &providerDetail = {});
     void runTool(const QString &name, const QJsonObject &arguments,
                  const QJsonObject &assistant, const QString &toolId);
     void addCardEvidence(const QVariantList &cards, bool readCard,

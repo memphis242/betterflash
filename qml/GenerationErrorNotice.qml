@@ -89,11 +89,21 @@ Rectangle {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
-        AppButton {
-            implicitHeight: 30
-            font.pixelSize: 13
-            text: notice.expanded ? "Hide details" : "Show details"
-            onClicked: notice.expanded = !notice.expanded
+        Flow {
+            Layout.fillWidth: true
+            spacing: 8
+            AppButton {
+                implicitHeight: 30
+                font.pixelSize: 13
+                text: notice.expanded ? "Hide details" : "Show details"
+                onClicked: notice.expanded = !notice.expanded
+            }
+            ErrorCopyButton {
+                width: Math.min(implicitWidth, parent.width)
+                report: [notice.errorCode, notice.summary, notice.reason, notice.action,
+                    notice.expanded && notice.details ? "Details:\n" + notice.details : ""]
+                    .filter(part => part.length > 0).join("\n\n")
+            }
         }
         ScrollView {
             id: detailViewport
@@ -109,6 +119,7 @@ Rectangle {
                 message: (notice.errorCode ? "Error code: " + notice.errorCode : "No error code was supplied.")
                     + (notice.details ? "\n\n" + notice.details : "")
                 details: ""
+                showCopyAction: false
                 textSize: 13
             }
         }

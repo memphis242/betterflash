@@ -31,15 +31,10 @@ ColumnLayout {
             MenuItem { text: "Select all"; onTriggered: view.selectAll() }
         }
     }
-    Label {
-        textFormat: Text.PlainText
+    ErrorBlock {
         id: failure
-        visible: text.length > 0
-        text: view.renderError
-        color: Theme.error
-        font.family: Theme.uiFont
-        font.pixelSize: 12
-        wrapMode: Text.Wrap
+        message: view.renderError
+        textSize: 12
         Layout.fillWidth: true
     }
 }

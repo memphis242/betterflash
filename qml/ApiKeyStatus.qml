@@ -131,22 +131,33 @@ ColumnLayout {
     Rectangle {
         visible: control.attentionText().length > 0
         Layout.fillWidth: true
-        implicitHeight: attentionLabel.implicitHeight + 20
+        implicitHeight: attentionContent.implicitHeight + 20
         color: control.storageState === "session-only"
             ? Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.14)
             : Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.14)
         border.color: control.storageState === "session-only" ? Theme.warning : Theme.error
         border.width: 1
         radius: 7
-        Label {
-            id: attentionLabel
-            anchors.fill: parent
+        ColumnLayout {
+            id: attentionContent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
             anchors.margins: 10
-            text: control.attentionText()
-            color: Theme.ink
-            font.family: Theme.contentFont
-            font.pixelSize: 14
-            wrapMode: Text.Wrap
+            spacing: 8
+            Label {
+                id: attentionLabel
+                text: control.attentionText()
+                color: Theme.ink
+                font.family: Theme.contentFont
+                font.pixelSize: 14
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            ErrorCopyButton {
+                report: control.attentionText()
+                Layout.maximumWidth: attentionContent.width
+            }
         }
     }
 
