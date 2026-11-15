@@ -1,5 +1,11 @@
 # GUI follow-ups
 
+## Deck creation keyboard controls
+
+- Keep Enter moving to the next field in the deck creation dialog.
+- Make Ctrl+Enter submit and save the deck when at least a nonblank name is
+  provided, subject to the dialog's normal validation.
+
 ## Deck deletion confirmation
 
 - Make the **Delete deck** button red in the confirmation dialog to clearly
