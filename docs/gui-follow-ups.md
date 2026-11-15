@@ -1,5 +1,10 @@
 # GUI follow-ups
 
+## Deck deletion confirmation
+
+- Make the **Delete deck** button red in the confirmation dialog to clearly
+  identify the destructive action.
+
 ## Ask AI message presentation
 
 Deferred for later:
