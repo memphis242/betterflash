@@ -1,5 +1,14 @@
 # GUI follow-ups
 
+## Ask AI message presentation
+
+Deferred for later:
+
+- Render Markdown in chat messages for readable prose, lists, and code blocks.
+- Present tool calls and sources as compact badges with brief summaries.
+- Show a summary tooltip on hover and open a detail window when a badge is
+  clicked.
+
 ## Typography
 
 Evaluate where a monospace face helps and where a proportional face would make
