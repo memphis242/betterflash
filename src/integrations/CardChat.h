@@ -20,6 +20,7 @@ class CardChat final : public QObject {
     Q_PROPERTY(QString threadId READ threadId NOTIFY changed)
     Q_PROPERTY(QVariantList threads READ threads NOTIFY changed)
     Q_PROPERTY(QVariantList messages READ messages NOTIFY changed)
+    Q_PROPERTY(QVariantList toolActivity READ toolActivity NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QVariantMap errorInfo READ errorInfo NOTIFY changed)
@@ -35,6 +36,7 @@ public:
     QString threadId() const { return m_threadId; }
     QVariantList threads() const;
     QVariantList messages() const;
+    QVariantList toolActivity() const;
     bool busy() const { return m_busy; }
     QString status() const { return m_status; }
     QVariantMap errorInfo() const { return m_errorInfo; }
@@ -42,7 +44,7 @@ public:
     QString contextNotice() const { return m_contextNotice; }
     bool dirty() const { return m_dirty; }
     bool pendingReply() const;
-    Q_INVOKABLE bool openFor(const QString &cardId);
+    Q_INVOKABLE bool openFor(const QString &cardId, const QVariantList &protectedDraftThreadIds);
     Q_INVOKABLE void close();
     Q_INVOKABLE bool newThread();
     Q_INVOKABLE bool selectThread(const QString &id);
@@ -86,6 +88,8 @@ private:
     QJsonArray m_durableThreads{};
     QJsonArray m_turnMessages{};
     QVariantList m_turnSources{};
+    QVariantList m_turnToolCalls{};
+    QVariantMap m_activeToolCall{};
     QSet<QString> m_usedSourceIds{};
     QString m_cardId{};
     QString m_threadId{};

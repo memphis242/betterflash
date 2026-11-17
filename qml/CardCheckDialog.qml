@@ -14,6 +14,12 @@ Dialog {
     property bool searchAllowed: false
     property bool savedCard: false
     property string checkedCardId: ""
+    property string resultContextKey: ""
+    signal reportAvailable(string key, string mode, string front, string back, string kind, var report)
+    onReportChanged: {
+        if (visible && report.verdict)
+            reportAvailable(resultContextKey, checkMode, checkedFront, checkedBack, checkedKind, report)
+    }
     readonly property var report: cardChecker.result
     property var contextFailure: ({})
     readonly property var failure: contextFailure.message ? contextFailure : cardChecker.errorInfo
@@ -35,7 +41,7 @@ Dialog {
         border.color: Theme.rule
     }
     Overlay.modal: Rectangle { color: Theme.scrim }
-    function openFor(mode, front, back, kind, saved = false, cardId = "") {
+    function openFor(mode, front, back, kind, saved = false, cardId = "", contextKey = "") {
         cardChecker.clear()
         checkMode = mode
         checkedFront = front
@@ -43,6 +49,7 @@ Dialog {
         checkedKind = kind
         savedCard = saved
         checkedCardId = cardId
+        resultContextKey = contextKey
         open()
         runCheck()
     }

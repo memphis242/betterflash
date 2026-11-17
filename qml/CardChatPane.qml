@@ -13,8 +13,28 @@ Item {
     property bool restoringDraft: false
     property int previousMessageCount: 0
     property bool followTranscript: true
+    property bool updatingTranscript: false
+    property int transcriptRevision: 0
+    property var transcriptMessages: []
+    property string transcriptSnapshot: ""
     readonly property var failure: cardChat.errorInfo
-    readonly property bool modalDialogOpen: confirmDialog.visible
+    readonly property bool modalDialogOpen: confirmDialog.visible || evidenceDialog.visible
+    readonly property string chatWarning: "The model receives this card and your messages. It can retrieve related saved cards and, if enabled, search the web. Chats stay on this device. LLMs can be wrong and miss recent changes."
+    onVisibleChanged: if (!visible && evidenceDialog) evidenceDialog.close()
+
+    function protectedDraftThreadIds(cardId) {
+        const prefix = cardId + ":"
+        const protectedIds = []
+        Object.keys(drafts).forEach(key => {
+            if (key.startsWith(prefix) && String(drafts[key] || "").trim())
+                protectedIds.push(key.slice(prefix.length))
+        })
+        if (draftKey.startsWith(prefix) && composer.text.trim()) {
+            const currentId = draftKey.slice(prefix.length)
+            if (protectedIds.indexOf(currentId) < 0) protectedIds.push(currentId)
+        }
+        return protectedIds
+    }
 
     function focusComposer() {
         if (!composer.readOnly) composer.forceActiveFocus()
@@ -36,9 +56,12 @@ Item {
         Qt.callLater(scrollToBottom)
     }
     function scrollToBottom() {
-        if (!followTranscript) return
-        const view = transcript.contentItem
-        view.contentY = Math.max(0, view.contentHeight - view.height)
+        if (!followTranscript || transcript.moving || transcript.dragging || transcript.flicking || transcriptBar.pressed) return
+        transcript.positionViewAtEnd()
+    }
+    function cancelDeferredTranscriptPosition() {
+        ++transcriptRevision
+        updatingTranscript = false
     }
     function sendQuestion() {
         const question = composer.text
@@ -50,11 +73,39 @@ Item {
         }
     }
     function refreshChatState() {
+        const previousKey = draftKey
         synchronizeDraft()
-        const count = cardChat.messages.length
-        if (count !== previousMessageCount) {
-            previousMessageCount = count
-            Qt.callLater(scrollToBottom)
+        const rows = cardChat.messages
+        const snapshot = JSON.stringify(rows)
+        if (snapshot !== transcriptSnapshot || previousKey !== draftKey) {
+            transcript.forceLayout()
+            const anchorIndex = transcript.indexAt(1, transcript.contentY + 1)
+            const anchorItem = anchorIndex >= 0 ? transcript.itemAtIndex(anchorIndex) : null
+            const anchorOffset = anchorItem ? transcript.contentY - anchorItem.y : 0
+            const shouldFollow = followTranscript
+            const revision = ++transcriptRevision
+            const threadKey = draftKey
+            updatingTranscript = true
+            transcriptSnapshot = snapshot
+            transcriptMessages = rows
+            previousMessageCount = rows.length
+            Qt.callLater(function() {
+                if (revision !== pane.transcriptRevision || threadKey !== pane.draftKey
+                    || snapshot !== pane.transcriptSnapshot) return
+                if (transcript.moving || transcript.dragging || transcript.flicking || transcriptBar.pressed) {
+                    pane.updatingTranscript = false
+                    return
+                }
+                transcript.forceLayout()
+                if (shouldFollow) pane.scrollToBottom()
+                else if (anchorIndex >= 0 && anchorIndex < transcript.count) {
+                    transcript.positionViewAtIndex(anchorIndex, ListView.Beginning)
+                    transcript.forceLayout()
+                    const item = transcript.itemAtIndex(anchorIndex)
+                    if (item) transcript.contentY = item.y + anchorOffset
+                }
+                pane.updatingTranscript = false
+            })
         }
         const index = threadPicker.indexOfValue(cardChat.threadId)
         if (!threadPicker.popup.visible && threadPicker.currentIndex !== index)
@@ -118,7 +169,8 @@ Item {
             }
         }
         Label {
-            text: "The model receives this card and your messages. It can retrieve related saved cards and, if enabled, search the web. Chats stay on this device. LLMs can be wrong and miss recent changes."
+            text: pane.chatWarning
+            textFormat: Text.PlainText
             color: Theme.inkMuted
             font.pixelSize: 12
             wrapMode: Text.Wrap
@@ -142,6 +194,20 @@ Item {
             Accessible.name: text
         }
         ProgressBar { visible: cardChat.busy; indeterminate: true; Layout.fillWidth: true }
+        Flow {
+            visible: cardChat.busy
+            Layout.fillWidth: true
+            spacing: 6
+            Repeater {
+                model: cardChat.toolActivity || []
+                delegate: ChatEvidenceBadge {
+                    required property var modelData
+                    evidence: modelData
+                    maximumWidth: Math.max(0, pane.width)
+                    onClicked: evidenceDialog.openFor(evidence, false)
+                }
+            }
+        }
         Label {
             visible: cardChat.stale
             text: "This card changed since this chat began. Start a new chat to use its current content."
@@ -176,17 +242,49 @@ Item {
                 }
             }
         }
-        ScrollView {
+        ListView {
             id: transcript
             objectName: "cardChatTranscript"
             clip: true
-            contentWidth: availableWidth
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 0
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                width: transcript.availableWidth
+            model: pane.transcriptMessages
+            reuseItems: true
+            cacheBuffer: 0
+            spacing: 12
+            boundsBehavior: Flickable.StopAtBounds
+            readonly property real messageWidth: Math.max(0, width - transcriptBar.width - 4)
+            function updateFollowPosition() {
+                if (!pane.updatingTranscript)
+                    pane.followTranscript = contentY + height >= originY + contentHeight - 32
+            }
+            onContentYChanged: {
+                if (moving || dragging || flicking || transcriptBar.pressed) {
+                    if (pane.updatingTranscript) pane.cancelDeferredTranscriptPosition()
+                    updateFollowPosition()
+                }
+            }
+            onMovementStarted: {
+                pane.cancelDeferredTranscriptPosition()
+                pane.followTranscript = false
+            }
+            onMovementEnded: updateFollowPosition()
+            onContentHeightChanged: Qt.callLater(pane.scrollToBottom)
+            onHeightChanged: Qt.callLater(pane.scrollToBottom)
+            ScrollBar.vertical: ScrollBar {
+                id: transcriptBar
+                policy: ScrollBar.AsNeeded
+                onPressedChanged: {
+                    if (pressed) {
+                        pane.cancelDeferredTranscriptPosition()
+                        pane.followTranscript = false
+                    }
+                    else transcript.updateFollowPosition()
+                }
+            }
+            header: ColumnLayout {
+                width: transcript.messageWidth
                 spacing: 12
                 Label {
                     visible: !cardChat.messages.length && !pane.failure.message
@@ -203,78 +301,57 @@ Item {
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
-                Repeater {
-                    model: cardChat.messages
-                    delegate: ColumnLayout {
-                        id: entry
-                        required property var modelData
-                        required property int index
-                        Layout.fillWidth: true
-                        spacing: 7
-                        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
-                        Label {
-                            text: entry.modelData.role === "user" ? "You" : "Assistant"
-                            color: Theme.ink
-                            font.bold: true
-                            Layout.fillWidth: true
-                        }
-                        TextEdit {
-                            text: entry.modelData.content || ""
-                            textFormat: TextEdit.PlainText
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.Wrap
-                            color: Theme.ink
-                            font.family: Theme.contentFont
-                            font.pixelSize: 15
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Math.max(contentHeight, 20)
-                        }
-                        Repeater {
-                            model: entry.modelData.sources || []
-                            delegate: Item {
-                                id: source
-                                required property var modelData
-                                readonly property string url: modelData.url || ""
-                                readonly property bool external: /^https?:\/\//i.test(url)
-                                Layout.fillWidth: true
-                                implicitHeight: external ? sourceButton.implicitHeight : sourceLabel.implicitHeight
-                                AppButton {
-                                    id: sourceButton
-                                    visible: source.external
-                                    width: parent.width
-                                    text: (source.modelData.id || "") + ": " + (source.modelData.title || "Source")
-                                    hint: source.url
-                                    Accessible.description: source.url
-                                    onClicked: Qt.openUrlExternally(source.url)
-                                }
-                                TextEdit {
-                                    id: sourceLabel
-                                    visible: !source.external
-                                    width: parent.width
-                                    text: (source.modelData.id || "") + ": " + (source.modelData.title || "Saved card")
-                                        + (source.modelData.cardId ? " (" + source.modelData.cardId + ")" : "")
-                                    textFormat: TextEdit.PlainText
-                                    readOnly: true
-                                    selectByMouse: true
-                                    color: Theme.inkMuted
-                                    font.family: Theme.uiFont
-                                    font.pixelSize: 13
-                                    wrapMode: TextEdit.Wrap
-                                    ToolTip.visible: sourceHover.hovered
-                                    ToolTip.text: "Retrieved saved-card source"
-                                    HoverHandler { id: sourceHover }
-                                }
-                            }
-                        }
+            }
+            delegate: ColumnLayout {
+                id: entry
+                required property var modelData
+                required property int index
+                property bool pooled: false
+                width: transcript.messageWidth
+                spacing: 7
+                ListView.onPooled: pooled = true
+                ListView.onReused: pooled = false
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
+                Label {
+                    text: entry.modelData.role === "user" ? "You" : "Assistant"
+                    color: Theme.ink
+                    font.bold: true
+                    Layout.fillWidth: true
+                }
+                Loader {
+                    active: !entry.pooled
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: item ? item.implicitHeight : 20
+                    sourceComponent: MarkdownPane {
+                        markdown: entry.modelData.content || ""
+                        baseFontSize: 15
+                        selectable: true
+                        mediaRoot: ""
+                        onImplicitHeightChanged: Qt.callLater(pane.scrollToBottom)
                     }
                 }
-            }
-            Connections {
-                target: transcript.contentItem
-                function onContentYChanged() {
-                    const view = transcript.contentItem
-                    pane.followTranscript = view.contentY + view.height >= view.contentHeight - 32
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Repeater {
+                        model: entry.modelData.toolCalls || []
+                        delegate: ChatEvidenceBadge {
+                            required property var modelData
+                            evidence: modelData
+                            maximumWidth: transcript.messageWidth
+                            onClicked: evidenceDialog.openFor(evidence, false)
+                        }
+                    }
+                    Repeater {
+                        model: entry.modelData.sources || []
+                        delegate: ChatEvidenceBadge {
+                            required property var modelData
+                            evidence: modelData
+                            source: true
+                            maximumWidth: transcript.messageWidth
+                            onClicked: evidenceDialog.openFor(evidence, true)
+                        }
+                    }
                 }
             }
         }
@@ -331,6 +408,7 @@ Item {
             clip: true
             TextArea {
                 id: composer
+                ContextMenu.menu: TextEditingMenu { editor: composer }
                 objectName: "cardChatComposer"
                 width: composerViewport.availableWidth
                 height: Math.max(composerViewport.availableHeight, implicitHeight)
@@ -363,6 +441,14 @@ Item {
                 }
             }
         }
+        Label {
+            text: pane.chatWarning
+            textFormat: Text.PlainText
+            color: Theme.inkMuted
+            font.pixelSize: 12
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+        }
         RowLayout {
             Layout.fillWidth: true
             Label {
@@ -389,6 +475,10 @@ Item {
                 onClicked: pane.sendQuestion()
             }
         }
+    }
+    ChatEvidenceDialog {
+        id: evidenceDialog
+        ui: pane.ui
     }
     Dialog {
         id: confirmDialog

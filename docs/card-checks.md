@@ -144,3 +144,20 @@ References:
 Automated tests are paused during visual refinement. Compilation and code
 review do not verify live model or Tavily behavior. A real check with a
 configured model and search key is still required for manual acceptance.
+
+## Findings in the card editor
+
+Completed checks retain their report snapshots in the card editor for the current
+session, including successful per-card results from a deck check. Correctness and
+completeness are shown independently. A bounded panel keeps claims, explanations,
+suggested adjustments and source references visible while editing. Wider windows
+place it beside the source/preview; narrow windows stack it below.
+
+Editing front/back text or card kind marks the report as referring to earlier
+content. A new successful check replaces that mode's result; a failed attempt
+keeps the previous report available. Dismissing a report hides that mode's panel
+without changing content or follow-up tags. The session retains at most 48
+individual card/draft contexts and displays a notice when older entries are
+released. Findings from the latest deck check remain available separately until
+a new deck check starts, even after closing its result dialog. Reports do not
+automatically mark a claim resolved or certify an edit as correct.

@@ -109,6 +109,12 @@ QVariantList CardChat::threads() const {
     return result;
 }
 QVariantList CardChat::messages() const { return currentThread().value(QStringLiteral("messages")).toArray().toVariantList(); }
+QVariantList CardChat::toolActivity() const {
+    if (!m_busy) return {};
+    QVariantList activity = m_turnToolCalls;
+    if (!m_activeToolCall.isEmpty()) activity.append(m_activeToolCall);
+    return activity;
+}
 QVariantMap CardChat::savedCard(const QString &id) const {
     for (const QVariant &value : m_app->cards()) {
         const QVariantMap card = value.toMap();
@@ -149,7 +155,7 @@ void CardChat::fail(const QString &code, const QString &summary, const QString &
     ++m_generation;
     if (m_retrievalCanceled) m_retrievalCanceled->store(true);
     if (m_job) { m_provider->cancelCompletion(m_job); m_job = 0; }
-    m_search->cancel();
+    if (hadActiveRequest) m_search->cancel();
     m_busy = false; m_status.clear();
     QString fullDetail = detail;
     if (hadActiveRequest && !m_lastToolDiagnostic.isEmpty() && !fullDetail.contains(m_lastToolDiagnostic))
@@ -177,21 +183,39 @@ bool CardChat::commitThreads(const QJsonArray &threads) {
     m_threads = threads; m_durableThreads = threads; m_durableThreadId = m_threadId; m_dirty = false; m_errorInfo.clear(); emit changed();
     return true;
 }
-bool CardChat::openFor(const QString &id) {
-    if (id == m_cardId && !m_cardId.isEmpty()) return true;
-    if (m_dirty) { fail(QStringLiteral("CARD_CHAT_UNSAVED"), QStringLiteral("The current chat has unsaved changes."), QStringLiteral("Retry saving or explicitly discard unsaved changes before switching cards.")); return false; }
+bool CardChat::openFor(const QString &id, const QVariantList &protectedDraftThreadIds) {
+    if (m_dirty) {
+        if (id == m_cardId && !m_cardId.isEmpty()) return true;
+        fail(QStringLiteral("CARD_CHAT_UNSAVED"), QStringLiteral("The current chat has unsaved changes."), QStringLiteral("Retry saving or explicitly discard unsaved changes before switching cards.")); return false;
+    }
     const QVariantMap card = savedCard(id);
     if (card.isEmpty() || !card.value(QStringLiteral("loadError")).toMap().isEmpty()) {
         fail(QStringLiteral("CARD_CHAT_CARD"), QStringLiteral("The selected card is unavailable or needs repair."), QStringLiteral("Refresh or repair the card, then open its chat.")); return false;
     }
-    const auto loaded = m_store->load(id);
-    if (!loaded) {
-        fail(QStringLiteral("CARD_CHAT_STORAGE"), QStringLiteral("This card's chats could not be loaded."), QStringLiteral("Check the chat storage file before trying again; it was left unchanged."), loaded.error()); return false;
+    if (id != m_cardId || m_cardId.isEmpty()) {
+        const auto loaded = m_store->load(id);
+        if (!loaded) {
+            fail(QStringLiteral("CARD_CHAT_STORAGE"), QStringLiteral("This card's chats could not be loaded."), QStringLiteral("Check the chat storage file before trying again; it was left unchanged."), loaded.error()); return false;
+        }
+        cancel(); m_cardId = id; m_threads = *loaded; m_durableThreads = *loaded;
+    } else {
+        cancel();
     }
-    cancel(); m_cardId = id; m_threads = *loaded; m_durableThreads = *loaded; m_threadId.clear();
-    if (!m_threads.isEmpty()) m_threadId = m_threads.last().toObject().value(QStringLiteral("id")).toString();
+    QSet<QString> protectedIds;
+    for (const QVariant &value : protectedDraftThreadIds)
+        if (value.metaType().id() == QMetaType::QString && betterflash::model::validUuid(value.toString())) protectedIds.insert(value.toString());
+    const QJsonObject currentContext = snapshot(card);
+    m_threadId.clear();
+    for (qsizetype index = m_threads.size(); index > 0; --index) {
+        const QJsonObject thread = m_threads.at(index - 1).toObject();
+        const QString threadId = thread.value(QStringLiteral("id")).toString();
+        if (thread.value(QStringLiteral("messages")).toArray().isEmpty()
+            && thread.value(QStringLiteral("context")).toObject() == currentContext && !protectedIds.contains(threadId)) {
+            m_threadId = threadId; break;
+        }
+    }
     m_durableThreadId = m_threadId; m_contextNotice.clear(); m_errorInfo.clear(); emit changed();
-    if (m_threads.isEmpty()) (void)newThread();
+    if (m_threadId.isEmpty()) (void)newThread();
     return true;
 }
 void CardChat::close() { cancel(); }
@@ -254,7 +278,7 @@ void CardChat::cancel() {
     ++m_generation;
     if (m_retrievalCanceled) m_retrievalCanceled->store(true);
     if (m_job) { m_provider->cancelCompletion(m_job); m_job = 0; }
-    m_search->cancel();
+    if (m_busy) m_search->cancel();
     if (m_busy) { m_busy = false; m_status = QStringLiteral("Chat request canceled. The question is available to retry or remove."); emit changed(); }
 }
 bool CardChat::discardPending() {
@@ -374,7 +398,8 @@ void CardChat::startTurn() {
         first -= 2; selected = candidate;
     }
     m_contextNotice = first > 0 ? QStringLiteral("Earlier messages were omitted from this model request to fit its context; they remain in the chat.") : QString();
-    m_turnMessages = selected; m_turnSources.clear(); m_turnCount = 0; m_toolCount = 0; m_webCount = 0; m_sourceSequence = 0;
+    m_turnMessages = selected; m_turnSources.clear(); m_turnToolCalls.clear(); m_activeToolCall.clear();
+    m_turnCount = 0; m_toolCount = 0; m_webCount = 0; m_sourceSequence = 0;
     m_usedSourceIds.clear();
     for (const QJsonValue &entry : history) {
         const QJsonArray sources = entry.toObject().value(QStringLiteral("sources")).toArray();
@@ -599,6 +624,15 @@ void CardChat::runTool(const QString &name, const QJsonObject &arguments,
         fail(QStringLiteral("CARD_CHAT_CONTEXT"), QStringLiteral("There is not enough context for a retrieval result."),
              QStringLiteral("Start a new chat, shorten the card or question, or choose a larger model. No additional search was made.")); return;
     }
+    const auto *const log = DiagnosticLog::instance();
+    const QString safeInput = log ? log->redact(raw.toString().trimmed()) : QStringLiteral("[Not retained]");
+    const QString summary = web ? QStringLiteral("Web search")
+        : readCard ? QStringLiteral("Read saved card") : QStringLiteral("Search saved cards");
+    QString detail = readCard ? QStringLiteral("Card ID: ") + safeInput : QStringLiteral("Query: ") + safeInput;
+    if (readCard && focus.isString() && !focus.toString().trimmed().isEmpty())
+        detail += QStringLiteral("\nPassage query: ") + (log ? log->redact(focus.toString().trimmed()) : QStringLiteral("[Not retained]"));
+    m_activeToolCall = {{QStringLiteral("name"), name}, {QStringLiteral("summary"), summary},
+                        {QStringLiteral("details"), detail.left(1024)}, {QStringLiteral("status"), QStringLiteral("running")}};
     ++m_toolCount;
     if (web) {
         ++m_webCount; m_status = QStringLiteral("Searching the web (%1 of %2)...").arg(m_webCount).arg(maxWebSearches);
@@ -753,6 +787,14 @@ void CardChat::addEvidence(const QJsonObject &assistant, const QString &toolId,
         fail(QStringLiteral("CARD_CHAT_CONTEXT"), QStringLiteral("The retrieved evidence does not fit the selected model."),
              QStringLiteral("Start a new chat or choose a model with a larger context.")); return;
     }
+    Q_ASSERT(!m_activeToolCall.isEmpty());
+    m_activeToolCall.insert(QStringLiteral("resultCount"), static_cast<int>(evidence.size()));
+    m_activeToolCall.insert(QStringLiteral("status"), QStringLiteral("complete"));
+    m_activeToolCall.insert(QStringLiteral("details"), m_activeToolCall.value(QStringLiteral("details")).toString()
+        + QStringLiteral("\nSources supplied: %1").arg(evidence.size())
+        + (truncated ? QStringLiteral("\nSome evidence was shortened.") : QString()));
+    m_turnToolCalls.append(m_activeToolCall);
+    m_activeToolCall.clear();
     if (truncated) {
         const QString note = QStringLiteral("Some retrieval evidence was shortened to fit the model's context.");
         if (!m_contextNotice.contains(note)) m_contextNotice += (m_contextNotice.isEmpty() ? QString() : QStringLiteral(" ")) + note;
@@ -765,6 +807,7 @@ void CardChat::finish(const QString &answer) {
     QJsonObject thread = currentThread(); QJsonArray history = thread.value(QStringLiteral("messages")).toArray();
     QJsonObject reply = message(assistantRole, answer);
     if (!m_turnSources.isEmpty()) reply.insert(QStringLiteral("sources"), QJsonArray::fromVariantList(m_turnSources));
+    if (!m_turnToolCalls.isEmpty()) reply.insert(QStringLiteral("toolCalls"), QJsonArray::fromVariantList(m_turnToolCalls));
     history.append(reply); thread.insert(QStringLiteral("messages"), history); thread.insert(QStringLiteral("updatedAt"), now());
     QJsonArray updated = m_threads; updated[threadIndex(m_threadId)] = thread;
     m_busy = false; m_status.clear();

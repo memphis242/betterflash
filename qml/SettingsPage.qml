@@ -7,7 +7,8 @@ Item {
     id: settingsPage
     required property var ui
     readonly property bool modalDialogOpen: voiceSettings.dialogOpen || aiKeyEditor.dialogOpen || aiModelPicker.dialogOpen
-        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen || webSearchSettings.dialogOpen || syncNoticeDialog.visible
+        || syncKeyStatus.dialogOpen || searchSettings.dialogOpen || webSearchSettings.dialogOpen || syncNoticeDialog.visible || typographyComparison.visible
+    TypographyComparisonDialog { id: typographyComparison; ui: settingsPage.ui }
     component SettingsButton: AppButton { font.pixelSize: 16 }
     component SettingsCombo: AppComboBox { font.pixelSize: 17 }
     component SettingsSwitch: AppSwitch { font.pixelSize: 16 }
@@ -339,6 +340,11 @@ Item {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                             font.pixelSize: 16
+                        }
+                        SettingsButton {
+                            text: "Compare reading typefaces"
+                            hint: "Compare proportional and monospace prose while keeping code distinct."
+                            onClicked: typographyComparison.open()
                         }
                         SettingsSwitch {
                             objectName: "showUndoRedo"

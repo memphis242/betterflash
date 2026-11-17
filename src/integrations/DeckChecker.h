@@ -36,6 +36,7 @@ public:
     Q_INVOKABLE void clear();
 signals:
     void changed();
+    void cardChecked(const QVariantMap &snapshot, const QString &mode, const QVariantMap &report);
 private:
     void advance();
     void checkerChanged();

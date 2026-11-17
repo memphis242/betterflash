@@ -4,6 +4,8 @@ import QtQuick.Controls
 Menu {
     id: menu
 
+    popupType: Popup.Item
+    margins: 8
     delegate: AppMenuItem {}
     background: Item {
         implicitWidth: 340

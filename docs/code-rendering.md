@@ -1,5 +1,12 @@
 # Native Markdown code rendering
 
+The card source editor uses the shared text-editing context menu, with outlined
+icons and visible pointer/keyboard highlighting. Undo, redo, cut, copy, paste,
+delete-selection and select-all actions follow the editor's live selection,
+read-only state and native text undo history. Markdown preview selection uses
+the same menu treatment for Copy and Select all. Menus render inside the Qt
+Quick window without a separate platform popup.
+
 Fenced Markdown uses one text frame for each block, with a continuous background,
 inner padding and no rules or gaps between source lines. Consecutive fences remain
 separate, even when they name the same language. Backtick and tilde fences are

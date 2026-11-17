@@ -180,6 +180,10 @@ void DeckChecker::checkerChanged() {
     if (!failure.isEmpty() || stale || report.value(QStringLiteral("verdict")).toString() != QStringLiteral("no_issues"))
         appendResult(card, report, failure, stale);
     ++m_completed;
+    const quint64 generation = m_generation;
+    if (failure.isEmpty() && !stale && !report.isEmpty())
+        emit cardChecked(card, m_mode, report);
+    if (!m_busy || generation != m_generation) return;
     if (!failure.isEmpty()) {
         stopWithError(error(QStringLiteral("DECK_CHECK_CARD_FAILED"),
             QStringLiteral("The deck check stopped because a card could not be checked."),
@@ -188,7 +192,6 @@ void DeckChecker::checkerChanged() {
         return;
     }
     emit changed();
-    const quint64 generation = m_generation;
     QTimer::singleShot(0, this, [this, generation] { if (generation == m_generation) advance(); });
 }
 

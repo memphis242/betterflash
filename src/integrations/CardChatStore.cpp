@@ -23,12 +23,15 @@ constexpr qsizetype maximumCardContextCharacters = 64'000;
 constexpr int maximumThreads = 50;
 constexpr int maximumMessages = 200;
 constexpr int maximumSources = 15;
+constexpr int maximumToolCalls = 6;
 constexpr qsizetype maximumTitleCharacters = 160;
 constexpr qsizetype maximumDeckNameCharacters = 256;
 constexpr qsizetype maximumTagCharacters = 4096;
 constexpr qsizetype maximumSourceIdCharacters = 32;
 constexpr qsizetype maximumSourceTitleCharacters = 300;
 constexpr qsizetype maximumSourceUrlCharacters = 2048;
+constexpr qsizetype maximumToolSummaryCharacters = 80;
+constexpr qsizetype maximumToolDetailsCharacters = 1200;
 
 struct StoredSnapshot {
     QJsonArray threads{};
@@ -145,6 +148,30 @@ std::expected<void, QString> validateThreads(const QString &cardId, const QJsonA
             }
             expectedRole = role == QStringLiteral("user") ? QStringLiteral("assistant") : QStringLiteral("user");
             totalCharacters += content.size();
+            if (message.contains(QStringLiteral("toolCalls"))) {
+                const QJsonValue value = message.value(QStringLiteral("toolCalls"));
+                const QString location = QStringLiteral("Chat %1 message %2 tool calls")
+                    .arg(QString::number(threadIndex + 1), QString::number(messageIndex + 1));
+                if (role != QStringLiteral("assistant") || !value.isArray() || value.toArray().size() > maximumToolCalls)
+                    return std::unexpected(QStringLiteral("%1 must be a bounded assistant tool-call list.").arg(location));
+                for (const QJsonValue &callValue : value.toArray()) {
+                    if (!callValue.isObject()) return std::unexpected(QStringLiteral("%1 contains a non-object entry.").arg(location));
+                    const QJsonObject call = callValue.toObject();
+                    const QString name = call.value(QStringLiteral("name")).toString();
+                    const QJsonValue summary = call.value(QStringLiteral("summary"));
+                    const QJsonValue details = call.value(QStringLiteral("details"));
+                    const QJsonValue status = call.value(QStringLiteral("status"));
+                    const QJsonValue count = call.value(QStringLiteral("resultCount"));
+                    if ((name != QStringLiteral("web_search") && name != QStringLiteral("search_cards") && name != QStringLiteral("read_card"))
+                        || !summary.isString() || summary.toString().isEmpty() || summary.toString().size() > maximumToolSummaryCharacters
+                        || !details.isString() || details.toString().size() > maximumToolDetailsCharacters
+                        || status.toString() != QStringLiteral("complete")
+                        || !count.isDouble() || count.toDouble() != count.toInt(-1)
+                        || count.toInt(-1) < 0 || count.toInt(-1) > maximumSources)
+                        return std::unexpected(QStringLiteral("%1 contains an invalid read-only retrieval record.").arg(location));
+                    totalCharacters += name.size() + summary.toString().size() + details.toString().size();
+                }
+            }
             if (message.contains(QStringLiteral("sources"))) {
                 const auto sources = validateSources(message.value(QStringLiteral("sources")),
                     QStringLiteral("Chat %1 message %2 sources").arg(QString::number(threadIndex + 1), QString::number(messageIndex + 1)));

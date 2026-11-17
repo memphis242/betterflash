@@ -25,10 +25,10 @@ ColumnLayout {
         selectionForeground: Theme.onAccent
         baseFontSize: 20
         onContextMenuRequested: (x, y) => selectionMenu.popup(x, y)
-        Menu {
+        AppMenu {
             id: selectionMenu
-            MenuItem { text: "Copy"; enabled: view.hasSelection; onTriggered: view.copySelection() }
-            MenuItem { text: "Select all"; onTriggered: view.selectAll() }
+            AppMenuItem { text: "Copy"; glyph: "copy"; enabled: view.hasSelection; onTriggered: view.copySelection() }
+            AppMenuItem { text: "Select all"; glyph: "select-all"; onTriggered: view.selectAll() }
         }
     }
     ErrorBlock {

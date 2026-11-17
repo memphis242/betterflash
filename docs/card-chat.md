@@ -18,11 +18,23 @@ model receives the question, conversation history, and a snapshot of the
 card's text, kind, deck name, and tags. Attached images are not inspected.
 LLMs can be wrong, have knowledge cutoffs, and miss recent changes.
 
-Use **New chat** to start a separate conversation about the same card. The
-chat selector returns to previous conversations. Closing the pane or card
+Opening Ask AI starts with a new conversation instead of selecting a prior
+one. An empty conversation without an unsent draft can be reused when opening
+the pane again. A draft remains attached to its conversation and can be
+revisited with the chat selector. At the saved-chat limit, select or delete an
+existing chat before starting another. Use **New chat** to start a separate
+conversation about the same card. The chat selector returns to previous
+conversations. Closing the pane or card
 cancels an ongoing reply and retains the conversation. Failed or canceled
 questions can be retried or discarded without deleting earlier messages.
 Deleting a chat requires an explicit confirmation.
+
+Chat replies render Markdown. Retrieval calls and their sources appear as
+compact badges; hover for a summary or select a badge for details. Saved tool
+records include the read-only operation, a redacted and bounded query or card
+ID, and the number of sources supplied. They do not store tool response bodies
+and never replay operations. Conversations saved without these records remain
+readable.
 
 Provider HTTP failures retain their structured message, error code, and type in
 **Show details**, with credentials redacted. Bounded raw response bodies and
@@ -48,8 +60,9 @@ retrieved excerpts beyond the beginning of long cards. Only relevant snippets ar
 
 When **Settings > Web search** is enabled, the model can also request Tavily
 searches using the configured key. Web search is off by default. Each submitted
-question permits at most three web searches, six retrieval calls, and seven
-model turns. Tavily searches use the user's quota and may incur charges.
+question permits at most three web searches, six retrieval calls, seven normal
+model turns, and up to two bounded correction turns. Tavily searches use the
+user's quota and may incur charges.
 Search results are not a guarantee of accuracy. Source links open only when
 clicked. The chat does not fetch arbitrary URLs or local files.
 

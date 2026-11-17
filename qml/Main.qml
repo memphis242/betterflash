@@ -112,6 +112,59 @@ ApplicationWindow {
     property bool initializingDeckParent: false
     property string localCardError: ""
     property string editorExitHint: ""
+    property var retainedCheckReports: ({})
+    property var retainedDeckCheckRows: []
+    property string retainedDeckCheckMode: ""
+    readonly property var editorCheckReports: {
+        if (!cardDialog.visible) return ({})
+        const reports = {}
+        if (editingCardId) {
+            for (const row of retainedDeckCheckRows) {
+                if (row.cardId !== editingCardId || !row.report?.verdict) continue
+                const snapshot = row.snapshot || {}
+                reports[retainedDeckCheckMode] = {front: snapshot.front || "", back: snapshot.back || "", kind: snapshot.kind || "basic", report: row.report}
+            }
+        }
+        const retained = retainedCheckReports[editorCheckKey] || {}
+        for (const mode of Object.keys(retained)) {
+            if (retained[mode]) reports[mode] = retained[mode]
+            else delete reports[mode]
+        }
+        return reports
+    }
+    property string checkRetentionNotice: ""
+    readonly property string editorCheckKey: editingCardId ? "card:" + editingCardId : "draft:" + editorSession
+    function retainCheckReport(key, mode, front, back, kind, report) {
+        if (!key || !report || !report.verdict) return
+        if (key.startsWith("card:") && mode === retainedDeckCheckMode) {
+            const cardId = key.slice(5)
+            retainedDeckCheckRows = retainedDeckCheckRows.flatMap(row => {
+                if (row.cardId !== cardId) return [row]
+                if (report.verdict === "no_issues") return []
+                return [Object.assign({}, row, {report: report, snapshot: Object.assign({}, row.snapshot || {}, {front: front, back: back, kind: kind})})]
+            })
+        }
+        const entries = Object.assign({}, retainedCheckReports)
+        const reports = Object.assign({}, entries[key] || {})
+        reports[mode] = {front: front, back: back, kind: kind, report: report}
+        delete entries[key]
+        entries[key] = reports
+        const keys = Object.keys(entries)
+        while (keys.length > 48) {
+            delete entries[keys.shift()]
+            checkRetentionNotice = "Earlier session-only check reports were released at the 48-card limit. Results from the current deck check remain available; rerun older checks when needed."
+        }
+        retainedCheckReports = entries
+    }
+    function dismissEditorCheck(mode) {
+        if (editingCardId && mode === retainedDeckCheckMode)
+            retainedDeckCheckRows = retainedDeckCheckRows.filter(row => row.cardId !== editingCardId)
+        const entries = Object.assign({}, retainedCheckReports)
+        const reports = Object.assign({}, entries[editorCheckKey] || {})
+        reports[mode] = null
+        entries[editorCheckKey] = reports
+        retainedCheckReports = entries
+    }
     property string localDeckError: ""
     property string pendingDeckName: ""
     property var knownDeckIds: []
@@ -947,6 +1000,7 @@ ApplicationWindow {
         showError("COLLECTION_RECORDS", "Some collection records or supporting features need attention. Saved card content remains available.", details)
     }
     function submitDeck() {
+        if (app.busy) return
         if (!deckName.text.trim()) {
             localDeckError = "DECK_NAME: Enter a deck name."
             deckName.forceActiveFocus()
@@ -1660,6 +1714,12 @@ ApplicationWindow {
             initializingDeckParent = false
             deckName.forceActiveFocus()
         }
+        Shortcut {
+            sequences: ["Ctrl+Return", "Ctrl+Enter"]
+            autoRepeat: false
+            enabled: deckDialog.visible && window.popupOwnsKeyboardFocus(deckDialog) && !deckParent.popup.visible && !app.busy
+            onActivated: window.submitDeck()
+        }
         contentItem: ColumnLayout {
             spacing: 12
             Label {
@@ -1669,11 +1729,19 @@ ApplicationWindow {
             }
             TextField {
                 id: deckName
+                Keys.priority: Keys.BeforeItem
                 objectName: "deckName"
                 Layout.fillWidth: true
                 selectByMouse: true
                 maximumLength: 256
                 onAccepted: deckDescription.forceActiveFocus()
+                ContextMenu.menu: TextEditingMenu { editor: deckName }
+                Keys.onPressed: event => {
+                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && event.modifiers === Qt.ControlModifier) {
+                        event.accepted = true
+                        if (!event.isAutoRepeat) window.submitDeck()
+                    }
+                }
             }
             Label {
                 textFormat: Text.PlainText
@@ -1686,7 +1754,19 @@ ApplicationWindow {
                 contentWidth: availableWidth
                 TextArea {
                     id: deckDescription
+                    Keys.priority: Keys.BeforeItem
                     objectName: "deckDescription"
+                    ContextMenu.menu: TextEditingMenu { editor: deckDescription }
+                    Keys.onPressed: event => {
+                        if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) return
+                        if (event.modifiers === Qt.ControlModifier) {
+                            event.accepted = true
+                            if (!event.isAutoRepeat) window.submitDeck()
+                        } else if (event.modifiers === Qt.NoModifier) {
+                            event.accepted = true
+                            deckParent.forceActiveFocus()
+                        }
+                    }
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                 }
@@ -1727,6 +1807,7 @@ ApplicationWindow {
             }
             AppButton {
                 objectName: "saveDeck"
+                enabled: !app.busy && deckName.text.trim().length > 0
                 text: "Save deck"
                 primary: true
                 onClicked: submitDeck()
@@ -2044,8 +2125,16 @@ ApplicationWindow {
                 }
                 Item { Layout.fillWidth: true }
             }
+            GridLayout {
+                columns: cardDialog.width >= 1000 ? 2 : 1
+                columnSpacing: 14
+                rowSpacing: 10
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             StackLayout {
                 currentIndex: editorTabs.currentIndex
+                Layout.minimumWidth: 0
+                Layout.minimumHeight: 120
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 ScrollView {
@@ -2055,6 +2144,7 @@ ApplicationWindow {
                     contentWidth: availableWidth
                     TextArea {
                         id: editorSource
+                        ContextMenu.menu: TextEditingMenu { editor: editorSource }
                         readOnly: window.editorModelBusy
                         objectName: "editorSource"
                         Keys.priority: Keys.BeforeItem
@@ -2189,6 +2279,18 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+            EditorCheckFindings {
+                reports: window.editorCheckReports
+                draft: window.currentCardDraft()
+                visible: Object.keys(reports).length > 0
+                Layout.fillWidth: true
+                Layout.fillHeight: cardDialog.width >= 1000
+                Layout.preferredWidth: cardDialog.width >= 1000 ? 330 : -1
+                Layout.maximumWidth: cardDialog.width >= 1000 ? 420 : Infinity
+                Layout.preferredHeight: cardDialog.width >= 1000 ? -1 : 170
+                onDismissRequested: mode => window.dismissEditorCheck(mode)
+            }
             }
             Label {
                 textFormat: Text.PlainText
@@ -2425,6 +2527,15 @@ ApplicationWindow {
                     const draft = window.currentCardDraft()
                     window.openCardCheck(mode, draft.front, draft.back, draft.kind, false, window.editingCardId)
                 }
+            }
+            Label {
+                text: window.checkRetentionNotice
+                visible: text.length > 0
+                textFormat: Text.PlainText
+                color: Theme.inkMuted
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                font.pixelSize: 11
             }
             Label {
                 text: window.editorExitHint
@@ -3101,6 +3212,7 @@ ApplicationWindow {
     CardCheckDialog {
         id: cardCheckDialog
         ui: window
+        onReportAvailable: (key, mode, front, back, kind, report) => window.retainCheckReport(key, mode, front, back, kind, report)
     }
     DeckCheckDialog {
         id: deckCheckDialog
@@ -3109,6 +3221,23 @@ ApplicationWindow {
     TagAssistantDialog {
         id: tagAssistantDialog
         ui: window
+    }
+    Connections {
+        target: deckChecker
+        function onChanged() {
+            if (deckChecker.busy && deckChecker.completed === 0) {
+                window.retainedDeckCheckRows = []
+                window.retainedDeckCheckMode = deckChecker.mode
+            }
+            if (deckChecker.results.length > 0) {
+                window.retainedDeckCheckRows = deckChecker.results
+                window.retainedDeckCheckMode = deckChecker.mode
+            }
+        }
+        function onCardChecked(snapshot, mode, report) {
+            if (report.verdict === "no_issues" && !window.retainedCheckReports["card:" + snapshot.id]?.[mode]) return
+            window.retainCheckReport("card:" + snapshot.id, mode, snapshot.front || "", snapshot.back || "", snapshot.kind || "basic", report)
+        }
     }
     function openDeckTags(deckId) {
         if (!tagAssistant.busy) tagAssistantDialog.openFor(deckId, "")
@@ -3153,7 +3282,10 @@ ApplicationWindow {
     }
     function openCardCheck(mode, front, back, kind, saved = false, cardId = "") {
         if (deckChecker.busy || deckCheckDialog.visible || tagAssistantDialog.visible) return
-        cardCheckDialog.openFor(mode, front, back, kind, saved, cardId)
+        const draft = cardDialog.visible ? window.currentCardDraft() : ({})
+        const key = cardId ? "card:" + cardId
+            : cardDialog.visible && draft.front === front && draft.back === back && draft.kind === kind ? window.editorCheckKey : ""
+        cardCheckDialog.openFor(mode, front, back, kind, saved, cardId, key)
     }
     Sheet {
         id: resetDialog
@@ -3229,6 +3361,11 @@ ApplicationWindow {
             AppButton {
                 text: "Delete " + deleteTarget
                 primary: true
+                fill: Theme.destructiveFill
+                foreground: Theme.destructiveInk
+                outline: Theme.error
+                focusOutline: Theme.error
+                enabled: !app.busy
                 onClicked: {
                     if (deleteTarget === "deck")
                         app.deleteDeck(deleteId)

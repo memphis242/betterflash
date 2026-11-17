@@ -5,6 +5,8 @@ MenuItem {
     id: item
     property string glyph: ""
     property bool danger: false
+    property string hint: ""
+    readonly property color actionInk: !enabled ? Theme.inkMuted : danger ? Theme.error : Theme.ink
     readonly property real checkSpace: checkable && indicator ? indicator.width + spacing : 0
     readonly property real submenuSpace: subMenu && arrow ? arrow.width + spacing : 0
     readonly property bool hasGlyph: glyph.length > 0 || icon.source.toString().length > 0
@@ -16,9 +18,12 @@ MenuItem {
     topPadding: 8
     bottomPadding: 8
     spacing: 12
+    hoverEnabled: true
     font.family: Theme.uiFont
     font.pixelSize: 15
     palette.windowText: enabled ? (danger ? Theme.error : Theme.ink) : Theme.inkMuted
+    ToolTip.visible: hovered && hint.length > 0
+    ToolTip.text: hint
     TextMetrics { id: labelMetrics; text: item.text; font: item.font }
     contentItem: Item {
         implicitHeight: labelMetrics.height
@@ -38,7 +43,7 @@ MenuItem {
                     anchors.fill: parent
                     visible: item.glyph.length > 0
                     kind: item.glyph
-                    stroke: item.danger ? Theme.error : Theme.inkMuted
+                    stroke: item.enabled && item.danger ? Theme.error : Theme.inkMuted
                 }
                 Image {
                     anchors.fill: parent
@@ -51,7 +56,7 @@ MenuItem {
                 anchors.verticalCenter: parent.verticalCenter
                 text: item.text
                 textFormat: Text.PlainText
-                color: item.danger ? Theme.error : Theme.ink
+                color: item.actionInk
                 font: item.font
                 elide: Text.ElideRight
                 width: Math.max(0, parent.width - (item.hasGlyph ? 30 : 0))
@@ -60,7 +65,7 @@ MenuItem {
     }
     background: Rectangle {
         radius: 8
-        color: item.highlighted ? Theme.accentSoft : Theme.transparent
+        color: item.enabled && (item.hovered || item.highlighted) ? Theme.accentSoft : Theme.transparent
         border.width: item.activeFocus ? 1 : 0
         border.color: Theme.accent
     }

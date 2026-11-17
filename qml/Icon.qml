@@ -33,6 +33,30 @@ Canvas {
             c.closePath()
         }
         switch (kind) {
+        case "copy":
+            roundedRect(6, 6, 10, 10, 1.4)
+            c.moveTo(3, 12); c.lineTo(2, 12); c.lineTo(2, 2); c.lineTo(12, 2); c.lineTo(12, 3)
+            break
+        case "cut":
+            c.moveTo(6, 5); c.arc(4, 5, 2, 0, Math.PI * 2)
+            c.moveTo(6, 13); c.arc(4, 13, 2, 0, Math.PI * 2)
+            c.moveTo(5.5, 6.3); c.lineTo(15, 15)
+            c.moveTo(5.5, 11.7); c.lineTo(15, 3)
+            break
+        case "paste":
+            c.moveTo(6, 4); c.lineTo(3, 4); c.lineTo(3, 16); c.lineTo(15, 16); c.lineTo(15, 4); c.lineTo(12, 4)
+            roundedRect(6, 2, 6, 4, 1)
+            c.moveTo(6, 10); c.lineTo(12, 10)
+            c.moveTo(6, 13); c.lineTo(11, 13)
+            break
+        case "select-all":
+            c.moveTo(6, 2); c.lineTo(2, 2); c.lineTo(2, 6)
+            c.moveTo(12, 2); c.lineTo(16, 2); c.lineTo(16, 6)
+            c.moveTo(2, 12); c.lineTo(2, 16); c.lineTo(6, 16)
+            c.moveTo(16, 12); c.lineTo(16, 16); c.lineTo(12, 16)
+            c.moveTo(5, 7); c.lineTo(13, 7)
+            c.moveTo(5, 11); c.lineTo(13, 11)
+            break
         case "undo":
         case "redo":
             if (kind === "redo") {

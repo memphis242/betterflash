@@ -58,8 +58,9 @@ Build and launch from this checkout:
 
 The first build downloads pinned native dependencies, including math/code
 rendering libraries, llama.cpp, ONNX Runtime and the desktop Whisper helper.
-Qt 6.7 or later is required; a C++23-capable compiler is also required. The
-build places generated files under `/workspace`
+Qt 6.9 or later is required for the styled text-editing context menus; a
+C++23-capable compiler is also required. The build places generated files under
+`/workspace`
 by default. Set `BETTERFLASH_BUILD_DIR` to choose another build directory.
 The run script updates the selected build before launching, which avoids
 accidentally running an older executable. The optional launcher integration is:

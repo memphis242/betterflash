@@ -25,7 +25,7 @@ Dialog {
             ui.showError("CARD_CHAT_BUSY", "Finish the current operation before opening a chat during review.", "The review timer must be paused before the chat opens.")
             return
         }
-        if (!cardChat.openFor(cardId)) {
+        if (!cardChat.openFor(cardId, chatPane.protectedDraftThreadIds(cardId))) {
             const failure = cardChat.errorInfo
             ui.showError(failure.code || "CARD_CHAT_OPEN", (failure.message || "Could not open this card's chats.") + "\n" + (failure.action || ""), failure.detail || "")
             return
