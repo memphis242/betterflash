@@ -1,5 +1,20 @@
 # GUI follow-ups
 
+## Edit-card text context menu
+
+- Fix right-click menu icons that render as solid shapes without internal
+  detail.
+- Restore hover highlighting for menu options.
+- Investigate possible latency when opening or using the menu.
+
+## Ask AI warnings and conversation defaults
+
+- Keep the existing chat warning and also show it below the prompt submission
+  textbox.
+- Open Ask AI with a new chat by default. Keep prior conversations available
+  through explicit selection, so users do not accidentally submit an unrelated
+  prompt in an existing chat.
+
 ## Deck creation keyboard controls
 
 - Keep Enter moving to the next field in the deck creation dialog.
