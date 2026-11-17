@@ -1,5 +1,11 @@
 # GUI follow-ups
 
+## Card-check findings while editing
+
+- Show correctness-check and completeness-check results as inline warnings
+  within the edit-card dialog, so users can keep the findings visible while
+  editing to fix each flagged claim.
+
 ## Edit-card text context menu
 
 - Fix right-click menu icons that render as solid shapes without internal
