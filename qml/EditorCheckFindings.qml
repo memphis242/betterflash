@@ -7,9 +7,13 @@ Rectangle {
     id: panel
     property var reports: ({})
     property var draft: ({})
+    readonly property var displayedModes: ["correctness", "completeness"].filter(mode => !!reports[mode])
+    readonly property color resultColor: displayedModes.length > 0
+        && displayedModes.every(mode => reports[mode].report?.verdict === "no_issues")
+        ? Theme.success : Theme.warning
     signal dismissRequested(string mode)
     color: Theme.surface
-    border.color: Theme.warning
+    border.color: resultColor
     radius: 8
     implicitHeight: 230
     implicitWidth: 330
@@ -19,7 +23,7 @@ Rectangle {
         spacing: 8
         Label {
             text: "Check findings"
-            color: Theme.warning
+            color: panel.resultColor
             font.bold: true
             font.pixelSize: 17
         }
@@ -41,7 +45,7 @@ Rectangle {
                 width: viewport.availableWidth
                 spacing: 14
                 Repeater {
-                    model: ["correctness", "completeness"].filter(mode => !!panel.reports[mode])
+                    model: panel.displayedModes
                     delegate: ColumnLayout {
                         id: check
                         required property string modelData
